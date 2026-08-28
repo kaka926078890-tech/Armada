@@ -1,0 +1,25 @@
+{
+  "lockfileVersion": 1,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "armada",
+    },
+    "extension": {
+      "name": "@armada/extension",
+    },
+    "hub": {
+      "name": "@armada/hub",
+      "dependencies": {
+        "hono": "^4.6.0",
+      },
+    },
+  },
+  "packages": {
+    "@armada/extension": ["@armada/extension@workspace:extension"],
+
+    "@armada/hub": ["@armada/hub@workspace:hub"],
+
+    "hono": ["hono@4.13.5", "", {}, "sha512-O6+/eCYRkzzzy0rPWwKLiGBR1nFuUPZynnwjxN1MBA62NNqbT0wQEzQyK2gSO5yDIDB336sXQleAhOHrzlYyKw=="],
+  }
+}
