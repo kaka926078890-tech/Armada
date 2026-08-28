@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { randomUUID } from "crypto";
 import type { Registry } from "./registry";
+import type { SseHub } from "./sse";
 
 const ACTIVE = ["created", "dispatched", "binding", "running"];
 const DISPATCH_TIMEOUT_MS = 5_000;
@@ -8,7 +9,7 @@ const BIND_TIMEOUT_MS = 60_000;
 
 export class RunService {
   private cancelRequested = new Set<string>();
-  constructor(private db: Database, private registry: Registry) {
+  constructor(private db: Database, private registry: Registry, private sse: SseHub) {
     registry.onMachineOffline = (id) => this.onMachineOffline(id);
   }
 
@@ -25,6 +26,8 @@ export class RunService {
     }
     this.db.query(`UPDATE runs SET ${sets.join(", ")} WHERE id=?1`).run(...vals as any);
     this.audit(actor, `run.${status}`, id, extra);
+    this.sse.broadcast(id, { type: "run.status", runId: id, status });
+    this.sse.broadcast("*", { type: "run.status", runId: id, status });
   }
 
   create(machineId: string, workspaceRoot: string, prompt: string,

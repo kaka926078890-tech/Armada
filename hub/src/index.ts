@@ -3,6 +3,8 @@ import { openDb } from "./db";
 import { loadToken, authMiddleware, ARMADA_HOME } from "./auth";
 import { Registry } from "./registry";
 import { RunService } from "./runs";
+import { SseHub } from "./sse";
+import { ingestEvent } from "./ingest";
 import { handleWsMessage, type WsData } from "./ws";
 
 export interface HubServer {
@@ -20,13 +22,30 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
   const token = loadToken(home);
   const db = openDb(home);
   const registry = new Registry(db);
-  const runs = new RunService(db, registry);
+  const sse = new SseHub();
+  const runs = new RunService(db, registry, sse);
 
   registry.inboundHandler = (ws, msg) => {
     const machineId = ws.data.machineId!;
     switch (msg.type) {
       case "run.ack": runs.onRunAck(machineId, msg); break;
       case "run.bound": runs.onRunBound(machineId, msg); break;
+      case "run.event": {
+        ingestEvent(db, runs, sse, machineId, msg);
+        const ack = (msg as any).__ack;
+        if (ack) registry.sendTo(machineId, ws.data.windowId!, ack);
+        break;
+      }
+      case "run.note": {
+        db.query("INSERT INTO audit (ts, actor, action, target, payload) VALUES (?1,'extension','run.note',?2,?3)")
+          .run(Date.now(), msg.runId, JSON.stringify({ level: msg.level, message: msg.message }));
+        break;
+      }
+      case "hooks.status": {
+        db.query("INSERT INTO audit (ts, actor, action, target, payload) VALUES (?1,'extension','hooks.status',?2,?3)")
+          .run(Date.now(), machineId, JSON.stringify(msg));
+        break;
+      }
     }
   };
 
@@ -50,6 +69,44 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
     const { error } = runs.onCancelRequested(c.req.param("id"));
     if (error) return c.json({ error }, error === "NOT_FOUND" ? 404 : 409);
     return c.json({ ok: true });
+  });
+
+  app.get("/api/runs/:id/events", (c) => {
+    const afterSeq = Number(c.req.query("afterSeq") ?? 0);
+    const limit = Math.min(Number(c.req.query("limit") ?? 500), 2000);
+    const rows = db.query("SELECT * FROM run_events WHERE run_id=?1 AND seq>?2 ORDER BY seq LIMIT ?3")
+      .all(c.req.param("id"), afterSeq, limit);
+    return c.json(rows);
+  });
+  app.get("/api/runs/:id/stream", (c) => {
+    const runId = c.req.param("id");
+    const stream = new ReadableStream({
+      start(controller) {
+        // Flush headers immediately so clients are not blocked waiting for first event.
+        controller.enqueue(new TextEncoder().encode(":ok\n\n"));
+        const unregister = sse.register(runId, controller);
+        (c.req.raw as any).signal?.addEventListener("abort", () => { unregister(); try { controller.close(); } catch {} });
+      },
+    });
+    return new Response(stream, { headers: { "content-type": "text/event-stream", "cache-control": "no-cache" } });
+  });
+  app.get("/api/events", (c) => {
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(":ok\n\n"));
+        const unregister = sse.register("*", controller);
+        (c.req.raw as any).signal?.addEventListener("abort", () => { unregister(); try { controller.close(); } catch {} });
+      },
+    });
+    return new Response(stream, { headers: { "content-type": "text/event-stream", "cache-control": "no-cache" } });
+  });
+  app.get("/api/audit/export", (c) => {
+    const from = Number(c.req.query("from") ?? 0);
+    const to = Number(c.req.query("to") ?? Date.now());
+    const rows = db.query("SELECT * FROM audit WHERE ts BETWEEN ?1 AND ?2 ORDER BY id").all(from, to) as any[];
+    return new Response(rows.map((r) => JSON.stringify(r)).join("\n") + "\n", {
+      headers: { "content-type": "application/x-ndjson", "content-disposition": "attachment; filename=armada-audit.jsonl" },
+    });
   });
 
   const server = Bun.serve<WsData>({
@@ -80,7 +137,7 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
   return {
     server, db, registry, runs, token,
     port: server.port!,
-    stop() { clearInterval(sweepTimer); server.stop(true); db.close(); },
+    stop() { clearInterval(sweepTimer); sse.closeAll(); server.stop(true); db.close(); },
   };
 }
 
