@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [{ "command": "__SCRIPT__ sessionStart", "timeout": 5 }],
+    "sessionEnd": [{ "command": "__SCRIPT__ sessionEnd", "timeout": 5 }],
+    "beforeSubmitPrompt": [{ "command": "__SCRIPT__ beforeSubmitPrompt", "timeout": 5 }],
+    "preToolUse": [{ "command": "__SCRIPT__ preToolUse", "timeout": 5 }],
+    "postToolUse": [{ "command": "__SCRIPT__ postToolUse", "timeout": 5 }],
+    "postToolUseFailure": [{ "command": "__SCRIPT__ postToolUseFailure", "timeout": 5 }],
+    "beforeShellExecution": [{ "command": "__SCRIPT__ beforeShellExecution", "timeout": 5 }],
+    "afterShellExecution": [{ "command": "__SCRIPT__ afterShellExecution", "timeout": 5 }],
+    "afterFileEdit": [{ "command": "__SCRIPT__ afterFileEdit", "timeout": 5 }],
+    "afterAgentResponse": [{ "command": "__SCRIPT__ afterAgentResponse", "timeout": 5 }],
+    "afterAgentThought": [{ "command": "__SCRIPT__ afterAgentThought", "timeout": 5 }],
+    "subagentStart": [{ "command": "__SCRIPT__ subagentStart", "timeout": 5 }],
+    "subagentStop": [{ "command": "__SCRIPT__ subagentStop", "timeout": 5 }],
+    "preCompact": [{ "command": "__SCRIPT__ preCompact", "timeout": 5 }],
+    "stop": [{ "command": "__SCRIPT__ stop", "timeout": 5 }]
+  }
+}
