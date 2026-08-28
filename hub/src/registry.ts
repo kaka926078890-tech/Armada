@@ -113,5 +113,9 @@ export class Registry {
     return null;
   }
 
-  dispatchInbound(_ws: ArmadaSocket, _msg: any): void { /* Task 4/5 填充 */ }
+  public inboundHandler: (ws: ArmadaSocket, msg: any) => void = () => {};
+
+  dispatchInbound(ws: ArmadaSocket, msg: any): void {
+    this.inboundHandler(ws, msg);
+  }
 }

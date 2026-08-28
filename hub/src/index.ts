@@ -2,12 +2,14 @@ import { Hono } from "hono";
 import { openDb } from "./db";
 import { loadToken, authMiddleware, ARMADA_HOME } from "./auth";
 import { Registry } from "./registry";
+import { RunService } from "./runs";
 import { handleWsMessage, type WsData } from "./ws";
 
 export interface HubServer {
   server: ReturnType<typeof Bun.serve>;
   db: ReturnType<typeof openDb>;
   registry: Registry;
+  runs: RunService;
   token: string;
   port: number;
   stop: () => void;
@@ -18,11 +20,37 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
   const token = loadToken(home);
   const db = openDb(home);
   const registry = new Registry(db);
+  const runs = new RunService(db, registry);
+
+  registry.inboundHandler = (ws, msg) => {
+    const machineId = ws.data.machineId!;
+    switch (msg.type) {
+      case "run.ack": runs.onRunAck(machineId, msg); break;
+      case "run.bound": runs.onRunBound(machineId, msg); break;
+    }
+  };
 
   const app = new Hono();
   app.get("/api/health", (c) => c.json({ ok: true, name: "armada-hub" }));
   app.use("/api/*", authMiddleware(token));
   app.get("/api/machines", (c) => c.json(registry.listMachines()));
+
+  app.post("/api/runs", async (c) => {
+    const body = await c.req.json();
+    const { run, error } = runs.create(body.machineId, body.workspaceRoot, body.prompt);
+    if (error) return c.json({ error }, error === "RUN_BUSY" ? 409 : 400);
+    return c.json({ run }, 201);
+  });
+  app.get("/api/runs", (c) => c.json(runs.list(c.req.query("status"), c.req.query("machineId"))));
+  app.get("/api/runs/:id", (c) => {
+    const r = runs.get(c.req.param("id"));
+    return r ? c.json(r) : c.json({ error: "NOT_FOUND" }, 404);
+  });
+  app.post("/api/runs/:id/cancel", (c) => {
+    const { error } = runs.onCancelRequested(c.req.param("id"));
+    if (error) return c.json({ error }, error === "NOT_FOUND" ? 404 : 409);
+    return c.json({ ok: true });
+  });
 
   const server = Bun.serve<WsData>({
     port: opts.port ?? 7380,
@@ -45,9 +73,12 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
     },
   });
 
-  const sweepTimer = setInterval(() => registry.sweep(), 15_000);
+  const sweepTimer = setInterval(() => {
+    registry.sweep();
+    runs.sweepTimeouts();
+  }, 15_000);
   return {
-    server, db, registry, token,
+    server, db, registry, runs, token,
     port: server.port!,
     stop() { clearInterval(sweepTimer); server.stop(true); db.close(); },
   };
