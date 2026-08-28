@@ -120,6 +120,41 @@ describe("event ingest", () => {
     ws.close();
   });
 
+  test("global SSE receives exactly one run.status per status change", async () => {
+    const { ws, runId } = await startBoundRun();
+    const ac = new AbortController();
+    const resp = await fetch(`http://127.0.0.1:${hub!.port}/api/events?token=${hub!.token}`, { signal: ac.signal });
+    expect(resp.status).toBe(200);
+    const reader = resp.body!.getReader();
+    // Drain the :ok comment frame so we only count post-subscribe broadcasts.
+    await reader.read();
+    ws.send(JSON.stringify(ev(runId, 1, "stop", { status: "completed" })));
+    const statusMsgs: any[] = [];
+    const deadline = Date.now() + 500;
+    while (Date.now() < deadline) {
+      const remaining = Math.max(1, deadline - Date.now());
+      const result = await Promise.race([
+        reader.read().then((r) => ({ kind: "data" as const, ...r })),
+        new Promise<{ kind: "timeout" }>((res) =>
+          setTimeout(() => res({ kind: "timeout" }), Math.min(100, remaining)),
+        ),
+      ]);
+      if (result.kind === "timeout") continue;
+      if (result.done) break;
+      const chunk = new TextDecoder().decode(result.value);
+      for (const line of chunk.split("\n")) {
+        if (!line.startsWith("data: ")) continue;
+        const msg = JSON.parse(line.slice(6));
+        if (msg.type === "run.status" && msg.runId === runId && msg.status === "completed") {
+          statusMsgs.push(msg);
+        }
+      }
+    }
+    expect(statusMsgs).toHaveLength(1);
+    ac.abort();
+    ws.close();
+  });
+
   test("audit export returns JSONL", async () => {
     const { api } = await startBoundRun();
     const r = await api("/api/audit/export");

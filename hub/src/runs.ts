@@ -27,7 +27,6 @@ export class RunService {
     this.db.query(`UPDATE runs SET ${sets.join(", ")} WHERE id=?1`).run(...vals as any);
     this.audit(actor, `run.${status}`, id, extra);
     this.sse.broadcast(id, { type: "run.status", runId: id, status });
-    this.sse.broadcast("*", { type: "run.status", runId: id, status });
   }
 
   create(machineId: string, workspaceRoot: string, prompt: string,
