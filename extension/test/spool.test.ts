@@ -73,4 +73,35 @@ describe("SpoolForwarder", () => {
     expect(f.poll()).toBe(0);
     expect(sent).toHaveLength(1);
   });
+
+  test("empty/corrupt seq file recovers from spool max prefix (no reuse)", () => {
+    const { spoolDir, stateDir, sent, f } = setup();
+    drop(spoolDir, "a.json", { __hook: "stop", __ts: 1, __raw: {} });
+    drop(spoolDir, "b.json", { __hook: "stop", __ts: 2, __raw: {} });
+    expect(f.poll()).toBe(2);
+    // Simulate crash truncation: seq file exists but empty
+    writeFileSync(join(stateDir, "seq"), "");
+    const sent2: OutboundEvent[] = [];
+    const f2 = new SpoolForwarder({ spoolDir, stateDir, send: (e) => sent2.push(e) });
+    drop(spoolDir, "c.json", { __hook: "stop", __ts: 3, __raw: {} });
+    expect(f2.poll()).toBe(1);
+    expect(sent2.map((e) => e.seq)).toEqual([3]);
+    expect(readdirSync(spoolDir).sort()).toEqual(["1-a.json", "2-b.json", "3-c.json"]);
+    expect(sent).toHaveLength(2); // prior instance unchanged
+  });
+
+  test("resendUnacked forwards unparsable assigned files as __unparsed", () => {
+    const { spoolDir, stateDir, f } = setup();
+    drop(spoolDir, "a.json", { __hook: "stop", __ts: 1, __raw: {} });
+    expect(f.poll()).toBe(1);
+    // Corrupt the already-assigned file after rename (crash between rename and send)
+    writeFileSync(join(spoolDir, "1-a.json"), "{broken");
+    const sent2: OutboundEvent[] = [];
+    const f2 = new SpoolForwarder({ spoolDir, stateDir, send: (e) => sent2.push(e) });
+    expect(f2.resendUnacked()).toBe(1);
+    expect(sent2).toHaveLength(1);
+    expect(sent2[0].seq).toBe(1);
+    expect(sent2[0].hook).toBe("unknown");
+    expect(String(sent2[0].raw.__unparsed)).toContain("{broken");
+  });
 });

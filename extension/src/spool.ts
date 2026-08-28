@@ -8,6 +8,22 @@ export interface OutboundEvent {
   raw: Record<string, unknown>;
 }
 
+const UNPARSED_MAX = 4000;
+
+function parseSpoolFile(path: string): Pick<OutboundEvent, "hook" | "ts" | "raw"> {
+  const body = readFileSync(path, "utf8");
+  try {
+    const j = JSON.parse(body);
+    return {
+      hook: typeof j.__hook === "string" ? j.__hook : "unknown",
+      ts: typeof j.__ts === "number" ? j.__ts : 0,
+      raw: j.__raw ?? {},
+    };
+  } catch {
+    return { hook: "unknown", ts: 0, raw: { __unparsed: body.slice(0, UNPARSED_MAX) } };
+  }
+}
+
 export class SpoolForwarder {
   private seqFile: string;
   constructor(private opts: {
@@ -20,13 +36,39 @@ export class SpoolForwarder {
     this.seqFile = join(opts.stateDir, "seq");
   }
 
+  /** Max `^(\d+)-` prefix among files in spoolDir (0 if none). */
+  private maxSpoolSeq(): number {
+    let max = 0;
+    for (const f of readdirSync(this.opts.spoolDir)) {
+      const m = /^(\d+)-/.exec(f);
+      if (m) max = Math.max(max, Number(m[1]));
+    }
+    return max;
+  }
+
+  /**
+   * Persisted counter. Missing file → 0 (fresh).
+   * Present but empty/NaN → recover from spool max prefix (crash-truncation).
+   * Note: Number("") === 0 — empty must be treated as corrupt, not fresh zero.
+   */
   private currentSeq(): number {
-    return existsSync(this.seqFile) ? Number(readFileSync(this.seqFile, "utf8").trim()) || 0 : 0;
+    if (!existsSync(this.seqFile)) return 0;
+    const text = readFileSync(this.seqFile, "utf8").trim();
+    if (text === "") return this.maxSpoolSeq();
+    const n = Number(text);
+    if (!Number.isFinite(n) || n < 0) return this.maxSpoolSeq();
+    return n;
+  }
+
+  private persistSeq(n: number): void {
+    const tmp = this.seqFile + ".tmp";
+    writeFileSync(tmp, String(n));
+    renameSync(tmp, this.seqFile);
   }
 
   private nextSeq(): number {
     const next = this.currentSeq() + 1;
-    writeFileSync(this.seqFile, String(next));
+    this.persistSeq(next);
     return next;
   }
 
@@ -48,13 +90,8 @@ export class SpoolForwarder {
     for (const { f } of files) {
       const seq = this.nextSeq();
       const p = join(this.opts.spoolDir, f);
-      let ev: OutboundEvent;
-      try {
-        const j = JSON.parse(readFileSync(p, "utf8"));
-        ev = { seq, hook: typeof j.__hook === "string" ? j.__hook : "unknown", ts: typeof j.__ts === "number" ? j.__ts : 0, raw: j.__raw ?? {} };
-      } catch {
-        ev = { seq, hook: "unknown", ts: 0, raw: { __unparsed: readFileSync(p, "utf8").slice(0, 4000) } };
-      }
+      const parsed = parseSpoolFile(p);
+      const ev: OutboundEvent = { seq, ...parsed };
       renameSync(p, join(this.opts.spoolDir, `${seq}-${f}`));
       this.opts.send(ev);
       n += 1;
@@ -79,10 +116,8 @@ export class SpoolForwarder {
       .filter((x): x is { f: string; seq: number } => x.seq !== null)
       .sort((a, b) => a.seq - b.seq);
     for (const { f, seq } of files) {
-      try {
-        const j = JSON.parse(readFileSync(join(this.opts.spoolDir, f), "utf8"));
-        this.opts.send({ seq, hook: typeof j.__hook === "string" ? j.__hook : "unknown", ts: typeof j.__ts === "number" ? j.__ts : 0, raw: j.__raw ?? {} });
-      } catch { /* 文件损坏则跳过,等 ack 超时由人工清理 */ }
+      const parsed = parseSpoolFile(join(this.opts.spoolDir, f));
+      this.opts.send({ seq, ...parsed });
     }
     return files.length;
   }
