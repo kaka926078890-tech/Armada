@@ -52,7 +52,15 @@ export function activate(context: vscode.ExtensionContext): void {
   const boundRuns = new Map<string, { conversationId: string; prompt: string }>();
   const cancelWatcher = new CancelWatcher();
 
-  const executor = new Executor({ globalState: context.globalState, send: (m) => core.enqueue(m) });
+  const executor = new Executor({
+    globalState: context.globalState,
+    send: (m) => core.enqueue(m),
+    addPending: (run) => { pendingRuns.push(run); },
+    removePending: (runId) => {
+      const i = pendingRuns.findIndex((r) => r.runId === runId);
+      if (i >= 0) pendingRuns.splice(i, 1);
+    },
+  });
 
   // transcript 事件走独立高段,避免与 spool seq 冲突
   let extSeq = 1_000_000_000;
@@ -104,7 +112,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const ensureHooks = () => {
     const hooksJsonPath = join(homedir(), ".cursor", "hooks.json");
     const scriptPath = join(homedir(), ".cursor", "hooks", "armada-spool.sh");
-    let installed = existsSync(scriptPath);
+    let installed = false;
     let drift = false;
     try {
       const existing = existsSync(hooksJsonPath) ? JSON.parse(readFileSync(hooksJsonPath, "utf8")) : null;
@@ -112,10 +120,13 @@ export function activate(context: vscode.ExtensionContext): void {
       if (changed) {
         if (existsSync(hooksJsonPath)) copyFileSync(hooksJsonPath, `${hooksJsonPath}.bak.${Date.now()}`);
         writeFileSync(hooksJsonPath, JSON.stringify(merged, null, 2));
-        installed = true;
       } else {
-        drift = hooksDriftHash(existing) !== hooksDriftHash(merged);
+        // Compare against expected canonical entries, not merge-of-existing (which is a no-op copy when unchanged).
+        const expected = mergeHooks(null, scriptPath).merged;
+        drift = hooksDriftHash(existing) !== hooksDriftHash(expected);
       }
+      // installed means spool script is present; changed only means hooks.json was repaired.
+      installed = existsSync(scriptPath);
     } catch { installed = false; }
     core.enqueue({ type: "hooks.status", installed, version: "0.1.0", drift });
   };
@@ -144,7 +155,7 @@ export function activate(context: vscode.ExtensionContext): void {
       try { msg = JSON.parse(String(data)); } catch { return; }
       switch (msg.type) {
         case "run.start":
-          pendingRuns.push({ runId: msg.runId, workspaceRoot: msg.workspaceRoot, prompt: msg.prompt, dispatchedAt: Date.now() });
+          // pendingRuns is populated inside Executor after auth + newAgentChat (not here).
           void executor.startRun(msg);
           break;
         case "run.cancel": {

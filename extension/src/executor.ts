@@ -1,3 +1,5 @@
+import type { PendingRun } from "./binding";
+
 export class CancelWatcher {
   private records = new Map<string, { cid: string; prompt: string; at: number; count: number }>();
 
@@ -26,6 +28,10 @@ export interface ExecutorDeps {
   };
   send: (msg: object) => void;
   sleep?: (ms: number) => Promise<void>;
+  /** Called after auth passes and newAgentChat succeeds — binding window starts here. */
+  addPending?: (run: PendingRun) => void;
+  /** Drop a pending entry on INJECT_FAILED after it was already added. */
+  removePending?: (runId: string) => void;
 }
 
 /** Lazy-load vscode so CancelWatcher stays bun-testable without the vscode runtime. */
@@ -61,13 +67,23 @@ export class Executor {
       }
       await this.deps.globalState.update("armada.authorizedWorkspaces", [...this.authorizedWorkspaces(), msg.workspaceRoot]);
     }
+    let pendingAdded = false;
     try {
       await vscode.commands.executeCommand("composer.newAgentChat");
+      // Auth passed + chat created: binding window starts; WRONG_WINDOW/NOT_AUTHORIZED never reach here.
+      this.deps.addPending?.({
+        runId: msg.runId,
+        workspaceRoot: msg.workspaceRoot,
+        prompt: msg.prompt,
+        dispatchedAt: Date.now(),
+      });
+      pendingAdded = true;
       await this.sleep(1500);
       await vscode.env.clipboard.writeText(msg.prompt);
       await vscode.commands.executeCommand("editor.action.clipboardPasteAction");
       this.deps.send({ type: "run.ack", runId: msg.runId, status: "accepted" });
     } catch (e) {
+      if (pendingAdded) this.deps.removePending?.(msg.runId);
       this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: `INJECT_FAILED:${String(e)}` });
     }
   }

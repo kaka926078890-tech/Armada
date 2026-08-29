@@ -33,4 +33,15 @@ describe("mergeHooks", () => {
     tampered.hooks.stop[0].command = "/evil.sh stop";
     expect(hooksDriftHash(tampered)).not.toBe(h1);
   });
+
+  test("drift vs expected: tampered timeout still containing armada-spool.sh is detected", () => {
+    const scriptPath = "/s/armada-spool.sh";
+    const { merged: expected } = mergeHooks(null, scriptPath);
+    const existing = JSON.parse(JSON.stringify(expected));
+    // Tamper timeout but keep armada-spool.sh substring — mergeHooks skips (changed=false).
+    existing.hooks.stop[0].timeout = 99;
+    expect(mergeHooks(existing, scriptPath).changed).toBe(false);
+    // Comparing to expected canonical merge detects drift (old bug: compare to merge(existing) → always equal).
+    expect(hooksDriftHash(existing) !== hooksDriftHash(mergeHooks(null, scriptPath).merged)).toBe(true);
+  });
 });
