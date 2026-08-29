@@ -101,7 +101,7 @@ Cursor → 扩展面板 → **Install from VSIX** → 选生成的 `.vsix`。
 | 令牌文件 | `$ARMADA_HUB_HOME/token` | 首次启动自动生成 64 位 hex；`chmod 600` |
 | `armada.hubUrl` | Cursor 设置 / 配置命令 | 形如 `192.168.1.10:7380`（无协议前缀） |
 | `armada.token` | Cursor 设置 / 配置命令 | 与 hub 令牌一致 |
-| `ARMADA_HUB_URL` / `ARMADA_HUB_TOKEN` | 环境变量（扩展） | 可覆盖设置项 |
+| `ARMADA_HUB_URL` / `ARMADA_HUB_TOKEN` | 环境变量（扩展） | 仅当对应 Cursor 设置项（`armada.hubUrl` / `armada.token`）为空时回退；设置项非空优先（见 `extension/src/config.ts`） |
 
 ## 协议摘要
 
