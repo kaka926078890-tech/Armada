@@ -7,7 +7,7 @@ import { join } from "path";
 import { loadConfig } from "./config";
 import { WsClientCore } from "./wsClient";
 import { SpoolForwarder } from "./spool";
-import { matchHookToPending, claimConversation, latestRunIdForConversation, type PendingRun } from "./binding";
+import { matchHookToPending, claimConversation, eventBelongsToWindow, transcriptPathBelongsToCid, runIdForHook, rememberSubagent, type PendingRun } from "./binding";
 import { TranscriptTailer } from "./transcript";
 import { Executor, CancelWatcher } from "./executor";
 import { createCdpSubmitter } from "./cdpInject";
@@ -59,6 +59,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const pendingRuns: PendingRun[] = [];
   const boundRuns = new Map<string, { conversationId: string; prompt: string }>();
+  const childConversations = new Map<string, string>();
   const cancelWatcher = new CancelWatcher();
 
   const cdpSubmit = config.autoSubmit ? createCdpSubmitter({ port: config.cdpPort, log }) : null;
@@ -107,22 +108,32 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const forwarder = new SpoolForwarder({
     spoolDir, stateDir: armadaDir,
+    shouldClaim: (ev) => eventBelongsToWindow(ev.raw, workspaces())
+      || !!matchHookToPending(pendingRuns, { hook: ev.hook, ts: ev.ts, raw: ev.raw })
+      || !!runIdForHook(boundRuns, childConversations, ev.raw?.conversation_id as string | undefined),
     send: (ev) => {
       // 绑定判定优先于转发
       const match = matchHookToPending(pendingRuns, { hook: ev.hook, ts: ev.ts, raw: ev.raw });
       if (match) {
         pendingRuns.splice(pendingRuns.indexOf(match.run), 1);
         claimConversation(boundRuns, match.run.runId, match.conversationId, match.run.prompt);
-        core.enqueue({ type: "run.bound", runId: match.run.runId, conversationId: match.conversationId, transcriptPath: match.transcriptPath, promptMatch: match.promptMatch });
-        if (match.transcriptPath) tailer.attach(match.run.runId, match.transcriptPath);
+        const path = match.transcriptPath && transcriptPathBelongsToCid(match.transcriptPath, match.conversationId)
+          ? match.transcriptPath
+          : null;
+        core.enqueue({ type: "run.bound", runId: match.run.runId, conversationId: match.conversationId, transcriptPath: path, promptMatch: match.promptMatch });
+        if (path) tailer.attach(match.run.runId, path);
       }
       const reCancel = cancelWatcher.shouldCancelAgain({ hook: ev.hook, raw: ev.raw }, Date.now());
       if (reCancel) void executor.cancel(reCancel);
-      // 事件归属:优先本次刚绑上的 run,否则按 conversation 取最新主人(同对话续聊不得把 stop 送给旧 run)
-      const runId = match?.run.runId
-        ?? latestRunIdForConversation(boundRuns, (ev.raw as any)?.conversation_id);
+      rememberSubagent(childConversations, boundRuns, ev.hook, ev.raw);
+      const cid = (ev.raw as any)?.conversation_id as string | undefined;
+      const runId = match?.run.runId ?? runIdForHook(boundRuns, childConversations, cid);
+      if (ev.hook === "stop" && runId) {
+        const owner = boundRuns.get(runId);
+        if (owner && owner.conversationId === cid) tailer.detach(runId);
+      }
       core.enqueue({
-        type: "run.event", runId, conversationId: (ev.raw as any)?.conversation_id,
+        type: "run.event", runId, conversationId: cid,
         source: "hook", hookEventName: ev.hook, payload: ev.raw, ts: ev.ts * 1000, seq: ev.seq,
       });
     },
@@ -177,7 +188,7 @@ export function activate(context: vscode.ExtensionContext): void {
       core.sendRegister({
         type: "register", machineId, windowId,
         name: hostname(), os: `${process.platform}-${process.arch}`,
-        cursorVersion: vscode.version, extensionVersion: "0.3.4",
+        cursorVersion: vscode.version, extensionVersion: "0.3.6",
         openWorkspaces: workspaces(),
       });
     });

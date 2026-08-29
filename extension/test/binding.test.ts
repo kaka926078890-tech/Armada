@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { matchHookToPending, latestRunIdForConversation, claimConversation, type PendingRun } from "../src/binding";
+import { matchHookToPending, latestRunIdForConversation, claimConversation, eventBelongsToWindow, transcriptPathBelongsToCid, runIdForHook, rememberSubagent, type PendingRun } from "../src/binding";
 
 const P: PendingRun = { runId: "r-1", workspaceRoot: "/ws/a", prompt: "hello", dispatchedAt: 1_000_000 };
 
@@ -17,9 +17,10 @@ describe("matchHookToPending", () => {
     expect(m!.promptMatch).toBe(true);
   });
 
-  test("beforeSubmitPrompt with edited prompt → edited", () => {
-    const m = matchHookToPending([P], ev("beforeSubmitPrompt", 1_002_000, { conversation_id: "c1", workspace_roots: ["/ws/a"], prompt: "hello!" }));
-    expect(m!.promptMatch).toBe("edited");
+  test("beforeSubmitPrompt with a different prompt does not bind", () => {
+    expect(matchHookToPending([P], ev("beforeSubmitPrompt", 1_002_000, {
+      conversation_id: "c-other", workspace_roots: ["/ws/a"], prompt: "样式优化一下",
+    }))).toBeNull();
   });
 
   test("ignores events from other workspaces", () => {
@@ -34,8 +35,14 @@ describe("matchHookToPending", () => {
     expect(matchHookToPending([P], ev("beforeSubmitPrompt", 1_001_000, { workspace_roots: ["/ws/a"], prompt: "hello" }))).toBeNull();
   });
 
-  test("ignores unrelated hook names", () => {
-    expect(matchHookToPending([P], ev("preToolUse", 1_001_000, { conversation_id: "c1", workspace_roots: ["/ws/a"] }))).toBeNull();
+  test("afterSubmitPrompt does not bind (no prompt to align)", () => {
+    expect(matchHookToPending([P], ev("afterSubmitPrompt", 1_002_000, { conversation_id: "c1", workspace_roots: ["/ws/a"] }))).toBeNull();
+  });
+
+  test("eventBelongsToWindow matches open folders", () => {
+    expect(eventBelongsToWindow({ workspace_roots: ["/ws/a"] }, ["/ws/a"])).toBe(true);
+    expect(eventBelongsToWindow({ workspace_roots: ["/ws/a"] }, ["/ws/b"])).toBe(false);
+    expect(eventBelongsToWindow({}, ["/ws/a"])).toBe(false);
   });
 
   test("picks latest-dispatched pending when multiple match (stale pending must not steal binding)", () => {
@@ -86,5 +93,33 @@ describe("conversation ownership", () => {
     claimConversation(bound, "r-new", "c1", "b");
     expect([...bound.keys()]).toEqual(["r-new"]);
     expect(bound.get("r-new")?.prompt).toBe("b");
+  });
+
+  test("runIdForHook does not attribute another conversation to the bound run", () => {
+    const bound = new Map<string, { conversationId: string }>([["r-1", { conversationId: "c-hello" }]]);
+    const children = new Map<string, string>();
+    expect(runIdForHook(bound, children, "c-hello")).toBe("r-1");
+    expect(runIdForHook(bound, children, "c-debug")).toBeUndefined();
+  });
+
+  test("rememberSubagent maps child cid to the parent run", () => {
+    const bound = new Map<string, { conversationId: string }>([["r-1", { conversationId: "c-hello" }]]);
+    const children = new Map<string, string>();
+    rememberSubagent(children, bound, "subagentStart", {
+      conversation_id: "c-child", parent_conversation_id: "c-hello",
+    });
+    expect(runIdForHook(bound, children, "c-child")).toBe("r-1");
+  });
+
+  test("transcriptPathBelongsToCid accepts matching jsonl and rejects a sibling conversation", () => {
+    const hello = "f53d9969-0734-48a9-9864-a5ab0702e00e";
+    const debug = "704d5468-2e6c-4ecf-bca4-4d1ae16c264e";
+    const p = `/Users/apple/.cursor/projects/desk/agent-transcripts/${hello}/${hello}.jsonl`;
+    expect(transcriptPathBelongsToCid(p, hello)).toBe(true);
+    expect(transcriptPathBelongsToCid(p, debug)).toBe(false);
+    expect(transcriptPathBelongsToCid(
+      `/Users/apple/.cursor/projects/desk/agent-transcripts/${hello}/subagents/child.jsonl`,
+      hello,
+    )).toBe(true);
   });
 });

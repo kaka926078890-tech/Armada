@@ -5,8 +5,8 @@ export default function Sidebar({ machines, runs, onDispatch }: {
   machines: Machine[]; runs: RunRow[]; onDispatch: () => void;
 }) {
   return (
-    <aside className="w-56 shrink-0 border-r border-zinc-800 flex flex-col">
-      <div className="px-3 py-2 text-xs text-zinc-400">机器</div>
+    <aside className="w-52 shrink-0 border-r border-zinc-800/80 flex flex-col">
+      <div className="px-3 py-2 text-[11px] uppercase tracking-wide text-zinc-600">机器</div>
       <div className="flex-1 overflow-y-auto">
         {machines.map((m) => {
           const active = runs.filter((r) => r.machine_id === m.id && ["dispatched", "binding", "running"].includes(r.status)).length;
@@ -27,7 +27,7 @@ export default function Sidebar({ machines, runs, onDispatch }: {
           );
         })}
       </div>
-      <button onClick={onDispatch} className="m-3 px-3 py-2 rounded bg-sky-600 hover:bg-sky-500 text-sm">+ 派发任务</button>
+      <button onClick={onDispatch} className="m-3 px-3 py-2 rounded-md bg-sky-700 hover:bg-sky-600 text-[13px]">+ 派发任务</button>
     </aside>
   );
 }

@@ -63,6 +63,28 @@ export class RunService {
     return run.status === "error" && run.end_reason === "DISPATCH_TIMEOUT";
   }
 
+  private isFalseBindTimeout(run: { status: string; end_reason: string | null }): boolean {
+    return run.status === "unknown" && run.end_reason === "BIND_TIMEOUT";
+  }
+
+  /**
+   * 其它窗口误转发、runId 为空时:仅当 prompt 与等待中的任务原文一致才挂靠。
+   * 同工作区另一对话的闲聊不得 bind。不含 running。
+   */
+  findAttachableRun(machineId: string, workspaceRoots: string[], prompt?: string): any | null {
+    const want = typeof prompt === "string" ? prompt.trim() : "";
+    if (!want || workspaceRoots.length === 0) return null;
+    const rows = this.db.query(
+      `SELECT * FROM runs WHERE machine_id=?1 ORDER BY created_at DESC`,
+    ).all(machineId) as any[];
+    return rows.find((r) => {
+      if (!workspaceRoots.includes(r.workspace_root)) return false;
+      if (String(r.prompt ?? "").trim() !== want) return false;
+      if (["dispatched", "binding"].includes(r.status)) return true;
+      return this.isFalseBindTimeout(r) || this.isFalseDispatchTimeout(r);
+    }) ?? null;
+  }
+
   onRunAck(_machineId: string, msg: any) {
     const run = this.get(msg.runId);
     if (!run) return;
@@ -80,7 +102,7 @@ export class RunService {
   onRunBound(_machineId: string, msg: any) {
     const run = this.get(msg.runId);
     if (!run) return;
-    const recoverable = this.isFalseDispatchTimeout(run);
+    const recoverable = this.isFalseDispatchTimeout(run) || this.isFalseBindTimeout(run);
     if (!["binding", "dispatched"].includes(run.status) && !recoverable) return;
     this.setStatus(run.id, "running", {
       conversation_id: msg.conversationId ?? null,
@@ -106,8 +128,7 @@ export class RunService {
     const run = this.get(runId);
     if (!run) return;
     // BIND_TIMEOUT / DISPATCH_TIMEOUT 误杀后真实事件仍可能到达
-    const recoverable = (run.status === "unknown" && run.end_reason === "BIND_TIMEOUT")
-      || this.isFalseDispatchTimeout(run);
+    const recoverable = this.isFalseBindTimeout(run) || this.isFalseDispatchTimeout(run);
     if (!ACTIVE.includes(run.status) && !recoverable) return;
     const s = payload?.status;
     if (s === "completed") this.setStatus(runId, "completed", { end_reason: "completed" }, "extension");

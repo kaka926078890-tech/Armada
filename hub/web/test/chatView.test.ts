@@ -81,4 +81,22 @@ describe("eventsToChat", () => {
       "user:你会什么技能",
     ]);
   });
+
+  test("with prompt, prefers hooks over unrelated transcript", () => {
+    const blocks = eventsToChat([
+      ev({ seq: 1, hook_event_name: "beforeSubmitPrompt", payload: JSON.stringify({ prompt: "说一句你好" }) }),
+      ev({ seq: 2, hook_event_name: "afterAgentResponse", payload: JSON.stringify({ text: "你好。" }) }),
+      ev({ seq: 3, hook_event_name: "subagentStart", payload: JSON.stringify({ description: "说一句你好", subagent_model: "cursor-grok-4.6-high" }) }),
+      ev({ seq: 4, hook_event_name: "subagentStop", payload: JSON.stringify({ description: "说一句你好", status: "completed", duration_ms: 9794, subagent_model: "cursor-grok-4.6-high" }) }),
+      ev({ seq: 10, source: "transcript", payload: JSON.stringify({
+        role: "user", message: { content: [{ type: "text", text: "[Image]\n<image_files>x.png</image_files>" }] },
+      }) }),
+      ev({ seq: 11, source: "transcript", payload: JSON.stringify({
+        role: "assistant", message: { content: [{ type: "text", text: "这段不该出现在本任务里" }] },
+      }) }),
+    ], "说一句你好");
+    expect(blocks.map((b) => b.kind)).toEqual(["user", "assistant", "subagent"]);
+    expect(blocks.find((b) => b.kind === "assistant")).toMatchObject({ text: "你好。" });
+    expect(blocks.find((b) => b.kind === "subagent")).toMatchObject({ status: "completed", durationMs: 9794 });
+  });
 });

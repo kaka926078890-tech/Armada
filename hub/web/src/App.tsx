@@ -75,11 +75,11 @@ export default function App() {
       {loadError && (
         <div className="px-4 py-2 text-sm text-red-400 bg-red-950/50 border-b border-red-900/50">{loadError}</div>
       )}
-      <header className="flex items-center gap-4 px-4 py-2 border-b border-zinc-800">
-        <span className="font-bold">Armada</span>
-        <span className="text-zinc-400 text-sm">{location.host}</span>
-        <span className="text-xs text-emerald-500">令牌已连接</span>
-        <span className="ml-auto text-sm text-zinc-400">
+      <header className="flex items-center gap-3 px-4 py-2 border-b border-zinc-800/80">
+        <span className="font-semibold text-[13px] tracking-wide">Armada</span>
+        <span className="text-zinc-600 text-[12px]">{location.host}</span>
+        <span className="text-[11px] text-emerald-500/90">令牌已连接</span>
+        <span className="ml-auto text-[12px] text-zinc-500">
           在线 {machines.filter((m) => m.status === "online").length}/{machines.length}
         </span>
       </header>

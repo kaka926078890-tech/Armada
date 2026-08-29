@@ -40,7 +40,11 @@ describe("cardView", () => {
     expect(v.elapsed).toBe("60s");
   });
   test("waiting badge text", () => {
-    const v = cardView({ ...base, status: "binding" }, 5000);
+    const v = cardView({ ...base, status: "dispatched" }, 5000);
     expect(v.badge).toBe("待本机回车");
+  });
+  test("binding badge is 绑定中, not 待本机回车", () => {
+    const v = cardView({ ...base, status: "binding" }, 5000);
+    expect(v.badge).toBe("绑定中");
   });
 });

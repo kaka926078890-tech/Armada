@@ -29,6 +29,6 @@ export function cardView(run: RunRow, now: number): { title: string; elapsed: st
   const from = run.started_at ?? run.created_at;
   const secs = Math.max(0, Math.floor(((run.ended_at ?? now) - from) / 1000));
   const elapsed = secs > 60 ? `${Math.floor(secs / 60)}m${secs % 60}s` : `${secs}s`;
-  const badge = COLUMN_LABELS[COLUMN_MAP[run.status] ?? "error"];
+  const badge = run.status === "binding" ? "绑定中" : COLUMN_LABELS[COLUMN_MAP[run.status] ?? "error"];
   return { title, elapsed, badge };
 }

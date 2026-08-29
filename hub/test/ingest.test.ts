@@ -192,4 +192,111 @@ describe("event ingest", () => {
     expect(body.trim().split("\n").length).toBeGreaterThanOrEqual(1);
     expect(JSON.parse(body.trim().split("\n")[0])).toHaveProperty("action");
   });
+
+  test("beforeSubmitPrompt without runId binds only when prompt matches the waiting run", async () => {
+    const home = mkdtempSync(join(tmpdir(), "armada-ing-"));
+    hub = createServer({ port: 0, home });
+    const ws: WebSocket = await new Promise((res, rej) => {
+      const w = new WebSocket(`ws://127.0.0.1:${hub!.port}/ws?token=${hub!.token}`);
+      w.onopen = () => res(w); w.onerror = rej;
+    });
+    ws.send(JSON.stringify({ type: "register", machineId: "m-1", windowId: "w-1", name: "A", os: "darwin", openWorkspaces: ["/ws/a"] }));
+    await new Promise((r) => setTimeout(r, 100));
+    const api = (p: string, init?: RequestInit) => fetch(`http://127.0.0.1:${hub!.port}${p}`, {
+      ...init, headers: { "content-type": "application/json", authorization: `Bearer ${hub!.token}` },
+    });
+    const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "hi" }) });
+    const { run } = await r.json() as any;
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    await new Promise((r2) => setTimeout(r2, 80));
+    ws.send(JSON.stringify({
+      type: "run.event", source: "hook", hookEventName: "beforeSubmitPrompt",
+      payload: { conversation_id: "cid-stolen", workspace_roots: ["/ws/a"], prompt: "hi" },
+      ts: Date.now(), seq: 1,
+    }));
+    await new Promise((r2) => setTimeout(r2, 120));
+    const after = (await (await api(`/api/runs/${run.id}`)).json()) as any;
+    expect(after.status).toBe("running");
+    expect(after.conversation_id).toBe("cid-stolen");
+    ws.close();
+  });
+
+  test("beforeSubmitPrompt without runId does not bind a different prompt in the same workspace", async () => {
+    const home = mkdtempSync(join(tmpdir(), "armada-ing-"));
+    hub = createServer({ port: 0, home });
+    const ws: WebSocket = await new Promise((res, rej) => {
+      const w = new WebSocket(`ws://127.0.0.1:${hub!.port}/ws?token=${hub!.token}`);
+      w.onopen = () => res(w); w.onerror = rej;
+    });
+    ws.send(JSON.stringify({ type: "register", machineId: "m-1", windowId: "w-1", name: "A", os: "darwin", openWorkspaces: ["/ws/a"] }));
+    await new Promise((r) => setTimeout(r, 100));
+    const api = (p: string, init?: RequestInit) => fetch(`http://127.0.0.1:${hub!.port}${p}`, {
+      ...init, headers: { "content-type": "application/json", authorization: `Bearer ${hub!.token}` },
+    });
+    const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "说一句你好" }) });
+    const { run } = await r.json() as any;
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    await new Promise((r2) => setTimeout(r2, 80));
+    ws.send(JSON.stringify({
+      type: "run.event", source: "hook", hookEventName: "beforeSubmitPrompt",
+      payload: { conversation_id: "cid-other", workspace_roots: ["/ws/a"], prompt: "样式优化一下" },
+      ts: Date.now(), seq: 1,
+    }));
+    await new Promise((r2) => setTimeout(r2, 120));
+    const after = (await (await api(`/api/runs/${run.id}`)).json()) as any;
+    expect(after.status).toBe("binding");
+    expect(after.conversation_id).toBeNull();
+    expect((await (await api(`/api/runs/${run.id}/events`)).json()) as any[]).toHaveLength(0);
+    ws.close();
+  });
+
+  test("bound run drops hooks from another conversation_id (same workspace)", async () => {
+    const { ws, api, runId } = await startBoundRun();
+    ws.send(JSON.stringify(ev(runId, 1, "afterAgentThought", {
+      conversation_id: "cid-other", text: "别的标签在说话",
+    })));
+    ws.send(JSON.stringify(ev(runId, 2, "afterAgentThought", {
+      conversation_id: "cid-1", text: "本任务思考",
+    })));
+    await new Promise((r) => setTimeout(r, 150));
+    const events = (await (await api(`/api/runs/${runId}/events`)).json()) as any[];
+    expect(events).toHaveLength(1);
+    expect(JSON.parse(events[0].payload).text).toBe("本任务思考");
+    ws.close();
+  });
+
+  test("completed run does not ingest another conversation via cid lookup", async () => {
+    const { ws, api, runId } = await startBoundRun();
+    ws.send(JSON.stringify(ev(runId, 1, "stop", { status: "completed", conversation_id: "cid-1" })));
+    await new Promise((r) => setTimeout(r, 100));
+    const stray = ev("", 2, "beforeSubmitPrompt", {
+      conversation_id: "cid-idle", workspace_roots: ["/ws/a"], prompt: "闲聊",
+    });
+    delete (stray as any).runId;
+    (stray as any).conversationId = "cid-idle";
+    ws.send(JSON.stringify(stray));
+    await new Promise((r) => setTimeout(r, 120));
+    const events = (await (await api(`/api/runs/${runId}/events`)).json()) as any[];
+    expect(events.filter((e) => e.hook_event_name === "beforeSubmitPrompt")).toHaveLength(0);
+    ws.close();
+  });
+
+  test("subagent hooks with parent_conversation_id still attach to the parent run", async () => {
+    const { ws, api, runId } = await startBoundRun();
+    ws.send(JSON.stringify(ev(runId, 1, "subagentStart", {
+      conversation_id: "cid-child",
+      parent_conversation_id: "cid-1",
+      description: "说一句你好",
+    })));
+    ws.send(JSON.stringify(ev(runId, 2, "preToolUse", {
+      conversation_id: "cid-child",
+      parent_conversation_id: "cid-1",
+      tool_name: "Grep",
+    })));
+    await new Promise((r) => setTimeout(r, 150));
+    const events = (await (await api(`/api/runs/${runId}/events`)).json()) as any[];
+    expect(events).toHaveLength(2);
+    expect(events.map((e) => e.hook_event_name)).toEqual(["subagentStart", "preToolUse"]);
+    ws.close();
+  });
 });

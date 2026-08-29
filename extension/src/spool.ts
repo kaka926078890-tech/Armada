@@ -32,6 +32,9 @@ export class SpoolForwarder {
     spoolDir: string;
     stateDir: string;
     send: (ev: OutboundEvent) => void;
+    /** 多窗口共享 spool:非本窗工作区的事件必须留下给对的窗口。缺省全收(单测/单窗)。 */
+    shouldClaim?: (ev: Pick<OutboundEvent, "hook" | "ts" | "raw">) => boolean;
+    now?: () => number;
   }) {
     mkdirSync(opts.spoolDir, { recursive: true });
     mkdirSync(opts.stateDir, { recursive: true });
@@ -124,10 +127,9 @@ export class SpoolForwarder {
     if (!this.tryAcquireSeqLock()) return 0;
     let n = 0;
     try {
-      for (const { f } of files) {
+      for (const { f, mtime } of files) {
         const p = join(this.opts.spoolDir, f);
         if (!existsSync(p) || this.assigned(f) !== null) continue;
-        const seq = this.nextSeq();
         let parsed: Pick<OutboundEvent, "hook" | "ts" | "raw">;
         try {
           parsed = parseSpoolFile(p);
@@ -135,6 +137,12 @@ export class SpoolForwarder {
           if (e?.code === "ENOENT") continue;
           throw e;
         }
+        if (this.opts.shouldClaim && !this.opts.shouldClaim(parsed)) {
+          const age = (this.opts.now ?? Date.now)() - mtime;
+          // 无主文件超过 20s 才兜底认领,避免 desk 事件被 test-ws 窗口先吃掉
+          if (age < 20_000) continue;
+        }
+        const seq = this.nextSeq();
         const ev: OutboundEvent = { seq, ...parsed };
         try {
           renameSync(p, join(this.opts.spoolDir, `${seq}-${f}`));

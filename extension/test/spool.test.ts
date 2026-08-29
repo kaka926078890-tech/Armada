@@ -133,4 +133,24 @@ describe("SpoolForwarder", () => {
     const assigned = readdirSync(spoolDir).filter((f) => /^\d+-/.test(f) && f.endsWith(".json"));
     expect(assigned).toHaveLength(N);
   });
+
+  test("shouldClaim false leaves file for the other window", () => {
+    const { spoolDir, sent, f } = setup();
+    const desk = new SpoolForwarder({
+      spoolDir, stateDir: mkdtempSync(join(tmpdir(), "armada-state-desk-")),
+      send: (e) => sent.push(e),
+      shouldClaim: (ev) => ev.raw.workspace_roots === "/ws/desk" || (Array.isArray(ev.raw.workspace_roots) && ev.raw.workspace_roots.includes("/ws/desk")),
+    });
+    drop(spoolDir, "other.json", { __hook: "beforeSubmitPrompt", __ts: 1, __raw: { workspace_roots: ["/ws/test"] } });
+    expect(desk.poll()).toBe(0);
+    expect(sent).toHaveLength(0);
+    expect(readdirSync(spoolDir).filter((x) => x.endsWith(".json"))).toEqual(["other.json"]);
+    const testWs = new SpoolForwarder({
+      spoolDir, stateDir: mkdtempSync(join(tmpdir(), "armada-state-test-")),
+      send: (e) => sent.push(e),
+      shouldClaim: (ev) => Array.isArray(ev.raw.workspace_roots) && ev.raw.workspace_roots.includes("/ws/test"),
+    });
+    expect(testWs.poll()).toBe(1);
+    expect(sent[0].hook).toBe("beforeSubmitPrompt");
+  });
 });
