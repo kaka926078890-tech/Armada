@@ -33,144 +33,148 @@
 | **hooks** | `hooks/` | 把 Cursor hook 事件落盘到 spool，供扩展轮询上报 |
 | **web** | `hub/web/` | 中台控制台：机器树、五列看板、run 详情、SSE 实时刷新 |
 
-## 角色怎么分
+## 中台端 vs 受控端
 
-| 角色 | 装什么 | 需要 Bun？ |
+全网只跑 **一套 hub**。中台机也可以同时当受控（本机 Cursor 窗口会注册上来）。当前范围：**macOS + Cursor**；Windows 未测。
+
+| | **中台端**（调度） | **受控端**（干活） |
 | --- | --- | --- |
-| **中台机** | `armada-hub` + 控制台静态页 | 要（跑 hub） |
-| **被控机** | Cursor + `armada-agent` 扩展 + hooks；建议用 `armada-cursor.sh` 启动 | **不要** |
+| 仓库 | 要，用来跑 hub | **可以 clone 本仓**，只用来装 hooks / 扩展 / 启动器 |
+| Bun | **要** | 不要（除非你想在受控端自己打 vsix） |
+| 启动 hub | **必须**，且加 `--lan` | **禁止**再起一份 |
+| 令牌 | 权威在 `~/.armada/token`，只在这里生成 | **抄中台这份**，不要在受控端生成 |
+| 入站端口 | 放行 **TCP 7380** | 不需要入站；只要能出站连中台 |
+| Cursor | 可选（本机也受控才要） | **必须**已安装并登录（用这台机自己的账号） |
+| 扩展 + hooks | 本机当受控时才装 | **必须** |
+| 日常操作 | 浏览器打开控制台、派发 / 取消 / 续聊 | 保持目标工作区窗口开着；CDP 失败时回车 |
 
-中台机自己也可以当被控（本机窗口会注册上来）。另一台电脑只要能访问中台的 `7380` 端口（出站 WebSocket），不必给被控机开入站端口。
+**中台端不要做：** 把 `hubUrl` 配成受控机 IP；在受控端另起 hub。  
+**受控端不要做：** `bun run hub/src/index.ts`；`hubUrl` 填 `127.0.0.1` 或加 `http://`；用图标点开 Cursor 还指望全自动提交。
 
-当前范围：**macOS + Cursor**。Windows 未测，不要按本文装。
+下面命令里的 `192.168.1.10` 请换成中台机局域网 IP（`ipconfig getifaddr en0`）。
 
-## 快速开始（只控本机）
+## 中台端要处理的
 
-```bash
-cd armada
-bun install
-cd hub/web && bun run build && cd ../..
-bun run hub/src/index.ts --lan          # 只本机调试可去掉 --lan
-sh hooks/install.sh
-```
+只做一次（或改完 launchd 后重启一次）。
 
-扩展打包见下一节。启动后令牌在 `~/.armada/token`。浏览器打开 `http://127.0.0.1:7380`，粘贴令牌。
-
-## 另一台电脑接入
-
-下面假设中台机局域网 IP 是 `192.168.1.10`（请换成你的）。被控机与中台须在同一局域网。
-
-### 1. 中台机：对局域网监听
-
-已在跑、且绑的是 `127.0.0.1` 时，**别的电脑连不上**。停掉后用 `--lan` 重启：
+1. **装依赖并构建控制台**
 
 ```bash
 cd /path/to/armada
-bun run hub/src/index.ts --lan
+bun install
+cd hub/web && bun run build && cd ../..
 ```
 
-日志应类似：`armada-hub listening on http://0.0.0.0:7380`。
-
-本机查 IP 与令牌：
+2. **对局域网启动 hub**（绑 `127.0.0.1` 时受控端连不上）
 
 ```bash
-ipconfig getifaddr en0          # Wi-Fi；有线可能是 en1
-cat ~/.armada/token             # 64 位 hex，不要换行、不要重新生成
+bun run hub/src/index.ts --lan
+# 日志: armada-hub listening on http://0.0.0.0:7380
 ```
 
-中台机防火墙需允许 **入站 TCP 7380**（系统设置 → 网络 → 防火墙 → 允许 `bun` / 终端传入）。被控机不需要入站规则。
+若用 launchd（`~/Library/LaunchAgents/com.armada.hub.plist`），在 `ProgramArguments` 末尾加 `<string>--lan</string>`，然后：
 
-在**被控机**上先探活（失败就先修网络，再装扩展）：
+```bash
+launchctl kickstart -k gui/$(id -u)/com.armada.hub
+lsof -nP -iTCP:7380 -sTCP:LISTEN    # 必须是 *:7380 或 0.0.0.0，不能是 127.0.0.1
+```
+
+3. **防火墙**允许本机 **入站 TCP 7380**（系统设置 → 网络 → 防火墙 → 允许 bun / 终端）。
+
+4. **记下 IP 与令牌**（发给受控端配置用；令牌不要换行、不要在受控端重造）
+
+```bash
+ipconfig getifaddr en0
+cat ~/.armada/token
+```
+
+5. **扩展包**（二选一）  
+   - 受控端 clone 本仓后自己 `npx tsup && npx vsce package`；或  
+   - 中台打一次，把 `extension/armada-agent-*.vsix` 拷过去（请用 ≥ 0.3.6）：
+
+```bash
+cd extension
+npx tsup
+npx vsce package --no-dependencies    # 没有 vsce：npm i -g @vscode/vsce
+```
+
+6. **日常：打开控制台派发**（任意电脑浏览器均可，同一令牌）
+
+- 打开 `http://<中台IP>:7380`，粘贴中台令牌。
+- 左侧应出现受控端主机名（绿点）和已开工作区。
+- **+ 派发任务** → 选机器 + 工作区 + prompt。CDP 正常时无需人在受控端回车。
+- 详情里看思考 / 工具 / 回复；「续聊同一对话」走同一 `conversation_id`。
+- 取消：中台点取消；受控端 Cursor 若仍要确认，在那台点一下。
+- 每机同时只能 1 个任务（`409 RUN_BUSY`）；关着的工作区不能派（`400 WORKSPACE_NOT_OPEN`）。
+
+## 受控端要处理的
+
+可以 **clone 本仓**，不必拷零散文件。Clone 之后 **不要启动 hub**。
+
+```bash
+git clone https://github.com/kaka926078890-tech/Armada.git
+cd Armada
+```
+
+1. **先探活中台**（失败先修网络，再装扩展）
 
 ```bash
 curl -sS http://192.168.1.10:7380/api/health
 # 期望: {"ok":true,"name":"armada-hub"}
 ```
 
-### 2. 中台机：打一次 vsix（被控机不用编）
+2. **Cursor 已登录**（这台电脑自己的账号；中台不代登）。
+
+3. **安装 hooks**（merge 进 `~/.cursor/hooks.json`，不覆盖别人的条目）
 
 ```bash
-cd /path/to/armada/extension
-npx tsup
-npx vsce package --no-dependencies    # 没有 vsce：npm i -g @vscode/vsce
-```
-
-得到 `armada-agent-0.3.6.vsix`（版本随 `extension/package.json`）。用隔空投送 / U 盘 / 共享目录拷到被控机。同时拷这三样（或整仓）：
-
-- `extension/armada-agent-*.vsix`
-- `hooks/`（整个目录）
-- `scripts/armada-cursor.sh`
-
-### 3. 被控机：hooks + 扩展
-
-被控机需要：**已安装并登录 Cursor**（用这台电脑自己的账号；中台不代登）。
-
-```bash
-cd /path/to/armada          # 或你解压 hooks 的目录
 sh hooks/install.sh
 ```
 
-会把 `armada-spool.sh` 拷到 `~/.cursor/hooks/`，并 **merge** 进 `~/.cursor/hooks.json`（不覆盖别人的条目）。
+4. **安装扩展** `armada-agent` ≥ 0.3.6  
+   Cursor → 扩展 → **Install from VSIX** → `extension/armada-agent-*.vsix`  
+   （没有现成 vsix 且这台有 Node 时：`cd extension && npx tsup && npx vsce package --no-dependencies`）
 
-Cursor → 扩展 → **Install from VSIX** → 选刚拷来的 `.vsix`。
+5. **指向中台**（`Cmd+Shift+P` → **Armada: Configure Hub Connection**）
 
-命令面板（`Cmd+Shift+P`）→ **`Armada: Configure Hub Connection`**：
-
-| 项 | 填法 | 不要填 |
+| 项 | 填 | 不要填 |
 | --- | --- | --- |
-| hub | `192.168.1.10:7380` | `http://`、`https://`、`127.0.0.1`（那是中台本机） |
-| token | 中台机 `~/.armada/token` 原文 | 被控机自己再生成一份 |
+| hub | `192.168.1.10:7380` | `http://`、`https://`、`127.0.0.1` |
+| token | **中台端** `~/.armada/token` 原文 | 在受控端跑 hub 新生成的 |
 
-保存后必须 **Reload Window**。输出面板选 **Armada**，应看到 `config loaded, hub=192.168.1.10:7380`。连不上时看是否防火墙 / IP / 令牌。
+保存后必须 **Reload Window**。输出面板选 **Armada**，应看到 `config loaded, hub=192.168.1.10:7380`。
 
-### 4. 被控机：用 CDP 启动器打开目标工作区
-
-全自动提交要求 Cursor **带着** `--remote-debugging-port=9222` 启动。已经用图标点开的 Cursor **没有** 这端口，扩展会降级成剪贴板，任务卡会停在「待本机回车」。
+6. **用启动器打开要派发的工作区**（否则任务停在「待本机回车」）
 
 ```bash
-# 先 Cmd+Q 完全退出 Cursor（所有窗口、所有对话框）
-chmod +x /path/to/armada/scripts/armada-cursor.sh
-/path/to/armada/scripts/armada-cursor.sh /绝对路径/你的工作区
+# 先 Cmd+Q 完全退出 Cursor（所有窗口、对话框）
+chmod +x scripts/armada-cursor.sh
+./scripts/armada-cursor.sh /绝对路径/你的工作区
 ```
 
-约束：
+约束：中台只能派到 **已经打开且扩展已上报** 的窗口；路径用绝对路径（不要 `~/proj`）；推理走 Cursor 云，受控端要能上网。
 
-- 中台只能派到 **已经打开、且扩展已上报** 的工作区；关窗或从未打开 → `400 WORKSPACE_NOT_OPEN`。不能远程替你开文件夹。
-- 路径必须与窗口标题/工作区根一致（用绝对路径；不要一个是 `/Users/foo/proj`、派发写成 `~/proj`）。
-- 每机同一时刻 **只能跑 1 个任务**（已有 running 会 `409 RUN_BUSY`）。
-- 推理走 Cursor 云，被控机要能上网。
+## 两端一起验收
 
-### 5. 中台控制台派发
+- [ ] 受控端 `curl` health 成功
+- [ ] 中台控制台看到该机在线 + 目标工作区
+- [ ] 派发后 30s 内进入运行中或已完成，详情不是别的窗口的对话
+- [ ] 受控端 IDE 里出现对应新对话，文件按 prompt 改了
 
-任意电脑浏览器打开 `http://192.168.1.10:7380`，粘贴**同一份**令牌。
+## 接入故障
 
-1. 左侧机器树出现被控机主机名，绿点在线；下面列出已开工作区。
-2. **+ 派发任务** → 选机器 → 选工作区 → 写 prompt → 发送。
-3. 看板应很快从「待本机回车」进入「运行中」（CDP 成功时无需人在被控机回车）。
-4. 详情里看思考 / 工具 / 回复；「续聊同一对话」走同一 `conversation_id`。
-5. 取消：中台点取消；若 Cursor 仍弹出确认，在被控机点一下。
-
-验收（建议第一条任务写文件，便于对照）：
-
-- [ ] 被控机 `curl` health 成功
-- [ ] 控制台看到该机在线 + 目标工作区
-- [ ] 派发后 30s 内进入运行中或已完成，且详情里的对话不是别的窗口的内容
-- [ ] 被控机 IDE 里出现对应新对话，工作区文件按 prompt 改了
-
-### 接入故障
-
-| 现象 | 先查 |
+| 现象 | 先查哪一端 |
 | --- | --- |
-| 控制台没有这台机器 | 扩展是否 Reload；hub 是否 `--lan`；`hubUrl` 是否写成了 `127.0.0.1`；输出面板 Armada 有无 WS 报错 |
-| health 都 curl 不通 | 中台防火墙、两机是否同网段、hub 是否真在 `0.0.0.0:7380` |
-| `WORKSPACE_NOT_OPEN` | 被控机用启动器打开该路径；等心跳（约 15s）后再派 |
-| `RUN_BUSY` | 等当前任务结束，或在中台取消/关闭异常卡 |
-| 一直「待本机回车」 | Cursor 不是 `armada-cursor.sh` 拉起的；先 Cmd+Q 再用脚本开 |
-| 详情串了别的对话 | 扩展需 ≥ 0.3.6；同一工作区多对话时归属按 prompt/`conversation_id`，不要用旧 vsix |
+| health 都 curl 不通 | **中台**：是否 `--lan`、防火墙、是否同网段 |
+| 控制台没有这台机器 | **受控**：是否 Reload；`hubUrl` 是否写成 `127.0.0.1`；输出面板 Armada |
+| `WORKSPACE_NOT_OPEN` | **受控**：启动器打开该路径；等心跳约 15s |
+| `RUN_BUSY` | **中台**：等当前任务结束，或取消/关闭异常卡 |
+| 一直「待本机回车」 | **受控**：Cursor 不是 `armada-cursor.sh` 拉起的 |
+| 详情串了别的对话 | **受控**：扩展 ≥ 0.3.6，不要用旧 vsix |
 
 ## 发送通道
 
-| 动作 | 中台做什么 | 被控机还要做什么 |
+| 动作 | 中台端 | 受控端 |
 | --- | --- | --- |
 | 新任务 | `run.start` → 新对话 + CDP 注入并模拟 Enter | 用 `armada-cursor.sh` 开着目标工作区。CDP 失败则变剪贴板，需 **回车** |
 | 取消 | `run.cancel`，扩展尝试 `cancelChat` | 若 UI 仍要确认则点一下 |
@@ -253,4 +257,4 @@ hub 静态托管路径相对 `hub/src`，**请从仓库根**执行 `bun run dev:
 
 - 规格与验收：[`../docs/superpowers/specs/2026-08-28-lan-cursor-workbench-design.md`](../docs/superpowers/specs/2026-08-28-lan-cursor-workbench-design.md)
 - 对话归属：[`../docs/superpowers/specs/2026-08-30-conversation-ownership-design.md`](../docs/superpowers/specs/2026-08-30-conversation-ownership-design.md)
-- 另一台电脑怎么装：见上文 **「另一台电脑接入」**
+- 中台端 / 受控端分别做什么：见上文 **「中台端 vs 受控端」**
