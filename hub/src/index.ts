@@ -123,10 +123,8 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
     return c.json({ run }, 201);
   });
   app.post("/api/runs/:id/close", (c) => {
-    const r = runs.get(c.req.param("id"));
-    if (!r) return c.json({ error: "NOT_FOUND" }, 404);
-    if (!["error", "unknown"].includes(r.status)) return c.json({ error: "NOT_CLOSABLE" }, 409);
-    db.query("UPDATE runs SET status='cancelled', end_reason='OPERATOR_CLOSED', ended_at=?1 WHERE id=?2").run(Date.now(), r.id);
+    const { error } = runs.close(c.req.param("id"));
+    if (error) return c.json({ error }, error === "NOT_FOUND" ? 404 : 409);
     return c.json({ ok: true });
   });
 

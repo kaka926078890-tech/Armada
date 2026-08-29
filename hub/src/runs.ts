@@ -127,4 +127,13 @@ export class RunService {
   getByConversation(cid: string): any {
     return this.db.query("SELECT * FROM runs WHERE conversation_id=?1 ORDER BY created_at DESC LIMIT 1").get(cid) ?? null;
   }
+
+  /** Operator close: only error/unknown → cancelled (SSE + audit via setStatus). */
+  close(runId: string): { error?: string; run?: any } {
+    const run = this.get(runId);
+    if (!run) return { error: "NOT_FOUND" };
+    if (!["error", "unknown"].includes(run.status)) return { error: "INVALID_STATE" };
+    this.setStatus(runId, "cancelled", { end_reason: "OPERATOR_CLOSED" }, "operator");
+    return { run: this.get(runId) };
+  }
 }

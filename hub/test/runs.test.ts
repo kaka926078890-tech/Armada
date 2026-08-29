@@ -142,4 +142,64 @@ describe("Run dispatch", () => {
     expect(inbound.find((m) => m.type === "run.followup")).toMatchObject({ runId: child.id, conversationId: "cid-1", prompt: "继续" });
     ws.close();
   });
+
+  test("close: error → cancelled via setStatus + SSE broadcast + audit", async () => {
+    const { ws, api } = await startWithExt();
+    const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "x" }) });
+    const { run } = await r.json() as any;
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "rejected", reason: "boom" }));
+    await new Promise((r2) => setTimeout(r2, 100));
+    expect(((await (await api(`/api/runs/${run.id}`)).json()) as any).status).toBe("error");
+
+    const ac = new AbortController();
+    const stream = await fetch(`http://127.0.0.1:${hub!.port}/api/runs/${run.id}/stream?token=${hub!.token}`, { signal: ac.signal });
+    const reader = stream.body!.getReader();
+    await reader.read(); // drain :ok
+
+    const closeRes = await api(`/api/runs/${run.id}/close`, { method: "POST" });
+    expect(closeRes.status).toBe(200);
+
+    const after = (await (await api(`/api/runs/${run.id}`)).json()) as any;
+    expect(after.status).toBe("cancelled");
+    expect(after.end_reason).toBe("OPERATOR_CLOSED");
+
+    let sawStatus = false;
+    const deadline = Date.now() + 500;
+    while (Date.now() < deadline && !sawStatus) {
+      const result = await Promise.race([
+        reader.read().then((x) => ({ kind: "data" as const, ...x })),
+        new Promise<{ kind: "timeout" }>((res) => setTimeout(() => res({ kind: "timeout" }), 50)),
+      ]);
+      if (result.kind === "timeout") continue;
+      if (result.done) break;
+      const chunk = new TextDecoder().decode(result.value);
+      for (const line of chunk.split("\n")) {
+        if (!line.startsWith("data: ")) continue;
+        const msg = JSON.parse(line.slice(6));
+        if (msg.type === "run.status" && msg.runId === run.id && msg.status === "cancelled") sawStatus = true;
+      }
+    }
+    expect(sawStatus).toBe(true);
+
+    const audit = hub!.db.query("SELECT action FROM audit WHERE target=?1 AND action='run.cancelled'").all(run.id) as any[];
+    expect(audit.length).toBeGreaterThanOrEqual(1);
+    ac.abort();
+    ws.close();
+  });
+
+  test("close: running → 409 INVALID_STATE", async () => {
+    const { ws, api } = await startWithExt();
+    const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "x" }) });
+    const { run } = await r.json() as any;
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId: run.id, conversationId: "cid-1", transcriptPath: null, promptMatch: false }));
+    await new Promise((r2) => setTimeout(r2, 100));
+    expect(((await (await api(`/api/runs/${run.id}`)).json()) as any).status).toBe("running");
+
+    const closeRes = await api(`/api/runs/${run.id}/close`, { method: "POST" });
+    expect(closeRes.status).toBe(409);
+    expect(((await closeRes.json()) as any).error).toBe("INVALID_STATE");
+    expect(((await (await api(`/api/runs/${run.id}`)).json()) as any).status).toBe("running");
+    ws.close();
+  });
 });

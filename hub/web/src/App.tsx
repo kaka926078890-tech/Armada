@@ -13,15 +13,27 @@ export default function App() {
   const [runs, setRuns] = useState<RunRow[]>([]);
   const [selectedRun, setSelectedRun] = useState<string | null>(null);
   const [dispatchOpen, setDispatchOpen] = useState(false);
+  const [loadError, setLoadError] = useState("");
 
   const refresh = useCallback(() => {
     if (!authed) return;
-    api.machines().then(setMachines).catch(() => {});
-    api.runs().then(setRuns).catch(() => {});
+    Promise.all([api.machines(), api.runs()])
+      .then(([m, r]) => {
+        setMachines(m);
+        setRuns(r);
+        setLoadError("");
+      })
+      .catch((e) => {
+        if (String(e).includes("unauthorized")) return;
+        setLoadError("看板加载失败（hub 不可达）");
+      });
   }, [authed]);
 
   useEffect(() => {
-    const on401 = () => setAuthed(false);
+    const on401 = () => {
+      localStorage.removeItem("armada.token");
+      setAuthed(false);
+    };
     window.addEventListener("armada:unauthorized", on401);
     return () => window.removeEventListener("armada:unauthorized", on401);
   }, []);
@@ -57,6 +69,9 @@ export default function App() {
 
   return (
     <div className="h-screen flex flex-col bg-zinc-950 text-zinc-100">
+      {loadError && (
+        <div className="px-4 py-2 text-sm text-red-400 bg-red-950/50 border-b border-red-900/50">{loadError}</div>
+      )}
       <header className="flex items-center gap-4 px-4 py-2 border-b border-zinc-800">
         <span className="font-bold">Armada</span>
         <span className="text-zinc-400 text-sm">{location.host}</span>
