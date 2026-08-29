@@ -115,6 +115,9 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
     const parent = runs.get(c.req.param("id"));
     if (!parent) return c.json({ error: "NOT_FOUND" }, 404);
     if (!parent.conversation_id) return c.json({ error: "NO_CONVERSATION" }, 409);
+    if (parent.end_reason === "OPERATOR_CLOSED") {
+      return c.json({ error: "CLOSED" }, 400);
+    }
     const { prompt } = await c.req.json();
     const { run, error } = runs.create(parent.machine_id, parent.workspace_root, prompt, {
       parentRunId: parent.id, conversationId: parent.conversation_id, via: "followup",

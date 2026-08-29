@@ -92,13 +92,26 @@ export class Executor {
     await vs().commands.executeCommand("composer.cancelChat", conversationId);
   }
 
-  async followup(msg: { runId: string; conversationId: string; prompt: string }): Promise<void> {
+  async followup(msg: {
+    runId: string;
+    conversationId: string;
+    prompt: string;
+    /** Present on hub `run.followup` (parent workspace); required for pending binding. */
+    workspaceRoot: string;
+  }): Promise<void> {
     const vscode = vs();
     try {
       await vscode.commands.executeCommand("composer.openComposer", msg.conversationId);
       await this.sleep(800);
       await vscode.env.clipboard.writeText(msg.prompt);
       await vscode.commands.executeCommand("editor.action.clipboardPasteAction");
+      // Binding window starts after inject succeeds (mirrors startRun post-auth pending).
+      this.deps.addPending?.({
+        runId: msg.runId,
+        workspaceRoot: msg.workspaceRoot,
+        prompt: msg.prompt,
+        dispatchedAt: Date.now(),
+      });
       this.deps.send({ type: "run.ack", runId: msg.runId, status: "accepted" });
     } catch (e) {
       this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: `FOLLOWUP_FAILED:${String(e)}` });

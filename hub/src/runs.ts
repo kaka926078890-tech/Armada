@@ -4,7 +4,7 @@ import type { Registry } from "./registry";
 import type { SseHub } from "./sse";
 
 const ACTIVE = ["created", "dispatched", "binding", "running"];
-const DISPATCH_TIMEOUT_MS = 5_000;
+const DISPATCH_TIMEOUT_MS = 30_000;
 const BIND_TIMEOUT_MS = 60_000;
 
 export class RunService {
@@ -48,7 +48,7 @@ export class RunService {
     this.audit("operator", "run.create", id, { machineId, workspaceRoot, via: opts.via ?? "new" });
     if (opts.via === "followup") {
       this.registry.sendTo(machineId, win.windowId, {
-        type: "run.followup", runId: id, conversationId: opts.conversationId, prompt,
+        type: "run.followup", runId: id, conversationId: opts.conversationId, workspaceRoot, prompt,
       });
       this.audit("hub", "run.followup", id);
     } else {

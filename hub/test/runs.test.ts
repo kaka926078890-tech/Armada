@@ -92,7 +92,7 @@ describe("Run dispatch", () => {
     const { api } = await startWithExt();
     const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "x" }) });
     const { run } = await r.json() as any;
-    hub!.db.query("UPDATE runs SET created_at=?1 WHERE id=?2").run(Date.now() - 10_000, run.id);
+    hub!.db.query("UPDATE runs SET created_at=?1 WHERE id=?2").run(Date.now() - 35_000, run.id);
     hub!.runs.sweepTimeouts();
     const after = (await (await api(`/api/runs/${run.id}`)).json()) as any;
     expect(after.status).toBe("error");
@@ -139,7 +139,24 @@ describe("Run dispatch", () => {
     expect(child.conversation_id).toBe("cid-1");
     await new Promise((r2) => setTimeout(r2, 100));
     expect(inbound.find((m) => m.type === "run.start")).toBeUndefined();
-    expect(inbound.find((m) => m.type === "run.followup")).toMatchObject({ runId: child.id, conversationId: "cid-1", prompt: "继续" });
+    expect(inbound.find((m) => m.type === "run.followup")).toMatchObject({
+      runId: child.id, conversationId: "cid-1", workspaceRoot: "/ws/a", prompt: "继续",
+    });
+    ws.close();
+  });
+
+  test("followup on operator-closed parent → 400 CLOSED", async () => {
+    const { ws, api } = await startWithExt();
+    const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "a" }) });
+    const { run } = await r.json() as any;
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "rejected", reason: "boom" }));
+    await new Promise((r2) => setTimeout(r2, 100));
+    expect((await api(`/api/runs/${run.id}/close`, { method: "POST" })).status).toBe(200);
+    // closed runs may still have conversation_id from a prior bind; force one so we hit CLOSED not NO_CONVERSATION
+    hub!.db.query("UPDATE runs SET conversation_id=?1 WHERE id=?2").run("cid-closed", run.id);
+    const f = await api(`/api/runs/${run.id}/followup`, { method: "POST", body: JSON.stringify({ prompt: "续" }) });
+    expect(f.status).toBe(400);
+    expect(((await f.json()) as any).error).toBe("CLOSED");
     ws.close();
   });
 

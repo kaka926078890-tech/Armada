@@ -104,4 +104,33 @@ describe("SpoolForwarder", () => {
     expect(sent2[0].hook).toBe("unknown");
     expect(String(sent2[0].raw.__unparsed)).toContain("{broken");
   });
+
+  test("two forwarders concurrent poll: seq unique, no lost/duplicate events", async () => {
+    const spoolDir = mkdtempSync(join(tmpdir(), "armada-spool-race-"));
+    const stateDir = mkdtempSync(join(tmpdir(), "armada-state-race-"));
+    const sent1: OutboundEvent[] = [];
+    const sent2: OutboundEvent[] = [];
+    const f1 = new SpoolForwarder({ spoolDir, stateDir, send: (e) => sent1.push(e) });
+    const f2 = new SpoolForwarder({ spoolDir, stateDir, send: (e) => sent2.push(e) });
+    const N = 40;
+    for (let i = 0; i < N; i++) {
+      drop(spoolDir, `ev-${i}.json`, { __hook: "stop", __ts: i, __raw: { i } });
+    }
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline) {
+      const pending = readdirSync(spoolDir).filter((f) => f.endsWith(".json") && !/^\d+-/.test(f));
+      if (pending.length === 0) break;
+      await Promise.all([
+        Promise.resolve(f1.poll()),
+        Promise.resolve(f2.poll()),
+      ]);
+    }
+    const all = [...sent1, ...sent2];
+    expect(all).toHaveLength(N);
+    const seqs = all.map((e) => e.seq).sort((a, b) => a - b);
+    expect(seqs).toEqual(Array.from({ length: N }, (_, i) => i + 1));
+    expect(new Set(seqs).size).toBe(N);
+    const assigned = readdirSync(spoolDir).filter((f) => /^\d+-/.test(f) && f.endsWith(".json"));
+    expect(assigned).toHaveLength(N);
+  });
 });

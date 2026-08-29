@@ -50,4 +50,23 @@ describe("matchHookToPending", () => {
     const m = matchHookToPending([P], ev("beforeSubmitPrompt", 1_002_000, { conversation_id: "c1", workspace_roots: ["/ws/a"], prompt: "hello", transcript_path: "/tmp/t.jsonl" }));
     expect(m!.transcriptPath).toBe("/tmp/t.jsonl");
   });
+
+  test("followup pending is matchable by beforeSubmitPrompt (session reuse)", () => {
+    // Executor.followup adds PendingRun after paste; child must bind without a new sessionStart.
+    const child: PendingRun = {
+      runId: "r-followup",
+      workspaceRoot: "/ws/a",
+      prompt: "继续",
+      dispatchedAt: 2_000_000,
+    };
+    const m = matchHookToPending(
+      [child],
+      ev("beforeSubmitPrompt", 2_001_000, {
+        conversation_id: "cid-parent",
+        workspace_roots: ["/ws/a"],
+        prompt: "继续",
+      }),
+    );
+    expect(m).toMatchObject({ run: child, conversationId: "cid-parent", promptMatch: true });
+  });
 });
