@@ -102,4 +102,29 @@ describe("WS registry", () => {
     expect(h.registry.findWindowForWorkspace("m-1", "/nope")).toBeNull();
     ws.close();
   });
+
+  test("multi-window same machine: routing is per-connection, not machine-level", async () => {
+    const h = start();
+    const ws1 = await connect(h.port, h.token);
+    let p = nextMessage(ws1);
+    ws1.send(JSON.stringify(REG)); // w-1: ["/ws/a"]
+    await p;
+    const ws2 = await connect(h.port, h.token);
+    p = nextMessage(ws2);
+    ws2.send(JSON.stringify({ ...REG, windowId: "w-2", openWorkspaces: ["/ws/b"] }));
+    await p;
+    // 每个工作区路由到真正开着它的窗口,与注册顺序无关
+    expect(h.registry.findWindowForWorkspace("m-1", "/ws/a")).toEqual({ machineId: "m-1", windowId: "w-1" });
+    expect(h.registry.findWindowForWorkspace("m-1", "/ws/b")).toEqual({ machineId: "m-1", windowId: "w-2" });
+    // 机器级展示为并集
+    expect(JSON.parse(h.registry.getMachine("m-1")!.open_workspaces).sort()).toEqual(["/ws/a", "/ws/b"]);
+    // w-2 心跳改工作区后路由跟随
+    ws2.send(JSON.stringify({ type: "heartbeat", openWorkspaces: ["/ws/c"], activeRunIds: [] }));
+    await new Promise((r) => setTimeout(r, 100));
+    expect(h.registry.findWindowForWorkspace("m-1", "/ws/c")).toEqual({ machineId: "m-1", windowId: "w-2" });
+    expect(h.registry.findWindowForWorkspace("m-1", "/ws/b")).toBeNull();
+    expect(h.registry.findWindowForWorkspace("m-1", "/ws/a")).toEqual({ machineId: "m-1", windowId: "w-1" });
+    ws1.close();
+    ws2.close();
+  });
 });

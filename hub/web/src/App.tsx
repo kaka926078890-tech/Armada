@@ -14,6 +14,7 @@ export default function App() {
   const [selectedRun, setSelectedRun] = useState<string | null>(null);
   const [dispatchOpen, setDispatchOpen] = useState(false);
   const [loadError, setLoadError] = useState("");
+  const [authDenied, setAuthDenied] = useState(false);
 
   const refresh = useCallback(() => {
     if (!authed) return;
@@ -33,6 +34,7 @@ export default function App() {
     const on401 = () => {
       localStorage.removeItem("armada.token");
       setAuthed(false);
+      setAuthDenied(true);
     };
     window.addEventListener("armada:unauthorized", on401);
     return () => window.removeEventListener("armada:unauthorized", on401);
@@ -57,9 +59,10 @@ export default function App() {
         <form className="flex flex-col gap-3 w-80" onSubmit={(e) => {
           e.preventDefault();
           const v = new FormData(e.currentTarget).get("token");
-          if (typeof v === "string" && v) { setToken(v); setAuthed(true); }
+          if (typeof v === "string" && v.trim()) { setToken(v.trim()); setAuthDenied(false); setAuthed(true); }
         }}>
           <h1 className="text-xl font-bold">Armada 舰队指挥台</h1>
+          {authDenied && <div className="text-sm text-red-400">令牌无效，请重新从 hub 机器复制（cat ~/.armada/token)</div>}
           <input name="token" type="password" placeholder="配对令牌" className="px-3 py-2 rounded bg-zinc-900 border border-zinc-700" />
           <button className="px-3 py-2 rounded bg-sky-600 hover:bg-sky-500">连接</button>
         </form>

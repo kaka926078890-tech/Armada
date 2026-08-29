@@ -13,7 +13,7 @@ export interface MachineRow {
   open_workspaces: string; status: string; last_seen_at: number | null;
 }
 
-type Conn = { ws: ArmadaSocket; machineId: string; windowId: string };
+type Conn = { ws: ArmadaSocket; machineId: string; windowId: string; openWorkspaces: string[] };
 
 export class Registry {
   private conns = new Map<string, Conn>();
@@ -62,27 +62,46 @@ export class Registry {
     ws.data.connKey = connKey;
     ws.data.machineId = msg.machineId;
     ws.data.windowId = msg.windowId;
-    this.conns.set(connKey, { ws, machineId: msg.machineId, windowId: msg.windowId });
+    this.conns.set(connKey, { ws, machineId: msg.machineId, windowId: msg.windowId, openWorkspaces: msg.openWorkspaces ?? [] });
     this.upsertMachine({
       id: msg.machineId, name: msg.name, os: msg.os,
       cursorVersion: msg.cursorVersion, extensionVersion: msg.extensionVersion,
       openWorkspaces: msg.openWorkspaces ?? [],
     });
+    this.refreshMachineWorkspaces(msg.machineId);
     ws.send(JSON.stringify({ type: "registered", machineId: msg.machineId }));
   }
 
   onHeartbeat(ws: ArmadaSocket, msg: any): void {
     const id = ws.data.machineId;
     if (!id) return;
+    const conn = ws.data.connKey ? this.conns.get(ws.data.connKey) : undefined;
+    if (conn && conn.ws === ws) conn.openWorkspaces = msg.openWorkspaces ?? [];
+    this.refreshMachineWorkspaces(id);
     this.db.query(
-      "UPDATE machines SET open_workspaces=?1, last_seen_at=?2, status='online' WHERE id=?3"
-    ).run(JSON.stringify(msg.openWorkspaces ?? []), Date.now(), id);
+      "UPDATE machines SET last_seen_at=?1, status='online' WHERE id=?2"
+    ).run(Date.now(), id);
+  }
+
+  /** 机器级 open_workspaces = 该机器所有在线连接工作区的并集(仅用于展示;路由按连接级匹配)。 */
+  private refreshMachineWorkspaces(machineId: string): void {
+    const union = new Set<string>();
+    for (const c of this.conns.values()) {
+      if (c.machineId !== machineId) continue;
+      for (const w of c.openWorkspaces) union.add(w);
+    }
+    if (union.size === 0) return; // 无在线连接时保留最后已知值
+    this.db.query("UPDATE machines SET open_workspaces=?1 WHERE id=?2")
+      .run(JSON.stringify([...union]), machineId);
   }
 
   onClose(ws: ArmadaSocket): void {
     if (ws.data.regTimer) { clearTimeout(ws.data.regTimer); ws.data.regTimer = undefined; }
     const key = ws.data.connKey;
-    if (key && this.conns.get(key)?.ws === ws) this.conns.delete(key);
+    if (key && this.conns.get(key)?.ws === ws) {
+      this.conns.delete(key);
+      if (ws.data.machineId) this.refreshMachineWorkspaces(ws.data.machineId);
+    }
   }
 
   sweep(now = Date.now()): void {
@@ -105,8 +124,7 @@ export class Registry {
   findWindowForWorkspace(machineId: string, workspaceRoot: string): { machineId: string; windowId: string } | null {
     for (const c of this.conns.values()) {
       if (c.machineId !== machineId) continue;
-      const m = this.getMachine(machineId);
-      if (m && JSON.parse(m.open_workspaces).includes(workspaceRoot)) {
+      if (c.openWorkspaces.includes(workspaceRoot)) {
         return { machineId: c.machineId, windowId: c.windowId };
       }
     }

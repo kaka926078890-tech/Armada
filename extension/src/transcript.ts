@@ -8,6 +8,9 @@ export class TranscriptTailer {
   constructor(private opts: TranscriptTailerOpts) {}
 
   attach(runId: string, path: string): void {
+    const existing = this.tails.get(runId);
+    // 续聊会再次 bind 同一 run:不得把 offset 打回 0,否则整份 transcript 会重复灌进详情
+    if (existing && existing.path === path) return;
     this.tails.set(runId, { path, offset: 0, buf: "" });
   }
 

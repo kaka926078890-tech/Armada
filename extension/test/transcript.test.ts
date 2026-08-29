@@ -44,4 +44,16 @@ describe("TranscriptTailer", () => {
     t.poll("ra"); t.poll("rb");
     expect(lines).toEqual([["ra", "1"], ["rb", "2"], ["rb", "2"]]);
   });
+
+  test("re-attach same run+path keeps offset (followup must not replay history)", () => {
+    const fs = fakeFs("old\n");
+    const lines: string[] = [];
+    const t = new TranscriptTailer({ readFile: fs.readFile, onLine: (_r, l) => lines.push(l) });
+    t.attach("r1", "/p");
+    t.poll("r1");
+    t.attach("r1", "/p");
+    fs.append("new\n");
+    t.poll("r1");
+    expect(lines).toEqual(["old", "new"]);
+  });
 });

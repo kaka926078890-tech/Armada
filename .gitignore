@@ -2,3 +2,4 @@ node_modules/
 dist/
 *.vsix
 hub/web/dist/
+.DS_Store

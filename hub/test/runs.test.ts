@@ -99,6 +99,23 @@ describe("Run dispatch", () => {
     expect(after.end_reason).toBe("DISPATCH_TIMEOUT");
   });
 
+  test("迟到的 accepted ack 从 DISPATCH_TIMEOUT 收回为 binding", async () => {
+    const { ws, api } = await startWithExt();
+    const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "x" }) });
+    const { run } = await r.json() as any;
+    hub!.db.query("UPDATE runs SET created_at=?1 WHERE id=?2").run(Date.now() - 35_000, run.id);
+    hub!.runs.sweepTimeouts();
+    expect(((await (await api(`/api/runs/${run.id}`)).json()) as any).end_reason).toBe("DISPATCH_TIMEOUT");
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    await new Promise((r2) => setTimeout(r2, 100));
+    const after = (await (await api(`/api/runs/${run.id}`)).json()) as any;
+    expect(after.status).toBe("binding");
+    expect(after.end_reason).toBeNull();
+    hub!.runs.sweepTimeouts();
+    expect(((await (await api(`/api/runs/${run.id}`)).json()) as any).status).toBe("binding");
+    ws.close();
+  });
+
   test("machine offline → running run becomes unknown", async () => {
     const { ws, api } = await startWithExt();
     const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "x" }) });
@@ -123,7 +140,25 @@ describe("Run dispatch", () => {
     ws.close();
   });
 
-  test("followup creates child run and sends run.followup (not run.start)", async () => {
+  test("followup of an old run must not BIND_TIMEOUT on original created_at", async () => {
+    const { ws, api } = await startWithExt();
+    const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "a" }) });
+    const { run } = await r.json() as any;
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId: run.id, conversationId: "cid-1", transcriptPath: null, promptMatch: true }));
+    ws.send(JSON.stringify({ type: "run.event", runId: run.id, source: "hook", hookEventName: "stop", payload: { status: "completed" }, ts: Date.now(), seq: 1 }));
+    await new Promise((r2) => setTimeout(r2, 150));
+    hub!.db.query("UPDATE runs SET created_at=?1 WHERE id=?2").run(Date.now() - 120_000, run.id);
+    const f = await api(`/api/runs/${run.id}/followup`, { method: "POST", body: JSON.stringify({ prompt: "继续" }) });
+    expect(f.status).toBe(200);
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    await new Promise((r2) => setTimeout(r2, 100));
+    hub!.runs.sweepTimeouts();
+    expect(((await (await api(`/api/runs/${run.id}`)).json()) as any).status).toBe("binding");
+    ws.close();
+  });
+
+  test("followup reopens the same run (same card) and sends run.followup", async () => {
     const { ws, inbound, api } = await startWithExt();
     const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "a" }) });
     const { run } = await r.json() as any;
@@ -133,15 +168,19 @@ describe("Run dispatch", () => {
     await new Promise((r2) => setTimeout(r2, 150));
     inbound.length = 0;
     const f = await api(`/api/runs/${run.id}/followup`, { method: "POST", body: JSON.stringify({ prompt: "继续" }) });
-    expect(f.status).toBe(201);
-    const { run: child } = await f.json() as any;
-    expect(child.parent_run_id).toBe(run.id);
-    expect(child.conversation_id).toBe("cid-1");
+    expect(f.status).toBe(200);
+    const { run: again } = await f.json() as any;
+    expect(again.id).toBe(run.id);
+    expect(again.status).toBe("dispatched");
+    expect(again.ended_at).toBeNull();
+    expect(again.parent_run_id).toBeNull();
     await new Promise((r2) => setTimeout(r2, 100));
     expect(inbound.find((m) => m.type === "run.start")).toBeUndefined();
     expect(inbound.find((m) => m.type === "run.followup")).toMatchObject({
-      runId: child.id, conversationId: "cid-1", workspaceRoot: "/ws/a", prompt: "继续",
+      runId: run.id, conversationId: "cid-1", workspaceRoot: "/ws/a", prompt: "继续",
     });
+    const listed = (await (await api("/api/runs")).json()) as any[];
+    expect(listed.filter((x) => x.conversation_id === "cid-1")).toHaveLength(1);
     ws.close();
   });
 

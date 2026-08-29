@@ -2,22 +2,51 @@
   "name": "armada-agent",
   "displayName": "Armada Agent",
   "publisher": "armada",
-  "version": "0.1.0",
+  "version": "0.3.4",
   "private": true,
-  "engines": { "vscode": "^1.96.0" },
-  "activationEvents": ["onStartupFinished"],
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "configuration": {
       "title": "Armada",
       "properties": {
-        "armada.hubUrl": { "type": "string", "default": "", "description": "Armada hub host:port, e.g. 192.168.1.10:7380" },
-        "armada.token": { "type": "string", "default": "", "description": "Armada pairing token" }
+        "armada.hubUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Armada hub host:port, e.g. 192.168.1.10:7380"
+        },
+        "armada.token": {
+          "type": "string",
+          "default": "",
+          "description": "Armada pairing token"
+        },
+        "armada.cdpPort": {
+          "type": "number",
+          "default": 9222,
+          "description": "CDP remote debugging port (Cursor launched via armada-cursor.sh)"
+        },
+        "armada.autoSubmit": {
+          "type": "boolean",
+          "default": true,
+          "description": "Auto-submit injected prompts via CDP; falls back to clipboard + manual Enter"
+        }
       }
     },
-    "commands": [{ "command": "armada.configure", "title": "Armada: Configure Hub Connection" }]
+    "commands": [
+      {
+        "command": "armada.configure",
+        "title": "Armada: Configure Hub Connection"
+      }
+    ]
   },
-  "dependencies": { "ws": "^8.18.0" },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
   "devDependencies": {
     "@types/vscode": "^1.96.0",
     "@types/ws": "^8.5.0",

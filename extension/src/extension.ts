@@ -7,9 +7,10 @@ import { join } from "path";
 import { loadConfig } from "./config";
 import { WsClientCore } from "./wsClient";
 import { SpoolForwarder } from "./spool";
-import { matchHookToPending, type PendingRun } from "./binding";
+import { matchHookToPending, claimConversation, latestRunIdForConversation, type PendingRun } from "./binding";
 import { TranscriptTailer } from "./transcript";
 import { Executor, CancelWatcher } from "./executor";
+import { createCdpSubmitter } from "./cdpInject";
 import { mergeHooks, hooksDriftHash } from "./hooksInstall";
 
 let client: { dispose: () => void } | null = null;
@@ -26,8 +27,13 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.showInformationMessage("Armada: saved. Reload window to connect.");
   }));
 
+  const out = vscode.window.createOutputChannel("Armada");
+  const log = (s: string) => out.appendLine(`[${new Date().toLocaleTimeString()}] ${s}`);
+  context.subscriptions.push(out);
+
   const config = loadConfig();
-  if (!config) return; // 未配置:静默待机
+  if (!config) { log("no armada.hubUrl/token configured; dormant"); return; }
+  log(`config loaded, hub=${config.hubUrl}`);
 
   let machineId = context.globalState.get<string>("armada.machineId");
   if (!machineId) {
@@ -42,7 +48,10 @@ export function activate(context: vscode.ExtensionContext): void {
   let reconnectTimer: NodeJS.Timeout | null = null;
   let disposed = false;
 
-  const core = new WsClientCore((msg) => ws?.send(JSON.stringify(msg)));
+  const core = new WsClientCore(
+    (msg) => { if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg)); },
+    () => ws?.readyState === WebSocket.OPEN,
+  );
 
   const armadaDir = join(homedir(), ".cursor", "armada");
   const spoolDir = join(armadaDir, "spool");
@@ -52,14 +61,25 @@ export function activate(context: vscode.ExtensionContext): void {
   const boundRuns = new Map<string, { conversationId: string; prompt: string }>();
   const cancelWatcher = new CancelWatcher();
 
+  const cdpSubmit = config.autoSubmit ? createCdpSubmitter({ port: config.cdpPort, log }) : null;
+  log(`autoSubmit=${config.autoSubmit} cdpPort=${config.cdpPort}`);
+
   const executor = new Executor({
     globalState: context.globalState,
-    send: (m) => core.enqueue(m),
+    send: (m) => { log(`=> ${JSON.stringify(m)}`); core.enqueue(m); },
     addPending: (run) => { pendingRuns.push(run); },
     removePending: (runId) => {
       const i = pendingRuns.findIndex((r) => r.runId === runId);
       if (i >= 0) pendingRuns.splice(i, 1);
     },
+    autoSubmit: cdpSubmit
+      ? async (workspaceRoot, prompt) => {
+          const r = await cdpSubmit(workspaceRoot, prompt);
+          if (!r.ok) log(`cdp submit failed: ${r.reason}; fallback to clipboard`);
+          else log("cdp submit ok");
+          return r.ok;
+        }
+      : undefined,
   });
 
   // transcript 事件走独立高段,避免与 spool seq 冲突
@@ -92,15 +112,15 @@ export function activate(context: vscode.ExtensionContext): void {
       const match = matchHookToPending(pendingRuns, { hook: ev.hook, ts: ev.ts, raw: ev.raw });
       if (match) {
         pendingRuns.splice(pendingRuns.indexOf(match.run), 1);
-        boundRuns.set(match.run.runId, { conversationId: match.conversationId, prompt: match.run.prompt });
+        claimConversation(boundRuns, match.run.runId, match.conversationId, match.run.prompt);
         core.enqueue({ type: "run.bound", runId: match.run.runId, conversationId: match.conversationId, transcriptPath: match.transcriptPath, promptMatch: match.promptMatch });
         if (match.transcriptPath) tailer.attach(match.run.runId, match.transcriptPath);
       }
       const reCancel = cancelWatcher.shouldCancelAgain({ hook: ev.hook, raw: ev.raw }, Date.now());
       if (reCancel) void executor.cancel(reCancel);
-      // 事件归属:优先 match 到的 runId,否则按 conversation_id 反查
+      // 事件归属:优先本次刚绑上的 run,否则按 conversation 取最新主人(同对话续聊不得把 stop 送给旧 run)
       const runId = match?.run.runId
-        ?? [...boundRuns.entries()].find(([, v]) => v.conversationId === (ev.raw as any)?.conversation_id)?.[0];
+        ?? latestRunIdForConversation(boundRuns, (ev.raw as any)?.conversation_id);
       core.enqueue({
         type: "run.event", runId, conversationId: (ev.raw as any)?.conversation_id,
         source: "hook", hookEventName: ev.hook, payload: ev.raw, ts: ev.ts * 1000, seq: ev.seq,
@@ -138,25 +158,44 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const connect = () => {
     if (disposed) return;
-    ws = new WebSocket(`ws://${config.hubUrl}/ws?token=${config.token}`);
-    ws.on("open", () => {
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    if (heartbeat) { clearInterval(heartbeat); heartbeat = null; }
+    const prev = ws;
+    ws = null;
+    if (prev) {
+      prev.removeAllListeners();
+      if (prev.readyState === WebSocket.OPEN || prev.readyState === WebSocket.CONNECTING) {
+        try { prev.close(); } catch { /* ignore */ }
+      }
+    }
+    const sock = new WebSocket(`ws://${config.hubUrl}/ws?token=${config.token}`);
+    ws = sock;
+    sock.on("open", () => {
+      if (ws !== sock) return;
+      log("ws open, registering");
       core.onOpen();
-      core.enqueue({
+      core.sendRegister({
         type: "register", machineId, windowId,
         name: hostname(), os: `${process.platform}-${process.arch}`,
-        cursorVersion: vscode.version, extensionVersion: "0.1.0",
+        cursorVersion: vscode.version, extensionVersion: "0.3.4",
         openWorkspaces: workspaces(),
       });
-      forwarder.resendUnacked();
-      heartbeat = setInterval(() => core.enqueue({ type: "heartbeat", openWorkspaces: workspaces(), activeRunIds: [...boundRuns.keys()] }), 15_000);
     });
-    ws.on("message", (data) => {
+    sock.on("message", (data) => {
+      if (ws !== sock) return;
       let msg: any;
       try { msg = JSON.parse(String(data)); } catch { return; }
+      log(`<= ${msg.type} ${msg.runId ?? ""}`);
       switch (msg.type) {
+        case "registered":
+          core.onRegistered();
+          if (heartbeat) clearInterval(heartbeat);
+          heartbeat = setInterval(() => core.enqueue({ type: "heartbeat", openWorkspaces: workspaces(), activeRunIds: [...boundRuns.keys()] }), 15_000);
+          forwarder.resendUnacked();
+          break;
         case "run.start":
           // pendingRuns is populated inside Executor after auth + newAgentChat (not here).
-          void executor.startRun(msg);
+          void executor.startRun(msg).catch((e) => log(`startRun error: ${String(e)}`));
           break;
         case "run.cancel": {
           const b = boundRuns.get(msg.runId);
@@ -175,11 +214,17 @@ export function activate(context: vscode.ExtensionContext): void {
           break;
       }
     });
-    ws.on("close", () => {
-      if (heartbeat) clearInterval(heartbeat);
+    sock.on("close", (code, reason) => {
+      if (ws !== sock) return;
+      log(`ws closed code=${code} ${reason}`);
+      if (heartbeat) { clearInterval(heartbeat); heartbeat = null; }
       if (!disposed) reconnectTimer = setTimeout(connect, core.onClose());
     });
-    ws.on("error", () => ws?.close());
+    sock.on("error", (e) => {
+      if (ws !== sock) return;
+      log(`ws error: ${String(e)}`);
+      sock.close();
+    });
   };
   connect();
 

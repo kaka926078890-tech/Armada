@@ -7,15 +7,21 @@ export function ingestEvent(db: Database, runs: RunService, sse: SseHub, machine
   if (typeof extSeq !== "number") return;
   const ack = () => ({ type: "event.ack", machineId, lastSeq: extSeq });
 
-  const runId = msg.runId || runs.getByConversation(msg.conversationId)?.id;
+  const cid = msg.conversationId || msg.payload?.conversation_id;
+  const ACTIVE = ["created", "dispatched", "binding", "running"];
+  let runId: string | undefined = msg.runId || undefined;
+  let run = runId ? runs.get(runId) : null;
+  // 扩展若把 stop 标到已终态的旧 run(同对话续聊/CDP 注入进原会话),改挂到该对话当前活跃 run
+  if ((!run || !ACTIVE.includes(run.status)) && cid) {
+    const live = runs.getActiveByConversation(cid);
+    if (live) { runId = live.id; run = live; }
+    else if (!run) { run = runs.getByConversation(cid); runId = run?.id; }
+  }
+  if (!runId) { (msg as any).__ack = ack(); return; }
+  if (!run) { (msg as any).__ack = ack(); return; }
 
-  // 去重:(machine_id, ext_seq) 已存在 → 仅 ack
   const dup = db.query("SELECT id FROM run_events WHERE machine_id=?1 AND ext_seq=?2").get(machineId, extSeq);
   if (dup) { (msg as any).__ack = ack(); return; }
-
-  if (!runId) { (msg as any).__ack = ack(); return; } // 无法归属:ack 掉避免无限重发
-  const run = runs.get(runId);
-  if (!run) { (msg as any).__ack = ack(); return; }
 
   const maxSeq = (db.query("SELECT COALESCE(MAX(seq),0) AS m FROM run_events WHERE run_id=?1").get(runId) as any).m as number;
   const terminal = !["created", "dispatched", "binding", "running"].includes(run.status);

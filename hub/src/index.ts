@@ -119,11 +119,9 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
       return c.json({ error: "CLOSED" }, 400);
     }
     const { prompt } = await c.req.json();
-    const { run, error } = runs.create(parent.machine_id, parent.workspace_root, prompt, {
-      parentRunId: parent.id, conversationId: parent.conversation_id, via: "followup",
-    });
-    if (error) return c.json({ error }, error === "RUN_BUSY" ? 409 : 400);
-    return c.json({ run }, 201);
+    const { run, error } = runs.followup(parent.id, prompt);
+    if (error) return c.json({ error }, error === "RUN_BUSY" || error === "ALREADY_ACTIVE" || error === "NO_CONVERSATION" ? 409 : 400);
+    return c.json({ run }, 200);
   });
   app.post("/api/runs/:id/close", (c) => {
     const { error } = runs.close(c.req.param("id"));

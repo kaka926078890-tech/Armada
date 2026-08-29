@@ -155,6 +155,35 @@ describe("event ingest", () => {
     ws.close();
   });
 
+  test("stop labeled with a completed runId is redirected to the active run on the same conversation", async () => {
+    const { ws, api, runId: oldId } = await startBoundRun();
+    ws.send(JSON.stringify(ev(oldId, 1, "stop", { status: "completed", conversation_id: "cid-1" })));
+    await new Promise((r) => setTimeout(r, 100));
+    expect(((await (await api(`/api/runs/${oldId}`)).json()) as any).status).toBe("completed");
+    const r2 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "hi2" }) });
+    const { run: neu } = await r2.json() as any;
+    ws.send(JSON.stringify({ type: "run.ack", runId: neu.id, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId: neu.id, conversationId: "cid-1", transcriptPath: "/tmp/t.jsonl", promptMatch: true }));
+    await new Promise((r) => setTimeout(r, 100));
+    ws.send(JSON.stringify({
+      type: "run.event", runId: oldId, conversationId: "cid-1", source: "hook",
+      hookEventName: "stop", payload: { status: "completed", conversation_id: "cid-1" }, ts: Date.now(), seq: 99,
+    }));
+    await new Promise((r) => setTimeout(r, 150));
+    expect(((await (await api(`/api/runs/${neu.id}`)).json()) as any).status).toBe("completed");
+    expect(((await (await api(`/api/runs/${oldId}`)).json()) as any).status).toBe("completed");
+    ws.close();
+  });
+
+  test("stop after false BIND_TIMEOUT still completes the run", async () => {
+    const { ws, api, runId } = await startBoundRun();
+    hub!.db.query("UPDATE runs SET status='unknown', end_reason='BIND_TIMEOUT', ended_at=?1 WHERE id=?2").run(Date.now(), runId);
+    ws.send(JSON.stringify(ev(runId, 9, "stop", { status: "completed" })));
+    await new Promise((r) => setTimeout(r, 120));
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).status).toBe("completed");
+    ws.close();
+  });
+
   test("audit export returns JSONL", async () => {
     const { api } = await startBoundRun();
     const r = await api("/api/audit/export");
