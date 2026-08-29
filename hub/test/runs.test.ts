@@ -122,4 +122,24 @@ describe("Run dispatch", () => {
     expect(rows.map((x) => x.action)).toEqual(["run.create", "run.dispatched", "run.binding"]);
     ws.close();
   });
+
+  test("followup creates child run and sends run.followup (not run.start)", async () => {
+    const { ws, inbound, api } = await startWithExt();
+    const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "a" }) });
+    const { run } = await r.json() as any;
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId: run.id, conversationId: "cid-1", transcriptPath: null, promptMatch: true }));
+    ws.send(JSON.stringify({ type: "run.event", runId: run.id, source: "hook", hookEventName: "stop", payload: { status: "completed" }, ts: Date.now(), seq: 1 }));
+    await new Promise((r2) => setTimeout(r2, 150));
+    inbound.length = 0;
+    const f = await api(`/api/runs/${run.id}/followup`, { method: "POST", body: JSON.stringify({ prompt: "继续" }) });
+    expect(f.status).toBe(201);
+    const { run: child } = await f.json() as any;
+    expect(child.parent_run_id).toBe(run.id);
+    expect(child.conversation_id).toBe("cid-1");
+    await new Promise((r2) => setTimeout(r2, 100));
+    expect(inbound.find((m) => m.type === "run.start")).toBeUndefined();
+    expect(inbound.find((m) => m.type === "run.followup")).toMatchObject({ runId: child.id, conversationId: "cid-1", prompt: "继续" });
+    ws.close();
+  });
 });

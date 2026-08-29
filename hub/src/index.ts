@@ -1,4 +1,6 @@
+import { join } from "path";
 import { Hono } from "hono";
+import { serveStatic } from "hono/bun";
 import { openDb } from "./db";
 import { loadToken, authMiddleware, ARMADA_HOME } from "./auth";
 import { Registry } from "./registry";
@@ -108,6 +110,29 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
       headers: { "content-type": "application/x-ndjson", "content-disposition": "attachment; filename=armada-audit.jsonl" },
     });
   });
+
+  app.post("/api/runs/:id/followup", async (c) => {
+    const parent = runs.get(c.req.param("id"));
+    if (!parent) return c.json({ error: "NOT_FOUND" }, 404);
+    if (!parent.conversation_id) return c.json({ error: "NO_CONVERSATION" }, 409);
+    const { prompt } = await c.req.json();
+    const { run, error } = runs.create(parent.machine_id, parent.workspace_root, prompt, {
+      parentRunId: parent.id, conversationId: parent.conversation_id, via: "followup",
+    });
+    if (error) return c.json({ error }, error === "RUN_BUSY" ? 409 : 400);
+    return c.json({ run }, 201);
+  });
+  app.post("/api/runs/:id/close", (c) => {
+    const r = runs.get(c.req.param("id"));
+    if (!r) return c.json({ error: "NOT_FOUND" }, 404);
+    if (!["error", "unknown"].includes(r.status)) return c.json({ error: "NOT_CLOSABLE" }, 409);
+    db.query("UPDATE runs SET status='cancelled', end_reason='OPERATOR_CLOSED', ended_at=?1 WHERE id=?2").run(Date.now(), r.id);
+    return c.json({ ok: true });
+  });
+
+  const webRoot = join(import.meta.dir, "../web/dist");
+  app.use("/*", serveStatic({ root: webRoot }));
+  app.get("*", serveStatic({ path: join(webRoot, "index.html") }));
 
   const server = Bun.serve<WsData>({
     port: opts.port ?? 7380,

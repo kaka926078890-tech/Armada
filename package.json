@@ -1,7 +1,7 @@
 {
   "name": "armada",
   "private": true,
-  "workspaces": ["hub", "extension"],
+  "workspaces": ["hub", "extension", "hub/web"],
   "scripts": {
     "test": "bun test hub/test extension/test hooks/test",
     "dev:hub": "bun run hub/src/index.ts"
