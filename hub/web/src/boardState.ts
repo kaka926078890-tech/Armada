@@ -3,6 +3,7 @@ export interface RunRow {
   prompt: string; status: string; conversation_id: string | null;
   transcript_path: string | null; parent_run_id: string | null;
   created_at: number; started_at: number | null; ended_at: number | null; end_reason: string | null;
+  archived_at?: number | null;
 }
 
 export type ColumnKey = "waiting" | "running" | "completed" | "cancelled" | "error";
@@ -31,4 +32,113 @@ export function cardView(run: RunRow, now: number): { title: string; elapsed: st
   const elapsed = secs > 60 ? `${Math.floor(secs / 60)}m${secs % 60}s` : `${secs}s`;
   const badge = run.status === "binding" ? "绑定中" : COLUMN_LABELS[COLUMN_MAP[run.status] ?? "error"];
   return { title, elapsed, badge };
+}
+
+export type WorkspaceSlot = {
+  machineId: string;
+  machineName: string;
+  os: string;
+  root: string;
+  online: boolean;
+};
+
+export function encodeWorkspaceKey(machineId: string, root: string): string {
+  return JSON.stringify([machineId, root]);
+}
+
+export function decodeWorkspaceKey(raw: string | null): { machineId: string; root: string } | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && typeof parsed[0] === "string" && typeof parsed[1] === "string") {
+      return { machineId: parsed[0], root: parsed[1] };
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
+export function machineLabel(m: { name: string; display_name?: string | null }): string {
+  const d = m.display_name?.trim();
+  return d || m.name;
+}
+
+export function listWorkspaceSlots(machines: Array<{
+  id: string; name: string; os: string; status: string; open_workspaces: string; display_name?: string | null;
+}>): WorkspaceSlot[] {
+  const out: WorkspaceSlot[] = [];
+  for (const m of machines) {
+    let roots: string[] = [];
+    try {
+      const parsed = JSON.parse(m.open_workspaces || "[]");
+      if (Array.isArray(parsed)) roots = parsed.filter((x): x is string => typeof x === "string");
+    } catch { continue; }
+    for (const root of roots) {
+      out.push({ machineId: m.id, machineName: machineLabel(m), os: m.os, root, online: m.status === "online" });
+    }
+  }
+  return out;
+}
+
+export type MachineGroup = {
+  machineId: string;
+  machineName: string;
+  os: string;
+  online: boolean;
+  workspaces: WorkspaceSlot[];
+};
+
+export function groupSlotsByMachine(slots: WorkspaceSlot[]): MachineGroup[] {
+  const order: string[] = [];
+  const map = new Map<string, MachineGroup>();
+  for (const s of slots) {
+    let g = map.get(s.machineId);
+    if (!g) {
+      g = { machineId: s.machineId, machineName: s.machineName, os: s.os, online: s.online, workspaces: [] };
+      map.set(s.machineId, g);
+      order.push(s.machineId);
+    }
+    g.workspaces.push(s);
+    if (s.online) g.online = true;
+  }
+  return order.map((id) => map.get(id)!);
+}
+
+export function filterRunsByWorkspace(runs: RunRow[], machineId: string, root: string): RunRow[] {
+  return runs.filter((r) => r.machine_id === machineId && r.workspace_root === root);
+}
+
+const LIVE = new Set(["created", "dispatched", "binding", "running"]);
+
+export function sortConversations(runs: RunRow[]): RunRow[] {
+  return runs.toSorted((a, b) => {
+    const live = Number(LIVE.has(b.status)) - Number(LIVE.has(a.status));
+    if (live !== 0) return live;
+    return b.created_at - a.created_at;
+  });
+}
+
+export function runActivityTs(run: RunRow): number {
+  return run.ended_at ?? run.started_at ?? run.created_at;
+}
+
+/** 有未读消息（进行中/完成/异常，且上次打开早于最近活动） */
+export function isUnreadMessage(run: RunRow, readAt: number | undefined): boolean {
+  if (["cancelled", "aborted"].includes(run.status)) return false;
+  return readAt == null || runActivityTs(run) > readAt;
+}
+
+export function isUnreadCompleted(run: RunRow, readAt: number | undefined): boolean {
+  return run.status === "completed" && isUnreadMessage(run, readAt);
+}
+
+export function workspaceHasUnread(runs: RunRow[], readMap: Record<string, number>): boolean {
+  return runs.some((r) => isUnreadMessage(r, readMap[r.id]));
+}
+
+export function isHubArchived(run: Pick<RunRow, "archived_at">): boolean {
+  return run.archived_at != null && run.archived_at > 0;
+}
+
+export function canArchiveRun(run: Pick<RunRow, "status">): boolean {
+  return !LIVE.has(run.status);
 }

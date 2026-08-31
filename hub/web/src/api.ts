@@ -9,7 +9,8 @@ async function req(path: string, init?: RequestInit): Promise<Response> {
 
 export const api = {
   machines: () => req("/api/machines").then((r) => r.json()),
-  runs: () => req("/api/runs").then((r) => r.json()),
+  runs: (opts?: { archived?: boolean }) =>
+    req(`/api/runs${opts?.archived ? "?archived=1" : ""}`).then((r) => r.json()),
   run: (id: string) => req(`/api/runs/${id}`).then((r) => r.json()),
   events: (id: string, afterSeq = 0) => req(`/api/runs/${id}/events?afterSeq=${afterSeq}`).then((r) => r.json()),
   dispatch: (machineId: string, workspaceRoot: string, prompt: string) =>
@@ -17,5 +18,9 @@ export const api = {
   cancel: (id: string) => req(`/api/runs/${id}/cancel`, { method: "POST" }).then((r) => r.json()),
   followup: (id: string, prompt: string) => req(`/api/runs/${id}/followup`, { method: "POST", body: JSON.stringify({ prompt }) }).then((r) => r.json()),
   close: (id: string) => req(`/api/runs/${id}/close`, { method: "POST" }).then((r) => r.json()),
+  archive: (id: string) => req(`/api/runs/${id}/archive`, { method: "POST" }).then((r) => r.json()),
+  unarchive: (id: string) => req(`/api/runs/${id}/unarchive`, { method: "POST" }).then((r) => r.json()),
+  renameMachine: (id: string, displayName: string) =>
+    req(`/api/machines/${id}`, { method: "PATCH", body: JSON.stringify({ displayName }) }).then((r) => r.json()),
   streamUrl: (id: string) => `/api/runs/${id}/stream?token=${encodeURIComponent(getToken())}`,
 };

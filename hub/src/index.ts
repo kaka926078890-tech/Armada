@@ -55,6 +55,13 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
   app.get("/api/health", (c) => c.json({ ok: true, name: "armada-hub" }));
   app.use("/api/*", authMiddleware(token));
   app.get("/api/machines", (c) => c.json(registry.listMachines()));
+  app.patch("/api/machines/:id", async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    if (typeof body.displayName !== "string") return c.json({ error: "INVALID" }, 400);
+    const { machine, error } = registry.setDisplayName(c.req.param("id"), body.displayName);
+    if (error) return c.json({ error }, 404);
+    return c.json({ machine });
+  });
 
   app.post("/api/runs", async (c) => {
     const body = await c.req.json();
@@ -62,7 +69,7 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
     if (error) return c.json({ error }, error === "RUN_BUSY" ? 409 : 400);
     return c.json({ run }, 201);
   });
-  app.get("/api/runs", (c) => c.json(runs.list(c.req.query("status"), c.req.query("machineId"))));
+  app.get("/api/runs", (c) => c.json(runs.list(c.req.query("status"), c.req.query("machineId"), c.req.query("archived"))));
   app.get("/api/runs/:id", (c) => {
     const r = runs.get(c.req.param("id"));
     return r ? c.json(r) : c.json({ error: "NOT_FOUND" }, 404);
@@ -127,6 +134,16 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
     const { error } = runs.close(c.req.param("id"));
     if (error) return c.json({ error }, error === "NOT_FOUND" ? 404 : 409);
     return c.json({ ok: true });
+  });
+  app.post("/api/runs/:id/archive", (c) => {
+    const { error, run } = runs.archive(c.req.param("id"));
+    if (error) return c.json({ error }, error === "NOT_FOUND" ? 404 : 409);
+    return c.json({ run });
+  });
+  app.post("/api/runs/:id/unarchive", (c) => {
+    const { error, run } = runs.unarchive(c.req.param("id"));
+    if (error) return c.json({ error }, error === "NOT_FOUND" ? 404 : 409);
+    return c.json({ run });
   });
 
   const webRoot = join(import.meta.dir, "../web/dist");

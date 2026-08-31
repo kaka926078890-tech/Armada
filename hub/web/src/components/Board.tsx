@@ -1,5 +1,6 @@
-import { groupRuns, cardView, COLUMN_LABELS, type ColumnKey, type RunRow } from "../boardState";
+import { groupRuns, cardView, COLUMN_LABELS, canArchiveRun, type ColumnKey, type RunRow } from "../boardState";
 import type { Machine } from "../types";
+import { machineLabel } from "../boardState";
 
 const COL_ACCENT: Record<ColumnKey, string> = {
   waiting: "border-t-amber-500",
@@ -17,12 +18,18 @@ const BADGE_COLOR: Record<ColumnKey, string> = {
   error: "text-red-400",
 };
 
-export default function Board({ runs, machines, selected, onSelect }: {
+export default function Board({ runs, machines, selected, onSelect, showArchived, onHide, onUnhide }: {
   runs: RunRow[]; machines: Machine[]; selected: string | null; onSelect: (id: string) => void;
+  showArchived: boolean;
+  onHide: (id: string) => void;
+  onUnhide: (id: string) => void;
 }) {
   const g = groupRuns(runs);
   const now = Date.now();
-  const nameOf = (id: string) => machines.find((m) => m.id === id)?.name ?? id;
+  const nameOf = (id: string) => {
+    const m = machines.find((x) => x.id === id);
+    return m ? machineLabel(m) : id;
+  };
   return (
     <main className="flex-1 min-w-0 overflow-x-auto flex gap-2 p-3">
       {(Object.keys(COLUMN_LABELS) as ColumnKey[]).map((col) => (
@@ -37,20 +44,32 @@ export default function Board({ runs, machines, selected, onSelect }: {
             {g[col].map((r) => {
               const v = cardView(r, now);
               return (
-                <button key={r.id} onClick={() => onSelect(r.id)}
-                  className={`text-left px-2.5 py-2 rounded-md border ${selected === r.id ? "border-sky-600/80 bg-zinc-900" : "border-transparent bg-zinc-900/50 hover:border-zinc-700"}`}>
-                  <div className="text-[13px] font-medium leading-snug text-zinc-100">{v.title}</div>
-                  <div className="text-[11px] text-zinc-500 mt-1">{nameOf(r.machine_id)} · {r.workspace_root.split("/").pop()}</div>
-                  {r.status === "binding" && (
-                    <div className="text-[11px] text-sky-500/80 mt-1">已提交,正在关联会话</div>
-                  )}
-                  {(r.status === "dispatched" || r.status === "created") && (
-                    <div className="text-[11px] text-amber-500/80 mt-1">已预填,待本机回车</div>
-                  )}
-                  <div className="text-[11px] text-zinc-500 mt-1 flex justify-between">
-                    <span className={BADGE_COLOR[col]}>{v.badge}</span><span className="text-zinc-600">{v.elapsed}</span>
-                  </div>
-                </button>
+                <div key={r.id} className={`group relative text-left rounded-md border ${selected === r.id ? "border-sky-600/80 bg-zinc-900" : "border-transparent bg-zinc-900/50 hover:border-zinc-700"}`}>
+                  <button onClick={() => onSelect(r.id)} className="w-full text-left px-2.5 py-2">
+                    <div className="text-[13px] font-medium leading-snug text-zinc-100 pr-10">{v.title}</div>
+                    <div className="text-[11px] text-zinc-500 mt-1">{nameOf(r.machine_id)} · {r.workspace_root.split("/").pop()}</div>
+                    {r.status === "binding" && (
+                      <div className="text-[11px] text-sky-500/80 mt-1">已提交,正在关联会话</div>
+                    )}
+                    {(r.status === "dispatched" || r.status === "created") && (
+                      <div className="text-[11px] text-amber-500/80 mt-1">已预填,待本机回车</div>
+                    )}
+                    <div className="text-[11px] text-zinc-500 mt-1 flex justify-between">
+                      <span className={BADGE_COLOR[col]}>{v.badge}</span><span className="text-zinc-600">{v.elapsed}</span>
+                    </div>
+                  </button>
+                  {showArchived ? (
+                    <button type="button" onClick={(e) => { e.stopPropagation(); onUnhide(r.id); }}
+                      className="absolute top-1.5 right-1.5 text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 opacity-0 group-hover:opacity-100">
+                      取消隐藏
+                    </button>
+                  ) : canArchiveRun(r) ? (
+                    <button type="button" onClick={(e) => { e.stopPropagation(); onHide(r.id); }}
+                      className="absolute top-1.5 right-1.5 text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 opacity-0 group-hover:opacity-100">
+                      隐藏
+                    </button>
+                  ) : null}
+                </div>
               );
             })}
           </div>

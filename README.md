@@ -105,7 +105,7 @@ npx vsce package --no-dependencies    # 没有 vsce：npm i -g @vscode/vsce
 - **+ 派发任务** → 选机器 + 工作区 + prompt。CDP 正常时无需人在受控端回车。
 - 详情里看思考 / 工具 / 回复；「续聊同一对话」走同一 `conversation_id`。
 - 取消：中台点取消；受控端 Cursor 若仍要确认，在那台点一下。
-- 每机同时只能 1 个任务（`409 RUN_BUSY`）；关着的工作区不能派（`400 WORKSPACE_NOT_OPEN`）。
+- **一台机器同时只能 1 个活跃任务**（`409 RUN_BUSY`，按机器不是按工作区）；关着的工作区不能派（`400 WORKSPACE_NOT_OPEN`）。
 
 ## 受控端要处理的
 
@@ -252,6 +252,17 @@ cd hub/web && bun run build
 
 工作区：`hub`、`extension`、`hub/web`（见根 `package.json`）。  
 hub 静态托管路径相对 `hub/src`，**请从仓库根**执行 `bun run dev:hub`。
+
+## 后续待办（已记录，未开工）
+
+细节与验收见规格 **§13**（v1.8）。此处只列结论，避免 README 和规格分叉。
+
+| 项 | 结论 |
+| --- | --- |
+| 中台选模型 | Cursor **没有**官方 API 列出/读取/切换 Composer Agent 模型。派发沿用该窗口当前选择。hooks 的 `model` 字段可事后展示（尚未做）。 |
+| 发图片 | 方案定为：**系统剪贴板 PNG → 聚焦 Composer → paste**（与人手一致）。`vscode.env.clipboard` 只有文本，不能贴图。dashi-taskboard 的 CDP 是把看板嵌进 Codex，**不是**往对话框贴图，不能照搬。 |
+| 并发 | **一台机器 1 条活跃任务**，不是一个工作区一条。同一 Mac 两个工作区也不能并行。 |
+| 接入变简单 | 方案：中台提供 `join.sh`+vsix；再用包装 `Armada Cursor.app` 固定 CDP 端口。**先记账后做**。 |
 
 ## 设计文档
 

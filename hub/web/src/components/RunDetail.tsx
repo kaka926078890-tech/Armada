@@ -44,7 +44,7 @@ export default function RunDetail({ runId, onClose, onChanged }: {
       let data: { type?: string };
       try { data = JSON.parse(e.data); } catch { return; }
       if (data.type === "run.event") reloadEvents();
-      if (data.type === "run.status") {
+      if (data.type === "run.status" || data.type === "run.archived") {
         api.run(runId).then((r) => {
           if (aborted) return;
           if (r?.error) { setMissing(true); setRun(null); return; }
@@ -60,7 +60,7 @@ export default function RunDetail({ runId, onClose, onChanged }: {
 
   if (missing) {
     return (
-      <aside className="w-[28rem] shrink-0 border-l border-zinc-800 flex flex-col">
+      <aside className="w-[28rem] h-full shrink-0 border-l border-zinc-800 flex flex-col bg-zinc-950 shadow-2xl">
         <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800">
           <span className="text-sm text-red-400">任务不存在或已删除</span>
           <button onClick={onClose} className="ml-auto text-zinc-500 hover:text-zinc-200">✕</button>
@@ -71,14 +71,23 @@ export default function RunDetail({ runId, onClose, onChanged }: {
 
   if (loadError && !run) {
     return (
-      <aside className="w-[28rem] shrink-0 border-l border-zinc-800 flex flex-col">
+      <aside className="w-[28rem] h-full shrink-0 border-l border-zinc-800 flex flex-col bg-zinc-950 shadow-2xl">
         <div className="px-3 py-2 text-sm text-red-400 bg-red-950/40 border-b border-red-900/50">{loadError}</div>
         <button onClick={onClose} className="m-3 text-zinc-500 hover:text-zinc-200 self-end">✕</button>
       </aside>
     );
   }
 
-  if (!run) return null;
+  if (!run) {
+    return (
+      <aside className="w-[36rem] max-w-[42vw] h-full shrink-0 border-l border-zinc-800/80 flex flex-col bg-zinc-950 shadow-2xl">
+        <div className="flex items-center gap-2 px-4 py-2.5 border-b border-zinc-800/80">
+          <span className="text-[13px] text-zinc-500">加载中…</span>
+          <button onClick={onClose} className="ml-auto text-zinc-500 hover:text-zinc-200">✕</button>
+        </div>
+      </aside>
+    );
+  }
   const active = ["dispatched", "binding", "running"].includes(run.status);
   const STATUS: Record<string, string> = {
     dispatched: "已派发", binding: "绑定中", running: "运行中",
@@ -86,7 +95,7 @@ export default function RunDetail({ runId, onClose, onChanged }: {
   };
   const chat = eventsToChat(events, run.prompt);
   return (
-    <aside className="w-[36rem] max-w-[42vw] shrink-0 border-l border-zinc-800/80 flex flex-col bg-zinc-950">
+    <aside className="w-[36rem] max-w-[42vw] h-full shrink-0 border-l border-zinc-800/80 flex flex-col bg-zinc-950 shadow-2xl">
       {loadError && (
         <div className="px-3 py-1.5 text-xs text-red-400 bg-red-950/40 border-b border-red-900/50">{loadError}</div>
       )}
@@ -102,6 +111,10 @@ export default function RunDetail({ runId, onClose, onChanged }: {
             className="px-2 py-1 rounded-md bg-red-950/80 hover:bg-red-900 text-red-200">取消</button>}
           {["error", "unknown"].includes(run.status) && <button onClick={() => api.close(run.id).then(onChanged)}
             className="px-2 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700">人工关闭</button>}
+          {run.archived_at
+            ? <button onClick={() => { api.unarchive(run.id).then((res) => { if (res?.run) setRun(res.run); onChanged(); }); }} className="px-2 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700">取消隐藏</button>
+            : ["dispatched", "binding", "running", "created"].includes(run.status) ? null
+            : <button onClick={() => api.archive(run.id).then(() => { onChanged(); onClose(); })} className="px-2 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700">隐藏</button>}
           <a href={`/api/audit/export?token=${encodeURIComponent(getToken())}`}
             className="px-2 py-1 rounded-md bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300">导出审计</a>
         </div>

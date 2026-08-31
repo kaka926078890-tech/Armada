@@ -156,10 +156,12 @@ export class RunService {
     for (const r of rows) this.setStatus(r.id, "unknown", { end_reason: "MACHINE_OFFLINE" });
   }
 
-  list(status?: string, machineId?: string) {
+  list(status?: string, machineId?: string, archived?: string) {
     let sql = "SELECT * FROM runs WHERE 1=1"; const args: string[] = [];
     if (status) { sql += " AND status=?"; args.push(status); }
     if (machineId) { sql += " AND machine_id=?"; args.push(machineId); }
+    if (archived === "1") sql += " AND archived_at IS NOT NULL";
+    else if (archived !== "all") sql += " AND archived_at IS NULL";
     return this.db.query(sql + " ORDER BY created_at DESC").all(...args);
   }
 
@@ -209,6 +211,27 @@ export class RunService {
     if (!run) return { error: "NOT_FOUND" };
     if (!["error", "unknown"].includes(run.status)) return { error: "INVALID_STATE" };
     this.setStatus(runId, "cancelled", { end_reason: "OPERATOR_CLOSED" }, "operator");
+    return { run: this.get(runId) };
+  }
+
+  /** 中台隐藏卡片，不删数据、不碰 Cursor 会话。运行中不可藏。 */
+  archive(runId: string): { error?: string; run?: any } {
+    const run = this.get(runId);
+    if (!run) return { error: "NOT_FOUND" };
+    if (ACTIVE.includes(run.status)) return { error: "INVALID_STATE" };
+    if (run.archived_at) return { run };
+    this.db.query("UPDATE runs SET archived_at=?1 WHERE id=?2").run(Date.now(), runId);
+    this.audit("operator", "run.archive", runId);
+    this.sse.broadcast(runId, { type: "run.archived", runId, archived: true });
+    return { run: this.get(runId) };
+  }
+
+  unarchive(runId: string): { error?: string; run?: any } {
+    const run = this.get(runId);
+    if (!run) return { error: "NOT_FOUND" };
+    this.db.query("UPDATE runs SET archived_at=NULL WHERE id=?1").run(runId);
+    this.audit("operator", "run.unarchive", runId);
+    this.sse.broadcast(runId, { type: "run.archived", runId, archived: false });
     return { run: this.get(runId) };
   }
 }

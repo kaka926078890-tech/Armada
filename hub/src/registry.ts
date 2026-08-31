@@ -11,6 +11,7 @@ export interface MachineRow {
   id: string; name: string; os: string;
   cursor_version: string | null; extension_version: string | null;
   open_workspaces: string; status: string; last_seen_at: number | null;
+  display_name: string | null;
 }
 
 type Conn = { ws: ArmadaSocket; machineId: string; windowId: string; openWorkspaces: string[] };
@@ -39,6 +40,14 @@ export class Registry {
 
   getMachine(id: string): MachineRow | null {
     return (this.db.query("SELECT * FROM machines WHERE id=?1").get(id) as MachineRow) ?? null;
+  }
+
+  setDisplayName(id: string, displayName: string | null): { error?: string; machine?: MachineRow } {
+    if (!this.getMachine(id)) return { error: "NOT_FOUND" };
+    const next = displayName == null ? null : displayName.trim().slice(0, 40);
+    const stored = next === "" ? null : next;
+    this.db.query("UPDATE machines SET display_name=?1 WHERE id=?2").run(stored, id);
+    return { machine: this.getMachine(id)! };
   }
 
   markOffline(id: string): void {

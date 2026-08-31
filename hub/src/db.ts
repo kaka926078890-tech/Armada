@@ -57,5 +57,12 @@ export function openDb(home: string): Database {
   mkdirSync(home, { recursive: true });
   const db = new Database(join(home, "hub.db"), { create: true });
   db.exec(SCHEMA);
+  ensureColumn(db, "machines", "display_name", "display_name TEXT");
+  ensureColumn(db, "runs", "archived_at", "archived_at INTEGER");
   return db;
+}
+
+function ensureColumn(db: Database, table: string, column: string, ddl: string): void {
+  const cols = db.query(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (!cols.some((c) => c.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
 }
