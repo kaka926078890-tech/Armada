@@ -222,6 +222,14 @@ export class RunService {
     this.promoteNextQueued(machineId);
   }
 
+  onBindAmbiguous(runId: string): void {
+    const run = this.get(runId);
+    if (!run) return;
+    if (!["dispatched", "binding"].includes(run.status)) return;
+    this.setStatus(run.id, "unknown", { end_reason: "BIND_AMBIGUOUS" }, "extension");
+    this.promoteNextQueued(run.machine_id);
+  }
+
   onCancelRequested(runId: string): { error?: string } {
     const run = this.get(runId);
     if (!run) return { error: "NOT_FOUND" };

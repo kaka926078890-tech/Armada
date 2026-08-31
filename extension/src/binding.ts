@@ -1,3 +1,6 @@
+import { workspacePathIn } from "./workspacePath";
+import { normalizePrompt } from "./promptNormalize";
+
 export interface PendingRun {
   runId: string;
   workspaceRoot: string;
@@ -18,6 +21,13 @@ export interface BindingMatch {
   promptMatch: true | false | "edited";
 }
 
+export interface AmbiguousBinding {
+  ambiguous: true;
+  runs: PendingRun[];
+}
+
+export type HookMatch = BindingMatch | AmbiguousBinding;
+
 const TOLERANCE_MS = 5_000;
 
 const BIND_HOOKS = new Set(["beforeSubmitPrompt"]);
@@ -27,10 +37,22 @@ export function eventBelongsToWindow(raw: Record<string, unknown> | undefined, o
     ? (raw!.workspace_roots as unknown[]).filter((x): x is string => typeof x === "string")
     : [];
   if (roots.length === 0 || openWorkspaces.length === 0) return false;
-  return roots.some((r) => openWorkspaces.includes(r));
+  return roots.some((r) => workspacePathIn(r, openWorkspaces));
 }
 
-export function matchHookToPending(pending: PendingRun[], ev: HookEventView): BindingMatch | null {
+export function isAmbiguousMatch(m: HookMatch | null): m is AmbiguousBinding {
+  return m != null && "ambiguous" in m && m.ambiguous === true;
+}
+
+export function dropPendingRuns(pending: PendingRun[], runs: PendingRun[]): void {
+  const ids = new Set(runs.map((r) => r.runId));
+  for (let i = pending.length - 1; i >= 0; i--) {
+    const row = pending[i];
+    if (row && ids.has(row.runId)) pending.splice(i, 1);
+  }
+}
+
+export function matchHookToPending(pending: PendingRun[], ev: HookEventView): HookMatch | null {
   // 只在真正提交且 prompt 与派发原文一致时绑定。
   // sessionStart 在 chat 创建瞬间就触发,会让 run 虚假进入 running。
   // afterSubmitPrompt 无 prompt,不得单独 bind(同工作区其它对话会误挂)。
@@ -39,14 +61,18 @@ export function matchHookToPending(pending: PendingRun[], ev: HookEventView): Bi
   if (!cid || typeof cid !== "string") return null;
   const roots: string[] = Array.isArray(ev.raw?.workspace_roots) ? ev.raw.workspace_roots : [];
   const evMs = ev.ts * 1000;
-  // 多个候选时取最近派发的:刚打开的 chat 属于最近一次注入;
-  // 最早优先会被"超时后才完成注入"的过期 pending 抢走绑定(真机联调实测)。
-  const candidates = pending
-    .filter((p) => roots.includes(p.workspaceRoot) && evMs >= p.dispatchedAt - TOLERANCE_MS)
-    .sort((a, b) => b.dispatchedAt - a.dispatchedAt);
-  const run = candidates[0];
-  if (!run) return null;
-  if (typeof ev.raw?.prompt !== "string" || ev.raw.prompt.trim() !== run.prompt.trim()) return null;
+  const prompt = typeof ev.raw?.prompt === "string" ? normalizePrompt(ev.raw.prompt) : "";
+  if (!prompt) return null;
+  const hits = pending.filter((p) =>
+    workspacePathIn(p.workspaceRoot, roots)
+    && evMs >= p.dispatchedAt - TOLERANCE_MS
+    && normalizePrompt(p.prompt) === prompt,
+  );
+  if (hits.length > 1) {
+    return { ambiguous: true as const, runs: hits };
+  }
+  if (hits.length !== 1) return null;
+  const run = hits[0]!;
   return {
     run,
     conversationId: cid,

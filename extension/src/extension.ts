@@ -7,7 +7,7 @@ import { join } from "path";
 import { loadConfig } from "./config";
 import { WsClientCore } from "./wsClient";
 import { SpoolForwarder } from "./spool";
-import { matchHookToPending, claimConversation, eventBelongsToWindow, transcriptPathBelongsToCid, runIdForHook, rememberSubagent, type PendingRun } from "./binding";
+import { matchHookToPending, claimConversation, eventBelongsToWindow, transcriptPathBelongsToCid, runIdForHook, rememberSubagent, isAmbiguousMatch, dropPendingRuns, type PendingRun } from "./binding";
 import { TranscriptTailer } from "./transcript";
 import { Executor, CancelWatcher } from "./executor";
 import { createCdpSubmitter } from "./cdpInject";
@@ -114,7 +114,12 @@ export function activate(context: vscode.ExtensionContext): void {
     send: (ev) => {
       // 绑定判定优先于转发
       const match = matchHookToPending(pendingRuns, { hook: ev.hook, ts: ev.ts, raw: ev.raw });
-      if (match) {
+      if (isAmbiguousMatch(match)) {
+        for (const run of match.runs) {
+          core.enqueue({ type: "run.note", runId: run.runId, level: "error", message: "BIND_AMBIGUOUS" });
+        }
+        dropPendingRuns(pendingRuns, match.runs);
+      } else if (match) {
         pendingRuns.splice(pendingRuns.indexOf(match.run), 1);
         claimConversation(boundRuns, match.run.runId, match.conversationId, match.run.prompt);
         const path = match.transcriptPath && transcriptPathBelongsToCid(match.transcriptPath, match.conversationId)
@@ -127,7 +132,8 @@ export function activate(context: vscode.ExtensionContext): void {
       if (reCancel) void executor.cancel(reCancel);
       rememberSubagent(childConversations, boundRuns, ev.hook, ev.raw);
       const cid = (ev.raw as any)?.conversation_id as string | undefined;
-      const runId = match?.run.runId ?? runIdForHook(boundRuns, childConversations, cid);
+      const runId = (match && "run" in match ? match.run.runId : undefined)
+        ?? runIdForHook(boundRuns, childConversations, cid);
       if (ev.hook === "stop" && runId) {
         const owner = boundRuns.get(runId);
         if (owner && owner.conversationId === cid) tailer.detach(runId);

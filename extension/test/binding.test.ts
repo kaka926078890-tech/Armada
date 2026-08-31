@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { matchHookToPending, latestRunIdForConversation, claimConversation, eventBelongsToWindow, transcriptPathBelongsToCid, runIdForHook, rememberSubagent, type PendingRun } from "../src/binding";
+import { matchHookToPending, latestRunIdForConversation, claimConversation, eventBelongsToWindow, transcriptPathBelongsToCid, runIdForHook, rememberSubagent, isAmbiguousMatch, dropPendingRuns, type PendingRun } from "../src/binding";
 
 const P: PendingRun = { runId: "r-1", workspaceRoot: "/ws/a", prompt: "hello", dispatchedAt: 1_000_000 };
 
@@ -45,11 +45,58 @@ describe("matchHookToPending", () => {
     expect(eventBelongsToWindow({}, ["/ws/a"])).toBe(false);
   });
 
-  test("picks latest-dispatched pending when multiple match (stale pending must not steal binding)", () => {
+  test("eventBelongsToWindow treats Windows slash and drive-letter case as the same workspace", () => {
+    expect(eventBelongsToWindow(
+      { workspace_roots: ["C:\\Users\\PC\\Desktop\\work"] },
+      ["c:\\Users\\PC\\Desktop\\work"],
+    )).toBe(true);
+    expect(eventBelongsToWindow(
+      { workspace_roots: ["c:/Users/PC/Desktop/work"] },
+      ["c:\\Users\\PC\\Desktop\\work"],
+    )).toBe(true);
+    expect(eventBelongsToWindow(
+      { workspace_roots: ["/c/Users/PC/Desktop/work"] },
+      ["c:\\Users\\PC\\Desktop\\work"],
+    )).toBe(true);
+  });
+
+  test("matchHookToPending binds when hook roots use Windows path variants", () => {
+    const win = { ...P, workspaceRoot: "c:\\Users\\PC\\Desktop\\work" };
+    const m = matchHookToPending([win], ev("beforeSubmitPrompt", 1_002_000, {
+      conversation_id: "c1",
+      workspace_roots: ["C:/Users/PC/Desktop/work"],
+      prompt: "hello",
+    }));
+    expect(m?.run.runId).toBe("r-1");
+  });
+
+  test("two pending with the same prompt do not bind (no FIFO guess)", () => {
     const older = { ...P, runId: "r-old", dispatchedAt: 999_000 };
     const newer = { ...P, runId: "r-new", dispatchedAt: 1_000_000 };
-    const m = matchHookToPending([newer, older], ev("beforeSubmitPrompt", 1_001_000, { conversation_id: "c1", workspace_roots: ["/ws/a"], prompt: "hello" }));
-    expect(m!.run.runId).toBe("r-new");
+    const m = matchHookToPending([newer, older], ev("beforeSubmitPrompt", 1_001_000, {
+      conversation_id: "c1", workspace_roots: ["/ws/a"], prompt: "hello",
+    }));
+    expect(m).toMatchObject({ ambiguous: true });
+    if (m && "ambiguous" in m) {
+      expect(m.runs.map((r) => r.runId).sort()).toEqual(["r-new", "r-old"]);
+    }
+  });
+
+  test("two pending with different prompts bind the matching one", () => {
+    const a = { ...P, runId: "r-a", prompt: "task a", dispatchedAt: 1_000_000 };
+    const b = { ...P, runId: "r-b", prompt: "task b", dispatchedAt: 999_000 };
+    const m = matchHookToPending([a, b], ev("beforeSubmitPrompt", 1_001_000, {
+      conversation_id: "c-b", workspace_roots: ["/ws/a"], prompt: "task b",
+    }));
+    expect(m && "run" in m ? m.run.runId : undefined).toBe("r-b");
+  });
+
+  test("normalized whitespace still binds the matching pending", () => {
+    const run = { ...P, prompt: "hello  world" };
+    const m = matchHookToPending([run], ev("beforeSubmitPrompt", 1_002_000, {
+      conversation_id: "c1", workspace_roots: ["/ws/a"], prompt: "  hello\r\n  world  ",
+    }));
+    expect(m && "run" in m ? m.run.runId : undefined).toBe("r-1");
   });
 
   test("captures transcript_path when present", () => {
@@ -74,6 +121,31 @@ describe("matchHookToPending", () => {
       }),
     );
     expect(m).toMatchObject({ run: child, conversationId: "cid-parent", promptMatch: true });
+  });
+});
+
+describe("ambiguous pending handling", () => {
+  test("isAmbiguousMatch is true only for the ambiguous result", () => {
+    const older = { ...P, runId: "r-old", dispatchedAt: 999_000 };
+    const newer = { ...P, runId: "r-new", dispatchedAt: 1_000_000 };
+    const amb = matchHookToPending([newer, older], ev("beforeSubmitPrompt", 1_001_000, {
+      conversation_id: "c1", workspace_roots: ["/ws/a"], prompt: "hello",
+    }));
+    expect(isAmbiguousMatch(amb)).toBe(true);
+    expect(isAmbiguousMatch(null)).toBe(false);
+    const hit = matchHookToPending([P], ev("beforeSubmitPrompt", 1_002_000, {
+      conversation_id: "c1", workspace_roots: ["/ws/a"], prompt: "hello",
+    }));
+    expect(isAmbiguousMatch(hit)).toBe(false);
+  });
+
+  test("dropPendingRuns removes the ambiguous ids from pending", () => {
+    const older = { ...P, runId: "r-old", dispatchedAt: 999_000 };
+    const newer = { ...P, runId: "r-new", dispatchedAt: 1_000_000 };
+    const keep = { ...P, runId: "r-keep", prompt: "other" };
+    const pending = [newer, older, keep];
+    dropPendingRuns(pending, [newer, older]);
+    expect(pending.map((p) => p.runId)).toEqual(["r-keep"]);
   });
 });
 

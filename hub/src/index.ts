@@ -43,6 +43,7 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
       case "run.note": {
         db.query("INSERT INTO audit (ts, actor, action, target, payload) VALUES (?1,'extension','run.note',?2,?3)")
           .run(Date.now(), msg.runId, JSON.stringify({ level: msg.level, message: msg.message }));
+        if (msg.message === "BIND_AMBIGUOUS") runs.onBindAmbiguous(msg.runId);
         break;
       }
       case "hooks.status": {

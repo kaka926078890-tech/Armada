@@ -493,4 +493,20 @@ describe("Run dispatch", () => {
     expect(((await (await api(`/api/runs/${run.id}`)).json()) as any).status).toBe("running");
     ws.close();
   });
+
+  test("BIND_AMBIGUOUS note marks injecting run unknown and promotes queued", async () => {
+    const { ws, api } = await startWithExt({ extensionVersion: "0.4.0" });
+    const r1 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "a" }) });
+    const { run: a } = await r1.json() as any;
+    const r2 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "b" }) });
+    const body2 = await r2.json() as any;
+    expect(body2.run.status).toBe("queued");
+    ws.send(JSON.stringify({ type: "run.note", runId: a.id, level: "error", message: "BIND_AMBIGUOUS" }));
+    await new Promise((r) => setTimeout(r, 150));
+    const afterA = (await (await api(`/api/runs/${a.id}`)).json()) as any;
+    expect(afterA.status).toBe("unknown");
+    expect(afterA.end_reason).toBe("BIND_AMBIGUOUS");
+    expect(((await (await api(`/api/runs/${body2.run.id}`)).json()) as any).status).toBe("dispatched");
+    ws.close();
+  });
 });
