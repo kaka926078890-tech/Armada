@@ -1,4 +1,7 @@
+import { homedir } from "os";
+import { join } from "path";
 import type { PendingRun } from "./binding";
+import { acquireCdpLock } from "./cdpLock";
 
 export class CancelWatcher {
   private records = new Map<string, { cid: string; prompt: string; at: number; count: number }>();
@@ -37,6 +40,8 @@ export interface ExecutorDeps {
    * 返回 false 或抛错时降级为剪贴板粘贴 + 人工回车。
    */
   autoSubmit?: (workspaceRoot: string, prompt: string) => Promise<boolean>;
+  /** Override path of the machine-wide CDP inject lock (tests / non-default home). */
+  cdpLockPath?: string;
 }
 
 /** Lazy-load vscode so CancelWatcher stays bun-testable without the vscode runtime. */
@@ -78,8 +83,18 @@ export class Executor {
       }
       await this.deps.globalState.update("armada.authorizedWorkspaces", [...this.authorizedWorkspaces(), msg.workspaceRoot]);
     }
+    const lock = await acquireCdpLock({
+      lockPath: this.deps.cdpLockPath ?? join(homedir(), ".cursor", "armada", "cdp.lock"),
+      timeoutMs: 25_000,
+      sleep: this.sleep,
+    });
+    if (!lock.ok) {
+      this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: "CDP_LOCK_TIMEOUT" });
+      return;
+    }
     let pendingAdded = false;
     try {
+      await vscode.commands.executeCommand("workbench.action.focusActiveEditorGroup");
       await vscode.commands.executeCommand("composer.newAgentChat");
       // Auth passed + chat created: binding window starts; WRONG_WINDOW/NOT_AUTHORIZED never reach here.
       this.deps.addPending?.({
@@ -94,6 +109,8 @@ export class Executor {
     } catch (e) {
       if (pendingAdded) this.deps.removePending?.(msg.runId);
       this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: `INJECT_FAILED:${String(e)}` });
+    } finally {
+      lock.release();
     }
   }
 
@@ -137,6 +154,15 @@ export class Executor {
     workspaceRoot: string;
   }): Promise<void> {
     const vscode = vs();
+    const lock = await acquireCdpLock({
+      lockPath: this.deps.cdpLockPath ?? join(homedir(), ".cursor", "armada", "cdp.lock"),
+      timeoutMs: 25_000,
+      sleep: this.sleep,
+    });
+    if (!lock.ok) {
+      this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: "CDP_LOCK_TIMEOUT" });
+      return;
+    }
     try {
       await vscode.commands.executeCommand("composer.openComposer", msg.conversationId);
       await this.injectPrompt(msg.workspaceRoot, msg.prompt, 800);
@@ -150,6 +176,8 @@ export class Executor {
       this.deps.send({ type: "run.ack", runId: msg.runId, status: "accepted" });
     } catch (e) {
       this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: `FOLLOWUP_FAILED:${String(e)}` });
+    } finally {
+      lock.release();
     }
   }
 }
