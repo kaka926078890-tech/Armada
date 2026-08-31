@@ -34,29 +34,46 @@ describe("mergeHooks", () => {
     expect(hooksDriftHash(tampered)).not.toBe(h1);
   });
 
-  test("drift vs expected: tampered timeout still containing armada-spool.sh is detected", () => {
+  test("repairs our entry when timeout or command drifted", () => {
     const scriptPath = "/s/armada-spool.sh";
-    const { merged: expected } = mergeHooks(null, scriptPath);
-    const existing = JSON.parse(JSON.stringify(expected));
+    const existing = mergeHooks(null, scriptPath).merged;
     existing.hooks.stop[0].timeout = 99;
-    expect(mergeHooks(existing, scriptPath).changed).toBe(false);
-    expect(hooksDriftHash(existing) !== hooksDriftHash(mergeHooks(null, scriptPath).merged)).toBe(true);
+    const { merged, changed } = mergeHooks(existing, scriptPath);
+    expect(changed).toBe(true);
+    expect(merged.hooks.stop[0].timeout).toBe(5);
+    expect(merged.hooks.stop[0].command).toBe("/s/armada-spool.sh stop");
   });
 
-  test("windows ps1 uses powershell.exe -File and is recognized as ours", () => {
+  test("windows ps1 uses forward slashes so bash hook launcher does not eat the path", () => {
     const scriptPath = "C:\\Users\\a\\.cursor\\hooks\\armada-spool.ps1";
     const { merged, changed } = mergeHooks(null, scriptPath);
     expect(changed).toBe(true);
     expect(merged.hooks.stop[0].command).toBe(
-      `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${scriptPath}" stop`,
+      `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "C:/Users/a/.cursor/hooks/armada-spool.ps1" stop`,
     );
     expect(mergeHooks(merged, scriptPath).changed).toBe(false);
   });
 
-  test("windows path with spaces stays quoted in -File", () => {
+  test("repairs legacy backslash -File commands already in hooks.json", () => {
+    const scriptPath = "C:\\Users\\PC\\.cursor\\hooks\\armada-spool.ps1";
+    const legacy = `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${scriptPath}" stop`;
+    const existing = {
+      version: 1,
+      hooks: { stop: [{ command: legacy, timeout: 5 }] },
+    };
+    const { merged, changed } = mergeHooks(existing, scriptPath);
+    expect(changed).toBe(true);
+    expect(merged.hooks.stop).toHaveLength(1);
+    expect(merged.hooks.stop[0].command).toContain("-File \"C:/Users/PC/.cursor/hooks/armada-spool.ps1\" stop");
+    expect(merged.hooks.stop[0].command).not.toContain("C:\\Users");
+  });
+
+  test("windows path with spaces stays quoted after slash normalize", () => {
     const scriptPath = "C:\\Users\\Foo Bar\\.cursor\\hooks\\armada-spool.ps1";
     const { merged } = mergeHooks(null, scriptPath);
-    expect(merged.hooks.sessionStart[0].command).toContain(`-File "${scriptPath}" sessionStart`);
+    expect(merged.hooks.sessionStart[0].command).toContain(
+      `-File "C:/Users/Foo Bar/.cursor/hooks/armada-spool.ps1" sessionStart`,
+    );
   });
 
   test("spoolScriptName follows platform", () => {

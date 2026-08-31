@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { eventsToChat, extractUserText } from "../src/chatView";
+import { eventsToChat, extractUserText, segmentChat } from "../src/chatView";
+import type { ChatBlock } from "../src/chatView";
 import type { RunEvent } from "../src/types";
 
 function ev(partial: Partial<RunEvent> & { seq: number; payload: string }): RunEvent {
@@ -98,5 +99,37 @@ describe("eventsToChat", () => {
     expect(blocks.map((b) => b.kind)).toEqual(["user", "assistant", "subagent"]);
     expect(blocks.find((b) => b.kind === "assistant")).toMatchObject({ text: "你好。" });
     expect(blocks.find((b) => b.kind === "subagent")).toMatchObject({ status: "completed", durationMs: 9794 });
+  });
+});
+
+describe("segmentChat", () => {
+  const thought = (seq: number, text: string): ChatBlock => ({ kind: "thought", seq, text });
+  const user = (seq: number, text: string): ChatBlock => ({ kind: "user", seq, text });
+  const asst = (seq: number, text: string): ChatBlock => ({ kind: "assistant", seq, text });
+  const tool = (seq: number, name: string): ChatBlock => ({ kind: "tool", seq, name, summary: name });
+
+  test("lists thoughts while the turn has no assistant yet", () => {
+    const segs = segmentChat([user(1, "hi"), thought(2, "先想"), tool(3, "Shell")]);
+    expect(segs.map((s) => s.kind)).toEqual(["user", "thought", "tool"]);
+  });
+
+  test("folds thoughts and tools into one process after the assistant reply", () => {
+    const segs = segmentChat([
+      user(1, "hi"), thought(2, "先想"), tool(3, "Shell"), asst(4, "好了"),
+    ]);
+    expect(segs.map((s) => s.kind)).toEqual(["user", "process", "assistant"]);
+    const proc = segs[1];
+    expect(proc.kind).toBe("process");
+    if (proc.kind !== "process") return;
+    expect(proc.collapsed).toBe(true);
+    expect(proc.steps.map((s) => s.kind)).toEqual(["thought", "tool"]);
+  });
+
+  test("completed turn folds; live follow-up turn stays listed", () => {
+    const segs = segmentChat([
+      user(1, "a"), thought(2, "t1"), asst(3, "done"),
+      user(4, "b"), thought(5, "t2"), tool(6, "Read"),
+    ]);
+    expect(segs.map((s) => s.kind)).toEqual(["user", "process", "assistant", "user", "thought", "tool"]);
   });
 });

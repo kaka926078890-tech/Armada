@@ -12,7 +12,8 @@ export const api = {
   runs: (opts?: { archived?: boolean }) =>
     req(`/api/runs${opts?.archived ? "?archived=1" : ""}`).then((r) => r.json()),
   run: (id: string) => req(`/api/runs/${id}`).then((r) => r.json()),
-  events: (id: string, afterSeq = 0) => req(`/api/runs/${id}/events?afterSeq=${afterSeq}`).then((r) => r.json()),
+  events: (id: string, afterSeq = 0, limit = 500) =>
+    req(`/api/runs/${id}/events?afterSeq=${afterSeq}&limit=${limit}`).then((r) => r.json()),
   dispatch: (machineId: string, workspaceRoot: string, prompt: string) =>
     req("/api/runs", { method: "POST", body: JSON.stringify({ machineId, workspaceRoot, prompt }) }).then((r) => r.json()),
   cancel: (id: string) => req(`/api/runs/${id}/cancel`, { method: "POST" }).then((r) => r.json()),

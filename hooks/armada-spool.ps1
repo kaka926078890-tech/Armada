@@ -5,12 +5,12 @@ $ErrorActionPreference = 'SilentlyContinue'
 
 function Read-StdinUtf8 {
   try {
-    $in = [Console]::OpenStandardInput()
-    $ms = New-Object System.IO.MemoryStream
-    $in.CopyTo($ms)
-    $bytes = $ms.ToArray()
-    if ($bytes.Length -eq 0) { return '{}' }
-    return [System.Text.Encoding]::UTF8.GetString($bytes)
+    # -File + redirected stdin: CopyTo can hang until Cursor's 5s timeout (empty spool).
+    $text = [Console]::In.ReadToEnd()
+    if (-not [string]::IsNullOrEmpty($text)) { return $text }
+    $piped = @($input) -join "`n"
+    if ($piped) { return $piped }
+    return '{}'
   } catch {
     return '{}'
   }

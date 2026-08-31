@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api, getToken } from "../api";
 import type { RunEvent } from "../types";
 import type { RunRow } from "../boardState";
 import ChatThread from "./ChatThread";
 import { eventsToChat } from "../chatView";
+import { collectEventPages, mergeEvents, EVENT_PAGE_SIZE } from "../loadEvents";
 
 export default function RunDetail({ runId, onClose, onChanged }: {
   runId: string; onClose: () => void; onChanged: () => void;
@@ -14,9 +15,13 @@ export default function RunDetail({ runId, onClose, onChanged }: {
   const [followupError, setFollowupError] = useState("");
   const [loadError, setLoadError] = useState("");
   const [missing, setMissing] = useState(false);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const stickRef = useRef(true);
+  const jumpedRef = useRef<string | null>(null);
 
   useEffect(() => {
+    jumpedRef.current = null;
+    stickRef.current = true;
     let aborted = false;
     setRun(null);
     setEvents([]);
@@ -30,20 +35,27 @@ export default function RunDetail({ runId, onClose, onChanged }: {
       setRun(r);
     }).catch(() => { if (!aborted) setLoadError("任务详情加载失败（hub 不可达）"); });
 
-    const reloadEvents = () => {
-      api.events(runId).then((evs: RunEvent[]) => {
-        if (aborted) return;
-        if (Array.isArray(evs)) setEvents(evs);
-      }).catch(() => { if (!aborted) setLoadError("事件加载失败（hub 不可达）"); });
+    const seqRef = { current: 0 };
+    const reloadEvents = (afterSeq = 0) => {
+      collectEventPages((after) => api.events(runId, after, EVENT_PAGE_SIZE) as Promise<RunEvent[]>, afterSeq, EVENT_PAGE_SIZE)
+        .then((evs) => {
+          if (aborted) return;
+          setEvents((prev) => {
+            const next = afterSeq === 0 ? evs : mergeEvents(prev, evs);
+            seqRef.current = next.at(-1)?.seq ?? 0;
+            return next;
+          });
+        })
+        .catch(() => { if (!aborted) setLoadError("事件加载失败（hub 不可达）"); });
     };
-    reloadEvents();
+    reloadEvents(0);
 
     const es = new EventSource(api.streamUrl(runId));
     es.onmessage = (e) => {
       if (aborted) return;
       let data: { type?: string };
       try { data = JSON.parse(e.data); } catch { return; }
-      if (data.type === "run.event") reloadEvents();
+      if (data.type === "run.event") reloadEvents(seqRef.current);
       if (data.type === "run.status" || data.type === "run.archived") {
         api.run(runId).then((r) => {
           if (aborted) return;
@@ -56,7 +68,16 @@ export default function RunDetail({ runId, onClose, onChanged }: {
     return () => { aborted = true; es.close(); };
   }, [runId, onChanged]);
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [events.length]);
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el || events.length === 0) return;
+    if (jumpedRef.current !== runId) {
+      jumpedRef.current = runId;
+      el.scrollTop = el.scrollHeight;
+      return;
+    }
+    if (stickRef.current) el.scrollTop = el.scrollHeight;
+  }, [events, runId]);
 
   if (missing) {
     return (
@@ -119,9 +140,16 @@ export default function RunDetail({ runId, onClose, onChanged }: {
             className="px-2 py-1 rounded-md bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300">导出审计</a>
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto px-4 py-4">
+      <div
+        ref={scrollRef}
+        onScroll={() => {
+          const el = scrollRef.current;
+          if (!el) return;
+          stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 72;
+        }}
+        className="flex-1 overflow-y-auto px-4 py-4"
+      >
         <ChatThread blocks={chat} />
-        <div ref={bottomRef} />
       </div>
       {run.conversation_id && (
         <form className="p-3 border-t border-zinc-800/80 flex flex-col gap-2" onSubmit={(e) => {

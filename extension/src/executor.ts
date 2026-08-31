@@ -2,6 +2,7 @@ import { homedir } from "os";
 import { join } from "path";
 import type { PendingRun } from "./binding";
 import { acquireCdpLock } from "./cdpLock";
+import { workspacePathIn } from "./workspacePath";
 
 export class CancelWatcher {
   private records = new Map<string, { cid: string; prompt: string; at: number; count: number }>();
@@ -69,11 +70,11 @@ export class Executor {
       return;
     }
     const folders = (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath);
-    if (!folders.includes(msg.workspaceRoot)) {
+    if (!workspacePathIn(msg.workspaceRoot, folders)) {
       this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: "WRONG_WINDOW" });
       return;
     }
-    if (!this.authorizedWorkspaces().includes(msg.workspaceRoot)) {
+    if (!workspacePathIn(msg.workspaceRoot, this.authorizedWorkspaces())) {
       const choice = await vscode.window.showInformationMessage(
         `Armada 请求向工作区 ${msg.workspaceRoot} 注入任务`, { modal: true }, "允许", "拒绝",
       );

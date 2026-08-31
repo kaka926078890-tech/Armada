@@ -17,7 +17,9 @@ export function isArmadaSpoolCommand(command: string): boolean {
 
 export function hookCommand(scriptPath: string, event: string): string {
   if (scriptPath.toLowerCase().endsWith(".ps1")) {
-    return `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${scriptPath}" ${event}`;
+    // Cursor's Windows hook runner is bash: backslashes in -File "C:\Users\..." get eaten.
+    const posix = scriptPath.replace(/\\/g, "/");
+    return `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${posix}" ${event}`;
   }
   return `${scriptPath} ${event}`;
 }
@@ -29,8 +31,12 @@ export function mergeHooks(existing: any, scriptPath: string): { merged: any; ch
   for (const event of HOOK_EVENTS) {
     if (!Array.isArray(merged.hooks[event])) merged.hooks[event] = [];
     const lst = merged.hooks[event] as any[];
-    if (!lst.some((e) => typeof e?.command === "string" && isArmadaSpoolCommand(e.command))) {
-      lst.push({ command: hookCommand(scriptPath, event), timeout: 5 });
+    const expected = { command: hookCommand(scriptPath, event), timeout: 5 };
+    const rest = lst.filter((e) => !(typeof e?.command === "string" && isArmadaSpoolCommand(e.command)));
+    const ours = lst.filter((e) => typeof e?.command === "string" && isArmadaSpoolCommand(e.command));
+    const same = ours.length === 1 && ours[0].command === expected.command && ours[0].timeout === expected.timeout;
+    if (!same) {
+      merged.hooks[event] = [...rest, expected];
       changed = true;
     }
   }

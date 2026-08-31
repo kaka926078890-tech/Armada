@@ -3,7 +3,7 @@ import type { Machine } from "../types";
 import type { RunRow } from "../boardState";
 import {
   encodeWorkspaceKey, filterRunsByWorkspace, groupSlotsByMachine, isUnreadCompleted,
-  workspaceHasUnread, type WorkspaceSlot,
+  type WorkspaceSlot,
 } from "../boardState";
 
 function RedDot({ title }: { title: string }) {
@@ -46,7 +46,15 @@ export default function Sidebar({
 
   return (
     <aside className="w-56 shrink-0 border-r border-zinc-800/80 flex flex-col bg-zinc-950">
-      <div className="px-3 pt-2.5 pb-1 text-[11px] uppercase tracking-wide text-zinc-600">机器</div>
+      <button
+        type="button"
+        disabled={!canDispatch}
+        onClick={onDispatch}
+        className="m-3 mb-1 px-3 py-2 rounded-md bg-sky-700 hover:bg-sky-600 text-[13px] disabled:opacity-40 disabled:hover:bg-sky-700"
+      >
+        + 派发任务
+      </button>
+      <div className="px-3 pt-1.5 pb-1 text-[11px] uppercase tracking-wide text-zinc-600">机器</div>
       <div className="flex-1 overflow-y-auto">
         {groups.length === 0 && (
           <div className="px-3 py-4 text-[12px] text-zinc-600">暂无在线工作区</div>
@@ -87,7 +95,6 @@ export default function Sidebar({
               const key = encodeWorkspaceKey(s.machineId, s.root);
               const wsRuns = filterRunsByWorkspace(allRuns, s.machineId, s.root);
               const doneUnread = wsRuns.some((r) => isUnreadCompleted(r, readMap[r.id]));
-              const hasUnread = workspaceHasUnread(wsRuns, readMap);
               return (
                 <button
                   key={key}
@@ -96,20 +103,13 @@ export default function Sidebar({
                 >
                   <span className="text-zinc-600 text-[11px] shrink-0">–</span>
                   <span className="min-w-0 flex-1 text-[13px] truncate" title={s.root}>{s.root.split("/").pop()}</span>
-                  {hasUnread && <RedDot title={doneUnread ? "有完成未读" : "有未读消息"} />}
+                  {doneUnread && <RedDot title="有完成未读" />}
                 </button>
               );
             })}
           </div>
         ))}
       </div>
-      <button
-        disabled={!canDispatch}
-        onClick={onDispatch}
-        className="m-3 px-3 py-2 rounded-md bg-sky-700 hover:bg-sky-600 text-[13px] disabled:opacity-40 disabled:hover:bg-sky-700"
-      >
-        + 派发任务
-      </button>
     </aside>
   );
 }

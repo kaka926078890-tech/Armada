@@ -177,3 +177,52 @@ export function eventsToChat(events: RunEvent[], prompt?: string): ChatBlock[] {
   const extraUsers = pendingUsers.filter((b) => b.kind === "user" && !txUser.has(b.text));
   return finish([...fromTx, ...extraUsers, ...liveHooks]);
 }
+
+const PROCESS = new Set(["thought", "tool", "file", "subagent"]);
+
+export type ProcessSegment = {
+  kind: "process";
+  collapsed: boolean;
+  steps: ChatBlock[];
+  seq: number;
+};
+
+export type ChatSegment = ChatBlock | ProcessSegment;
+
+/** 有正文后把该轮思考/工具收成一段；尚未出正文时保持一条条列出。 */
+export function segmentChat(blocks: ChatBlock[]): ChatSegment[] {
+  const turns: ChatBlock[][] = [];
+  let cur: ChatBlock[] = [];
+  for (const b of blocks) {
+    if (b.kind === "user" && cur.length > 0) {
+      turns.push(cur);
+      cur = [];
+    }
+    cur.push(b);
+  }
+  if (cur.length) turns.push(cur);
+
+  const out: ChatSegment[] = [];
+  for (const turn of turns) {
+    if (!turn.some((b) => b.kind === "assistant")) {
+      out.push(...turn);
+      continue;
+    }
+    const buf: ChatBlock[] = [];
+    const flush = () => {
+      if (buf.length === 0) return;
+      out.push({ kind: "process", collapsed: true, steps: [...buf], seq: buf[0].seq });
+      buf.length = 0;
+    };
+    for (const b of turn) {
+      if (PROCESS.has(b.kind)) buf.push(b);
+      else {
+        flush();
+        out.push(b);
+      }
+    }
+    flush();
+  }
+  return out;
+}
+
