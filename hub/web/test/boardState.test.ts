@@ -116,6 +116,12 @@ describe("unread dots", () => {
     expect(isUnreadCompleted(base, undefined)).toBe(false);
   });
 
+  test("workspace badge is completed-unread only; running does not light the dot", () => {
+    expect(workspaceHasUnread([base], {})).toBe(false);
+    expect(workspaceHasUnread([{ ...base, status: "error", ended_at: 5000 }], {})).toBe(false);
+    expect(workspaceHasUnread([{ ...base, status: "completed", ended_at: 5000 }], {})).toBe(true);
+  });
+
   test("cancelled does not badge", () => {
     const run = { ...base, status: "cancelled", ended_at: 9 };
     expect(isUnreadMessage(run, undefined)).toBe(false);
@@ -131,6 +137,7 @@ describe("unread dots", () => {
 
   test("canArchiveRun forbids live statuses", () => {
     expect(canArchiveRun({ status: "running" })).toBe(false);
+    expect(canArchiveRun({ status: "queued" })).toBe(false);
     expect(canArchiveRun({ status: "completed" })).toBe(true);
     expect(isHubArchived({ archived_at: 9 })).toBe(true);
     expect(isHubArchived({ archived_at: null })).toBe(false);

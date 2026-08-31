@@ -90,7 +90,7 @@ cat ~/.armada/token
 
 5. **扩展包**（二选一）  
    - 受控端 clone 本仓后自己 `npx tsup && npx vsce package`；或  
-   - 中台打一次，把 `extension/armada-agent-*.vsix` 拷过去（请用 ≥ 0.3.7）：
+   - 中台打一次，把 `extension/armada-agent-*.vsix` 拷过去（请用 ≥ 0.3.8）：
 
 ```bash
 cd extension
@@ -105,7 +105,7 @@ npx vsce package --no-dependencies    # 没有 vsce：npm i -g @vscode/vsce
 - **+ 派发任务** → 选机器 + 工作区 + prompt。CDP 正常时无需人在受控端回车。
 - 详情里看思考 / 工具 / 回复；「续聊同一对话」走同一 `conversation_id`。
 - 取消：中台点取消；受控端 Cursor 若仍要确认，在那台点一下。
-- **一台机器同时只能 1 个活跃任务**（`409 RUN_BUSY`，按机器不是按工作区）；关着的工作区不能派（`400 WORKSPACE_NOT_OPEN`）。
+- 同一机器可多条 `running`（默认每机 8、每工作区 4）。**整机同时只有 1 条处于派发/绑定**（CDP 注入串行）。超出限额 → `429 RUN_LIMIT`。同工作区相同 prompt → `409 PROMPT_COLLISION`。关着的工作区不能派（`400 WORKSPACE_NOT_OPEN`）。扩展需 ≥ 0.4.0 才能同一窗口并行第二条。
 
 ## 受控端要处理的
 
@@ -133,7 +133,7 @@ curl -sS http://192.168.1.10:7380/api/health
 sh hooks/install.sh
 ```
 
-4. **安装扩展** `armada-agent` ≥ 0.3.7  
+4. **安装扩展** `armada-agent` ≥ 0.3.8  
    Cursor → 扩展 → **Install from VSIX** → `extension/armada-agent-*.vsix`  
    （没有现成 vsix 且这台有 Node 时：`cd extension && npx tsup && npx vsce package --no-dependencies`）
 
@@ -165,7 +165,7 @@ chmod +x scripts/armada-cursor.sh
 | 要带上 Windows 的 | 从哪来 | 说明 |
 | --- | --- | --- |
 | 本仓库 | `git clone` 本仓，或把整个 `Armada` 文件夹拷过去 | 用来跑 `hooks\install.ps1` 和启动器 |
-| `armada-agent-0.3.7.vsix` | 中台 `extension\armada-agent-0.3.7.vsix`（必须 ≥ 0.3.7） | 旧包只会装 `.sh`，Windows 上 hooks 不会跑 |
+| `armada-agent-0.3.8.vsix` | 中台 `extension\armada-agent-0.3.8.vsix`，或 Windows 自己 `npm install && npx tsup && npx --yes @vscode/vsce package --no-dependencies`（必须 ≥ 0.3.8） | 0.3.7 的 hooks 命令含 `C:\`，Windows 上 Cursor 用 bash 跑 hook 会把路径吃掉，spool 一直是空的 |
 | 中台 IP + token | 中台 `ipconfig getifaddr en0` 和 `~/.armada/token` | token 不要换行；不要在 Windows 上新生成 |
 
 下面把 `192.168.1.10` 换成你的中台局域网 IP。所有命令都在 **PowerShell** 里执行，先 `cd` 到仓库根目录（里面能看到 `hooks` 和 `scripts` 文件夹）。
@@ -193,7 +193,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File hooks\install.ps1
 **4. 安装扩展**
 
 1. 先用图标正常打开一次 Cursor（这次还不用启动器）。
-2. 左侧扩展 → `...` → **Install from VSIX** → 选中 `armada-agent-0.3.7.vsix`。
+2. 左侧扩展 → `...` → **Install from VSIX** → 选中 `armada-agent-0.3.8.vsix`。
 3. 装完先不要关。
 
 **5. 指向中台**（`Ctrl+Shift+P` → 输入 `Armada: Configure Hub Connection`）
@@ -238,9 +238,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\armada-cursor.ps1 C:
 | health 都 curl 不通 | **中台**：是否 `--lan`、防火墙、是否同网段 |
 | 控制台没有这台机器 | **受控**：是否 Reload；`hubUrl` 是否写成 `127.0.0.1`；输出面板 Armada |
 | `WORKSPACE_NOT_OPEN` | **受控**：启动器打开该路径；等心跳约 15s |
-| `RUN_BUSY` | **中台**：等当前任务结束，或取消/关闭异常卡 |
-| 一直「待本机回车」 | **受控**：Cursor 不是启动器拉起的（Windows：托盘未退干净就又点了图标） |
-| 详情串了别的对话 | **受控**：扩展 ≥ 0.3.7，不要用旧 vsix |
+| `RUN_LIMIT` | **中台**：该机或该工作区已达并行上限，等一条结束或取消排队 |
+| `PROMPT_COLLISION` | **中台**：同工作区已有相同 prompt 在跑或排队，改文案后再派 |
+| `CONVERSATION_BUSY` | **中台**：该对话仍在运行，结束后才能续聊 |
+| `INJECT_SLOT_BUSY` | **中台**：正在向该机注入另一条任务，稍后再续聊 |
+| `WINDOW_BUSY` | **受控**：扩展 < 0.4.0 或关闭了同窗并行 |
+| 一直「待本机回车」但黄字是「绑定中」 | **受控**：IDE 已提交，中台没收到 hook。看 `%USERPROFILE%\.cursor\armada\spool` 是否为空；空则扩展必须 ≥ 0.3.8 并 Reload（旧命令里的 `C:\` 会被 bash 吃掉） |
+| 一直「待本机回车」且蓝字是「已预填,待本机回车」 | **受控**：Cursor 不是启动器拉起的（Windows：托盘未退干净就又点了图标） |
+| 详情串了别的对话 | **受控**：扩展 ≥ 0.3.8，不要用旧 vsix |
 | Windows 启动器报「正在运行」 | **受控**：托盘 `^` 里 Cursor 右键退出，不是只关窗口 |
 
 ## 发送通道
@@ -266,6 +271,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\armada-cursor.ps1 C:
 | `armada.cdpPort` | Cursor 设置 | 默认 `9222`，须与 `armada-cursor.sh` / `.ps1` 一致 |
 | `armada.autoSubmit` | Cursor 设置 | 默认 `true`；`false` 则只预填、等人回车 |
 | `ARMADA_HUB_URL` / `ARMADA_HUB_TOKEN` | 环境变量（扩展） | 仅当对应 Cursor 设置项（`armada.hubUrl` / `armada.token`）为空时回退；设置项非空优先（见 `extension/src/config.ts`） |
+| `ARMADA_MAX_RUNS_PER_MACHINE` | 环境变量 | 每机占用中任务上限，默认 8（含 queued） |
+| `ARMADA_MAX_RUNS_PER_WORKSPACE` | 环境变量 | 每工作区上限，默认 4 |
+| `ARMADA_MULTI_RUN_PER_WINDOW` | 环境变量 | `0` 关闭同窗并行（U1 探针失败时用） |
 
 ## 协议摘要
 
@@ -303,7 +311,7 @@ Token **仅** query 鉴权；消息体不再带 token。连上后 10s 内必须 
 | GET | `/api/events` | 全局 SSE |
 | GET | `/api/audit/export` | 审计 JSONL |
 
-常见错误码：`MACHINE_OFFLINE`、`WORKSPACE_NOT_OPEN`、`RUN_BUSY`、`NOT_FOUND`、`INVALID_STATE`、`NO_CONVERSATION`。
+常见错误码：`MACHINE_OFFLINE`、`WORKSPACE_NOT_OPEN`、`RUN_LIMIT`、`PROMPT_COLLISION`、`CONVERSATION_BUSY`、`INJECT_SLOT_BUSY`、`WINDOW_BUSY`、`NOT_FOUND`、`INVALID_STATE`、`NO_CONVERSATION`。
 
 ## 开发指南
 
@@ -332,11 +340,12 @@ hub 静态托管路径相对 `hub/src`，**请从仓库根**执行 `bun run dev:
 | --- | --- |
 | 中台选模型 | Cursor **没有**官方 API 列出/读取/切换 Composer Agent 模型。派发沿用该窗口当前选择。hooks 的 `model` 字段可事后展示（尚未做）。 |
 | 发图片 | 方案定为：**系统剪贴板 PNG → 聚焦 Composer → paste**（与人手一致）。`vscode.env.clipboard` 只有文本，不能贴图。dashi-taskboard 的 CDP 是把看板嵌进 Codex，**不是**往对话框贴图，不能照搬。 |
-| 并发 | **一台机器 1 条活跃任务**，不是一个工作区一条。同一 Mac 两个工作区也不能并行。 |
+| 并发 | **执行并行、注入串行**：每机默认最多 8 条占用中任务、每工作区 4 条；整机同时 1 条 CDP 注入。详见 [并行规格](../docs/superpowers/specs/2026-08-31-armada-parallel-runs-design.md)。 |
 | 接入变简单 | 方案：中台提供 `join.sh`+vsix；再用包装 `Armada Cursor.app` 固定 CDP 端口。**先记账后做**。 |
 
 ## 设计文档
 
 - 规格与验收：[`../docs/superpowers/specs/2026-08-28-lan-cursor-workbench-design.md`](../docs/superpowers/specs/2026-08-28-lan-cursor-workbench-design.md)
+- 单机并行：[`../docs/superpowers/specs/2026-08-31-armada-parallel-runs-design.md`](../docs/superpowers/specs/2026-08-31-armada-parallel-runs-design.md)
 - 对话归属：[`../docs/superpowers/specs/2026-08-30-conversation-ownership-design.md`](../docs/superpowers/specs/2026-08-30-conversation-ownership-design.md)
 - 中台端 / 受控端分别做什么：见上文 **「中台端 vs 受控端」**

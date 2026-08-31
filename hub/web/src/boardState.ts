@@ -109,7 +109,7 @@ export function filterRunsByWorkspace(runs: RunRow[], machineId: string, root: s
   return runs.filter((r) => r.machine_id === machineId && r.workspace_root === root);
 }
 
-const LIVE = new Set(["created", "dispatched", "binding", "running"]);
+const LIVE = new Set(["created", "queued", "dispatched", "binding", "running"]);
 
 export function sortConversations(runs: RunRow[]): RunRow[] {
   return runs.toSorted((a, b) => {
@@ -133,8 +133,9 @@ export function isUnreadCompleted(run: RunRow, readAt: number | undefined): bool
   return run.status === "completed" && isUnreadMessage(run, readAt);
 }
 
+/** 侧栏红点：仅未读的已完成任务。进行中不亮，避免任务还没结束就提前提示。 */
 export function workspaceHasUnread(runs: RunRow[], readMap: Record<string, number>): boolean {
-  return runs.some((r) => isUnreadMessage(r, readMap[r.id]));
+  return runs.some((r) => isUnreadCompleted(r, readMap[r.id]));
 }
 
 export function isHubArchived(run: Pick<RunRow, "archived_at">): boolean {

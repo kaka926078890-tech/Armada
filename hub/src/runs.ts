@@ -352,7 +352,7 @@ export class RunService {
   archive(runId: string): { error?: string; run?: any } {
     const run = this.get(runId);
     if (!run) return { error: "NOT_FOUND" };
-    if (ACTIVE.includes(run.status)) return { error: "INVALID_STATE" };
+    if ((OCCUPYING_STATUSES as readonly string[]).includes(run.status)) return { error: "INVALID_STATE" };
     if (run.archived_at) return { run };
     this.db.query("UPDATE runs SET archived_at=?1 WHERE id=?2").run(Date.now(), runId);
     this.audit("operator", "run.archive", runId);
