@@ -2,7 +2,7 @@
 
 局域网 Cursor **舰队指挥台**：一台中台机调度多台被控 Cursor 窗口的派发、监控与取消。任务在被控机真实 IDE 对话里跑，用该机自己的 Cursor 登录态。
 
-发送通道默认 **CDP 全自动**（Cursor 须用 `scripts/armada-cursor.sh` 启动）。未走该启动器时降级为剪贴板预填 + 本机回车。
+发送通道默认 **CDP 全自动**（Cursor 须用 `scripts/armada-cursor.sh` 或 Windows 上的 `armada-cursor.ps1` 启动）。未走该启动器时降级为剪贴板预填 + 本机回车。
 
 ## 架构
 
@@ -21,7 +21,7 @@
                    │ spool JSON
                    ▼
             ┌──────────────┐
-            │    hooks     │  ~/.cursor/hooks → armada-spool.sh
+            │    hooks     │  ~/.cursor/hooks → armada-spool.sh / .ps1
             │  Cursor 钩子 │
             └──────────────┘
 ```
@@ -35,7 +35,7 @@
 
 ## 中台端 vs 受控端
 
-全网只跑 **一套 hub**。中台机也可以同时当受控（本机 Cursor 窗口会注册上来）。当前范围：**macOS + Cursor**；Windows 未测。
+全网只跑 **一套 hub**。中台机也可以同时当受控（本机 Cursor 窗口会注册上来）。当前范围：**中台建议 macOS**；受控端 **macOS + Windows**。不要在 Windows 上另起一份 hub。
 
 | | **中台端**（调度） | **受控端**（干活） |
 | --- | --- | --- |
@@ -90,7 +90,7 @@ cat ~/.armada/token
 
 5. **扩展包**（二选一）  
    - 受控端 clone 本仓后自己 `npx tsup && npx vsce package`；或  
-   - 中台打一次，把 `extension/armada-agent-*.vsix` 拷过去（请用 ≥ 0.3.6）：
+   - 中台打一次，把 `extension/armada-agent-*.vsix` 拷过去（请用 ≥ 0.3.7）：
 
 ```bash
 cd extension
@@ -116,6 +116,8 @@ git clone https://github.com/kaka926078890-tech/Armada.git
 cd Armada
 ```
 
+### macOS
+
 1. **先探活中台**（失败先修网络，再装扩展）
 
 ```bash
@@ -131,7 +133,7 @@ curl -sS http://192.168.1.10:7380/api/health
 sh hooks/install.sh
 ```
 
-4. **安装扩展** `armada-agent` ≥ 0.3.6  
+4. **安装扩展** `armada-agent` ≥ 0.3.7  
    Cursor → 扩展 → **Install from VSIX** → `extension/armada-agent-*.vsix`  
    （没有现成 vsix 且这台有 Node 时：`cd extension && npx tsup && npx vsce package --no-dependencies`）
 
@@ -154,6 +156,74 @@ chmod +x scripts/armada-cursor.sh
 
 约束：中台只能派到 **已经打开且扩展已上报** 的窗口；路径用绝对路径（不要 `~/proj`）；推理走 Cursor 云，受控端要能上网。
 
+### Windows（第一次安装 + 每天怎么开）
+
+中台仍跑在 Mac（或已有 hub 那台机）。这台 Windows **只当受控**：不要 `bun run hub`，不要在本机生成新 token，不要从开始菜单/桌面图标打开 Cursor 做派发。
+
+**先拿到这三样，再往下敲命令：**
+
+| 要带上 Windows 的 | 从哪来 | 说明 |
+| --- | --- | --- |
+| 本仓库 | `git clone` 本仓，或把整个 `Armada` 文件夹拷过去 | 用来跑 `hooks\install.ps1` 和启动器 |
+| `armada-agent-0.3.7.vsix` | 中台 `extension\armada-agent-0.3.7.vsix`（必须 ≥ 0.3.7） | 旧包只会装 `.sh`，Windows 上 hooks 不会跑 |
+| 中台 IP + token | 中台 `ipconfig getifaddr en0` 和 `~/.armada/token` | token 不要换行；不要在 Windows 上新生成 |
+
+下面把 `192.168.1.10` 换成你的中台局域网 IP。所有命令都在 **PowerShell** 里执行，先 `cd` 到仓库根目录（里面能看到 `hooks` 和 `scripts` 文件夹）。
+
+#### 第一次安装（做完一次即可）
+
+**1. 探活中台**（失败先修网络，再装东西）
+
+```powershell
+curl.exe -sS http://192.168.1.10:7380/api/health
+# 期望打印: {"ok":true,"name":"armada-hub"}
+```
+
+不通：中台是否 `--lan`、Mac 防火墙是否放行 7380、是否同一 Wi-Fi。Windows **不需要**入站端口。
+
+**2. 确认 Cursor 已安装并已登录**（用这台 Windows 自己的账号；中台不代登）。
+
+**3. 安装 hooks**（写入 `%USERPROFILE%\.cursor\hooks.json`，不覆盖别人已有的条目）
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File hooks\install.ps1
+# 期望打印: hooks 已安装: ...\armada-spool.ps1
+```
+
+**4. 安装扩展**
+
+1. 先用图标正常打开一次 Cursor（这次还不用启动器）。
+2. 左侧扩展 → `...` → **Install from VSIX** → 选中 `armada-agent-0.3.7.vsix`。
+3. 装完先不要关。
+
+**5. 指向中台**（`Ctrl+Shift+P` → 输入 `Armada: Configure Hub Connection`）
+
+| 项 | 填这个 | 不要填 |
+| --- | --- | --- |
+| hub | `192.168.1.10:7380` | `http://`、`https://`、`127.0.0.1`、本机 IP |
+| token | 中台 `~/.armada/token` **原文** | 在 Windows 上跑 hub 新生成的 |
+
+保存后：**Developer: Reload Window**。  
+`View` → **Output** → 下拉选 **Armada**，应看到 `config loaded, hub=192.168.1.10:7380`。没有这行 = 没配上，不要继续。
+
+#### 每天派发前：必须用启动器开 Cursor
+
+图标/开始菜单打开的 Cursor **没有**调试端口，中台派发会停在「待本机回车」。
+
+1. **完全退出** Cursor：右下角托盘（^ 里）找到 Cursor 图标 → 右键 **Exit / 退出**。任务栏和托盘都不要还留着。
+2. 用启动器打开**要派发的工作区**（路径必须是 Windows 绝对路径，例如 `C:\Users\me\proj`，不要 `~\proj`）：
+
+```powershell
+cd <你的 Armada 仓库根目录>
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\armada-cursor.ps1 C:\绝对路径\你的工作区
+```
+
+成功时会打印 Cursor 路径、CDP 端口、工作区。若提示「正在运行」，按上面第 1 步再退一次。
+
+3. 等扩展连上（约 15 秒）。中台控制台左侧应出现这台 Windows 主机名（绿点）和刚才那个工作区路径。之后即可派发。
+
+**不要做：** 启动器开起来之后，再双击图标开第二个 Cursor（单实例会把 CDP 参数吞掉）。换工作区 = 再退干净，再用启动器带新路径启动。
+
 ## 两端一起验收
 
 - [ ] 受控端 `curl` health 成功
@@ -169,14 +239,15 @@ chmod +x scripts/armada-cursor.sh
 | 控制台没有这台机器 | **受控**：是否 Reload；`hubUrl` 是否写成 `127.0.0.1`；输出面板 Armada |
 | `WORKSPACE_NOT_OPEN` | **受控**：启动器打开该路径；等心跳约 15s |
 | `RUN_BUSY` | **中台**：等当前任务结束，或取消/关闭异常卡 |
-| 一直「待本机回车」 | **受控**：Cursor 不是 `armada-cursor.sh` 拉起的 |
-| 详情串了别的对话 | **受控**：扩展 ≥ 0.3.6，不要用旧 vsix |
+| 一直「待本机回车」 | **受控**：Cursor 不是启动器拉起的（Windows：托盘未退干净就又点了图标） |
+| 详情串了别的对话 | **受控**：扩展 ≥ 0.3.7，不要用旧 vsix |
+| Windows 启动器报「正在运行」 | **受控**：托盘 `^` 里 Cursor 右键退出，不是只关窗口 |
 
 ## 发送通道
 
 | 动作 | 中台端 | 受控端 |
 | --- | --- | --- |
-| 新任务 | `run.start` → 新对话 + CDP 注入并模拟 Enter | 用 `armada-cursor.sh` 开着目标工作区。CDP 失败则变剪贴板，需 **回车** |
+| 新任务 | `run.start` → 新对话 + CDP 注入并模拟 Enter | 用 `armada-cursor.sh` / `.ps1` 开着目标工作区。CDP 失败则变剪贴板，需 **回车** |
 | 取消 | `run.cancel`，扩展尝试 `cancelChat` | 若 UI 仍要确认则点一下 |
 | 续聊 | `POST /api/runs/:id/followup` 注入同一对话 | CDP 失败时同样要回车 |
 
@@ -192,7 +263,7 @@ chmod +x scripts/armada-cursor.sh
 | 令牌文件 | `$ARMADA_HUB_HOME/token` | 首次启动自动生成 64 位 hex；`chmod 600` |
 | `armada.hubUrl` | Cursor 设置 / 配置命令 | 形如 `192.168.1.10:7380`（无协议前缀） |
 | `armada.token` | Cursor 设置 / 配置命令 | 与 hub 令牌一致 |
-| `armada.cdpPort` | Cursor 设置 | 默认 `9222`，须与 `armada-cursor.sh` 一致 |
+| `armada.cdpPort` | Cursor 设置 | 默认 `9222`，须与 `armada-cursor.sh` / `.ps1` 一致 |
 | `armada.autoSubmit` | Cursor 设置 | 默认 `true`；`false` 则只预填、等人回车 |
 | `ARMADA_HUB_URL` / `ARMADA_HUB_TOKEN` | 环境变量（扩展） | 仅当对应 Cursor 设置项（`armada.hubUrl` / `armada.token`）为空时回退；设置项非空优先（见 `extension/src/config.ts`） |
 

@@ -88,3 +88,45 @@ describe("armada-spool.sh", () => {
     expect(j.__raw.__unparsed).toHaveLength(4000);
   });
 });
+
+describe("armada-spool.ps1", () => {
+  const PS1 = join(import.meta.dir, "..", "armada-spool.ps1");
+
+  test("writes utf-8 without bom via WriteAllText + Move-Item", () => {
+    const src = readFileSync(PS1, "utf8");
+    expect(src).toContain("UTF8Encoding");
+    expect(src).toContain("WriteAllText");
+    expect(src).toContain("Move-Item");
+    expect(src).toContain("__unparsed");
+  });
+
+  const pwsh = Bun.which("pwsh") ?? (process.platform === "win32" ? "powershell.exe" : null);
+  const runPs = async (spoolDir: string, event: string, payload: object | string) => {
+    const body = typeof payload === "string" ? payload : JSON.stringify(payload);
+    const proc = Bun.spawn([pwsh!, "-NoProfile", "-NonInteractive", "-File", PS1, event], {
+      stdin: new Response(body).body!,
+      stdout: "pipe",
+      env: { ...process.env, ARMADA_SPOOL_DIR: spoolDir },
+    });
+    const out = await new Response(proc.stdout).text();
+    const code = await proc.exited;
+    return { out, code };
+  };
+
+  test.skipIf(!pwsh)("runtime: valid json + invalid stdin", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "armada-spool-ps1-"));
+    const ok = await runPs(dir, "sessionStart", { conversation_id: "c-1" });
+    expect(ok.code).toBe(0);
+    expect(ok.out.trim()).toBe("{}");
+    const j = readSpoolJson(dir);
+    expect(j.__hook).toBe("sessionStart");
+    expect(j.__raw.conversation_id).toBe("c-1");
+
+    const dir2 = mkdtempSync(join(tmpdir(), "armada-spool-ps1-bad-"));
+    const bad = await runPs(dir2, "stop", 'not json with "quotes"');
+    expect(bad.code).toBe(0);
+    expect(bad.out.trim()).toBe("{}");
+    const j2 = readSpoolJson(dir2);
+    expect(j2.__raw.__unparsed).toContain("not json");
+  });
+});

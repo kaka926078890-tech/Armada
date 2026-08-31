@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mergeHooks, hooksDriftHash, HOOK_EVENTS } from "../src/hooksInstall";
+import { mergeHooks, hooksDriftHash, HOOK_EVENTS, spoolScriptName } from "../src/hooksInstall";
 
 describe("mergeHooks", () => {
   test("creates hooks object from scratch with all 15 events", () => {
@@ -38,10 +38,30 @@ describe("mergeHooks", () => {
     const scriptPath = "/s/armada-spool.sh";
     const { merged: expected } = mergeHooks(null, scriptPath);
     const existing = JSON.parse(JSON.stringify(expected));
-    // Tamper timeout but keep armada-spool.sh substring — mergeHooks skips (changed=false).
     existing.hooks.stop[0].timeout = 99;
     expect(mergeHooks(existing, scriptPath).changed).toBe(false);
-    // Comparing to expected canonical merge detects drift (old bug: compare to merge(existing) → always equal).
     expect(hooksDriftHash(existing) !== hooksDriftHash(mergeHooks(null, scriptPath).merged)).toBe(true);
+  });
+
+  test("windows ps1 uses powershell.exe -File and is recognized as ours", () => {
+    const scriptPath = "C:\\Users\\a\\.cursor\\hooks\\armada-spool.ps1";
+    const { merged, changed } = mergeHooks(null, scriptPath);
+    expect(changed).toBe(true);
+    expect(merged.hooks.stop[0].command).toBe(
+      `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${scriptPath}" stop`,
+    );
+    expect(mergeHooks(merged, scriptPath).changed).toBe(false);
+  });
+
+  test("windows path with spaces stays quoted in -File", () => {
+    const scriptPath = "C:\\Users\\Foo Bar\\.cursor\\hooks\\armada-spool.ps1";
+    const { merged } = mergeHooks(null, scriptPath);
+    expect(merged.hooks.sessionStart[0].command).toContain(`-File "${scriptPath}" sessionStart`);
+  });
+
+  test("spoolScriptName follows platform", () => {
+    expect(spoolScriptName("win32")).toBe("armada-spool.ps1");
+    expect(spoolScriptName("darwin")).toBe("armada-spool.sh");
+    expect(spoolScriptName("linux")).toBe("armada-spool.sh");
   });
 });

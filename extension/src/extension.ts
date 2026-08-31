@@ -11,7 +11,7 @@ import { matchHookToPending, claimConversation, eventBelongsToWindow, transcript
 import { TranscriptTailer } from "./transcript";
 import { Executor, CancelWatcher } from "./executor";
 import { createCdpSubmitter } from "./cdpInject";
-import { mergeHooks, hooksDriftHash } from "./hooksInstall";
+import { mergeHooks, hooksDriftHash, spoolScriptName } from "./hooksInstall";
 
 let client: { dispose: () => void } | null = null;
 
@@ -142,10 +142,13 @@ export function activate(context: vscode.ExtensionContext): void {
   // hooks 安装检查 + drift 上报
   const ensureHooks = () => {
     const hooksJsonPath = join(homedir(), ".cursor", "hooks.json");
-    const scriptPath = join(homedir(), ".cursor", "hooks", "armada-spool.sh");
+    const scriptPath = join(homedir(), ".cursor", "hooks", spoolScriptName());
+    const bundled = join(context.extensionPath, "hooks", spoolScriptName());
     let installed = false;
     let drift = false;
     try {
+      mkdirSync(join(homedir(), ".cursor", "hooks"), { recursive: true });
+      if (existsSync(bundled)) copyFileSync(bundled, scriptPath);
       const existing = existsSync(hooksJsonPath) ? JSON.parse(readFileSync(hooksJsonPath, "utf8")) : null;
       const { merged, changed } = mergeHooks(existing, scriptPath);
       if (changed) {
@@ -188,7 +191,7 @@ export function activate(context: vscode.ExtensionContext): void {
       core.sendRegister({
         type: "register", machineId, windowId,
         name: hostname(), os: `${process.platform}-${process.arch}`,
-        cursorVersion: vscode.version, extensionVersion: "0.3.6",
+        cursorVersion: vscode.version, extensionVersion: "0.3.7",
         openWorkspaces: workspaces(),
       });
     });

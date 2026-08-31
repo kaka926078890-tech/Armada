@@ -2,7 +2,7 @@
   "name": "armada-agent",
   "displayName": "Armada Agent",
   "publisher": "armada",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "private": true,
   "engines": {
     "vscode": "^1.96.0"
@@ -28,7 +28,7 @@
         "armada.cdpPort": {
           "type": "number",
           "default": 9222,
-          "description": "CDP remote debugging port (Cursor launched via armada-cursor.sh)"
+          "description": "CDP remote debugging port (Cursor launched via armada-cursor.sh / armada-cursor.ps1)"
         },
         "armada.autoSubmit": {
           "type": "boolean",
