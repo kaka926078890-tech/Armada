@@ -8,6 +8,7 @@ import { RunService } from "./runs";
 import { SseHub } from "./sse";
 import { ingestEvent } from "./ingest";
 import { handleWsMessage, type WsData } from "./ws";
+import { limitsFromEnv, httpStatusForRunError, type ConcurrencyLimits } from "./concurrency";
 
 export interface HubServer {
   server: ReturnType<typeof Bun.serve>;
@@ -19,13 +20,14 @@ export interface HubServer {
   stop: () => void;
 }
 
-export function createServer(opts: { port?: number; hostname?: string; home?: string } = {}): HubServer {
+export function createServer(opts: { port?: number; hostname?: string; home?: string; concurrency?: ConcurrencyLimits } = {}): HubServer {
   const home = ARMADA_HOME(opts.home);
   const token = loadToken(home);
   const db = openDb(home);
   const registry = new Registry(db);
   const sse = new SseHub();
-  const runs = new RunService(db, registry, sse);
+  const limits = opts.concurrency ?? limitsFromEnv();
+  const runs = new RunService(db, registry, sse, { limits });
 
   registry.inboundHandler = (ws, msg) => {
     const machineId = ws.data.machineId!;
@@ -65,9 +67,9 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
 
   app.post("/api/runs", async (c) => {
     const body = await c.req.json();
-    const { run, error } = runs.create(body.machineId, body.workspaceRoot, body.prompt);
-    if (error) return c.json({ error }, error === "RUN_BUSY" ? 409 : 400);
-    return c.json({ run }, 201);
+    const { run, error, queuePosition } = runs.create(body.machineId, body.workspaceRoot, body.prompt);
+    if (error) return c.json({ error }, httpStatusForRunError(error));
+    return c.json({ run, queuePosition }, 201);
   });
   app.get("/api/runs", (c) => c.json(runs.list(c.req.query("status"), c.req.query("machineId"), c.req.query("archived"))));
   app.get("/api/runs/:id", (c) => {
@@ -184,6 +186,8 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
 
 if (import.meta.main) {
   const lan = process.argv.includes("--lan");
-  const s = createServer({ hostname: lan ? "0.0.0.0" : "127.0.0.1" });
+  const limits = limitsFromEnv();
+  const s = createServer({ hostname: lan ? "0.0.0.0" : "127.0.0.1", concurrency: limits });
   console.log(`armada-hub listening on http://${s.server.hostname}:${s.port} (token in ${ARMADA_HOME()}/token)`);
+  console.log(`armada-hub concurrency=v2-slot N=${limits.maxPerMachine} M=${limits.maxPerWorkspace} multiWindow=${limits.multiRunPerWindow ? 1 : 0}`);
 }

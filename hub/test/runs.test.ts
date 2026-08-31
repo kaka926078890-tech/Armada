@@ -2,14 +2,19 @@ import { describe, expect, test, afterEach } from "bun:test";
 import { mkdtempSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import type { ConcurrencyLimits } from "../src/concurrency";
 import { createServer, type HubServer } from "../src/index";
 
 let hub: HubServer | null = null;
 afterEach(() => { hub?.stop(); hub = null; });
 
-async function startWithExt() {
+async function startWithExt(opts: {
+  extensionVersion?: string;
+  openWorkspaces?: string[];
+  concurrency?: ConcurrencyLimits;
+} = {}) {
   const home = mkdtempSync(join(tmpdir(), "armada-runs-"));
-  hub = createServer({ port: 0, home });
+  hub = createServer({ port: 0, home, concurrency: opts.concurrency });
   const ws: WebSocket = await new Promise((res, rej) => {
     const w = new WebSocket(`ws://127.0.0.1:${hub!.port}/ws?token=${hub!.token}`);
     w.onopen = () => res(w); w.onerror = rej;
@@ -18,7 +23,8 @@ async function startWithExt() {
   ws.addEventListener("message", (e) => inbound.push(JSON.parse(String(e.data))));
   ws.send(JSON.stringify({
     type: "register", machineId: "m-1", windowId: "w-1", name: "Mac-A",
-    os: "darwin-arm64", openWorkspaces: ["/ws/a"],
+    os: "darwin-arm64", openWorkspaces: opts.openWorkspaces ?? ["/ws/a"],
+    extensionVersion: opts.extensionVersion,
   }));
   await new Promise((r) => setTimeout(r, 100));
   inbound.length = 0; // drop "registered"
@@ -28,6 +34,34 @@ async function startWithExt() {
       headers: { "content-type": "application/json", authorization: `Bearer ${hub!.token}`, ...(init?.headers ?? {}) },
     });
   return { ws, inbound, api };
+}
+
+async function startTwoWindows() {
+  const home = mkdtempSync(join(tmpdir(), "armada-runs-"));
+  hub = createServer({ port: 0, home });
+  const connect = async (windowId: string, openWorkspaces: string[]) => {
+    const ws: WebSocket = await new Promise((res, rej) => {
+      const w = new WebSocket(`ws://127.0.0.1:${hub!.port}/ws?token=${hub!.token}`);
+      w.onopen = () => res(w); w.onerror = rej;
+    });
+    const inbound: any[] = [];
+    ws.addEventListener("message", (e) => inbound.push(JSON.parse(String(e.data))));
+    ws.send(JSON.stringify({
+      type: "register", machineId: "m-1", windowId, name: "Mac-A",
+      os: "darwin-arm64", openWorkspaces, extensionVersion: "0.4.0",
+    }));
+    await new Promise((r) => setTimeout(r, 100));
+    inbound.length = 0;
+    return { ws, inbound };
+  };
+  const a = await connect("w-1", ["/ws/a"]);
+  const b = await connect("w-2", ["/ws/b"]);
+  const api = (path: string, init?: RequestInit) =>
+    fetch(`http://127.0.0.1:${hub!.port}${path}`, {
+      ...init,
+      headers: { "content-type": "application/json", authorization: `Bearer ${hub!.token}`, ...(init?.headers ?? {}) },
+    });
+  return { wsA: a.ws, inboundA: a.inbound, wsB: b.ws, inboundB: b.inbound, api };
 }
 
 describe("Run dispatch", () => {
@@ -67,13 +101,141 @@ describe("Run dispatch", () => {
     expect(((await r.json()) as any).error).toBe("WORKSPACE_NOT_OPEN");
   });
 
-  test("rejects busy machine (409 RUN_BUSY)", async () => {
-    const { api } = await startWithExt();
+  test("second run queues while inject slot occupied, then starts after bind", async () => {
+    const { ws, inbound, api } = await startWithExt({ extensionVersion: "0.4.0" });
+    const r1 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "a" }) });
+    expect(r1.status).toBe(201);
+    const { run: a } = await r1.json() as any;
+    expect(a.status).toBe("dispatched");
+    const r2 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "b" }) });
+    expect(r2.status).toBe(201);
+    const body2 = await r2.json() as any;
+    expect(body2.run.status).toBe("queued");
+    expect(body2.queuePosition).toBe(1);
+    ws.send(JSON.stringify({ type: "run.ack", runId: a.id, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId: a.id, conversationId: "cid-a", transcriptPath: null, promptMatch: true }));
+    await new Promise((r) => setTimeout(r, 150));
+    expect(((await (await api(`/api/runs/${a.id}`)).json()) as any).status).toBe("running");
+    expect(((await (await api(`/api/runs/${body2.run.id}`)).json()) as any).status).toBe("dispatched");
+    expect(inbound.filter((m) => m.type === "run.start").map((m) => m.prompt).sort()).toEqual(["a", "b"]);
+    ws.close();
+  });
+
+  test("identical prompt on same workspace → 409 PROMPT_COLLISION even after running", async () => {
+    const { ws, api } = await startWithExt({ extensionVersion: "0.4.0" });
+    const r1 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "same" }) });
+    const { run } = await r1.json() as any;
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId: run.id, conversationId: "c1", transcriptPath: null, promptMatch: true }));
+    await new Promise((r) => setTimeout(r, 100));
+    const r2 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: " same  " }) });
+    expect(r2.status).toBe(409);
+    expect(((await r2.json()) as any).error).toBe("PROMPT_COLLISION");
+    ws.close();
+  });
+
+  test("two windows: second queues then starts after first bind, both can run", async () => {
+    const { wsA, inboundA, wsB, inboundB, api } = await startTwoWindows();
+    const r1 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "a" }) });
+    expect(r1.status).toBe(201);
+    const { run: runA } = await r1.json() as any;
+    expect(runA.status).toBe("dispatched");
+    const r2 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/b", prompt: "b" }) });
+    expect(r2.status).toBe(201);
+    const body2 = await r2.json() as any;
+    expect(body2.run.status).toBe("queued");
+    wsA.send(JSON.stringify({ type: "run.ack", runId: runA.id, status: "accepted" }));
+    wsA.send(JSON.stringify({ type: "run.bound", runId: runA.id, conversationId: "cid-a", transcriptPath: null, promptMatch: true }));
+    await new Promise((r) => setTimeout(r, 150));
+    expect(((await (await api(`/api/runs/${body2.run.id}`)).json()) as any).status).toBe("dispatched");
+    wsB.send(JSON.stringify({ type: "run.ack", runId: body2.run.id, status: "accepted" }));
+    wsB.send(JSON.stringify({ type: "run.bound", runId: body2.run.id, conversationId: "cid-b", transcriptPath: null, promptMatch: true }));
+    await new Promise((r) => setTimeout(r, 150));
+    expect(((await (await api(`/api/runs/${runA.id}`)).json()) as any).status).toBe("running");
+    expect(((await (await api(`/api/runs/${body2.run.id}`)).json()) as any).status).toBe("running");
+    expect(inboundA.filter((m) => m.type === "run.start").map((m) => m.prompt)).toEqual(["a"]);
+    expect(inboundB.filter((m) => m.type === "run.start").map((m) => m.prompt)).toEqual(["b"]);
+    wsA.close();
+    wsB.close();
+  });
+
+  test("third run on same workspace hits 429 RUN_LIMIT when M=2", async () => {
+    const { api } = await startWithExt({
+      extensionVersion: "0.4.0",
+      concurrency: { maxPerMachine: 8, maxPerWorkspace: 2, multiRunPerWindow: true },
+    });
     const r1 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "a" }) });
     expect(r1.status).toBe(201);
     const r2 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "b" }) });
-    expect(r2.status).toBe(409);
-    expect(((await r2.json()) as any).error).toBe("RUN_BUSY");
+    expect(r2.status).toBe(201);
+    const r3 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "c" }) });
+    expect(r3.status).toBe(429);
+    expect(((await r3.json()) as any).error).toBe("RUN_LIMIT");
+  });
+
+  test("old extension 0.3.8 same window stays queued and does not get second run.start", async () => {
+    const { ws, inbound, api } = await startWithExt({ extensionVersion: "0.3.8" });
+    const r1 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "a" }) });
+    const { run: a } = await r1.json() as any;
+    ws.send(JSON.stringify({ type: "run.ack", runId: a.id, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId: a.id, conversationId: "cid-a", transcriptPath: null, promptMatch: true }));
+    await new Promise((r) => setTimeout(r, 100));
+    inbound.length = 0;
+    const r2 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "b" }) });
+    expect(r2.status).toBe(201);
+    const body2 = await r2.json() as any;
+    expect(body2.run.status).toBe("queued");
+    await new Promise((r) => setTimeout(r, 100));
+    expect(inbound.filter((m) => m.type === "run.start")).toEqual([]);
+    expect(((await (await api(`/api/runs/${body2.run.id}`)).json()) as any).status).toBe("queued");
+    ws.close();
+  });
+
+  test("late ack after DISPATCH_TIMEOUT does not revive when inject slot is taken", async () => {
+    const { ws, api } = await startWithExt({ extensionVersion: "0.4.0" });
+    const r1 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "a" }) });
+    const { run: a } = await r1.json() as any;
+    const r2 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "b" }) });
+    const body2 = await r2.json() as any;
+    expect(body2.run.status).toBe("queued");
+    hub!.db.query("UPDATE runs SET created_at=?1 WHERE id=?2").run(Date.now() - 35_000, a.id);
+    hub!.runs.sweepTimeouts();
+    expect(((await (await api(`/api/runs/${a.id}`)).json()) as any).status).toBe("error");
+    expect(((await (await api(`/api/runs/${body2.run.id}`)).json()) as any).status).toBe("dispatched");
+    ws.send(JSON.stringify({ type: "run.ack", runId: a.id, status: "accepted" }));
+    await new Promise((r) => setTimeout(r, 100));
+    expect(((await (await api(`/api/runs/${a.id}`)).json()) as any).status).toBe("error");
+    expect(((await (await api(`/api/runs/${body2.run.id}`)).json()) as any).status).toBe("dispatched");
+    const denied = hub!.db.query("SELECT action FROM audit WHERE action='inject_slot_revive_denied' AND target=?1").all(a.id) as any[];
+    expect(denied.length).toBeGreaterThanOrEqual(1);
+    ws.close();
+  });
+
+  test("closed-workspace queued is failed then next starts", async () => {
+    const { ws, inbound, api } = await startWithExt({
+      extensionVersion: "0.4.0",
+      openWorkspaces: ["/ws/a", "/ws/gone"],
+    });
+    const rHold = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "hold" }) });
+    const { run: hold } = await rHold.json() as any;
+    expect(hold.status).toBe("dispatched");
+    const rGone = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/gone", prompt: "gone" }) });
+    const gone = (await rGone.json() as any).run;
+    expect(gone.status).toBe("queued");
+    const rA = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "a" }) });
+    const next = (await rA.json() as any).run;
+    expect(next.status).toBe("queued");
+    ws.send(JSON.stringify({ type: "heartbeat", openWorkspaces: ["/ws/a"] }));
+    await new Promise((r) => setTimeout(r, 100));
+    inbound.length = 0;
+    ws.send(JSON.stringify({ type: "run.ack", runId: hold.id, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId: hold.id, conversationId: "cid-hold", transcriptPath: null, promptMatch: true }));
+    await new Promise((r) => setTimeout(r, 150));
+    expect(((await (await api(`/api/runs/${gone.id}`)).json()) as any).status).toBe("error");
+    expect(((await (await api(`/api/runs/${gone.id}`)).json()) as any).end_reason).toBe("WORKSPACE_NOT_OPEN");
+    expect(((await (await api(`/api/runs/${next.id}`)).json()) as any).status).toBe("dispatched");
+    expect(inbound.filter((m) => m.type === "run.start").map((m) => m.prompt)).toEqual(["a"]);
+    ws.close();
   });
 
   test("rejected ack → error with reason", async () => {

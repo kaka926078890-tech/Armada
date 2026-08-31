@@ -59,6 +59,9 @@ export function openDb(home: string): Database {
   db.exec(SCHEMA);
   ensureColumn(db, "machines", "display_name", "display_name TEXT");
   ensureColumn(db, "runs", "archived_at", "archived_at INTEGER");
+  ensureColumn(db, "runs", "queued_at", "queued_at INTEGER");
+  ensureColumn(db, "runs", "dispatch_seq", "dispatch_seq INTEGER");
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_runs_cid_active ON runs(conversation_id) WHERE conversation_id IS NOT NULL AND status IN ('dispatched','binding','running')`);
   return db;
 }
 

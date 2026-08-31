@@ -14,7 +14,7 @@ export interface MachineRow {
   display_name: string | null;
 }
 
-type Conn = { ws: ArmadaSocket; machineId: string; windowId: string; openWorkspaces: string[] };
+type Conn = { ws: ArmadaSocket; machineId: string; windowId: string; openWorkspaces: string[]; extensionVersion: string | null };
 
 export class Registry {
   private conns = new Map<string, Conn>();
@@ -71,7 +71,11 @@ export class Registry {
     ws.data.connKey = connKey;
     ws.data.machineId = msg.machineId;
     ws.data.windowId = msg.windowId;
-    this.conns.set(connKey, { ws, machineId: msg.machineId, windowId: msg.windowId, openWorkspaces: msg.openWorkspaces ?? [] });
+    this.conns.set(connKey, {
+      ws, machineId: msg.machineId, windowId: msg.windowId,
+      openWorkspaces: msg.openWorkspaces ?? [],
+      extensionVersion: typeof msg.extensionVersion === "string" ? msg.extensionVersion : null,
+    });
     this.upsertMachine({
       id: msg.machineId, name: msg.name, os: msg.os,
       cursorVersion: msg.cursorVersion, extensionVersion: msg.extensionVersion,
@@ -138,6 +142,10 @@ export class Registry {
       }
     }
     return null;
+  }
+
+  windowExtensionVersion(machineId: string, windowId: string): string | null {
+    return this.conns.get(`${machineId}:${windowId}`)?.extensionVersion ?? null;
   }
 
   public inboundHandler: (ws: ArmadaSocket, msg: any) => void = () => {};
