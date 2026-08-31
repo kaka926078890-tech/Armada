@@ -209,6 +209,8 @@ export default function App() {
           machines={machines}
           preset={preset}
           presetLabel={`${presetSlot?.machineName ?? preset.machineId} · ${preset.workspaceRoot.split("/").pop()}`}
+          activeOnWorkspace={filterRunsByWorkspace(runs, preset.machineId, preset.workspaceRoot)
+            .filter((r) => ["queued", "dispatched", "binding", "running"].includes(r.status)).length}
           onClose={() => setDispatchOpen(false)}
           onDone={() => { setDispatchOpen(false); refresh(); }}
         />

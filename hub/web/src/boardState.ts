@@ -9,7 +9,7 @@ export interface RunRow {
 export type ColumnKey = "waiting" | "running" | "completed" | "cancelled" | "error";
 
 const COLUMN_MAP: Record<string, ColumnKey> = {
-  created: "waiting", dispatched: "waiting", binding: "waiting",
+  created: "waiting", queued: "waiting", dispatched: "waiting", binding: "waiting",
   running: "running", completed: "completed",
   cancelled: "cancelled", aborted: "cancelled",
   error: "error", unknown: "error",
@@ -30,7 +30,9 @@ export function cardView(run: RunRow, now: number): { title: string; elapsed: st
   const from = run.started_at ?? run.created_at;
   const secs = Math.max(0, Math.floor(((run.ended_at ?? now) - from) / 1000));
   const elapsed = secs > 60 ? `${Math.floor(secs / 60)}m${secs % 60}s` : `${secs}s`;
-  const badge = run.status === "binding" ? "绑定中" : COLUMN_LABELS[COLUMN_MAP[run.status] ?? "error"];
+  const badge = run.status === "queued" ? "排队中"
+    : run.status === "binding" ? "绑定中"
+    : COLUMN_LABELS[COLUMN_MAP[run.status] ?? "error"];
   return { title, elapsed, badge };
 }
 

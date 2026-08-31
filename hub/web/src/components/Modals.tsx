@@ -2,6 +2,16 @@ import { useState } from "react";
 import { api } from "../api";
 import type { Machine } from "../types";
 
+const ERR: Record<string, string> = {
+  RUN_LIMIT: "已达该机或该工作区并行上限",
+  PROMPT_COLLISION: "相同提示词已在该工作区执行或排队",
+  WINDOW_BUSY: "该窗口暂不支持并行（扩展需 ≥ 0.4.0 或已关闭同窗并行）",
+  INJECT_SLOT_BUSY: "正在向该机注入另一条任务，请稍后再续聊",
+  CONVERSATION_BUSY: "该对话仍在运行，结束后才能续聊",
+  WORKSPACE_NOT_OPEN: "工作区未打开",
+  MACHINE_OFFLINE: "机器离线",
+};
+
 function parseWorkspaces(raw: string | undefined): { workspaces: string[]; parseFailed: boolean } {
   try {
     const parsed = JSON.parse(raw ?? "[]");
@@ -15,10 +25,11 @@ function parseWorkspaces(raw: string | undefined): { workspaces: string[]; parse
   }
 }
 
-export function DispatchModal({ machines, preset, presetLabel, onClose, onDone }: {
+export function DispatchModal({ machines, preset, presetLabel, activeOnWorkspace, onClose, onDone }: {
   machines: Machine[];
   preset?: { machineId: string; workspaceRoot: string };
   presetLabel?: string;
+  activeOnWorkspace: number;
   onClose: () => void;
   onDone: () => void;
 }) {
@@ -53,6 +64,11 @@ export function DispatchModal({ machines, preset, presetLabel, onClose, onDone }
             {parseFailed && <div className="text-red-400 text-sm">工作区列表解析失败，无法选择</div>}
           </>
         )}
+        {activeOnWorkspace > 0 && (
+          <div className="text-amber-300/90 text-sm">
+            该工作区已有 {activeOnWorkspace} 个任务在跑或排队，并行可能争用同一批文件。
+          </div>
+        )}
         <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={6}
           placeholder="提示词…" className="px-2 py-1.5 rounded bg-zinc-950 border border-zinc-700" />
         {error && <div className="text-red-400 text-sm">{error}</div>}
@@ -60,7 +76,7 @@ export function DispatchModal({ machines, preset, presetLabel, onClose, onDone }
           <button onClick={onClose} className="px-3 py-1.5 rounded bg-zinc-800">取消</button>
           <button disabled={!machineId || !workspace || !prompt.trim()} onClick={() => {
             api.dispatch(machineId, workspace, prompt.trim()).then((r) => {
-              if (r.error) setError(r.error); else onDone();
+              if (r.error) setError(ERR[r.error] ?? r.error); else onDone();
             }).catch((e) => setError(String(e)));
           }} className="px-3 py-1.5 rounded bg-sky-600 hover:bg-sky-500 disabled:opacity-40">派发</button>
         </div>

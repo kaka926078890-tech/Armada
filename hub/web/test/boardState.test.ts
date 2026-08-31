@@ -51,6 +51,11 @@ describe("cardView", () => {
     const v = cardView({ ...base, status: "binding" }, 5000);
     expect(v.badge).toBe("绑定中");
   });
+  test("queued sits in waiting with 排队中 badge", () => {
+    const g = groupRuns([{ ...base, id: "q", status: "queued" }]);
+    expect(g.waiting.map((r) => r.id)).toEqual(["q"]);
+    expect(cardView({ ...base, status: "queued" }, 5000).badge).toBe("排队中");
+  });
 });
 
 describe("workspace slots and conversation filter", () => {
