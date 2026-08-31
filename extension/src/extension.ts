@@ -7,11 +7,12 @@ import { join } from "path";
 import { loadConfig } from "./config";
 import { WsClientCore } from "./wsClient";
 import { SpoolForwarder } from "./spool";
-import { matchHookToPending, claimConversation, eventBelongsToWindow, transcriptPathBelongsToCid, runIdForHook, rememberSubagent, isAmbiguousMatch, dropPendingRuns, type PendingRun } from "./binding";
+import { matchHookToPending, claimConversation, eventBelongsToWindow, transcriptPathBelongsToCid, runIdForHook, rememberSubagent, isAmbiguousMatch, dropPendingRuns, type PendingRun, type BindingMatch } from "./binding";
 import { TranscriptTailer } from "./transcript";
 import { Executor, CancelWatcher } from "./executor";
 import { createCdpSubmitter } from "./cdpInject";
-import { mergeHooks, hooksDriftHash, spoolScriptName } from "./hooksInstall";
+import { mergeHooks, hooksDriftHash, spoolScriptName, shouldInstallArmadaHooks } from "./hooksInstall";
+import { collectTranscriptViews, matchTranscriptToPending, stopPayloadFromTranscriptLine, transcriptsDirForWorkspace, TRANSCRIPT_BIND_WINDOW_MS } from "./transcriptBind";
 
 let client: { dispose: () => void } | null = null;
 
@@ -65,24 +66,6 @@ export function activate(context: vscode.ExtensionContext): void {
   const cdpSubmit = config.autoSubmit ? createCdpSubmitter({ port: config.cdpPort, log }) : null;
   log(`autoSubmit=${config.autoSubmit} cdpPort=${config.cdpPort}`);
 
-  const executor = new Executor({
-    globalState: context.globalState,
-    send: (m) => { log(`=> ${JSON.stringify(m)}`); core.enqueue(m); },
-    addPending: (run) => { pendingRuns.push(run); },
-    removePending: (runId) => {
-      const i = pendingRuns.findIndex((r) => r.runId === runId);
-      if (i >= 0) pendingRuns.splice(i, 1);
-    },
-    autoSubmit: cdpSubmit
-      ? async (workspaceRoot, prompt) => {
-          const r = await cdpSubmit(workspaceRoot, prompt);
-          if (!r.ok) log(`cdp submit failed: ${r.reason}; fallback to clipboard`);
-          else log("cdp submit ok");
-          return r.ok;
-        }
-      : undefined,
-  });
-
   // transcript 事件走独立高段,避免与 spool seq 冲突
   let extSeq = 1_000_000_000;
   const nextExtSeq = () => { extSeq += 1; return extSeq; };
@@ -103,7 +86,92 @@ export function activate(context: vscode.ExtensionContext): void {
       let payload: any = { __raw_line: line };
       try { payload = JSON.parse(line); } catch { /* 保留原始行 */ }
       core.enqueue({ type: "run.event", runId, source: "transcript", payload, ts: Date.now(), seq: nextExtSeq() });
+      // Windows: stop hook 同样被 PS 5s 杀掉。合成 hub 已有的 stop 契约，不改 ingest。
+      // 不 detach：续聊同一 path 才能保住 offset，避免重放旧 turn_ended 把 followup 立刻收口。
+      if (process.platform !== "win32") return;
+      const stop = stopPayloadFromTranscriptLine(line);
+      if (!stop) return;
+      const owner = boundRuns.get(runId);
+      core.enqueue({
+        type: "run.event",
+        runId,
+        conversationId: owner?.conversationId,
+        source: "hook",
+        hookEventName: "stop",
+        payload: { ...stop, conversation_id: owner?.conversationId },
+        ts: Date.now(),
+        seq: nextExtSeq(),
+      });
+      log(`stop synthesized ${runId} status=${stop.status}`);
     },
+  });
+
+  const applyBinding = (match: BindingMatch, via: string): void => {
+    const idx = pendingRuns.indexOf(match.run);
+    if (idx >= 0) pendingRuns.splice(idx, 1);
+    claimConversation(boundRuns, match.run.runId, match.conversationId, match.run.prompt);
+    const path = match.transcriptPath && transcriptPathBelongsToCid(match.transcriptPath, match.conversationId)
+      ? match.transcriptPath
+      : null;
+    core.enqueue({ type: "run.bound", runId: match.run.runId, conversationId: match.conversationId, transcriptPath: path, promptMatch: match.promptMatch });
+    log(`run.bound ${match.run.runId} cid=${match.conversationId} via=${via}`);
+    if (path) {
+      tailer.attach(match.run.runId, path);
+      tailer.poll(match.run.runId);
+    }
+  };
+
+  const tryBindFromTranscripts = (): void => {
+    if (pendingRuns.length === 0) return;
+    const boundCids = new Set([...boundRuns.values()].map((v) => v.conversationId));
+    const files = [];
+    const seen = new Set<string>();
+    for (const run of pendingRuns) {
+      if (Date.now() - run.dispatchedAt > TRANSCRIPT_BIND_WINDOW_MS) continue;
+      const dir = transcriptsDirForWorkspace(homedir(), run.workspaceRoot);
+      if (!dir || seen.has(dir)) continue;
+      seen.add(dir);
+      files.push(...collectTranscriptViews(dir));
+    }
+    const match = matchTranscriptToPending(pendingRuns, files, { boundCids });
+    if (isAmbiguousMatch(match)) {
+      for (const run of match.runs) {
+        core.enqueue({ type: "run.note", runId: run.runId, level: "error", message: "BIND_AMBIGUOUS" });
+      }
+      dropPendingRuns(pendingRuns, match.runs);
+      return;
+    }
+    if (match) applyBinding(match, "transcript");
+  };
+
+  const executor = new Executor({
+    globalState: context.globalState,
+    send: (m) => { log(`=> ${JSON.stringify(m)}`); core.enqueue(m); },
+    addPending: (run) => { pendingRuns.push(run); },
+    removePending: (runId) => {
+      const i = pendingRuns.findIndex((r) => r.runId === runId);
+      if (i >= 0) pendingRuns.splice(i, 1);
+    },
+    bindKnown: ({ runId, conversationId, workspaceRoot }) => {
+      const run = pendingRuns.find((r) => r.runId === runId);
+      if (!run) return;
+      const dir = transcriptsDirForWorkspace(homedir(), workspaceRoot);
+      const path = dir ? join(dir, conversationId, `${conversationId}.jsonl`) : null;
+      applyBinding({
+        run,
+        conversationId,
+        transcriptPath: path && existsSync(path) ? path : null,
+        promptMatch: true,
+      }, "followup");
+    },
+    autoSubmit: cdpSubmit
+      ? async (workspaceRoot, prompt) => {
+          const r = await cdpSubmit(workspaceRoot, prompt);
+          if (!r.ok) log(`cdp submit failed: ${r.reason}; fallback to clipboard`);
+          else log("cdp submit ok");
+          return r.ok;
+        }
+      : undefined,
   });
 
   const forwarder = new SpoolForwarder({
@@ -120,13 +188,7 @@ export function activate(context: vscode.ExtensionContext): void {
         }
         dropPendingRuns(pendingRuns, match.runs);
       } else if (match) {
-        pendingRuns.splice(pendingRuns.indexOf(match.run), 1);
-        claimConversation(boundRuns, match.run.runId, match.conversationId, match.run.prompt);
-        const path = match.transcriptPath && transcriptPathBelongsToCid(match.transcriptPath, match.conversationId)
-          ? match.transcriptPath
-          : null;
-        core.enqueue({ type: "run.bound", runId: match.run.runId, conversationId: match.conversationId, transcriptPath: path, promptMatch: match.promptMatch });
-        if (path) tailer.attach(match.run.runId, path);
+        applyBinding(match, "hook");
       }
       const reCancel = cancelWatcher.shouldCancelAgain({ hook: ev.hook, raw: ev.raw }, Date.now());
       if (reCancel) void executor.cancel(reCancel);
@@ -148,32 +210,39 @@ export function activate(context: vscode.ExtensionContext): void {
   // hooks 安装检查 + drift 上报
   const ensureHooks = () => {
     const hooksJsonPath = join(homedir(), ".cursor", "hooks.json");
-    const scriptPath = join(homedir(), ".cursor", "hooks", spoolScriptName());
+    const hooksDir = join(homedir(), ".cursor", "hooks");
+    let scriptPath = join(hooksDir, spoolScriptName());
     const bundled = join(context.extensionPath, "hooks", spoolScriptName());
+    const bundledSh = join(context.extensionPath, "hooks", "armada-spool.sh");
     let installed = false;
     let drift = false;
     try {
-      mkdirSync(join(homedir(), ".cursor", "hooks"), { recursive: true });
-      if (existsSync(bundled)) copyFileSync(bundled, scriptPath);
+      mkdirSync(hooksDir, { recursive: true });
+      if (shouldInstallArmadaHooks(scriptPath)) {
+        if (existsSync(bundled)) copyFileSync(bundled, scriptPath);
+        else if (existsSync(bundledSh)) copyFileSync(bundledSh, scriptPath);
+      }
       const existing = existsSync(hooksJsonPath) ? JSON.parse(readFileSync(hooksJsonPath, "utf8")) : null;
       const { merged, changed } = mergeHooks(existing, scriptPath);
       if (changed) {
         if (existsSync(hooksJsonPath)) copyFileSync(hooksJsonPath, `${hooksJsonPath}.bak.${Date.now()}`);
         writeFileSync(hooksJsonPath, JSON.stringify(merged, null, 2));
+        if (!shouldInstallArmadaHooks(scriptPath)) log("windows: removed Armada hooks; bind via transcripts");
       } else {
-        // Compare against expected canonical entries, not merge-of-existing (which is a no-op copy when unchanged).
         const expected = mergeHooks(null, scriptPath).merged;
         drift = hooksDriftHash(existing) !== hooksDriftHash(expected);
       }
-      // installed means spool script is present; changed only means hooks.json was repaired.
-      installed = existsSync(scriptPath);
+      installed = shouldInstallArmadaHooks(scriptPath) ? existsSync(scriptPath) : true;
     } catch { installed = false; }
     core.enqueue({ type: "hooks.status", installed, version: "0.1.0", drift });
   };
   ensureHooks();
 
   const tailerActive = () => [...boundRuns.keys()];
-  const spoolPoll = setInterval(() => forwarder.poll(), 1000);
+  const spoolPoll = setInterval(() => {
+    forwarder.poll();
+    tryBindFromTranscripts();
+  }, 1000);
   const transcriptPoll = setInterval(() => { for (const id of tailerActive()) tailer.poll(id); }, 2000);
 
   const connect = () => {
@@ -197,7 +266,7 @@ export function activate(context: vscode.ExtensionContext): void {
       core.sendRegister({
         type: "register", machineId, windowId,
         name: hostname(), os: `${process.platform}-${process.arch}`,
-        cursorVersion: vscode.version, extensionVersion: "0.4.0",
+        cursorVersion: vscode.version, extensionVersion: "0.4.8",
         openWorkspaces: workspaces(),
       });
     });

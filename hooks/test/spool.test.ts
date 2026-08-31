@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, readdirSync, readFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { compileWindowsSpooler } from "../../extension/src/hooksInstall";
 
 const SCRIPT = join(import.meta.dir, "..", "armada-spool.sh");
 
@@ -40,7 +41,7 @@ describe("armada-spool.sh", () => {
     expect(j.__raw.conversation_id).toBe("c-1");
   });
 
-  test("concurrent invocations do not interleave (maildir)", async () => {
+  test.skipIf(process.platform === "win32")("concurrent invocations do not interleave (maildir)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "armada-spool-"));
     await Promise.all(
       Array.from({ length: 20 }, (_, i) =>
@@ -87,6 +88,27 @@ describe("armada-spool.sh", () => {
     const j = readSpoolJson(dir);
     expect(j.__raw.__unparsed).toHaveLength(4000);
   });
+
+  test("does not deadlock when Cursor keeps stdin open after compact JSON", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "armada-spool-open-"));
+    const body = JSON.stringify({ conversation_id: "c-open", workspace_roots: ["/ws/a"] });
+    const proc = Bun.spawn(["sh", SCRIPT, "sessionStart"], {
+      stdin: "pipe",
+      stdout: "pipe",
+      env: { ...process.env, ARMADA_SPOOL_DIR: dir },
+    });
+    proc.stdin.write(body);
+    const killer = setTimeout(() => proc.kill(), 3000);
+    const t0 = Date.now();
+    const code = await proc.exited;
+    clearTimeout(killer);
+    const ms = Date.now() - t0;
+    const out = await new Response(proc.stdout).text();
+    expect(code).toBe(0);
+    expect(ms).toBeLessThan(2500);
+    expect(out.trim()).toBe("{}");
+    expect(readSpoolJson(dir).__raw.conversation_id).toBe("c-open");
+  });
 });
 
 describe("armada-spool.ps1", () => {
@@ -101,9 +123,13 @@ describe("armada-spool.ps1", () => {
   });
 
   const pwsh = Bun.which("pwsh") ?? (process.platform === "win32" ? "powershell.exe" : null);
+  // Cursor wraps: $input | & { $input | & "script.ps1" event }. Do not use -File
+  // (that hits Console.In / EOF deadlock and skips Unicode $input).
   const runPs = async (spoolDir: string, event: string, payload: object | string) => {
-    const body = typeof payload === "string" ? payload : JSON.stringify(payload);
-    const proc = Bun.spawn([pwsh!, "-NoProfile", "-NonInteractive", "-File", PS1, event], {
+    const body = (typeof payload === "string" ? payload : JSON.stringify(payload)) + "\n";
+    const cmd = "[Console]::InputEncoding = New-Object System.Text.UTF8Encoding $false; $input | & '"
+      + PS1.replace(/'/g, "''") + "' " + event;
+    const proc = Bun.spawn([pwsh!, "-NoProfile", "-NonInteractive", "-Command", cmd], {
       stdin: new Response(body).body!,
       stdout: "pipe",
       env: { ...process.env, ARMADA_SPOOL_DIR: spoolDir },
@@ -113,7 +139,7 @@ describe("armada-spool.ps1", () => {
     return { out, code };
   };
 
-  test.skipIf(!pwsh)("runtime: valid json + invalid stdin", async () => {
+  test.skipIf(!pwsh || process.platform === "win32")("runtime: valid json + invalid stdin", async () => {
     const dir = mkdtempSync(join(tmpdir(), "armada-spool-ps1-"));
     const ok = await runPs(dir, "sessionStart", { conversation_id: "c-1" });
     expect(ok.code).toBe(0);
@@ -128,5 +154,51 @@ describe("armada-spool.ps1", () => {
     expect(bad.out.trim()).toBe("{}");
     const j2 = readSpoolJson(dir2);
     expect(j2.__raw.__unparsed).toContain("not json");
+  }, { timeout: 20000 });
+
+  test.skipIf(!pwsh || process.platform === "win32")("preserves utf-8 prompt 你好 through PowerShell $input (not ???)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "armada-spool-ps1-hi-"));
+    const ok = await runPs(dir, "beforeSubmitPrompt", {
+      conversation_id: "c-hi",
+      prompt: "你好",
+      workspace_roots: ["/C:/Users/PC/Desktop/work"],
+    });
+    expect(ok.code).toBe(0);
+    expect(ok.out.trim()).toBe("{}");
+    const j = readSpoolJson(dir);
+    expect(j.__raw.prompt).toBe("你好");
+    expect(j.__raw.prompt).not.toBe("???");
+  }, { timeout: 20000 });
+});
+
+describe("armada-spool.exe", () => {
+  const CS = join(import.meta.dir, "..", "armada-spool.cs");
+
+  test.skipIf(process.platform !== "win32")("exits on complete JSON while stdin stays open (utf-8)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "armada-spool-exe-"));
+    const exe = join(dir, "armada-spool.exe");
+    const compiled = compileWindowsSpooler(CS, exe);
+    expect(compiled.ok).toBe(true);
+
+    const body = JSON.stringify({ conversation_id: "c-open", prompt: "你好", workspace_roots: ["/ws/a"] });
+    const proc = Bun.spawn([exe, "beforeSubmitPrompt"], {
+      stdin: "pipe",
+      stdout: "pipe",
+      env: { ...process.env, ARMADA_SPOOL_DIR: dir },
+    });
+    proc.stdin.write(body);
+    const killer = setTimeout(() => proc.kill(), 3000);
+    const t0 = Date.now();
+    const code = await proc.exited;
+    clearTimeout(killer);
+    const ms = Date.now() - t0;
+    const out = await new Response(proc.stdout).text();
+    expect(code).toBe(0);
+    expect(ms).toBeLessThan(1500);
+    expect(out.trim()).toBe("{}");
+    const j = readSpoolJson(dir);
+    expect(j.__hook).toBe("beforeSubmitPrompt");
+    expect(j.__raw.conversation_id).toBe("c-open");
+    expect(j.__raw.prompt).toBe("你好");
   });
 });

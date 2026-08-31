@@ -221,6 +221,42 @@ describe("event ingest", () => {
     ws.close();
   });
 
+  test("beforeSubmitPrompt without runId binds Windows path variants of the same workspace", async () => {
+    const home = mkdtempSync(join(tmpdir(), "armada-ing-"));
+    hub = createServer({ port: 0, home });
+    const ws: WebSocket = await new Promise((res, rej) => {
+      const w = new WebSocket(`ws://127.0.0.1:${hub!.port}/ws?token=${hub!.token}`);
+      w.onopen = () => res(w); w.onerror = rej;
+    });
+    const winRoot = "c:\\Users\\PC\\Desktop\\work";
+    ws.send(JSON.stringify({
+      type: "register", machineId: "m-win", windowId: "w-1", name: "W", os: "win32",
+      openWorkspaces: [winRoot],
+    }));
+    await new Promise((r) => setTimeout(r, 100));
+    const api = (p: string, init?: RequestInit) => fetch(`http://127.0.0.1:${hub!.port}${p}`, {
+      ...init, headers: { "content-type": "application/json", authorization: `Bearer ${hub!.token}` },
+    });
+    const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-win", workspaceRoot: winRoot, prompt: "你好" }) });
+    const { run } = await r.json() as any;
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    await new Promise((r2) => setTimeout(r2, 80));
+    ws.send(JSON.stringify({
+      type: "run.event", source: "hook", hookEventName: "beforeSubmitPrompt",
+      payload: {
+        conversation_id: "cid-win",
+        workspace_roots: ["/C:/Users/PC/Desktop/work"],
+        prompt: "你好",
+      },
+      ts: Date.now(), seq: 1,
+    }));
+    await new Promise((r2) => setTimeout(r2, 120));
+    const after = (await (await api(`/api/runs/${run.id}`)).json()) as any;
+    expect(after.status).toBe("running");
+    expect(after.conversation_id).toBe("cid-win");
+    ws.close();
+  });
+
   test("beforeSubmitPrompt without runId does not bind a different prompt in the same workspace", async () => {
     const home = mkdtempSync(join(tmpdir(), "armada-ing-"));
     hub = createServer({ port: 0, home });

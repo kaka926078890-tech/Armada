@@ -9,6 +9,7 @@ import {
   extensionSupportsMultiRunPerWindow,
   OCCUPYING_STATUSES,
 } from "./concurrency";
+import { workspacePathIn } from "../../extension/src/workspacePath";
 
 const ACTIVE = ["created", "dispatched", "binding", "running"];
 const DISPATCH_TIMEOUT_MS = 30_000;
@@ -184,7 +185,7 @@ export class RunService {
       `SELECT * FROM runs WHERE machine_id=?1 ORDER BY created_at DESC`,
     ).all(machineId) as any[];
     return rows.find((r) => {
-      if (!workspaceRoots.includes(r.workspace_root)) return false;
+      if (!workspacePathIn(r.workspace_root, workspaceRoots)) return false;
       if (String(r.prompt ?? "").trim() !== want) return false;
       if (["dispatched", "binding"].includes(r.status)) return true;
       return this.isFalseBindTimeout(r) || this.isFalseDispatchTimeout(r);

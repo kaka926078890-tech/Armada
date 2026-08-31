@@ -23,6 +23,22 @@ describe("matchHookToPending", () => {
     }))).toBeNull();
   });
 
+  test("garbled ??? prompt binds the only waiting run as edited", () => {
+    const m = matchHookToPending([P], ev("beforeSubmitPrompt", 1_002_000, {
+      conversation_id: "c-other", workspace_roots: ["/ws/a"], prompt: "???",
+    }));
+    expect(m?.promptMatch).toBe("edited");
+    expect(m && "run" in m ? m.run.runId : null).toBe("r-1");
+  });
+
+  test("garbled ??? with two waiting runs does not guess", () => {
+    const a = { ...P, runId: "r-a", prompt: "你好" };
+    const b = { ...P, runId: "r-b", prompt: "样式优化一下", dispatchedAt: 999_000 };
+    expect(matchHookToPending([a, b], ev("beforeSubmitPrompt", 1_002_000, {
+      conversation_id: "c-x", workspace_roots: ["/ws/a"], prompt: "???",
+    }))).toBeNull();
+  });
+
   test("ignores events from other workspaces", () => {
     expect(matchHookToPending([P], ev("beforeSubmitPrompt", 1_001_000, { conversation_id: "c1", workspace_roots: ["/ws/b"], prompt: "hello" }))).toBeNull();
   });
@@ -58,7 +74,12 @@ describe("matchHookToPending", () => {
       { workspace_roots: ["/c/Users/PC/Desktop/work"] },
       ["c:\\Users\\PC\\Desktop\\work"],
     )).toBe(true);
+    expect(eventBelongsToWindow(
+      { workspace_roots: ["/C:/Users/PC/Desktop/work"] },
+      ["c:\\Users\\PC\\Desktop\\work"],
+    )).toBe(true);
   });
+
 
   test("matchHookToPending binds when hook roots use Windows path variants", () => {
     const win = { ...P, workspaceRoot: "c:\\Users\\PC\\Desktop\\work" };

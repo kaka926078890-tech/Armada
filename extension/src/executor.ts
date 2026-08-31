@@ -41,6 +41,10 @@ export interface ExecutorDeps {
    * 返回 false 或抛错时降级为剪贴板粘贴 + 人工回车。
    */
   autoSubmit?: (workspaceRoot: string, prompt: string) => Promise<boolean>;
+  /**
+   * Called when conversation_id is already known (followup) so we do not wait for hooks.
+   */
+  bindKnown?: (args: { runId: string; conversationId: string; prompt: string; workspaceRoot: string }) => void;
   /** Override path of the machine-wide CDP inject lock (tests / non-default home). */
   cdpLockPath?: string;
 }
@@ -173,6 +177,12 @@ export class Executor {
         workspaceRoot: msg.workspaceRoot,
         prompt: msg.prompt,
         dispatchedAt: Date.now(),
+      });
+      this.deps.bindKnown?.({
+        runId: msg.runId,
+        conversationId: msg.conversationId,
+        prompt: msg.prompt,
+        workspaceRoot: msg.workspaceRoot,
       });
       this.deps.send({ type: "run.ack", runId: msg.runId, status: "accepted" });
     } catch (e) {

@@ -1,19 +1,10 @@
-# Armada hooks installer (Windows): copy spooler + merge %USERPROFILE%\.cursor\hooks.json.
-# Does not require Python/Node. WinPS 5.1 JavaScriptSerializer keeps arrays as arrays.
+# Armada Windows installer: strip Armada hook entries from hooks.json.
+# Cursor Windows wraps every hook in a new PowerShell that cannot beat the 5s
+# timeout, so binding is done by the extension via agent-transcripts (0.4.8+).
+# Do not re-add armada-spool.exe/ps1/sh commands here.
 $ErrorActionPreference = 'Stop'
 
-$hooksDir = Join-Path $env:USERPROFILE '.cursor\hooks'
 $hooksJson = Join-Path $env:USERPROFILE '.cursor\hooks.json'
-$scriptSrc = Join-Path $PSScriptRoot 'armada-spool.ps1'
-$scriptDst = Join-Path $hooksDir 'armada-spool.ps1'
-
-if (-not (Test-Path -LiteralPath $scriptSrc)) {
-  Write-Error "missing $scriptSrc"
-  exit 1
-}
-
-New-Item -ItemType Directory -Force -Path $hooksDir | Out-Null
-Copy-Item -Force -LiteralPath $scriptSrc -Destination $scriptDst
 
 $events = @(
   'sessionStart', 'sessionEnd', 'beforeSubmitPrompt', 'preToolUse', 'postToolUse',
@@ -22,75 +13,55 @@ $events = @(
   'preCompact', 'stop'
 )
 
+if (-not (Test-Path -LiteralPath $hooksJson)) {
+  Write-Host "no hooks.json; nothing to strip. Install armada-agent >= 0.4.8 and Reload Window."
+  Write-Host "Daily: open workspaces with scripts\armada-cursor.ps1 (not the desktop icon)."
+  exit 0
+}
+
 Add-Type -AssemblyName System.Web.Extensions
 $ser = New-Object System.Web.Script.Serialization.JavaScriptSerializer
 $ser.MaxJsonLength = [int]::MaxValue
 
-$root = $null
-if (Test-Path -LiteralPath $hooksJson) {
-  $stamp = [int]([DateTime]::UtcNow - [DateTime]::SpecifyKind([DateTime]'1970-01-01', 'Utc')).TotalSeconds
-  Copy-Item -LiteralPath $hooksJson -Destination ($hooksJson + '.bak.' + $stamp)
-  try {
-    $rawText = [System.IO.File]::ReadAllText($hooksJson)
-    $root = $ser.DeserializeObject($rawText)
-  } catch {
-    $root = $null
-  }
-}
-if ($null -eq $root) {
-  $root = New-Object 'System.Collections.Generic.Dictionary[string,object]'
-  $root['version'] = 1
-}
+$stamp = [int]([DateTime]::UtcNow - [DateTime]::SpecifyKind([DateTime]'1970-01-01', 'Utc')).TotalSeconds
+Copy-Item -LiteralPath $hooksJson -Destination ($hooksJson + '.bak.' + $stamp)
 
+$rawText = [System.IO.File]::ReadAllText($hooksJson)
+$root = $ser.DeserializeObject($rawText)
+if ($null -eq $root) {
+  Write-Host "hooks.json empty; nothing to strip."
+  exit 0
+}
 if (-not $root.ContainsKey('hooks') -or $null -eq $root['hooks']) {
-  $root['hooks'] = New-Object 'System.Collections.Generic.Dictionary[string,object]'
+  Write-Host "hooks.json has no hooks object; nothing to strip."
+  exit 0
 }
 $hooks = $root['hooks']
 
 function Test-Ours($cmd) {
-  return ($cmd -is [string] -and ($cmd.Contains('armada-spool.ps1') -or $cmd.Contains('armada-spool.sh')))
+  return ($cmd -is [string] -and (
+    $cmd.Contains('armada-spool.ps1') -or
+    $cmd.Contains('armada-spool.sh') -or
+    $cmd.Contains('armada-spool.exe')
+  ))
 }
 
-function Hook-Command([string]$script, [string]$event) {
-  $posix = $script -replace '\\', '/'
-  return 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $posix + '" ' + $event
-}
-
+$removed = 0
 foreach ($event in $events) {
-  $lst = New-Object System.Collections.ArrayList
-  if ($hooks.ContainsKey($event) -and $null -ne $hooks[$event]) {
-    foreach ($e in @($hooks[$event])) { [void]$lst.Add($e) }
-  }
-  $want = Hook-Command $scriptDst $event
+  if (-not $hooks.ContainsKey($event) -or $null -eq $hooks[$event]) { continue }
   $kept = New-Object System.Collections.ArrayList
-  $hasExact = $false
-  foreach ($e in $lst) {
+  foreach ($e in @($hooks[$event])) {
     $cmd = $null
     if ($e -is [System.Collections.IDictionary]) { $cmd = $e['command'] }
     elseif ($e.command) { $cmd = $e.command }
-    if (Test-Ours $cmd) {
-      $timeout = 5
-      if ($e -is [System.Collections.IDictionary] -and $null -ne $e['timeout']) { $timeout = $e['timeout'] }
-      elseif ($e.timeout) { $timeout = $e.timeout }
-      if ($cmd -eq $want -and $timeout -eq 5) {
-        $hasExact = $true
-        [void]$kept.Add($e)
-      }
-    } else {
-      [void]$kept.Add($e)
-    }
-  }
-  if (-not $hasExact) {
-    $entry = New-Object 'System.Collections.Generic.Dictionary[string,object]'
-    $entry['command'] = $want
-    $entry['timeout'] = 5
-    [void]$kept.Add($entry)
+    if (Test-Ours $cmd) { $removed += 1; continue }
+    [void]$kept.Add($e)
   }
   $hooks[$event] = $kept.ToArray()
 }
 
 $utf8 = New-Object System.Text.UTF8Encoding $false
 [System.IO.File]::WriteAllText($hooksJson, $ser.Serialize($root), $utf8)
-Write-Host "hooks 已安装: $scriptDst"
-Write-Host "下一步: 在 Cursor 里 Install from VSIX（armada-agent ≥ 0.3.8）→ Ctrl+Shift+P → Armada: Configure Hub Connection → Reload Window"
-Write-Host "之后每天请用 scripts\armada-cursor.ps1 打开工作区，不要点图标启动。"
+Write-Host "stripped $removed Armada hook command(s). Binding uses transcripts (armada-agent >= 0.4.8)."
+Write-Host "Next: Install from VSIX, then Developer: Reload Window."
+Write-Host "Daily: open workspaces with scripts\armada-cursor.ps1 (not the desktop icon)."

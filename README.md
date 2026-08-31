@@ -21,7 +21,7 @@
                    │ spool JSON
                    ▼
             ┌──────────────┐
-            │    hooks     │  ~/.cursor/hooks → armada-spool.sh / .ps1
+            │    hooks     │  ~/.cursor/hooks → .sh (macOS) / .exe (Windows)
             │  Cursor 钩子 │
             └──────────────┘
 ```
@@ -90,7 +90,7 @@ cat ~/.armada/token
 
 5. **扩展包**（二选一）  
    - 受控端 clone 本仓后自己 `npx tsup && npx vsce package`；或  
-   - 中台打一次，把 `extension/armada-agent-*.vsix` 拷过去（请用 ≥ 0.3.8）：
+   - 中台打一次，把 `extension/armada-agent-*.vsix` 拷过去（Windows 受控请用 ≥ 0.4.3，绑定依赖 native spooler；**不必**为这个绑定问题升级中台 hub）：
 
 ```bash
 cd extension
@@ -133,7 +133,7 @@ curl -sS http://192.168.1.10:7380/api/health
 sh hooks/install.sh
 ```
 
-4. **安装扩展** `armada-agent` ≥ 0.3.8  
+4. **安装扩展** `armada-agent` ≥ 0.4.8（macOS 用 ≥ 0.4.0 即可；Windows 绑定必须 ≥ 0.4.8）  
    Cursor → 扩展 → **Install from VSIX** → `extension/armada-agent-*.vsix`  
    （没有现成 vsix 且这台有 Node 时：`cd extension && npx tsup && npx vsce package --no-dependencies`）
 
@@ -165,7 +165,7 @@ chmod +x scripts/armada-cursor.sh
 | 要带上 Windows 的 | 从哪来 | 说明 |
 | --- | --- | --- |
 | 本仓库 | `git clone` 本仓，或把整个 `Armada` 文件夹拷过去 | 用来跑 `hooks\install.ps1` 和启动器 |
-| `armada-agent-0.3.8.vsix` | 中台 `extension\armada-agent-0.3.8.vsix`，或 Windows 自己 `npm install && npx tsup && npx --yes @vscode/vsce package --no-dependencies`（必须 ≥ 0.3.8） | 0.3.7 的 hooks 命令含 `C:\`，Windows 上 Cursor 用 bash 跑 hook 会把路径吃掉，spool 一直是空的 |
+| `armada-agent-0.4.8.vsix` | 中台 `extension\armada-agent-0.4.8.vsix`，或 Windows 自己 `npm install && npx tsup && npx --yes @vscode/vsce package --no-dependencies`（必须 ≥ 0.4.8） | 0.4.7 能扫 transcript 绑定，但完成仍等 `stop` hook，Windows 上会一直「运行中」。0.4.8 用 `turn_ended` 合成 stop。**升级中台 hub 解决不了这个问题** |
 | 中台 IP + token | 中台 `ipconfig getifaddr en0` 和 `~/.armada/token` | token 不要换行；不要在 Windows 上新生成 |
 
 下面把 `192.168.1.10` 换成你的中台局域网 IP。所有命令都在 **PowerShell** 里执行，先 `cd` 到仓库根目录（里面能看到 `hooks` 和 `scripts` 文件夹）。
@@ -183,17 +183,18 @@ curl.exe -sS http://192.168.1.10:7380/api/health
 
 **2. 确认 Cursor 已安装并已登录**（用这台 Windows 自己的账号；中台不代登）。
 
-**3. 安装 hooks**（写入 `%USERPROFILE%\.cursor\hooks.json`，不覆盖别人已有的条目）
+**3. 卸掉旧 Armada hooks**（写入 `%USERPROFILE%\.cursor\hooks.json`，只删 `armada-spool*`，不覆盖别人的条目）
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File hooks\install.ps1
-# 期望打印: hooks 已安装: ...\armada-spool.ps1
+# 期望打印: stripped N Armada hook command(s)...
+# 0.4.7 起 Windows 绑定不再走 hook（Cursor 每次新拉 PowerShell，5s 内完不成）
 ```
 
 **4. 安装扩展**
 
 1. 先用图标正常打开一次 Cursor（这次还不用启动器）。
-2. 左侧扩展 → `...` → **Install from VSIX** → 选中 `armada-agent-0.3.8.vsix`。
+2. 左侧扩展 → `...` → **Install from VSIX** → 选中 `armada-agent-0.4.8.vsix`。
 3. 装完先不要关。
 
 **5. 指向中台**（`Ctrl+Shift+P` → 输入 `Armada: Configure Hub Connection`）
@@ -243,9 +244,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\armada-cursor.ps1 C:
 | `CONVERSATION_BUSY` | **中台**：该对话仍在运行，结束后才能续聊 |
 | `INJECT_SLOT_BUSY` | **中台**：正在向该机注入另一条任务，稍后再续聊 |
 | `WINDOW_BUSY` | **受控**：扩展 < 0.4.0 或关闭了同窗并行 |
-| 一直「待本机回车」但黄字是「绑定中」 | **受控**：IDE 已提交，中台没收到 hook。看 `%USERPROFILE%\.cursor\armada\spool` 是否为空；空则扩展必须 ≥ 0.3.8 并 Reload（旧命令里的 `C:\` 会被 bash 吃掉） |
+| 一直「待本机回车」但黄字是「绑定中」 | **受控**：Windows 须装 **armada-agent ≥ 0.4.8** 并 Reload。绑定扫 `agent-transcripts`，结束行 `turn_ended` 会合成 `stop`。Reload 后 `hooks.json` 里不应再有 `armada-spool`。日志：`run.bound ... via=transcript`，对话结束后 `stop synthesized`。**不要为此升级中台 hub** |
 | 一直「待本机回车」且蓝字是「已预填,待本机回车」 | **受控**：Cursor 不是启动器拉起的（Windows：托盘未退干净就又点了图标） |
-| 详情串了别的对话 | **受控**：扩展 ≥ 0.3.8，不要用旧 vsix |
+| 详情串了别的对话 | **受控**：扩展 ≥ 0.4.3，不要用旧 vsix |
 | Windows 启动器报「正在运行」 | **受控**：托盘 `^` 里 Cursor 右键退出，不是只关窗口 |
 
 ## 发送通道

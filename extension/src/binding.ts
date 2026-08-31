@@ -32,6 +32,14 @@ const TOLERANCE_MS = 5_000;
 
 const BIND_HOOKS = new Set(["beforeSubmitPrompt"]);
 
+/** PowerShell → native exe often turns CJK into "?" / U+FFFD. Recoverable only if one run is waiting. */
+export function isGarbledHookPrompt(prompt: string): boolean {
+  const t = prompt.trim();
+  if (!t) return false;
+  if (/^\?+$/.test(t)) return true;
+  return t.includes("\uFFFD");
+}
+
 export function eventBelongsToWindow(raw: Record<string, unknown> | undefined, openWorkspaces: string[]): boolean {
   const roots = Array.isArray(raw?.workspace_roots)
     ? (raw!.workspace_roots as unknown[]).filter((x): x is string => typeof x === "string")
@@ -71,7 +79,23 @@ export function matchHookToPending(pending: PendingRun[], ev: HookEventView): Ho
   if (hits.length > 1) {
     return { ambiguous: true as const, runs: hits };
   }
-  if (hits.length !== 1) return null;
+  if (hits.length !== 1) {
+    if (!isGarbledHookPrompt(prompt)) return null;
+    // PowerShell → native exe re-encodes CJK to "???". One waiting run in this
+    // workspace+time window is still unambiguous (CDP just submitted it).
+    const unique = pending.filter((p) =>
+      workspacePathIn(p.workspaceRoot, roots)
+      && evMs >= p.dispatchedAt - TOLERANCE_MS,
+    );
+    if (unique.length !== 1) return null;
+    const run = unique[0]!;
+    return {
+      run,
+      conversationId: cid,
+      transcriptPath: typeof ev.raw?.transcript_path === "string" ? ev.raw.transcript_path : null,
+      promptMatch: "edited",
+    };
+  }
   const run = hits[0]!;
   return {
     run,
