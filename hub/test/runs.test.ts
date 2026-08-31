@@ -320,6 +320,79 @@ describe("Run dispatch", () => {
     ws.close();
   });
 
+  test("cancel queued does not send run.cancel and promotes next", async () => {
+    const { ws, inbound, api } = await startWithExt({ extensionVersion: "0.4.0" });
+    const r1 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "a" }) });
+    const { run: a } = await r1.json() as any;
+    expect(a.status).toBe("dispatched");
+    const r2 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "b" }) });
+    const body2 = await r2.json() as any;
+    expect(body2.run.status).toBe("queued");
+    inbound.length = 0;
+    const cancel = await api(`/api/runs/${body2.run.id}/cancel`, { method: "POST" });
+    expect(cancel.status).toBe(200);
+    await new Promise((r) => setTimeout(r, 100));
+    expect(((await (await api(`/api/runs/${body2.run.id}`)).json()) as any).status).toBe("cancelled");
+    expect(inbound.filter((m) => m.type === "run.cancel")).toEqual([]);
+    expect(inbound.filter((m) => m.type === "run.start")).toEqual([]);
+    expect(((await (await api(`/api/runs/${a.id}`)).json()) as any).status).toBe("dispatched");
+    ws.close();
+  });
+
+  test("followup while another run is injecting → 409 INJECT_SLOT_BUSY without changing completed card", async () => {
+    const { ws, api } = await startWithExt({ extensionVersion: "0.4.0" });
+    const r1 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "a" }) });
+    const { run: a } = await r1.json() as any;
+    ws.send(JSON.stringify({ type: "run.ack", runId: a.id, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId: a.id, conversationId: "cid-a", transcriptPath: null, promptMatch: true }));
+    ws.send(JSON.stringify({ type: "run.event", runId: a.id, source: "hook", hookEventName: "stop", payload: { status: "completed" }, ts: Date.now(), seq: 1 }));
+    await new Promise((r) => setTimeout(r, 150));
+    expect(((await (await api(`/api/runs/${a.id}`)).json()) as any).status).toBe("completed");
+    const r2 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "b" }) });
+    const { run: b } = await r2.json() as any;
+    expect(b.status).toBe("dispatched");
+    const f = await api(`/api/runs/${a.id}/followup`, { method: "POST", body: JSON.stringify({ prompt: "续" }) });
+    expect(f.status).toBe(409);
+    expect(((await f.json()) as any).error).toBe("INJECT_SLOT_BUSY");
+    expect(((await (await api(`/api/runs/${a.id}`)).json()) as any).status).toBe("completed");
+    ws.close();
+  });
+
+  test("followup on running card → 409 CONVERSATION_BUSY", async () => {
+    const { ws, api } = await startWithExt({ extensionVersion: "0.4.0" });
+    const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "a" }) });
+    const { run } = await r.json() as any;
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId: run.id, conversationId: "cid-1", transcriptPath: null, promptMatch: true }));
+    await new Promise((r2) => setTimeout(r2, 100));
+    const f = await api(`/api/runs/${run.id}/followup`, { method: "POST", body: JSON.stringify({ prompt: "续" }) });
+    expect(f.status).toBe(409);
+    expect(((await f.json()) as any).error).toBe("CONVERSATION_BUSY");
+    ws.close();
+  });
+
+  test("followup after complete while slot free still reopens same card", async () => {
+    const { ws, inbound, api } = await startWithExt({ extensionVersion: "0.4.0" });
+    const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "a" }) });
+    const { run } = await r.json() as any;
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId: run.id, conversationId: "cid-1", transcriptPath: null, promptMatch: true }));
+    ws.send(JSON.stringify({ type: "run.event", runId: run.id, source: "hook", hookEventName: "stop", payload: { status: "completed" }, ts: Date.now(), seq: 1 }));
+    await new Promise((r2) => setTimeout(r2, 150));
+    inbound.length = 0;
+    const f = await api(`/api/runs/${run.id}/followup`, { method: "POST", body: JSON.stringify({ prompt: "继续" }) });
+    expect(f.status).toBe(200);
+    const { run: again } = await f.json() as any;
+    expect(again.id).toBe(run.id);
+    expect(again.status).toBe("dispatched");
+    expect(again.ended_at).toBeNull();
+    await new Promise((r2) => setTimeout(r2, 100));
+    expect(inbound.find((m) => m.type === "run.followup")).toMatchObject({
+      runId: run.id, conversationId: "cid-1", workspaceRoot: "/ws/a", prompt: "继续",
+    });
+    ws.close();
+  });
+
   test("followup reopens the same run (same card) and sends run.followup", async () => {
     const { ws, inbound, api } = await startWithExt();
     const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "a" }) });

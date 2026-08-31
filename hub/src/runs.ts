@@ -7,6 +7,7 @@ import {
   limitsFromEnv,
   normalizePrompt,
   extensionSupportsMultiRunPerWindow,
+  OCCUPYING_STATUSES,
 } from "./concurrency";
 
 const ACTIVE = ["created", "dispatched", "binding", "running"];
@@ -224,6 +225,11 @@ export class RunService {
   onCancelRequested(runId: string): { error?: string } {
     const run = this.get(runId);
     if (!run) return { error: "NOT_FOUND" };
+    if (run.status === "queued") {
+      this.setStatus(runId, "cancelled", { end_reason: "cancelled" }, "operator");
+      this.promoteNextQueued(run.machine_id);
+      return {};
+    }
     if (!ACTIVE.includes(run.status)) return { error: "ALREADY_TERMINAL" };
     this.cancelRequested.add(runId);
     if (run.conversation_id && run.window_id) {
@@ -270,9 +276,12 @@ export class RunService {
 
   onMachineOffline(machineId: string) {
     const rows = this.db.query(
-      `SELECT id FROM runs WHERE machine_id=?1 AND status IN ('dispatched','binding','running')`
+      `SELECT id, status FROM runs WHERE machine_id=?1 AND status IN ('queued','dispatched','binding','running')`
     ).all(machineId) as any[];
-    for (const r of rows) this.setStatus(r.id, "unknown", { end_reason: "MACHINE_OFFLINE" });
+    for (const r of rows) {
+      if (r.status === "queued") this.setStatus(r.id, "cancelled", { end_reason: "MACHINE_OFFLINE" });
+      else this.setStatus(r.id, "unknown", { end_reason: "MACHINE_OFFLINE" });
+    }
     this.promoteNextQueued(machineId);
   }
 
@@ -302,18 +311,15 @@ export class RunService {
 
   /**
    * 续聊:同一张卡片回到 dispatched,事件继续追加。不新建 child run。
-   * 其它机器上的活跃任务仍受 RUN_BUSY 约束(不含本 run)。
+   * 本卡仍占用中 → CONVERSATION_BUSY；注入槽被其它 run 占用 → INJECT_SLOT_BUSY。
    */
   followup(runId: string, prompt: string): { error?: string; run?: any } {
     const run = this.get(runId);
     if (!run) return { error: "NOT_FOUND" };
     if (!run.conversation_id) return { error: "NO_CONVERSATION" };
     if (run.end_reason === "OPERATOR_CLOSED") return { error: "CLOSED" };
-    if (ACTIVE.includes(run.status)) return { error: "ALREADY_ACTIVE" };
-    const busy = this.db.query(
-      "SELECT id FROM runs WHERE machine_id=?1 AND id!=?2 AND status IN (?3,?4,?5,?6)",
-    ).get(run.machine_id, run.id, ...ACTIVE);
-    if (busy) return { error: "RUN_BUSY" };
+    if ((OCCUPYING_STATUSES as readonly string[]).includes(run.status)) return { error: "CONVERSATION_BUSY" };
+    if (this.injectSlotCount(run.machine_id) > 0) return { error: "INJECT_SLOT_BUSY" };
     const win = this.registry.findWindowForWorkspace(run.machine_id, run.workspace_root);
     if (!win) return { error: "WORKSPACE_NOT_OPEN" };
 

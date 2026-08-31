@@ -129,7 +129,7 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
     }
     const { prompt } = await c.req.json();
     const { run, error } = runs.followup(parent.id, prompt);
-    if (error) return c.json({ error }, error === "RUN_BUSY" || error === "ALREADY_ACTIVE" || error === "NO_CONVERSATION" ? 409 : 400);
+    if (error) return c.json({ error }, httpStatusForRunError(error));
     return c.json({ run }, 200);
   });
   app.post("/api/runs/:id/close", (c) => {
