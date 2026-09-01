@@ -1,4 +1,5 @@
 mod attach;
+mod cursor;
 mod hub;
 
 use hub::HubState;
@@ -14,7 +15,10 @@ pub fn run() {
             hub::create_fleet,
             hub::join_fleet,
             hub::quit_owned_hub,
-            attach::local_attach
+            attach::local_attach,
+            cursor::cdp_status,
+            cursor::open_workspace,
+            cursor::pick_workspace
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -2,12 +2,16 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   attachBanner,
   boardUrl,
+  cdpStatusLabel,
+  cdpWatchdogCopy,
+  cdpZombieCopy,
   copiedToast,
   firstArmadaJoinUri,
   parsePastedJoin,
   selectShareCandidate,
   shareJoinUri,
   shouldShowCreate,
+  type CdpStatus,
   type LocalAttachView,
   type ShareCandidate,
 } from "../../desktop-core/src/index.ts";
@@ -59,6 +63,13 @@ function fleetErrorMessage(raw: string): string {
     ["hub-root-missing", "未找到 hub 源码"],
     ["bun-missing", "未找到 Bun"],
     ["token-missing", "缺少令牌"],
+    ["zombie", cdpZombieCopy()],
+    ["open-failed", cdpZombieCopy()],
+    ["path-not-absolute", "请选择绝对路径的文件夹"],
+    ["path-not-dir", "路径不是文件夹"],
+    ["launcher-missing", "未找到 Cursor 启动器脚本"],
+    ["cursor-missing", "找不到 Cursor"],
+    ["cancelled", "已取消"],
   ];
   for (const [code, msg] of codes) {
     if (blob.includes(code)) return msg;
@@ -216,4 +227,83 @@ window.addEventListener("DOMContentLoaded", () => {
   });
 
   wireDeepLink();
+  wireWorkspace();
 });
+
+const WATCHDOG_MS = 10_000;
+
+function cdpEl() {
+  return document.querySelector<HTMLParagraphElement>("#cdp-status");
+}
+
+function wsPathEl() {
+  return document.querySelector<HTMLInputElement>("#ws-path");
+}
+
+function showCdp(status: CdpStatus) {
+  const el = cdpEl();
+  if (el) el.textContent = `CDP: ${cdpStatusLabel(status)} (${status})`;
+}
+
+async function refreshCdp(): Promise<CdpStatus | null> {
+  try {
+    const status = await invoke<CdpStatus>("cdp_status");
+    showCdp(status);
+    return status;
+  } catch (e) {
+    setErr(fleetErrorMessage(String(e)));
+    return null;
+  }
+}
+
+function wireWorkspace() {
+  void refreshCdp();
+
+  document.querySelector("#pick-ws")?.addEventListener("click", () => {
+    void invoke<string>("pick_workspace")
+      .then((p) => {
+        const input = wsPathEl();
+        if (input) input.value = p;
+      })
+      .catch((e) => {
+        const msg = String(e);
+        if (!msg.toLowerCase().includes("cancelled")) setErr(fleetErrorMessage(msg));
+      });
+  });
+
+  document.querySelector("#open-ws")?.addEventListener("click", () => {
+    const absPath = (wsPathEl()?.value ?? "").trim();
+    if (!absPath) {
+      setErr("请选择工作区文件夹");
+      return;
+    }
+    setErr("");
+    void invoke("open_workspace", { absPath })
+      .then(async () => {
+        const status = await refreshCdp();
+        if (status === "zombie") setErr(cdpZombieCopy());
+        window.setTimeout(() => {
+          void invoke<CdpStatus>("cdp_status").then((s) => {
+            showCdp(s);
+            if (s !== "ready") setErr(cdpWatchdogCopy());
+          });
+        }, WATCHDOG_MS);
+      })
+      .catch((e) => {
+        const raw = String(e);
+        setErr(fleetErrorMessage(raw));
+        void refreshCdp();
+        if (raw.toLowerCase().includes("zombie")) {
+          const poll = window.setInterval(() => {
+            void invoke<CdpStatus>("cdp_status").then((s) => {
+              showCdp(s);
+              if (s !== "zombie") {
+                window.clearInterval(poll);
+                if (s === "absent") setErr("");
+              }
+            });
+          }, 1000);
+        }
+      });
+  });
+}

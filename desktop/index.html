@@ -29,6 +29,14 @@
         <ul id="share-candidates"></ul>
       </section>
       <div id="attach-bar" class="attach-bar" hidden></div>
+      <section id="workspace">
+        <p id="cdp-status">CDP: …</p>
+        <div class="row">
+          <input id="ws-path" placeholder="工作区绝对路径" autocomplete="off" />
+          <button type="button" id="pick-ws">选择文件夹</button>
+          <button type="button" id="open-ws">打开工作区</button>
+        </div>
+      </section>
       <pre id="err"></pre>
       <iframe id="board" title="Armada 看板" hidden></iframe>
     </main>
