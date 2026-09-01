@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, getToken, setToken } from "./api";
+import { consumeQueryToken, searchWithoutToken } from "./tokenBootstrap";
 import type { Machine } from "./types";
 import type { RunRow } from "./boardState";
 import {
@@ -14,12 +15,23 @@ const WS_KEY = "armada.selectedWorkspace.v1";
 const READ_KEY = "armada.readRuns.v1";
 const READ_SEEDED = "armada.readRuns.seeded.v1";
 
+function bootstrapTokenFromQuery(): string {
+  const current = getToken();
+  const { token, stripQuery } = consumeQueryToken(window.location.search, current);
+  if (token && token !== current) setToken(token);
+  if (stripQuery && typeof history !== "undefined" && window.location.search.includes("token=")) {
+    const next = `${window.location.pathname}${searchWithoutToken(window.location.search)}${window.location.hash}`;
+    history.replaceState(null, "", next);
+  }
+  return token || current;
+}
+
 function loadReadMap(): Record<string, number> {
   try { return JSON.parse(localStorage.getItem(READ_KEY) || "{}"); } catch { return {}; }
 }
 
 export default function App() {
-  const [authed, setAuthed] = useState(!!getToken());
+  const [authed, setAuthed] = useState(() => !!bootstrapTokenFromQuery());
   const [machines, setMachines] = useState<Machine[]>([]);
   const [runs, setRuns] = useState<RunRow[]>([]);
   const [hiddenRuns, setHiddenRuns] = useState<RunRow[]>([]);
