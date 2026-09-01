@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  afterOpenWorkspaceFeedback,
   cdpStatusLabel,
   cdpWatchdogCopy,
   cdpZombieCopy,
@@ -24,6 +25,20 @@ describe("shouldRunLauncher", () => {
     expect(shouldRunLauncher("ready")).toBe(false);
     expect(shouldRunLauncher("zombie")).toBe(false);
     expect(shouldRunLauncher("absent")).toBe(true);
+  });
+});
+
+describe("afterOpenWorkspaceFeedback", () => {
+  test("watchdog clears on ready, else watchdog copy", () => {
+    expect(afterOpenWorkspaceFeedback("watchdog", "ready")).toBe("");
+    expect(afterOpenWorkspaceFeedback("watchdog", "zombie")).toBe(cdpWatchdogCopy());
+    expect(afterOpenWorkspaceFeedback("watchdog", "absent")).toBe(cdpWatchdogCopy());
+  });
+
+  test("zombie-poll continues until user quits or CDP recovers", () => {
+    expect(afterOpenWorkspaceFeedback("zombie-poll", "zombie")).toBe("continue");
+    expect(afterOpenWorkspaceFeedback("zombie-poll", "absent")).toBe("clear");
+    expect(afterOpenWorkspaceFeedback("zombie-poll", "ready")).toBe("stop");
   });
 });
 

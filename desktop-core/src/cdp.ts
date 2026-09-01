@@ -30,3 +30,30 @@ export function cdpZombieCopy(): string {
 export function cdpWatchdogCopy(): string {
   return "单实例吞掉了调试口。请先完全退出 Cursor（Cmd+Q / 托盘 Exit），再用本应用打开工作区。";
 }
+
+export type AfterOpenWorkspaceZombiePoll = "continue" | "clear" | "stop";
+
+/**
+ * User-facing error after open_workspace:
+ * - watchdog: 10s after success; clear when ready, else watchdog copy.
+ * - zombie-poll: catch-path 1s poll after invoke rejected as zombie.
+ */
+export function afterOpenWorkspaceFeedback(
+  kind: "watchdog",
+  status: CdpStatus,
+): string;
+export function afterOpenWorkspaceFeedback(
+  kind: "zombie-poll",
+  status: CdpStatus,
+): AfterOpenWorkspaceZombiePoll;
+export function afterOpenWorkspaceFeedback(
+  kind: "watchdog" | "zombie-poll",
+  status: CdpStatus,
+): string | AfterOpenWorkspaceZombiePoll {
+  if (kind === "watchdog") {
+    return status === "ready" ? "" : cdpWatchdogCopy();
+  }
+  if (status === "zombie") return "continue";
+  if (status === "absent") return "clear";
+  return "stop";
+}

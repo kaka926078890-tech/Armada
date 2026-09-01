@@ -3,7 +3,7 @@ import {
   attachBanner,
   boardUrl,
   cdpStatusLabel,
-  cdpWatchdogCopy,
+  afterOpenWorkspaceFeedback,
   cdpZombieCopy,
   copiedToast,
   firstArmadaJoinUri,
@@ -231,6 +231,19 @@ window.addEventListener("DOMContentLoaded", () => {
 });
 
 const WATCHDOG_MS = 10_000;
+let openWsWatchdog: ReturnType<typeof setTimeout> | null = null;
+let openWsZombiePoll: ReturnType<typeof setInterval> | null = null;
+
+function clearOpenWorkspaceTimers() {
+  if (openWsWatchdog !== null) {
+    window.clearTimeout(openWsWatchdog);
+    openWsWatchdog = null;
+  }
+  if (openWsZombiePoll !== null) {
+    window.clearInterval(openWsZombiePoll);
+    openWsZombiePoll = null;
+  }
+}
 
 function cdpEl() {
   return document.querySelector<HTMLParagraphElement>("#cdp-status");
@@ -278,14 +291,15 @@ function wireWorkspace() {
       return;
     }
     setErr("");
+    clearOpenWorkspaceTimers();
     void invoke("open_workspace", { absPath })
       .then(async () => {
-        const status = await refreshCdp();
-        if (status === "zombie") setErr(cdpZombieCopy());
-        window.setTimeout(() => {
+        await refreshCdp();
+        openWsWatchdog = window.setTimeout(() => {
+          openWsWatchdog = null;
           void invoke<CdpStatus>("cdp_status").then((s) => {
             showCdp(s);
-            if (s !== "ready") setErr(cdpWatchdogCopy());
+            setErr(afterOpenWorkspaceFeedback("watchdog", s));
           });
         }, WATCHDOG_MS);
       })
@@ -294,13 +308,16 @@ function wireWorkspace() {
         setErr(fleetErrorMessage(raw));
         void refreshCdp();
         if (raw.toLowerCase().includes("zombie")) {
-          const poll = window.setInterval(() => {
+          openWsZombiePoll = window.setInterval(() => {
             void invoke<CdpStatus>("cdp_status").then((s) => {
               showCdp(s);
-              if (s !== "zombie") {
-                window.clearInterval(poll);
-                if (s === "absent") setErr("");
+              const action = afterOpenWorkspaceFeedback("zombie-poll", s);
+              if (action === "continue") return;
+              if (openWsZombiePoll !== null) {
+                window.clearInterval(openWsZombiePoll);
+                openWsZombiePoll = null;
               }
+              if (action === "clear") setErr("");
             });
           }, 1000);
         }
