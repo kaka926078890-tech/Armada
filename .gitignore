@@ -3,6 +3,16 @@ dist/
 *.vsix
 hub/web/dist/
 extension/hooks/
+<<<<<<< HEAD
 hooks/armada-spool.exe
 _spool_exe_test/
 _spool_exe_test2/
+=======
+.DS_Store
+desktop/src-tauri/resources/hub/
+desktop/src-tauri/resources/bun
+desktop/src-tauri/resources/scripts/
+desktop/src-tauri/resources/hooks/
+desktop/src-tauri/resources/*.vsix
+desktop/src-tauri/resources/bun.path
+>>>>>>> feat/desktop-shell

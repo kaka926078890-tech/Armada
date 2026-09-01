@@ -28,6 +28,7 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
   const sse = new SseHub();
   const limits = opts.concurrency ?? limitsFromEnv();
   const runs = new RunService(db, registry, sse, { limits });
+  registry.onMachinesChanged = () => sse.broadcast("*", { type: "machine.updated" });
 
   registry.inboundHandler = (ws, msg) => {
     const machineId = ws.data.machineId!;

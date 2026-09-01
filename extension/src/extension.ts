@@ -238,12 +238,16 @@ export function activate(context: vscode.ExtensionContext): void {
   };
   ensureHooks();
 
+  const sendHeartbeat = () =>
+    core.enqueue({ type: "heartbeat", openWorkspaces: workspaces(), activeRunIds: [...boundRuns.keys()] });
+
   const tailerActive = () => [...boundRuns.keys()];
   const spoolPoll = setInterval(() => {
     forwarder.poll();
     tryBindFromTranscripts();
   }, 1000);
   const transcriptPoll = setInterval(() => { for (const id of tailerActive()) tailer.poll(id); }, 2000);
+  context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(() => sendHeartbeat()));
 
   const connect = () => {
     if (disposed) return;
@@ -279,7 +283,8 @@ export function activate(context: vscode.ExtensionContext): void {
         case "registered":
           core.onRegistered();
           if (heartbeat) clearInterval(heartbeat);
-          heartbeat = setInterval(() => core.enqueue({ type: "heartbeat", openWorkspaces: workspaces(), activeRunIds: [...boundRuns.keys()] }), 15_000);
+          sendHeartbeat();
+          heartbeat = setInterval(sendHeartbeat, 15_000);
           forwarder.resendUnacked();
           break;
         case "run.start":

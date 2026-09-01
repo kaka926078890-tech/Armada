@@ -21,6 +21,7 @@ function PencilIcon() {
 
 export default function Sidebar({
   slots, machines, allRuns, selectedKey, onSelectWorkspace, readMap, onDispatch, onRename,
+  showDesktopActions, onOpenWorkspace, onGetShareLink,
 }: {
   slots: WorkspaceSlot[];
   machines: Machine[];
@@ -30,6 +31,9 @@ export default function Sidebar({
   readMap: Record<string, number>;
   onDispatch: () => void;
   onRename: (machineId: string, displayName: string) => void;
+  showDesktopActions?: boolean;
+  onOpenWorkspace?: () => void;
+  onGetShareLink?: () => void;
 }) {
   const groups = groupSlotsByMachine(slots);
   const selected = slots.find((s) => encodeWorkspaceKey(s.machineId, s.root) === selectedKey);
@@ -46,11 +50,29 @@ export default function Sidebar({
 
   return (
     <aside className="w-56 shrink-0 border-r border-zinc-800/80 flex flex-col bg-zinc-950">
+      {showDesktopActions ? (
+        <div className="mx-3 mt-3 mb-1.5 flex flex-col gap-1.5">
+          <button
+            type="button"
+            onClick={onOpenWorkspace}
+            className="px-3 py-2 rounded-md border border-zinc-700 hover:bg-zinc-900 text-[13px]"
+          >
+            打开工作区
+          </button>
+          <button
+            type="button"
+            onClick={onGetShareLink}
+            className="px-3 py-2 rounded-md border border-zinc-700 hover:bg-zinc-900 text-[13px]"
+          >
+            获取分享链接
+          </button>
+        </div>
+      ) : null}
       <button
         type="button"
         disabled={!canDispatch}
         onClick={onDispatch}
-        className="m-3 mb-1 px-3 py-2 rounded-md bg-sky-700 hover:bg-sky-600 text-[13px] disabled:opacity-40 disabled:hover:bg-sky-700"
+        className={`mx-3 mb-1 px-3 py-2 rounded-md bg-sky-700 hover:bg-sky-600 text-[13px] disabled:opacity-40 disabled:hover:bg-sky-700 ${showDesktopActions ? "mt-0" : "mt-3"}`}
       >
         + 派发任务
       </button>
