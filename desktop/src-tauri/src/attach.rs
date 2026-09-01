@@ -18,6 +18,14 @@ pub struct LocalAttachResult {
     pub vsix_path: Option<String>,
 }
 
+pub fn hub_url_to_write<'a>(overwrite: bool, existing_hub: Option<&'a str>, hub_url: &'a str) -> &'a str {
+    if overwrite {
+        hub_url
+    } else {
+        existing_hub.unwrap_or(hub_url)
+    }
+}
+
 pub fn should_write_cursor_settings(
     overwrite: bool,
     existing_hub: Option<&str>,
@@ -25,11 +33,7 @@ pub fn should_write_cursor_settings(
     hub_url: &str,
     token: &str,
 ) -> bool {
-    let hub_to_write = if overwrite {
-        hub_url
-    } else {
-        existing_hub.unwrap_or(hub_url)
-    };
+    let hub_to_write = hub_url_to_write(overwrite, existing_hub, hub_url);
     existing_hub != Some(hub_to_write) || existing_token != Some(token)
 }
 
@@ -106,11 +110,7 @@ pub fn apply_cursor_settings(
     ) {
         return Ok("ok");
     }
-    let hub_to_write = if overwrite {
-        hub_url
-    } else {
-        existing_hub.as_deref().unwrap_or(hub_url)
-    };
+    let hub_to_write = hub_url_to_write(overwrite, existing_hub.as_deref(), hub_url);
     let (json, _) = merge_armada_settings(&raw, hub_to_write, token)?;
     if let Some(parent) = settings_path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -184,6 +184,8 @@ fn cursor_cli_candidates() -> Vec<PathBuf> {
     v.push(PathBuf::from("/Applications/Cursor.app/Contents/Resources/app/bin/cursor"));
     if let Ok(local) = env::var("LOCALAPPDATA") {
         let local = PathBuf::from(local);
+        v.push(local.join("Programs/cursor/Cursor.exe"));
+        v.push(local.join("Programs/Cursor/Cursor.exe"));
         v.push(local.join("Programs/cursor/resources/app/bin/cursor.cmd"));
         v.push(local.join("Programs/Cursor/resources/app/bin/cursor.cmd"));
     }
@@ -203,25 +205,36 @@ fn try_install_vsix(cli: &Path, vsix: &Path) -> Option<(bool, String, String)> {
     ))
 }
 
-pub fn install_vsix(resource_dir: Option<&Path>) -> (&'static str, Option<String>) {
-    let roots = vsix_search_roots(resource_dir);
-    let Some(vsix) = find_vsix(&roots) else {
-        let shown = roots
-            .first()
-            .map(|p| p.join("armada-agent.vsix").display().to_string());
-        return ("manual-path-shown", shown);
-    };
+pub fn probe_vsix_cli_chain<F>(
+    vsix: &Path,
+    clis: &[PathBuf],
+    mut try_one: F,
+) -> (&'static str, Option<String>)
+where
+    F: FnMut(&Path, &Path) -> Option<(bool, String, String)>,
+{
     let path_s = vsix.display().to_string();
-    for cli in cursor_cli_candidates() {
-        if let Some((ok, stdout, stderr)) = try_install_vsix(&cli, &vsix) {
-            let status = classify_vsix_cli(ok, &stdout, &stderr);
-            if status == "manual-path-shown" {
-                return (status, Some(path_s));
-            }
+    for cli in clis {
+        let Some((ok, stdout, stderr)) = try_one(cli, vsix) else {
+            continue;
+        };
+        let status = classify_vsix_cli(ok, &stdout, &stderr);
+        if status != "manual-path-shown" {
             return (status, None);
         }
     }
     ("manual-path-shown", Some(path_s))
+}
+
+pub fn install_vsix_from_roots(roots: &[PathBuf]) -> (&'static str, Option<String>) {
+    let Some(vsix) = find_vsix(roots) else {
+        return ("manual-path-shown", None);
+    };
+    probe_vsix_cli_chain(&vsix, &cursor_cli_candidates(), try_install_vsix)
+}
+
+pub fn install_vsix(resource_dir: Option<&Path>) -> (&'static str, Option<String>) {
+    install_vsix_from_roots(&vsix_search_roots(resource_dir))
 }
 
 pub fn resolve_hooks_dir(resource_dir: Option<&Path>) -> Result<PathBuf, String> {
@@ -301,6 +314,10 @@ pub fn run_local_attach_gated(
     if !allowed {
         return Err("not-authorized".into());
     }
+    let raw = fs::read_to_string(settings_path).unwrap_or_default();
+    let (existing_hub, _) = existing_keys(&raw);
+    let hub_url_written =
+        hub_url_to_write(overwrite_cursor_hub_url, existing_hub.as_deref(), hub_url).to_string();
     let settings = match apply_cursor_settings(settings_path, hub_url, token, overwrite_cursor_hub_url) {
         Ok(_) => "ok",
         Err(_) => "failed",
@@ -321,7 +338,7 @@ pub fn run_local_attach_gated(
         vsix,
         hooks,
         settings,
-        hub_url_written: hub_url.to_string(),
+        hub_url_written,
         vsix_path,
     })
 }
@@ -495,13 +512,121 @@ mod tests {
     #[test]
     fn missing_vsix_is_manual_path_shown() {
         let dir = scratch("novsix");
-        let (status, path) = {
-            let found = find_vsix(&[dir.clone()]);
-            assert!(found.is_none());
-            ("manual-path-shown", dir.join("armada-agent.vsix"))
-        };
+        let (status, path) = install_vsix_from_roots(&[dir.clone()]);
         assert_eq!(status, "manual-path-shown");
-        assert!(path.ends_with("armada-agent.vsix"));
+        match path {
+            None => {}
+            Some(p) => {
+                assert!(
+                    !p.ends_with(".vsix"),
+                    "must not invent a vsix file path, got {p}"
+                );
+                assert_eq!(PathBuf::from(&p), dir);
+            }
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn vsix_cli_skips_missing_candidate_then_succeeds() {
+        let vsix = PathBuf::from("/tmp/real-armada.vsix");
+        let clis = [PathBuf::from("missing"), PathBuf::from("app-cursor")];
+        let mut seen = Vec::new();
+        let (status, path) = probe_vsix_cli_chain(&vsix, &clis, |cli, _| {
+            seen.push(cli.to_path_buf());
+            if cli == Path::new("missing") {
+                None
+            } else {
+                Some((true, "successfully installed".into(), String::new()))
+            }
+        });
+        assert_eq!(status, "ok");
+        assert!(path.is_none());
+        assert_eq!(seen.len(), 2);
+    }
+
+    #[test]
+    fn vsix_cli_does_not_stop_at_first_failing_process() {
+        let vsix = PathBuf::from("/tmp/real-armada.vsix");
+        let clis = [
+            PathBuf::from("path-cursor"),
+            PathBuf::from("app-cursor"),
+            PathBuf::from("win-cursor"),
+        ];
+        let mut seen = Vec::new();
+        let (status, path) = probe_vsix_cli_chain(&vsix, &clis, |cli, _| {
+            seen.push(cli.to_path_buf());
+            if cli == Path::new("path-cursor") {
+                Some((false, String::new(), "command failed".into()))
+            } else if cli == Path::new("app-cursor") {
+                Some((true, "successfully installed".into(), String::new()))
+            } else {
+                panic!("must not probe remaining candidates after success");
+            }
+        });
+        assert_eq!(status, "ok");
+        assert!(path.is_none());
+        assert_eq!(seen.len(), 2);
+    }
+
+    #[test]
+    fn vsix_cli_all_fail_is_manual_with_real_vsix_path() {
+        let vsix = PathBuf::from("/tmp/real-armada.vsix");
+        let clis = [PathBuf::from("a"), PathBuf::from("b")];
+        let (status, path) = probe_vsix_cli_chain(&vsix, &clis, |_, _| {
+            Some((false, String::new(), "nope".into()))
+        });
+        assert_eq!(status, "manual-path-shown");
+        assert_eq!(path.as_deref(), Some("/tmp/real-armada.vsix"));
+    }
+
+    #[test]
+    fn cursor_cli_candidates_follow_spec_order() {
+        let displays: Vec<String> = cursor_cli_candidates()
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect();
+        assert_eq!(displays[0], "cursor");
+        let app_i = displays
+            .iter()
+            .position(|s| s.contains("Cursor.app/Contents/Resources/app/bin/cursor"));
+        assert!(app_i.is_some(), "macOS Cursor.app CLI must be a candidate");
+        assert!(app_i.unwrap() > 0);
+        if let Ok(local) = env::var("LOCALAPPDATA") {
+            let exe = format!("{local}/Programs/cursor/Cursor.exe");
+            let cmd = format!("{local}/Programs/cursor/resources/app/bin/cursor.cmd");
+            let exe_i = displays.iter().position(|s| s == &exe || s.ends_with("Cursor.exe"));
+            let cmd_i = displays.iter().position(|s| s == &cmd || s.ends_with("cursor.cmd"));
+            assert!(exe_i.is_some() && cmd_i.is_some());
+            assert!(app_i.unwrap() < exe_i.unwrap());
+            assert!(exe_i.unwrap() < cmd_i.unwrap());
+        }
+    }
+
+    #[test]
+    fn overwrite_false_lan_input_reports_loopback_hub_url_written() {
+        let dir = scratch("hubwritten");
+        let path = dir.join("settings.json");
+        fs::write(
+            &path,
+            "{\n  \"armada.hubUrl\": \"127.0.0.1:7380\",\n  \"armada.token\": \"ab\"\n}\n",
+        )
+        .unwrap();
+        let r = run_local_attach_gated(
+            true,
+            Some(&dir),
+            "192.168.1.23:7380",
+            "ab",
+            false,
+            &path,
+            Some(&dir),
+        )
+        .unwrap();
+        assert_eq!(r.hub_url_written, "127.0.0.1:7380");
+        assert_eq!(r.settings, "ok");
+        let on_disk: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(on_disk["armada.hubUrl"], "127.0.0.1:7380");
         let _ = fs::remove_dir_all(&dir);
     }
 
