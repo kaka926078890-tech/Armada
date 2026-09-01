@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Pack-time sidecar for the Armada desktop shell (Tauri resources/).
+# Pack-time sidecar for the Armada desktop shell (Tauri $RESOURCE/).
 #
 # Copies hub *sources* (not a compiled hub binary) plus a Bun runtime so
 # create_fleet can spawn:
-#   resources/bun src/index.ts --lan
-# with cwd = resources/hub, so hub/src/index.ts still resolves ../web/dist.
+#   $RESOURCE/bun src/index.ts --lan
+# with cwd = $RESOURCE/hub, so hub/src/index.ts still resolves ../web/dist.
 #
 # GA / release builds MUST pin an official Bun binary for the *target* arch
 # (https://github.com/oven-sh/bun/releases). Copying $(which bun) is only
