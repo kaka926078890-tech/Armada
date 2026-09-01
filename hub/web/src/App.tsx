@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, getToken, setToken } from "./api";
-import { consumeQueryToken, searchWithoutToken } from "./tokenBootstrap";
+import { api, clearToken, getToken, setToken } from "./api";
+import { consumeQueryToken, isDesktopShell, searchWithoutToken } from "./tokenBootstrap";
+import { requestDesktop } from "./desktopBridge";
 import type { Machine } from "./types";
 import type { RunRow } from "./boardState";
 import {
@@ -147,6 +148,9 @@ export default function App() {
           if (typeof v === "string" && v.trim()) { setToken(v.trim()); setAuthDenied(false); setAuthed(true); }
         }}>
           <h1 className="text-xl font-bold">Armada 舰队指挥台</h1>
+          <p className="text-[12px] text-zinc-500 leading-5">
+            浏览器联调：先启动 hub，再粘贴 <code className="text-zinc-400">~/.armada/token</code>。创建/加入舰队请用桌面应用。
+          </p>
           {authDenied && <div className="text-sm text-red-400">令牌无效，请重新从 hub 机器复制（cat ~/.armada/token)</div>}
           <input name="token" type="password" placeholder="配对令牌" className="px-3 py-2 rounded bg-zinc-900 border border-zinc-700" />
           <button className="px-3 py-2 rounded bg-sky-600 hover:bg-sky-500">连接</button>
@@ -154,6 +158,17 @@ export default function App() {
       </div>
     );
   }
+
+  const desktop = isDesktopShell(window.location.search);
+  const leaveFleet = () => {
+    if (desktop) {
+      requestDesktop("leave-fleet");
+      return;
+    }
+    clearToken();
+    setAuthed(false);
+    setAuthDenied(false);
+  };
 
   const preset = selected ? { machineId: selected.machineId, workspaceRoot: selected.root } : null;
   const presetSlot = selected ? slots.find((s) => s.machineId === selected.machineId && s.root === selected.root) : null;
@@ -174,8 +189,15 @@ export default function App() {
         >
           {showArchived ? "返回看板" : `查看已隐藏${hiddenRuns.length ? ` ${hiddenRuns.length}` : ""}`}
         </button>
-        <span className="ml-auto text-[12px] text-zinc-500">
+        <span className="ml-auto flex items-center gap-3 text-[12px] text-zinc-500">
           在线 {machines.filter((m) => m.status === "online").length}/{machines.length}
+          <button
+            type="button"
+            onClick={leaveFleet}
+            className="text-zinc-400 hover:text-zinc-100 px-2 py-0.5 rounded border border-zinc-700"
+          >
+            退出中台
+          </button>
         </span>
       </header>
       <div className="flex flex-1 min-h-0">
@@ -188,6 +210,9 @@ export default function App() {
           readMap={readMap}
           onDispatch={() => { if (preset) setDispatchOpen(true); }}
           onRename={(id, displayName) => { api.renameMachine(id, displayName).then(refresh); }}
+          showDesktopActions={desktop}
+          onOpenWorkspace={() => requestDesktop("open-workspace")}
+          onGetShareLink={() => requestDesktop("get-share-link")}
         />
         <div className="flex-1 min-w-0 min-h-0 flex flex-col">
           {showArchived && (

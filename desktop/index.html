@@ -8,37 +8,55 @@
     <script type="module" src="/src/main.ts" defer></script>
   </head>
   <body>
-    <main class="container" id="shell">
-      <h1>Armada</h1>
-      <p id="windows-hint" hidden>Windows 请使用加入舰队</p>
-      <div class="row">
-        <button type="button" id="create">创建舰队</button>
-        <button type="button" id="join">加入舰队</button>
-      </div>
-      <form class="row" id="join-form">
-        <input id="join-uri" placeholder="armada://join?hub=host:port&amp;token=…" autocomplete="off" />
-        <button type="submit">加入</button>
-      </form>
-      <section id="share" hidden>
-        <label for="share-uri">分享链接（含令牌，复制一次即可）</label>
-        <div class="row">
-          <input id="share-uri" readonly />
-          <button type="button" id="copy">复制链接</button>
+    <main class="shell" id="landing">
+      <section class="card">
+        <div class="brand">
+          <div class="mark" aria-hidden="true">
+            <span></span><span></span><span></span>
+          </div>
+          <h1>Armada</h1>
+          <p class="lede">局域网 Cursor 舰队指挥台</p>
         </div>
-        <p id="copy-toast" class="toast" hidden></p>
-        <ul id="share-candidates"></ul>
-      </section>
-      <div id="attach-bar" class="attach-bar" hidden></div>
-      <section id="workspace">
-        <p id="cdp-status">CDP: …</p>
-        <div class="row">
-          <input id="ws-path" placeholder="工作区绝对路径" autocomplete="off" />
-          <button type="button" id="pick-ws">选择文件夹</button>
-          <button type="button" id="open-ws">打开工作区</button>
+
+        <p id="windows-hint" class="hint" hidden>Windows 请加入已有舰队，创建中台仅支持 macOS。</p>
+
+        <fieldset id="mode-field" class="segment">
+          <legend class="sr-only">选择入口</legend>
+          <div class="segment-track">
+            <label id="mode-create-label" class="segment-item">
+              <input type="radio" name="mode" value="create" id="mode-create" checked />
+              <span>创建舰队</span>
+            </label>
+            <label id="mode-join-label" class="segment-item">
+              <input type="radio" name="mode" value="join" id="mode-join" />
+              <span>加入舰队</span>
+            </label>
+          </div>
+        </fieldset>
+
+        <div id="create-pane" class="pane" hidden>
+          <p class="pane-copy">在本机启动或接入中台，随后进入看板派发任务。</p>
+          <button type="button" class="btn btn-primary" id="create">创建舰队</button>
         </div>
+
+        <div id="join-pane" class="pane" hidden>
+          <label class="field-label" for="join-uri">邀请链接</label>
+          <form id="join-form" class="join-form">
+            <input
+              id="join-uri"
+              class="field"
+              placeholder="armada://join?hub=host:port&amp;token=…"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <button type="submit" class="btn btn-primary" id="join">加入舰队</button>
+          </form>
+        </div>
+
+        <p id="err" class="err" hidden></p>
       </section>
-      <pre id="err"></pre>
-      <iframe id="board" title="Armada 看板" hidden></iframe>
     </main>
+    <iframe id="board" title="Armada 看板" hidden></iframe>
+    <p id="toast" class="toast" hidden></p>
   </body>
 </html>

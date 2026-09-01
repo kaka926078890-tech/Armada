@@ -1,33 +1,35 @@
 import { invoke } from "@tauri-apps/api/core";
 import {
-  attachBanner,
-  boardUrl,
-  cdpStatusLabel,
   afterOpenWorkspaceFeedback,
+  boardUrl,
   cdpZombieCopy,
   copiedToast,
+  defaultLandingMode,
   firstArmadaJoinUri,
   noShareIpCopy,
+  parseDesktopBoardRequest,
   parsePastedJoin,
   selectShareCandidate,
   shareJoinUri,
   shouldOpenBoardAfterCreate,
   shouldShowCreate,
   type CdpStatus,
+  type LandingMode,
   type LocalAttachView,
   type ShareCandidate,
 } from "../../desktop-core/src/index.ts";
 
-const errEl = () => document.querySelector<HTMLPreElement>("#err");
+const errEl = () => document.querySelector<HTMLParagraphElement>("#err");
 const uriEl = () => document.querySelector<HTMLInputElement>("#join-uri");
-const shareEl = () => document.querySelector<HTMLElement>("#share");
-const shareUriEl = () => document.querySelector<HTMLInputElement>("#share-uri");
-const candidatesEl = () => document.querySelector<HTMLUListElement>("#share-candidates");
-const toastEl = () => document.querySelector<HTMLParagraphElement>("#copy-toast");
-const attachEl = () => document.querySelector<HTMLDivElement>("#attach-bar");
+const toastEl = () => document.querySelector<HTMLParagraphElement>("#toast");
 const boardEl = () => document.querySelector<HTMLIFrameElement>("#board");
 const createBtn = () => document.querySelector<HTMLButtonElement>("#create");
 const windowsHint = () => document.querySelector<HTMLElement>("#windows-hint");
+const createPane = () => document.querySelector<HTMLElement>("#create-pane");
+const joinPane = () => document.querySelector<HTMLElement>("#join-pane");
+const modeCreate = () => document.querySelector<HTMLInputElement>("#mode-create");
+const modeJoin = () => document.querySelector<HTMLInputElement>("#mode-join");
+const modeCreateLabel = () => document.querySelector<HTMLElement>("#mode-create-label");
 
 type CreateFleetResult = {
   decision: "reuse-owned" | "spawn" | "attach";
@@ -46,9 +48,37 @@ type JoinFleetResult = {
   attach?: LocalAttachView | null;
 };
 
+let lastShareUri = "";
+
 function setErr(msg: string) {
   const el = errEl();
-  if (el) el.textContent = msg;
+  if (!el) return;
+  el.textContent = msg;
+  el.hidden = !msg;
+}
+
+function setBusy(busy: boolean) {
+  const create = createBtn();
+  const join = document.querySelector<HTMLButtonElement>("#join");
+  if (create) {
+    create.disabled = busy;
+    create.textContent = busy ? "正在创建…" : "创建舰队";
+  }
+  if (join) {
+    join.disabled = busy;
+    join.textContent = busy ? "正在加入…" : "加入舰队";
+  }
+}
+
+function showToast(msg: string, kind: "ok" | "err" = "ok") {
+  const el = toastEl();
+  if (!el || !msg) return;
+  el.hidden = false;
+  el.textContent = msg;
+  el.classList.toggle("toast-err", kind === "err");
+  window.setTimeout(() => {
+    if (el.textContent === msg) el.hidden = true;
+  }, 4000);
 }
 
 function fleetErrorMessage(raw: string): string {
@@ -81,28 +111,42 @@ function fleetErrorMessage(raw: string): string {
   return "操作失败";
 }
 
+function detectPlatform(): string {
+  const plat = (navigator.platform || "").toLowerCase();
+  if (plat.startsWith("mac")) return "macos";
+  if (plat.startsWith("win")) return "windows";
+  if (plat.includes("linux")) return "linux";
+  return platformFromUa(navigator.userAgent);
+}
+
 function platformFromUa(ua: string): string {
   const s = ua.toLowerCase();
+  if (s.includes("macintosh") || s.includes("mac os")) return "macos";
   if (s.includes("windows")) return "windows";
-  if (s.includes("mac")) return "macos";
   if (s.includes("linux")) return "linux";
   return "unknown";
 }
 
-function showAttach(attach: LocalAttachView | null | undefined) {
-  const el = attachEl();
-  if (!el) return;
-  const banner = attachBanner(attach);
-  if (banner.kind === "none") {
-    el.hidden = true;
-    el.textContent = "";
-    el.classList.remove("attach-red", "attach-info");
-    return;
+function applyLandingMode(mode: LandingMode) {
+  const create = modeCreate();
+  const join = modeJoin();
+  if (create) create.checked = mode === "create";
+  if (join) join.checked = mode === "join";
+  const cPane = createPane();
+  const jPane = joinPane();
+  if (cPane) cPane.hidden = mode !== "create";
+  if (jPane) jPane.hidden = mode !== "join";
+}
+
+function toastAttach(attach: LocalAttachView | null | undefined) {
+  if (!attach) return;
+  if (attach.settings === "ok") showToast("若 Cursor 已打开，请 Reload Window");
+  if (attach.vsix === "manual-path-shown" && attach.vsixPath) {
+    showToast(`请手工安装扩展：${attach.vsixPath}`, "err");
   }
-  el.hidden = false;
-  el.textContent = banner.lines.join("\n");
-  el.classList.toggle("attach-red", banner.kind === "red");
-  el.classList.toggle("attach-info", banner.kind === "info");
+  if (attach.hooks === "failed" || attach.settings === "failed") {
+    showToast("本机 Cursor 接入未完成", "err");
+  }
 }
 
 function openBoard(origin: string, token: string) {
@@ -117,47 +161,36 @@ function openBoard(origin: string, token: string) {
   window.location.assign(url);
 }
 
-function renderShare(candidates: ShareCandidate[], token: string) {
-  const section = shareEl();
-  const input = shareUriEl();
-  const list = candidatesEl();
-  if (!section || !input || !list) return;
+function leaveBoard() {
+  const frame = boardEl();
+  if (frame) {
+    frame.hidden = true;
+    frame.removeAttribute("src");
+    frame.src = "about:blank";
+  }
+  document.body.classList.remove("board-open");
+  setErr("");
+  setBusy(false);
+  void invoke("quit_owned_hub").catch(() => {
+    /* attach mode has no owned child */
+  });
+}
+
+function rememberShareFromCreate(candidates: ShareCandidate[], token: string) {
   const selected = selectShareCandidate(candidates);
-  if (!selected) {
-    input.value = "";
-    list.replaceChildren();
-    section.hidden = false;
-    const empty = document.createElement("li");
-    empty.textContent = "无局域网分享地址";
-    list.append(empty);
-    return;
-  }
-  input.value = shareJoinUri(selected.ipv4, token);
-  list.replaceChildren();
-  for (const c of candidates) {
-    const li = document.createElement("li");
-    const mark = c.maybeUnreachable ? " （可能无法访问）" : "";
-    li.textContent = `${c.name} ${c.ipv4}${mark}`;
-    if (c.ipv4 === selected.ipv4) li.classList.add("selected");
-    list.append(li);
-  }
-  section.hidden = false;
+  lastShareUri = selected ? shareJoinUri(selected.ipv4, token) : "";
 }
 
 async function copyShare() {
-  const input = shareUriEl();
-  const toast = toastEl();
-  const uri = input?.value ?? "";
-  if (!uri) return;
-  try {
-    await navigator.clipboard.writeText(uri);
-  } catch {
-    input?.select();
-    document.execCommand("copy");
+  if (!lastShareUri) {
+    showToast("暂无分享链接", "err");
+    return;
   }
-  if (toast) {
-    toast.hidden = false;
-    toast.textContent = copiedToast();
+  try {
+    await navigator.clipboard.writeText(lastShareUri);
+    showToast(copiedToast());
+  } catch {
+    showToast("复制失败，请重试", "err");
   }
 }
 
@@ -168,12 +201,15 @@ function joinFromPaste(raw: string) {
     return;
   }
   setErr("");
+  lastShareUri = parsed.uri;
+  setBusy(true);
   void invoke<JoinFleetResult>("join_fleet", { uri: parsed.uri })
     .then((r) => {
-      showAttach(r.attach);
+      toastAttach(r.attach);
       openBoard(r.webviewOrigin, r.token);
     })
-    .catch((e) => setErr(fleetErrorMessage(String(e))));
+    .catch((e) => setErr(fleetErrorMessage(String(e))))
+    .finally(() => setBusy(false));
 }
 
 function wireDeepLink() {
@@ -182,6 +218,7 @@ function wireDeepLink() {
       const apply = (urls: string[]) => {
         const raw = firstArmadaJoinUri(urls);
         if (!raw) return;
+        applyLandingMode("join");
         const input = uriEl();
         if (input) input.value = raw;
         joinFromPaste(raw);
@@ -196,46 +233,64 @@ function wireDeepLink() {
 }
 
 window.addEventListener("DOMContentLoaded", () => {
-  const platform = platformFromUa(navigator.userAgent);
-  if (!shouldShowCreate(platform)) {
+  const platform = detectPlatform();
+  const canCreate = shouldShowCreate(platform);
+  if (!canCreate) {
     const btn = createBtn();
     if (btn) btn.hidden = true;
     const hint = windowsHint();
     if (hint) hint.hidden = false;
+    const label = modeCreateLabel();
+    if (label) label.hidden = true;
+    const radio = modeCreate();
+    if (radio) radio.disabled = true;
+    document.querySelector("#mode-field")?.classList.add("single");
   }
 
-  const input = uriEl();
-  if (input) input.placeholder = shareJoinUri("192.168.1.23", "<token>");
+  applyLandingMode(defaultLandingMode(platform));
 
-  document.querySelector("#copy")?.addEventListener("click", () => {
-    void copyShare();
-  });
+  modeCreate()?.addEventListener("change", () => applyLandingMode("create"));
+  modeJoin()?.addEventListener("change", () => applyLandingMode("join"));
 
   document.querySelector("#create")?.addEventListener("click", () => {
     setErr("");
+    setBusy(true);
     void invoke<CreateFleetResult>("create_fleet")
       .then((r) => {
-        renderShare(r.shareCandidates, r.token);
-        showAttach(r.attach);
+        rememberShareFromCreate(r.shareCandidates, r.token);
+        toastAttach(r.attach);
         if (!shouldOpenBoardAfterCreate(r.shareCandidates)) {
           setErr(noShareIpCopy());
           return;
         }
         openBoard(r.webviewOrigin ?? "127.0.0.1:7380", r.token);
       })
-      .catch((e) => setErr(fleetErrorMessage(String(e))));
+      .catch((e) => setErr(fleetErrorMessage(String(e))))
+      .finally(() => setBusy(false));
   });
 
-  document.querySelector("#join")?.addEventListener("click", () => {
-    joinFromPaste(uriEl()?.value ?? "");
-  });
   document.querySelector("#join-form")?.addEventListener("submit", (e) => {
     e.preventDefault();
     joinFromPaste(uriEl()?.value ?? "");
   });
 
+  window.addEventListener("message", (e) => {
+    const frame = boardEl();
+    if (!frame || e.source !== frame.contentWindow) return;
+    const req = parseDesktopBoardRequest(e.data);
+    if (!req) return;
+    if (req === "get-share-link") {
+      void copyShare();
+      return;
+    }
+    if (req === "leave-fleet") {
+      leaveBoard();
+      return;
+    }
+    void openWorkspaceFromBoard();
+  });
+
   wireDeepLink();
-  wireWorkspace();
 });
 
 const WATCHDOG_MS = 10_000;
@@ -253,82 +308,43 @@ function clearOpenWorkspaceTimers() {
   }
 }
 
-function cdpEl() {
-  return document.querySelector<HTMLParagraphElement>("#cdp-status");
-}
-
-function wsPathEl() {
-  return document.querySelector<HTMLInputElement>("#ws-path");
-}
-
-function showCdp(status: CdpStatus) {
-  const el = cdpEl();
-  if (el) el.textContent = `CDP: ${cdpStatusLabel(status)} (${status})`;
-}
-
-async function refreshCdp(): Promise<CdpStatus | null> {
+async function openWorkspaceFromBoard() {
+  let absPath: string;
   try {
-    const status = await invoke<CdpStatus>("cdp_status");
-    showCdp(status);
-    return status;
+    absPath = await invoke<string>("pick_workspace");
   } catch (e) {
-    setErr(fleetErrorMessage(String(e)));
-    return null;
+    const msg = String(e);
+    if (msg.toLowerCase().includes("cancelled")) return;
+    showToast(fleetErrorMessage(msg), "err");
+    return;
   }
-}
-
-function wireWorkspace() {
-  void refreshCdp();
-
-  document.querySelector("#pick-ws")?.addEventListener("click", () => {
-    void invoke<string>("pick_workspace")
-      .then((p) => {
-        const input = wsPathEl();
-        if (input) input.value = p;
-      })
-      .catch((e) => {
-        const msg = String(e);
-        if (!msg.toLowerCase().includes("cancelled")) setErr(fleetErrorMessage(msg));
+  absPath = absPath.trim();
+  if (!absPath) return;
+  setErr("");
+  clearOpenWorkspaceTimers();
+  try {
+    await invoke("open_workspace", { absPath });
+    openWsWatchdog = window.setTimeout(() => {
+      openWsWatchdog = null;
+      void invoke<CdpStatus>("cdp_status").then((s) => {
+        const action = afterOpenWorkspaceFeedback("watchdog", s);
+        if (action && action !== "clear" && action !== "continue") showToast(action, "err");
       });
-  });
-
-  document.querySelector("#open-ws")?.addEventListener("click", () => {
-    const absPath = (wsPathEl()?.value ?? "").trim();
-    if (!absPath) {
-      setErr("请选择工作区文件夹");
-      return;
+    }, WATCHDOG_MS);
+  } catch (e) {
+    const raw = String(e);
+    showToast(fleetErrorMessage(raw), "err");
+    if (raw.toLowerCase().includes("zombie")) {
+      openWsZombiePoll = window.setInterval(() => {
+        void invoke<CdpStatus>("cdp_status").then((s) => {
+          const action = afterOpenWorkspaceFeedback("zombie-poll", s);
+          if (action === "continue") return;
+          if (openWsZombiePoll !== null) {
+            window.clearInterval(openWsZombiePoll);
+            openWsZombiePoll = null;
+          }
+        });
+      }, 1000);
     }
-    setErr("");
-    clearOpenWorkspaceTimers();
-    void invoke("open_workspace", { absPath })
-      .then(async () => {
-        await refreshCdp();
-        openWsWatchdog = window.setTimeout(() => {
-          openWsWatchdog = null;
-          void invoke<CdpStatus>("cdp_status").then((s) => {
-            showCdp(s);
-            setErr(afterOpenWorkspaceFeedback("watchdog", s));
-          });
-        }, WATCHDOG_MS);
-      })
-      .catch((e) => {
-        const raw = String(e);
-        setErr(fleetErrorMessage(raw));
-        void refreshCdp();
-        if (raw.toLowerCase().includes("zombie")) {
-          openWsZombiePoll = window.setInterval(() => {
-            void invoke<CdpStatus>("cdp_status").then((s) => {
-              showCdp(s);
-              const action = afterOpenWorkspaceFeedback("zombie-poll", s);
-              if (action === "continue") return;
-              if (openWsZombiePoll !== null) {
-                window.clearInterval(openWsZombiePoll);
-                openWsZombiePoll = null;
-              }
-              if (action === "clear") setErr("");
-            });
-          }, 1000);
-        }
-      });
-  });
+  }
 }

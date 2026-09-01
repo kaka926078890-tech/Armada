@@ -12,8 +12,26 @@ export type LocalAttachView = {
 
 export type AttachBanner = { kind: "red" | "info" | "none"; lines: string[] };
 
+export const DESKTOP_BOARD_SOURCE = "armada-desktop";
+
+export type DesktopBoardRequest = "open-workspace" | "get-share-link" | "leave-fleet";
+
+export type LandingMode = "create" | "join";
+
 export function boardUrl(webviewOrigin: string, token: string): string {
-  return `http://${webviewOrigin}/?token=${token}`;
+  return `http://${webviewOrigin}/?token=${token}&desktop=1`;
+}
+
+export function defaultLandingMode(platform: string): LandingMode {
+  return shouldShowCreate(platform) ? "create" : "join";
+}
+
+export function parseDesktopBoardRequest(data: unknown): DesktopBoardRequest | null {
+  if (!data || typeof data !== "object") return null;
+  const o = data as { source?: unknown; type?: unknown };
+  if (o.source !== DESKTOP_BOARD_SOURCE) return null;
+  if (o.type === "open-workspace" || o.type === "get-share-link" || o.type === "leave-fleet") return o.type;
+  return null;
 }
 
 export function shouldShowCreate(platform: string): boolean {

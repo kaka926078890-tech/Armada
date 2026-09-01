@@ -4,8 +4,10 @@ import {
   attachBanner,
   boardUrl,
   copiedToast,
+  defaultLandingMode,
   firstArmadaJoinUri,
   noShareIpCopy,
+  parseDesktopBoardRequest,
   parsePastedJoin,
   selectShareCandidate,
   shareJoinUri,
@@ -16,9 +18,9 @@ import {
 const token = "a".repeat(64);
 
 describe("boardUrl", () => {
-  test("opens hub origin with query token and no extra path", () => {
-    expect(boardUrl("127.0.0.1:7380", token)).toBe(`http://127.0.0.1:7380/?token=${token}`);
-    expect(boardUrl("192.168.1.23:7380", token)).toBe(`http://192.168.1.23:7380/?token=${token}`);
+  test("opens hub origin with query token, desktop flag, and no extra path", () => {
+    expect(boardUrl("127.0.0.1:7380", token)).toBe(`http://127.0.0.1:7380/?token=${token}&desktop=1`);
+    expect(boardUrl("192.168.1.23:7380", token)).toBe(`http://192.168.1.23:7380/?token=${token}&desktop=1`);
   });
 });
 
@@ -27,6 +29,27 @@ describe("shouldShowCreate", () => {
     expect(shouldShowCreate("windows")).toBe(false);
     expect(shouldShowCreate("macos")).toBe(true);
     expect(shouldShowCreate("linux")).toBe(true);
+  });
+});
+
+describe("defaultLandingMode", () => {
+  test("create on macOS, join only on windows", () => {
+    expect(defaultLandingMode("macos")).toBe("create");
+    expect(defaultLandingMode("windows")).toBe("join");
+  });
+});
+
+describe("parseDesktopBoardRequest", () => {
+  test("accepts open-workspace and get-share-link from the board iframe", () => {
+    expect(parseDesktopBoardRequest({ source: "armada-desktop", type: "open-workspace" })).toBe("open-workspace");
+    expect(parseDesktopBoardRequest({ source: "armada-desktop", type: "get-share-link" })).toBe("get-share-link");
+    expect(parseDesktopBoardRequest({ source: "armada-desktop", type: "leave-fleet" })).toBe("leave-fleet");
+  });
+
+  test("ignores other origins and types", () => {
+    expect(parseDesktopBoardRequest({ source: "other", type: "open-workspace" })).toBeNull();
+    expect(parseDesktopBoardRequest({ source: "armada-desktop", type: "dispatch" })).toBeNull();
+    expect(parseDesktopBoardRequest(null)).toBeNull();
   });
 });
 

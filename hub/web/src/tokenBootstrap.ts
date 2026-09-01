@@ -12,3 +12,8 @@ export function searchWithoutToken(search: string): string {
   const s = p.toString();
   return s ? `?${s}` : "";
 }
+
+export function isDesktopShell(search: string): boolean {
+  const q = search.startsWith("?") ? search.slice(1) : search;
+  return new URLSearchParams(q).get("desktop") === "1";
+}

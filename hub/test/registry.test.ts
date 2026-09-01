@@ -3,7 +3,7 @@ import { mkdtempSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { openDb } from "../src/db";
-import { Registry } from "../src/registry";
+import { Registry, workspaceListChanged } from "../src/registry";
 
 function setup() {
   const home = mkdtempSync(join(tmpdir(), "armada-reg-"));
@@ -49,5 +49,39 @@ describe("Registry", () => {
     expect(names).toContain("runs");
     expect(names).toContain("run_events");
     expect(names).toContain("audit");
+  });
+
+  test("workspaceListChanged is order-insensitive", () => {
+    expect(workspaceListChanged(["/a", "/b"], ["/b", "/a"])).toBe(false);
+    expect(workspaceListChanged(["/a"], ["/a", "/b"])).toBe(true);
+  });
+
+  test("register notifies machines changed even when union matches upsert", () => {
+    const { reg } = setup();
+    let n = 0;
+    reg.onMachinesChanged = () => { n += 1; };
+    const ws = { data: { registered: false } as { registered: boolean; connKey?: string; machineId?: string; windowId?: string }, send() {}, close() {} };
+    reg.onRegister(ws, {
+      machineId: "m-1", windowId: "w-1", name: "Mac-A", os: "darwin-arm64",
+      openWorkspaces: ["/ws/new"],
+    });
+    expect(n).toBe(1);
+    expect(JSON.parse(reg.getMachine("m-1")!.open_workspaces)).toEqual(["/ws/new"]);
+  });
+
+  test("heartbeat notifies only when workspace union changes", () => {
+    const { reg } = setup();
+    const ws = { data: { registered: false } as { registered: boolean; connKey?: string; machineId?: string; windowId?: string }, send() {}, close() {} };
+    reg.onRegister(ws, {
+      machineId: "m-1", windowId: "w-1", name: "Mac-A", os: "darwin-arm64",
+      openWorkspaces: ["/ws/a"],
+    });
+    let n = 0;
+    reg.onMachinesChanged = () => { n += 1; };
+    reg.onHeartbeat(ws, { openWorkspaces: ["/ws/a"] });
+    expect(n).toBe(0);
+    reg.onHeartbeat(ws, { openWorkspaces: ["/ws/a", "/ws/b"] });
+    expect(n).toBe(1);
+    expect(JSON.parse(reg.getMachine("m-1")!.open_workspaces)).toEqual(["/ws/a", "/ws/b"]);
   });
 });

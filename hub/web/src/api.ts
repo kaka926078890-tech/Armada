@@ -1,5 +1,6 @@
 export function getToken(): string { return localStorage.getItem("armada.token") ?? ""; }
 export function setToken(t: string): void { localStorage.setItem("armada.token", t); }
+export function clearToken(): void { localStorage.removeItem("armada.token"); }
 
 async function req(path: string, init?: RequestInit): Promise<Response> {
   const r = await fetch(path, { ...init, headers: { "content-type": "application/json", authorization: `Bearer ${getToken()}`, ...(init?.headers ?? {}) } });

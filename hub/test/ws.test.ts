@@ -127,4 +127,32 @@ describe("WS registry", () => {
     ws1.close();
     ws2.close();
   });
+
+  test("register pushes machine.updated on the board SSE stream", async () => {
+    const h = start();
+    const res = await fetch(`http://127.0.0.1:${h.port}/api/events?token=${h.token}`);
+    expect(res.ok).toBe(true);
+    const reader = res.body!.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    const sawUpdated = (async () => {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) return false;
+        buf += dec.decode(value, { stream: true });
+        if (buf.includes("machine.updated")) return true;
+      }
+    })();
+    const ws = await connect(h.port, h.token);
+    const p = nextMessage(ws);
+    ws.send(JSON.stringify(REG));
+    await p;
+    const found = await Promise.race([
+      sawUpdated,
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 1000)),
+    ]);
+    await reader.cancel().catch(() => {});
+    ws.close();
+    expect(found).toBe(true);
+  });
 });
