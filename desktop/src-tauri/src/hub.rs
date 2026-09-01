@@ -10,6 +10,7 @@ use std::{env, thread};
 
 const HUB_PORT: u16 = 7380;
 const JOIN_MUST_NOT_SPAWN: &str = "join-must-not-spawn";
+const MACOS_CURSOR_EXE: &str = "/Applications/Cursor.app/Contents/MacOS/Cursor";
 const DENY_IFACE: &[&str] = &[
     "utun", "tun", "ppp", "docker", "veth", "br", "bridge", "vmnet", "vnic", "tailscale", "wg",
 ];
@@ -204,6 +205,44 @@ pub fn is_denied_iface(name: &str) -> bool {
     DENY_IFACE.iter().any(|p| n == *p || n.starts_with(p))
 }
 
+pub fn host_os() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "macos"
+    } else if cfg!(windows) {
+        "windows"
+    } else {
+        "linux"
+    }
+}
+
+pub fn require_macos_create(os: &str) -> Result<(), &'static str> {
+    if os == "macos" {
+        Ok(())
+    } else {
+        Err("create-macos-only")
+    }
+}
+
+pub fn require_share_candidates(candidates: &[ShareCandidate]) -> Result<(), &'static str> {
+    if candidates.is_empty() {
+        Err("no-share-ip")
+    } else {
+        Ok(())
+    }
+}
+
+pub fn require_cursor_app_at(path: &Path) -> Result<(), &'static str> {
+    if path.is_file() {
+        Ok(())
+    } else {
+        Err("cursor-missing")
+    }
+}
+
+fn require_cursor_app() -> Result<(), String> {
+    require_cursor_app_at(Path::new(MACOS_CURSOR_EXE)).map_err(|e| e.to_string())
+}
+
 pub fn pick_share_candidates(ifaces: &[(String, String)]) -> Vec<ShareCandidate> {
     let mut out: Vec<ShareCandidate> = Vec::new();
     for (name, ipv4) in ifaces {
@@ -394,10 +433,18 @@ pub fn resolve_hub_root_from(
 
 fn find_bun(resource_dir: Option<&Path>) -> Result<PathBuf, String> {
     let env_bun = env::var("ARMADA_DESKTOP_BUN").ok();
-    find_bun_from(env_bun.as_deref().map(Path::new), resource_dir)
+    find_bun_from(
+        env_bun.as_deref().map(Path::new),
+        resource_dir,
+        cfg!(debug_assertions),
+    )
 }
 
-fn find_bun_from(env_bun: Option<&Path>, resource_dir: Option<&Path>) -> Result<PathBuf, String> {
+fn find_bun_from(
+    env_bun: Option<&Path>,
+    resource_dir: Option<&Path>,
+    allow_system_bun: bool,
+) -> Result<PathBuf, String> {
     if let Some(p) = env_bun {
         return Ok(p.to_path_buf());
     }
@@ -413,6 +460,9 @@ fn find_bun_from(env_bun: Option<&Path>, resource_dir: Option<&Path>) -> Result<
                 return Ok(p);
             }
         }
+    }
+    if !allow_system_bun {
+        return Err("bun-missing".into());
     }
     let out = Command::new("which")
         .arg("bun")
@@ -546,22 +596,31 @@ fn finish_create(
     token: String,
     kind: ApplyKind,
     pid: Option<u32>,
-) -> CreateFleetResult {
+) -> Result<CreateFleetResult, String> {
     let existing = crate::attach::read_existing_hub_url();
     let overwrite = existing.as_deref() != Some("127.0.0.1:7380");
     let attach = crate::attach::run_local_attach(resource, "127.0.0.1:7380", &token, overwrite, None).ok();
-    CreateFleetResult {
+    let share_candidates = pick_share_candidates(&list_ifaces());
+    require_share_candidates(&share_candidates).map_err(|e| e.to_string())?;
+    Ok(CreateFleetResult {
         decision: decision_label(kind),
         token,
-        share_candidates: pick_share_candidates(&list_ifaces()),
+        share_candidates,
         owned_hub_pid: pid,
         webview_origin: "127.0.0.1:7380".into(),
         attach,
-    }
+    })
 }
 
 #[tauri::command]
 pub fn create_fleet(app: tauri::AppHandle, state: tauri::State<'_, HubState>) -> Result<CreateFleetResult, String> {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (&app, &state);
+        return Err("create-macos-only".into());
+    }
+    require_macos_create(host_os()).map_err(|e| e.to_string())?;
+    require_cursor_app()?;
     let resource = resource_dir_from(&app);
     let mut owned = state.owned.lock().map_err(|_| "lock".to_string())?;
     let alive = owned_alive(&mut owned);
@@ -585,17 +644,17 @@ pub fn create_fleet(app: tauri::AppHandle, state: tauri::State<'_, HubState>) ->
                 "spawn-timeout".to_string()
             })?;
             let pid = owned.as_ref().map(|c| c.id());
-            Ok(finish_create(resource.as_deref(), token, kind, pid))
+            finish_create(resource.as_deref(), token, kind, pid)
         }
         ApplyKind::Attach => {
             *owned = None;
             let token = load_token_from_home().ok_or_else(|| "token-missing".to_string())?;
-            Ok(finish_create(resource.as_deref(), token, kind, None))
+            finish_create(resource.as_deref(), token, kind, None)
         }
         ApplyKind::ReuseOwned => {
             let token = load_token_from_home().ok_or_else(|| "token-missing".to_string())?;
             let pid = owned.as_ref().map(|c| c.id());
-            Ok(finish_create(resource.as_deref(), token, kind, pid))
+            finish_create(resource.as_deref(), token, kind, pid)
         }
     }
 }
@@ -850,7 +909,7 @@ mod tests {
         let dir = scratch("bun");
         write_fake_hub(&dir.join("hub"));
         fs::write(dir.join("bun"), b"fake-bun\n").unwrap();
-        let got = find_bun_from(None, Some(&dir)).unwrap();
+        let got = find_bun_from(None, Some(&dir), false).unwrap();
         assert_eq!(got, dir.join("bun"));
         let _ = fs::remove_dir_all(&dir);
     }
@@ -860,8 +919,55 @@ mod tests {
         let dir = scratch("bun-env");
         fs::write(dir.join("bun"), b"bundled\n").unwrap();
         let custom = dir.join("custom-bun");
-        let got = find_bun_from(Some(&custom), Some(&dir)).unwrap();
+        let got = find_bun_from(Some(&custom), Some(&dir), true).unwrap();
         assert_eq!(got, custom);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn create_rejects_windows_and_linux() {
+        assert_eq!(require_macos_create("windows"), Err("create-macos-only"));
+        assert_eq!(require_macos_create("linux"), Err("create-macos-only"));
+        assert_eq!(require_macos_create("macos"), Ok(()));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn create_cfg_rejects_non_macos_host() {
+        assert_eq!(require_macos_create(host_os()), Err("create-macos-only"));
+    }
+
+    #[test]
+    fn empty_rfc1918_candidates_block_create() {
+        let rows = pick_share_candidates(&[
+            ("lo0".into(), "127.0.0.1".into()),
+            ("docker0".into(), "172.17.0.1".into()),
+            ("utun4".into(), "10.8.0.2".into()),
+            ("en0".into(), "8.8.8.8".into()),
+        ]);
+        assert!(rows.is_empty());
+        assert_eq!(require_share_candidates(&rows), Err("no-share-ip"));
+        let ok = pick_share_candidates(&[("en0".into(), "192.168.1.23".into())]);
+        assert_eq!(require_share_candidates(&ok), Ok(()));
+    }
+
+    #[test]
+    fn bun_release_errors_when_bundled_missing() {
+        let dir = scratch("bun-rel");
+        write_fake_hub(&dir.join("hub"));
+        let err = find_bun_from(None, Some(&dir), false).unwrap_err();
+        assert_eq!(err, "bun-missing");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cursor_app_gate_requires_binary() {
+        let missing = PathBuf::from("/no/such/Applications/Cursor.app/Contents/MacOS/Cursor");
+        assert_eq!(require_cursor_app_at(&missing), Err("cursor-missing"));
+        let dir = scratch("cursor-app");
+        let p = dir.join("Cursor");
+        fs::write(&p, b"fake\n").unwrap();
+        assert_eq!(require_cursor_app_at(&p), Ok(()));
         let _ = fs::remove_dir_all(&dir);
     }
 }

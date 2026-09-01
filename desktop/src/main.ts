@@ -7,9 +7,11 @@ import {
   cdpZombieCopy,
   copiedToast,
   firstArmadaJoinUri,
+  noShareIpCopy,
   parsePastedJoin,
   selectShareCandidate,
   shareJoinUri,
+  shouldOpenBoardAfterCreate,
   shouldShowCreate,
   type CdpStatus,
   type LocalAttachView,
@@ -58,6 +60,8 @@ function fleetErrorMessage(raw: string): string {
     ["foreign-armada", "7380 上已有另一份 Armada（令牌不同）"],
     ["port-busy", "7380 被其他程序占用"],
     ["join-must-not-spawn", "加入不会在本机启动中台"],
+    ["create-macos-only", "创建舰队仅支持 macOS，请使用加入舰队"],
+    ["no-share-ip", noShareIpCopy()],
     ["not-authorized", "鉴权失败，未写入 Cursor 设置"],
     ["spawn-timeout", "中台启动超时"],
     ["hub-root-missing", "未找到 hub 源码"],
@@ -213,6 +217,10 @@ window.addEventListener("DOMContentLoaded", () => {
       .then((r) => {
         renderShare(r.shareCandidates, r.token);
         showAttach(r.attach);
+        if (!shouldOpenBoardAfterCreate(r.shareCandidates)) {
+          setErr(noShareIpCopy());
+          return;
+        }
         openBoard(r.webviewOrigin ?? "127.0.0.1:7380", r.token);
       })
       .catch((e) => setErr(fleetErrorMessage(String(e))));

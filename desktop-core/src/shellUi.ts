@@ -20,6 +20,14 @@ export function shouldShowCreate(platform: string): boolean {
   return platform !== "windows";
 }
 
+export function shouldOpenBoardAfterCreate(candidates: ShareCandidate[]): boolean {
+  return candidates.length > 0;
+}
+
+export function noShareIpCopy(): string {
+  return "未检测到局域网地址。请连接到局域网，或手工填写分享地址（不会自动复制到剪贴板）。";
+}
+
 export function selectShareCandidate(candidates: ShareCandidate[]): ShareCandidate | null {
   return candidates[0] ?? null;
 }

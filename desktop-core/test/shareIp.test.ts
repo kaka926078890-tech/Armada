@@ -34,3 +34,13 @@ test("marks non en/eth as maybeUnreachable", () => {
   const rows = pickShareCandidates([{ name: "wlan0", ipv4: "192.168.0.5" }]);
   expect(rows[0]?.maybeUnreachable).toBe(true);
 });
+
+test("zero rfc1918 candidates after deny/loopback/public", () => {
+  expect(
+    pickShareCandidates([
+      { name: "lo0", ipv4: "127.0.0.1" },
+      { name: "docker0", ipv4: "172.17.0.1" },
+      { name: "en0", ipv4: "8.8.8.8" },
+    ]),
+  ).toEqual([]);
+});

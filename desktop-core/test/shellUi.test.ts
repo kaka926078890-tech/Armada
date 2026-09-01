@@ -5,9 +5,11 @@ import {
   boardUrl,
   copiedToast,
   firstArmadaJoinUri,
+  noShareIpCopy,
   parsePastedJoin,
   selectShareCandidate,
   shareJoinUri,
+  shouldOpenBoardAfterCreate,
   shouldShowCreate,
 } from "../src/shellUi";
 
@@ -25,6 +27,23 @@ describe("shouldShowCreate", () => {
     expect(shouldShowCreate("windows")).toBe(false);
     expect(shouldShowCreate("macos")).toBe(true);
     expect(shouldShowCreate("linux")).toBe(true);
+  });
+});
+
+describe("create completion gates", () => {
+  test("zero RFC1918 candidates do not open the board", () => {
+    expect(shouldOpenBoardAfterCreate([])).toBe(false);
+    expect(
+      shouldOpenBoardAfterCreate([{ ipv4: "192.168.1.23", name: "en0", maybeUnreachable: false }]),
+    ).toBe(true);
+  });
+
+  test("zero-candidate copy tells operator to use LAN or hand-fill, not clipboard", () => {
+    const copy = noShareIpCopy();
+    expect(copy).toMatch(/局域网/);
+    expect(copy).toMatch(/手工|手填/);
+    expect(copy.toLowerCase()).not.toMatch(/clipboard|剪贴板已/);
+    expect(copy).toMatch(/剪贴板/);
   });
 });
 
