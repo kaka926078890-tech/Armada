@@ -3,7 +3,7 @@
   "private": true,
   "workspaces": ["hub", "extension", "hub/web"],
   "scripts": {
-    "test": "bun test hub/test extension/test hooks/test hub/web/test",
+    "test": "bun test hub/test extension/test hooks/test hub/web/test desktop-core/test",
     "dev:hub": "bun run hub/src/index.ts"
   }
 }
