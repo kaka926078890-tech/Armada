@@ -361,10 +361,18 @@ fn load_token_from_home() -> Option<String> {
 }
 
 pub fn resolve_hub_root(resource_dir: Option<&Path>) -> Result<PathBuf, String> {
-    if let Ok(p) = env::var("ARMADA_DESKTOP_HUB_ROOT") {
-        let pb = PathBuf::from(p);
-        if pb.join("src/index.ts").is_file() {
-            return Ok(pb);
+    let env_root = env::var("ARMADA_DESKTOP_HUB_ROOT").ok();
+    resolve_hub_root_from(env_root.as_deref().map(Path::new), resource_dir)
+}
+
+/// Dev: ARMADA_DESKTOP_HUB_ROOT. Packaged: resource_dir/hub (src/index.ts + web/dist).
+pub fn resolve_hub_root_from(
+    env_root: Option<&Path>,
+    resource_dir: Option<&Path>,
+) -> Result<PathBuf, String> {
+    if let Some(p) = env_root {
+        if p.join("src/index.ts").is_file() {
+            return Ok(p.to_path_buf());
         }
         return Err("hub-root-missing".into());
     }
@@ -385,20 +393,25 @@ pub fn resolve_hub_root(resource_dir: Option<&Path>) -> Result<PathBuf, String> 
 }
 
 fn find_bun(resource_dir: Option<&Path>) -> Result<PathBuf, String> {
-    if let Ok(p) = env::var("ARMADA_DESKTOP_BUN") {
-        return Ok(PathBuf::from(p));
+    let env_bun = env::var("ARMADA_DESKTOP_BUN").ok();
+    find_bun_from(env_bun.as_deref().map(Path::new), resource_dir)
+}
+
+fn find_bun_from(env_bun: Option<&Path>, resource_dir: Option<&Path>) -> Result<PathBuf, String> {
+    if let Some(p) = env_bun {
+        return Ok(p.to_path_buf());
     }
     if let Some(dir) = resource_dir {
+        let bundled = dir.join("bun");
+        if bundled.is_file() {
+            return Ok(bundled);
+        }
         let recorded = dir.join("bun.path");
         if let Ok(s) = fs::read_to_string(&recorded) {
             let p = PathBuf::from(s.trim());
             if p.is_file() {
                 return Ok(p);
             }
-        }
-        let sibling = dir.join("bun");
-        if sibling.is_file() {
-            return Ok(sibling);
         }
     }
     let out = Command::new("which")
@@ -418,9 +431,8 @@ fn find_bun(resource_dir: Option<&Path>) -> Result<PathBuf, String> {
 fn spawn_hub(resource_dir: Option<&Path>) -> Result<Child, String> {
     let hub_root = resolve_hub_root(resource_dir)?;
     let bun = find_bun(resource_dir)?;
-    let entry = hub_root.join("src/index.ts");
     let mut cmd = Command::new(bun);
-    cmd.arg(entry)
+    cmd.arg("src/index.ts")
         .arg("--lan")
         .current_dir(&hub_root)
         .stdin(Stdio::null())
@@ -777,5 +789,79 @@ mod tests {
         let j = serde_json::to_value(&joined).unwrap();
         assert!(j["attach"].is_null());
         assert_eq!(j["webviewOrigin"], "192.168.1.23:7380");
+    }
+
+    fn scratch(label: &str) -> PathBuf {
+        let p = env::temp_dir().join(format!(
+            "armada-t13-{label}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    fn write_fake_hub(root: &Path) {
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::create_dir_all(root.join("web/dist")).unwrap();
+        fs::write(root.join("src/index.ts"), "// sidecar entry\n").unwrap();
+        fs::write(root.join("web/dist/index.html"), "<!doctype html>\n").unwrap();
+    }
+
+    #[test]
+    fn hub_root_env_wins_over_bundled_resources() {
+        let dir = scratch("env");
+        let env_hub = dir.join("dev-hub");
+        let res = dir.join("resources");
+        write_fake_hub(&env_hub);
+        write_fake_hub(&res.join("hub"));
+        let got = resolve_hub_root_from(Some(&env_hub), Some(&res)).unwrap();
+        assert_eq!(got, env_hub);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn hub_root_uses_bundled_resources_when_env_unset() {
+        let dir = scratch("res");
+        write_fake_hub(&dir.join("hub"));
+        let got = resolve_hub_root_from(None, Some(&dir)).unwrap();
+        assert_eq!(got, dir.join("hub"));
+        assert!(got.join("src/index.ts").is_file());
+        assert!(got.join("web/dist/index.html").is_file());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn hub_root_env_missing_index_is_error_not_resource_fallback() {
+        let dir = scratch("missing");
+        let env_hub = dir.join("empty-dev");
+        fs::create_dir_all(&env_hub).unwrap();
+        write_fake_hub(&dir.join("resources/hub"));
+        let err = resolve_hub_root_from(Some(&env_hub), Some(&dir.join("resources"))).unwrap_err();
+        assert_eq!(err, "hub-root-missing");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn bun_prefers_bundled_binary_over_which() {
+        let dir = scratch("bun");
+        write_fake_hub(&dir.join("hub"));
+        fs::write(dir.join("bun"), b"fake-bun\n").unwrap();
+        let got = find_bun_from(None, Some(&dir)).unwrap();
+        assert_eq!(got, dir.join("bun"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn bun_env_wins_over_bundled() {
+        let dir = scratch("bun-env");
+        fs::write(dir.join("bun"), b"bundled\n").unwrap();
+        let custom = dir.join("custom-bun");
+        let got = find_bun_from(Some(&custom), Some(&dir)).unwrap();
+        assert_eq!(got, custom);
+        let _ = fs::remove_dir_all(&dir);
     }
 }

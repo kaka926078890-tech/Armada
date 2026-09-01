@@ -4,3 +4,9 @@ dist/
 hub/web/dist/
 extension/hooks/
 .DS_Store
+desktop/src-tauri/resources/hub/
+desktop/src-tauri/resources/bun
+desktop/src-tauri/resources/scripts/
+desktop/src-tauri/resources/hooks/
+desktop/src-tauri/resources/*.vsix
+desktop/src-tauri/resources/bun.path
