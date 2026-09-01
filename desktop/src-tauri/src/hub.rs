@@ -62,6 +62,8 @@ pub struct CreateFleetResult {
     pub token: String,
     pub share_candidates: Vec<ShareCandidate>,
     pub owned_hub_pid: Option<u32>,
+    pub webview_origin: String,
+    pub attach: Option<crate::attach::LocalAttachResult>,
 }
 
 #[derive(Serialize)]
@@ -71,6 +73,7 @@ pub struct JoinFleetResult {
     pub token: String,
     pub cursor_hub_url: String,
     pub join_self: bool,
+    pub attach: Option<crate::attach::LocalAttachResult>,
 }
 
 pub fn decide_occupancy(
@@ -534,12 +537,14 @@ fn finish_create(
 ) -> CreateFleetResult {
     let existing = crate::attach::read_existing_hub_url();
     let overwrite = existing.as_deref() != Some("127.0.0.1:7380");
-    let _ = crate::attach::run_local_attach(resource, "127.0.0.1:7380", &token, overwrite, None);
+    let attach = crate::attach::run_local_attach(resource, "127.0.0.1:7380", &token, overwrite, None).ok();
     CreateFleetResult {
         decision: decision_label(kind),
         token,
         share_candidates: pick_share_candidates(&list_ifaces()),
         owned_hub_pid: pid,
+        webview_origin: "127.0.0.1:7380".into(),
+        attach,
     }
 }
 
@@ -608,18 +613,20 @@ pub fn join_fleet(app: tauri::AppHandle, uri: String, _state: tauri::State<'_, H
                 true
             };
             let resource = resource_dir_from(&app);
-            let _ = crate::attach::run_local_attach(
+            let attach = crate::attach::run_local_attach(
                 resource.as_deref(),
                 &cursor_hub_url,
                 &token,
                 overwrite,
                 None,
-            );
+            )
+            .ok();
             Ok(JoinFleetResult {
                 webview_origin,
                 token,
                 cursor_hub_url,
                 join_self,
+                attach,
             })
         }
         ApplyKind::Spawn => Err(JOIN_MUST_NOT_SPAWN.into()),
@@ -737,5 +744,38 @@ mod tests {
             health_name: Some("armada-hub".into()),
             auth: Auth::Ok,
         }));
+    }
+
+    #[test]
+    fn create_and_join_results_surface_attach() {
+        let attach = crate::attach::LocalAttachResult {
+            vsix: "manual-path-shown",
+            hooks: "failed",
+            settings: "ok",
+            hub_url_written: "127.0.0.1:7380".into(),
+            vsix_path: Some("/tmp/armada-agent.vsix".into()),
+        };
+        let created = CreateFleetResult {
+            decision: "spawn",
+            token: "ab".into(),
+            share_candidates: vec![],
+            owned_hub_pid: None,
+            webview_origin: "127.0.0.1:7380".into(),
+            attach: Some(attach),
+        };
+        let v = serde_json::to_value(&created).unwrap();
+        assert_eq!(v["webviewOrigin"], "127.0.0.1:7380");
+        assert_eq!(v["attach"]["hooks"], "failed");
+        assert_eq!(v["attach"]["vsixPath"], "/tmp/armada-agent.vsix");
+        let joined = JoinFleetResult {
+            webview_origin: "192.168.1.23:7380".into(),
+            token: "ab".into(),
+            cursor_hub_url: "192.168.1.23:7380".into(),
+            join_self: false,
+            attach: None,
+        };
+        let j = serde_json::to_value(&joined).unwrap();
+        assert!(j["attach"].is_null());
+        assert_eq!(j["webviewOrigin"], "192.168.1.23:7380");
     }
 }

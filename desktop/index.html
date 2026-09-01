@@ -8,17 +8,29 @@
     <script type="module" src="/src/main.ts" defer></script>
   </head>
   <body>
-    <main class="container">
+    <main class="container" id="shell">
       <h1>Armada</h1>
+      <p id="windows-hint" hidden>Windows 请使用加入舰队</p>
       <div class="row">
         <button type="button" id="create">创建舰队</button>
         <button type="button" id="join">加入舰队</button>
       </div>
       <form class="row" id="join-form">
         <input id="join-uri" placeholder="armada://join?hub=host:port&amp;token=…" autocomplete="off" />
-        <button type="submit">解析</button>
+        <button type="submit">加入</button>
       </form>
+      <section id="share" hidden>
+        <label for="share-uri">分享链接（含令牌，复制一次即可）</label>
+        <div class="row">
+          <input id="share-uri" readonly />
+          <button type="button" id="copy">复制链接</button>
+        </div>
+        <p id="copy-toast" class="toast" hidden></p>
+        <ul id="share-candidates"></ul>
+      </section>
+      <div id="attach-bar" class="attach-bar" hidden></div>
       <pre id="err"></pre>
+      <iframe id="board" title="Armada 看板" hidden></iframe>
     </main>
   </body>
 </html>
