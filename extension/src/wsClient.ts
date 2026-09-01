@@ -7,6 +7,9 @@ export class ReconnectPolicy {
 function msgKey(m: object): string | null {
   const t = (m as { type?: string }).type;
   if (t === "run.ack" || t === "run.bound") return `${t}:${(m as { runId?: string }).runId ?? ""}`;
+  if (t === "run.event" && (m as { hookEventName?: string }).hookEventName === "stop") {
+    return `stop:${(m as { runId?: string }).runId ?? ""}`;
+  }
   return null;
 }
 

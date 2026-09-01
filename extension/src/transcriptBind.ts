@@ -159,4 +159,32 @@ export function stopPayloadFromTranscriptLine(line: string): { status: string; e
   return { status: "completed" };
 }
 
-export const TRANSCRIPT_BIND_WINDOW_MS = 20_000;
+/** Last complete jsonl record. Null if the turn is still open (user started another). */
+export function stopFromTranscriptFileContent(content: string): { status: string; error?: string } | null {
+  const lines = content.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  if (lines.length === 0) return null;
+  return stopPayloadFromTranscriptLine(lines[lines.length - 1]!);
+}
+
+/**
+ * How long after dispatch we keep scanning for the first jsonl so we can
+ * bind the run.
+ *
+ * Hub BIND_TIMEOUT_MS is 60s (`hub/src/runs.ts`). Cursor on Windows often
+ * writes the first jsonl *after* CDP inject returns — observed 22s on a
+ * busy window. A 20s local window therefore stopped scanning while hub
+ * still waited, and the card went 异常 with BIND_TIMEOUT even though the
+ * file eventually appeared.
+ *
+ * Keep this >= hub timeout so we don't give up first. Extra 10s past
+ * hub BIND_TIMEOUT lets a late run.bound resurrect the unknown card
+ * (hub `onRunBound` treats BIND_TIMEOUT as recoverable).
+ */
+export const TRANSCRIPT_BIND_WINDOW_MS = 70_000;
+
+export function isWithinTranscriptBindWindow(
+  dispatchedAt: number,
+  now: number = Date.now(),
+): boolean {
+  return now - dispatchedAt <= TRANSCRIPT_BIND_WINDOW_MS;
+}

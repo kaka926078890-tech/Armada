@@ -12,7 +12,10 @@ import { TranscriptTailer } from "./transcript";
 import { Executor, CancelWatcher } from "./executor";
 import { createCdpSubmitter } from "./cdpInject";
 import { mergeHooks, hooksDriftHash, spoolScriptName, shouldInstallArmadaHooks } from "./hooksInstall";
-import { collectTranscriptViews, matchTranscriptToPending, stopPayloadFromTranscriptLine, transcriptsDirForWorkspace, TRANSCRIPT_BIND_WINDOW_MS } from "./transcriptBind";
+import { collectTranscriptViews, matchTranscriptToPending, stopPayloadFromTranscriptLine, stopFromTranscriptFileContent, transcriptsDirForWorkspace, isWithinTranscriptBindWindow } from "./transcriptBind";
+import { TranscriptDirWatcher, debounceLeading, watchTranscriptDir, watchFileSize, TRANSCRIPT_WATCHDOG_MS, TRANSCRIPT_WATCH_DEBOUNCE_MS } from "./transcriptWatch";
+import { createExtSeq } from "./extSeq";
+import { hubRunsNeedingTranscriptFollow } from "./adoptRuns";
 
 let client: { dispose: () => void } | null = null;
 
@@ -60,15 +63,18 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const pendingRuns: PendingRun[] = [];
   const boundRuns = new Map<string, { conversationId: string; prompt: string }>();
+  const boundPaths = new Map<string, string>();
+  const stopSent = new Set<string>();
   const childConversations = new Map<string, string>();
+  const sizeWatches = new Map<string, () => void>();
   const cancelWatcher = new CancelWatcher();
 
   const cdpSubmit = config.autoSubmit ? createCdpSubmitter({ port: config.cdpPort, log }) : null;
   log(`autoSubmit=${config.autoSubmit} cdpPort=${config.cdpPort}`);
 
-  // transcript 事件走独立高段,避免与 spool seq 冲突
-  let extSeq = 1_000_000_000;
-  const nextExtSeq = () => { extSeq += 1; return extSeq; };
+  // transcript 事件走独立高段,避免与 spool seq 冲突。
+  // 每次启动从时钟播种:不可再从 1e9 重数,否则 UNIQUE(machine_id, ext_seq) 把 stop 当重复丢掉。
+  const nextExtSeq = createExtSeq();
 
   const tailer = new TranscriptTailer({
     readFile: (path, offset) => {
@@ -85,26 +91,44 @@ export function activate(context: vscode.ExtensionContext): void {
     onLine: (runId, line) => {
       let payload: any = { __raw_line: line };
       try { payload = JSON.parse(line); } catch { /* 保留原始行 */ }
+      if (payload?.role === "user") stopSent.delete(runId);
       core.enqueue({ type: "run.event", runId, source: "transcript", payload, ts: Date.now(), seq: nextExtSeq() });
       // Windows: stop hook 同样被 PS 5s 杀掉。合成 hub 已有的 stop 契约，不改 ingest。
       // 不 detach：续聊同一 path 才能保住 offset，避免重放旧 turn_ended 把 followup 立刻收口。
       if (process.platform !== "win32") return;
       const stop = stopPayloadFromTranscriptLine(line);
       if (!stop) return;
-      const owner = boundRuns.get(runId);
-      core.enqueue({
-        type: "run.event",
-        runId,
-        conversationId: owner?.conversationId,
-        source: "hook",
-        hookEventName: "stop",
-        payload: { ...stop, conversation_id: owner?.conversationId },
-        ts: Date.now(),
-        seq: nextExtSeq(),
-      });
-      log(`stop synthesized ${runId} status=${stop.status}`);
+      emitSynthesizedStop(runId, stop);
     },
   });
+
+  const emitSynthesizedStop = (runId: string, stop: { status: string; error?: string }): void => {
+    if (stopSent.has(runId)) return;
+    stopSent.add(runId);
+    const owner = boundRuns.get(runId);
+    core.enqueue({
+      type: "run.event",
+      runId,
+      conversationId: owner?.conversationId,
+      source: "hook",
+      hookEventName: "stop",
+      payload: { ...stop, conversation_id: owner?.conversationId },
+      ts: Date.now(),
+      seq: nextExtSeq(),
+    });
+    log(`stop synthesized ${runId} status=${stop.status}`);
+  };
+
+  const maybeCompleteFromDisk = (runId: string): void => {
+    if (process.platform !== "win32") return;
+    const path = boundPaths.get(runId);
+    if (!path) return;
+    let content = "";
+    try { content = readFileSync(path, "utf8"); } catch { return; }
+    const stop = stopFromTranscriptFileContent(content);
+    if (stop) emitSynthesizedStop(runId, stop);
+    else stopSent.delete(runId);
+  };
 
   const applyBinding = (match: BindingMatch, via: string): void => {
     const idx = pendingRuns.indexOf(match.run);
@@ -115,9 +139,17 @@ export function activate(context: vscode.ExtensionContext): void {
       : null;
     core.enqueue({ type: "run.bound", runId: match.run.runId, conversationId: match.conversationId, transcriptPath: path, promptMatch: match.promptMatch });
     log(`run.bound ${match.run.runId} cid=${match.conversationId} via=${via}`);
+    watchWorkspaceTranscripts(match.run.workspaceRoot);
     if (path) {
+      boundPaths.set(match.run.runId, path);
       tailer.attach(match.run.runId, path);
       tailer.poll(match.run.runId);
+      sizeWatches.get(match.run.runId)?.();
+      sizeWatches.set(match.run.runId, watchFileSize(path, () => {
+        tailer.poll(match.run.runId);
+        maybeCompleteFromDisk(match.run.runId);
+      }));
+      maybeCompleteFromDisk(match.run.runId);
     }
   };
 
@@ -127,7 +159,7 @@ export function activate(context: vscode.ExtensionContext): void {
     const files = [];
     const seen = new Set<string>();
     for (const run of pendingRuns) {
-      if (Date.now() - run.dispatchedAt > TRANSCRIPT_BIND_WINDOW_MS) continue;
+      if (!isWithinTranscriptBindWindow(run.dispatchedAt)) continue;
       const dir = transcriptsDirForWorkspace(homedir(), run.workspaceRoot);
       if (!dir || seen.has(dir)) continue;
       seen.add(dir);
@@ -144,10 +176,32 @@ export function activate(context: vscode.ExtensionContext): void {
     if (match) applyBinding(match, "transcript");
   };
 
+  const onTranscriptDisk = debounceLeading(() => {
+    tryBindFromTranscripts();
+    for (const id of boundRuns.keys()) tailer.poll(id);
+  }, TRANSCRIPT_WATCH_DEBOUNCE_MS);
+
+  const dirWatch = new TranscriptDirWatcher({
+    watch: watchTranscriptDir,
+    onEvent: () => onTranscriptDisk(),
+  });
+
+  const watchWorkspaceTranscripts = (workspaceRoot: string): void => {
+    const dir = transcriptsDirForWorkspace(homedir(), workspaceRoot);
+    if (!dir) return;
+    const n = dirWatch.watched().length;
+    dirWatch.ensure(dir);
+    if (dirWatch.watched().length !== n) log(`transcript watch ${dir}`);
+  };
+
   const executor = new Executor({
     globalState: context.globalState,
     send: (m) => { log(`=> ${JSON.stringify(m)}`); core.enqueue(m); },
-    addPending: (run) => { pendingRuns.push(run); },
+    addPending: (run) => {
+      pendingRuns.push(run);
+      watchWorkspaceTranscripts(run.workspaceRoot);
+      tryBindFromTranscripts();
+    },
     removePending: (runId) => {
       const i = pendingRuns.findIndex((r) => r.runId === runId);
       if (i >= 0) pendingRuns.splice(i, 1);
@@ -198,7 +252,11 @@ export function activate(context: vscode.ExtensionContext): void {
         ?? runIdForHook(boundRuns, childConversations, cid);
       if (ev.hook === "stop" && runId) {
         const owner = boundRuns.get(runId);
-        if (owner && owner.conversationId === cid) tailer.detach(runId);
+        if (owner && owner.conversationId === cid) {
+          tailer.detach(runId);
+          sizeWatches.get(runId)?.();
+          sizeWatches.delete(runId);
+        }
       }
       core.enqueue({
         type: "run.event", runId, conversationId: cid,
@@ -241,13 +299,51 @@ export function activate(context: vscode.ExtensionContext): void {
   const sendHeartbeat = () =>
     core.enqueue({ type: "heartbeat", openWorkspaces: workspaces(), activeRunIds: [...boundRuns.keys()] });
 
-  const tailerActive = () => [...boundRuns.keys()];
   const spoolPoll = setInterval(() => {
     forwarder.poll();
     tryBindFromTranscripts();
+    for (const run of pendingRuns) watchWorkspaceTranscripts(run.workspaceRoot);
   }, 1000);
-  const transcriptPoll = setInterval(() => { for (const id of tailerActive()) tailer.poll(id); }, 2000);
+  const transcriptPoll = setInterval(() => {
+    tryBindFromTranscripts();
+    for (const id of boundRuns.keys()) {
+      tailer.poll(id);
+      maybeCompleteFromDisk(id);
+    }
+  }, TRANSCRIPT_WATCHDOG_MS);
   context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(() => sendHeartbeat()));
+
+  const adoptFromHub = async (): Promise<void> => {
+    try {
+      const res = await fetch(`http://${config.hubUrl}/api/runs`, {
+        headers: { authorization: `Bearer ${config.token}` },
+      });
+      if (!res.ok) { log(`adopt runs http ${res.status}`); return; }
+      const rows = await res.json() as unknown;
+      if (!Array.isArray(rows)) return;
+      const targets = hubRunsNeedingTranscriptFollow(machineId!, rows);
+      for (const t of targets) {
+        if (!boundRuns.has(t.runId)) {
+          claimConversation(boundRuns, t.runId, t.conversationId, t.prompt);
+          log(`adopt ${t.runId} cid=${t.conversationId}`);
+        }
+        const dir = transcriptsDirForWorkspace(homedir(), t.workspaceRoot);
+        const path = dir ? join(dir, t.conversationId, `${t.conversationId}.jsonl`) : null;
+        if (!path || !existsSync(path) || !transcriptPathBelongsToCid(path, t.conversationId)) continue;
+        boundPaths.set(t.runId, path);
+        tailer.attach(t.runId, path);
+        tailer.poll(t.runId);
+        sizeWatches.get(t.runId)?.();
+        sizeWatches.set(t.runId, watchFileSize(path, () => {
+          tailer.poll(t.runId);
+          maybeCompleteFromDisk(t.runId);
+        }));
+        maybeCompleteFromDisk(t.runId);
+      }
+    } catch (e) {
+      log(`adopt runs failed: ${String(e)}`);
+    }
+  };
 
   const connect = () => {
     if (disposed) return;
@@ -270,7 +366,7 @@ export function activate(context: vscode.ExtensionContext): void {
       core.sendRegister({
         type: "register", machineId, windowId,
         name: hostname(), os: `${process.platform}-${process.arch}`,
-        cursorVersion: vscode.version, extensionVersion: "0.4.8",
+        cursorVersion: vscode.version, extensionVersion: "0.4.12",
         openWorkspaces: workspaces(),
       });
     });
@@ -282,6 +378,7 @@ export function activate(context: vscode.ExtensionContext): void {
       switch (msg.type) {
         case "registered":
           core.onRegistered();
+          void adoptFromHub();
           if (heartbeat) clearInterval(heartbeat);
           sendHeartbeat();
           heartbeat = setInterval(sendHeartbeat, 15_000);
@@ -329,6 +426,9 @@ export function activate(context: vscode.ExtensionContext): void {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       clearInterval(spoolPoll);
       clearInterval(transcriptPoll);
+      dirWatch.dispose();
+      for (const stop of sizeWatches.values()) stop();
+      sizeWatches.clear();
       ws?.close();
     },
   };

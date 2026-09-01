@@ -133,7 +133,7 @@ curl -sS http://192.168.1.10:7380/api/health
 sh hooks/install.sh
 ```
 
-4. **安装扩展** `armada-agent` ≥ 0.4.8（macOS 用 ≥ 0.4.0 即可；Windows 绑定必须 ≥ 0.4.8）  
+4. **安装扩展** `armada-agent` ≥ 0.4.12（macOS 用 ≥ 0.4.0 即可；Windows 绑定必须 ≥ 0.4.12）  
    Cursor → 扩展 → **Install from VSIX** → `extension/armada-agent-*.vsix`  
    （没有现成 vsix 且这台有 Node 时：`cd extension && npx tsup && npx vsce package --no-dependencies`）
 
@@ -165,7 +165,7 @@ chmod +x scripts/armada-cursor.sh
 | 要带上 Windows 的 | 从哪来 | 说明 |
 | --- | --- | --- |
 | 本仓库 | `git clone` 本仓，或把整个 `Armada` 文件夹拷过去 | 用来跑 `hooks\install.ps1` 和启动器 |
-| `armada-agent-0.4.8.vsix` | 中台 `extension\armada-agent-0.4.8.vsix`，或 Windows 自己 `npm install && npx tsup && npx --yes @vscode/vsce package --no-dependencies`（必须 ≥ 0.4.8） | 0.4.7 能扫 transcript 绑定，但完成仍等 `stop` hook，Windows 上会一直「运行中」。0.4.8 用 `turn_ended` 合成 stop。**升级中台 hub 解决不了这个问题** |
+| `armada-agent-0.4.12.vsix` | 中台 `extension\armada-agent-0.4.12.vsix`，或 Windows 自己 `npm install && npx tsup && npx --yes @vscode/vsce package --no-dependencies`（必须 ≥ 0.4.12） | 0.4.11 绑定后 Reload 会把 `ext_seq` 重数到已占用号段，hub 丢掉 `stop`，卡片永远停在运行中。0.4.12 时钟播种 seq，重连认领未结束 run，jsonl 已 `turn_ended` 则收口。 |
 | 中台 IP + token | 中台 `ipconfig getifaddr en0` 和 `~/.armada/token` | token 不要换行；不要在 Windows 上新生成 |
 
 下面把 `192.168.1.10` 换成你的中台局域网 IP。所有命令都在 **PowerShell** 里执行，先 `cd` 到仓库根目录（里面能看到 `hooks` 和 `scripts` 文件夹）。
@@ -194,7 +194,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File hooks\install.ps1
 **4. 安装扩展**
 
 1. 先用图标正常打开一次 Cursor（这次还不用启动器）。
-2. 左侧扩展 → `...` → **Install from VSIX** → 选中 `armada-agent-0.4.8.vsix`。
+2. 左侧扩展 → `...` → **Install from VSIX** → 选中 `armada-agent-0.4.12.vsix`。
 3. 装完先不要关。
 
 **5. 指向中台**（`Ctrl+Shift+P` → 输入 `Armada: Configure Hub Connection`）
@@ -244,7 +244,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\armada-cursor.ps1 C:
 | `CONVERSATION_BUSY` | **中台**：该对话仍在运行，结束后才能续聊 |
 | `INJECT_SLOT_BUSY` | **中台**：正在向该机注入另一条任务，稍后再续聊 |
 | `WINDOW_BUSY` | **受控**：扩展 < 0.4.0 或关闭了同窗并行 |
-| 一直「待本机回车」但黄字是「绑定中」 | **受控**：Windows 须装 **armada-agent ≥ 0.4.8** 并 Reload。绑定扫 `agent-transcripts`，结束行 `turn_ended` 会合成 `stop`。Reload 后 `hooks.json` 里不应再有 `armada-spool`。日志：`run.bound ... via=transcript`，对话结束后 `stop synthesized`。**不要为此升级中台 hub** |
+| 一直「待本机回车」但黄字是「绑定中」，约 1 分钟后进异常 | **受控**：Windows 须装 **armada-agent ≥ 0.4.12** 并 Reload。0.4.10 扫描窗 20s 会 BIND_TIMEOUT。 |
+| 本机对话已结束，看板仍「运行中」 | **受控**：须 ≥ 0.4.12。0.4.11 Reload 后 `ext_seq` 撞号，hub 丢掉合成 `stop`。日志：`stop synthesized` / `adopt r-…`。**不要为此升级中台 hub** |
 | 一直「待本机回车」且蓝字是「已预填,待本机回车」 | **受控**：Cursor 不是启动器拉起的（Windows：托盘未退干净就又点了图标） |
 | 详情串了别的对话 | **受控**：扩展 ≥ 0.4.3，不要用旧 vsix |
 | Windows 启动器报「正在运行」 | **受控**：托盘 `^` 里 Cursor 右键退出，不是只关窗口 |

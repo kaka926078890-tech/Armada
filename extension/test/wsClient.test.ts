@@ -48,6 +48,25 @@ describe("WsClientCore register-before-flush", () => {
     expect((sent[1] as any).runId).toBe("r-1");
   });
 
+  test("ready 时发出的 synthesized stop 在 1006 后仍会补发", () => {
+    const sent: object[] = [];
+    const core = new WsClientCore((m) => sent.push(m));
+    core.onOpen();
+    core.sendRegister({ type: "register" });
+    core.onRegistered();
+    core.enqueue({
+      type: "run.event", runId: "r-1", source: "hook", hookEventName: "stop",
+      payload: { status: "completed" }, seq: 9,
+    });
+    expect(sent.filter((m: any) => m.hookEventName === "stop")).toHaveLength(1);
+    core.onClose();
+    sent.length = 0;
+    core.onOpen();
+    core.sendRegister({ type: "register" });
+    core.onRegistered();
+    expect(sent.filter((m: any) => m.hookEventName === "stop")).toHaveLength(1);
+  });
+
   test("ready 但 socket 已死:ack 入队,不丢", () => {
     const sent: object[] = [];
     let open = true;

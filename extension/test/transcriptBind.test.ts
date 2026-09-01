@@ -11,6 +11,9 @@ import {
   matchTranscriptToPending,
   stopPayloadFromTranscriptLine,
   transcriptsDirForWorkspace,
+  isWithinTranscriptBindWindow,
+  TRANSCRIPT_BIND_WINDOW_MS,
+  stopFromTranscriptFileContent,
 } from "../src/transcriptBind";
 
 const CID = "c9597541-e291-40c9-9041-772c292acc24";
@@ -71,6 +74,12 @@ describe("matchTranscriptToPending", () => {
     expect(m && "run" in m ? m.run.runId : null).toBe("r-1");
     expect(m && "conversationId" in m ? m.conversationId : null).toBe(CID);
     expect(m && "transcriptPath" in m ? m.transcriptPath : null).toBe(file.path);
+  });
+
+  test("jsonl written 22s after dispatch still matches (mtime has no upper bound)", () => {
+    const late = { ...file, mtimeMs: P.dispatchedAt + 22_000 };
+    const m = matchTranscriptToPending([P], [late]);
+    expect(m && "run" in m ? m.run.runId : null).toBe("r-1");
   });
 
   test("ignores transcripts older than dispatch minus 5s", () => {
@@ -134,5 +143,38 @@ describe("stopPayloadFromTranscriptLine", () => {
   test("assistant/user lines are not stop", () => {
     expect(stopPayloadFromTranscriptLine(`{"role":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}`)).toBeNull();
     expect(stopPayloadFromTranscriptLine(`{"role":"user","message":{"content":[{"type":"text","text":"x"}]}}`)).toBeNull();
+  });
+});
+
+describe("stopFromTranscriptFileContent", () => {
+  test("last turn_ended line completes even if earlier lines were already tailed", () => {
+    const body = [
+      `{"role":"user","message":{"content":[{"type":"text","text":"hi"}]}}`,
+      `{"role":"assistant","message":{"content":[{"type":"text","text":"ok"}]}}`,
+      `{"type":"turn_ended","status":"success"}`,
+      ``,
+    ].join("\n");
+    expect(stopFromTranscriptFileContent(body)).toEqual({ status: "completed" });
+  });
+
+  test("a new user line after turn_ended means the turn is no longer finished", () => {
+    const body = [
+      `{"type":"turn_ended","status":"success"}`,
+      `{"role":"user","message":{"content":[{"type":"text","text":"followup"}]}}`,
+    ].join("\n");
+    expect(stopFromTranscriptFileContent(body)).toBeNull();
+  });
+});
+
+describe("isWithinTranscriptBindWindow", () => {
+  test("keeps scanning past 20s so a late jsonl still binds before hub BIND_TIMEOUT", () => {
+    expect(TRANSCRIPT_BIND_WINDOW_MS).toBeGreaterThanOrEqual(60_000);
+    expect(isWithinTranscriptBindWindow(0, 22_000)).toBe(true);
+    expect(isWithinTranscriptBindWindow(0, 59_000)).toBe(true);
+  });
+
+  test("still scans a few seconds after hub BIND_TIMEOUT so a late run.bound can resurrect", () => {
+    expect(isWithinTranscriptBindWindow(0, 61_000)).toBe(true);
+    expect(isWithinTranscriptBindWindow(0, 71_000)).toBe(false);
   });
 });
