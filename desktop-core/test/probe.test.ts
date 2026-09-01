@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { probeHub } from "../src/probe";
+import { mayWriteCursorSettings, probeHub } from "../src/probe";
 
 function mockFetch(seq: Array<{ urlIncludes: string; status: number; body: unknown }>): typeof fetch {
   let i = 0;
@@ -33,4 +33,14 @@ test("both 200", async () => {
     { urlIncludes: "/api/machines", status: 200, body: [] },
   ]));
   expect(r).toMatchObject({ connectivity: "ok", auth: "ok" });
+  expect(mayWriteCursorSettings(r)).toBe(true);
+});
+
+test("mayWriteCursorSettings is false unless health and machines Bearer both succeeded", async () => {
+  const unauthorized = await probeHub("http://127.0.0.1:7380", "tok", mockFetch([
+    { urlIncludes: "/api/health", status: 200, body: { ok: true, name: "armada-hub" } },
+    { urlIncludes: "/api/machines", status: 401, body: { error: "unauthorized" } },
+  ]));
+  expect(mayWriteCursorSettings(unauthorized)).toBe(false);
+  expect(mayWriteCursorSettings({ connectivity: "fail", auth: "skipped" })).toBe(false);
 });

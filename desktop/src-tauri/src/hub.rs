@@ -42,9 +42,9 @@ pub(crate) enum Auth {
     Skipped,
 }
 
-struct Probe {
-    health_name: Option<String>,
-    auth: Auth,
+pub(crate) struct Probe {
+    pub health_name: Option<String>,
+    pub auth: Auth,
 }
 
 #[derive(Serialize)]
@@ -301,7 +301,11 @@ fn http_get(host: &str, port: u16, path: &str, bearer: Option<&str>, timeout: Du
     Ok((status, body.to_string()))
 }
 
-fn probe_hub(host: &str, port: u16, token: &str) -> Probe {
+pub(crate) fn may_write_cursor_settings(p: &Probe) -> bool {
+    p.health_name.as_deref() == Some("armada-hub") && p.auth == Auth::Ok
+}
+
+pub(crate) fn probe_hub(host: &str, port: u16, token: &str) -> Probe {
     let timeout = Duration::from_secs(1);
     let Ok((status, body)) = http_get(host, port, "/api/health", None, timeout) else {
         return Probe {
@@ -522,6 +526,23 @@ fn resource_dir_from(app: &tauri::AppHandle) -> Option<PathBuf> {
     app.path().resource_dir().ok()
 }
 
+fn finish_create(
+    resource: Option<&std::path::Path>,
+    token: String,
+    kind: ApplyKind,
+    pid: Option<u32>,
+) -> CreateFleetResult {
+    let existing = crate::attach::read_existing_hub_url();
+    let overwrite = existing.as_deref() != Some("127.0.0.1:7380");
+    let _ = crate::attach::run_local_attach(resource, "127.0.0.1:7380", &token, overwrite, None);
+    CreateFleetResult {
+        decision: decision_label(kind),
+        token,
+        share_candidates: pick_share_candidates(&list_ifaces()),
+        owned_hub_pid: pid,
+    }
+}
+
 #[tauri::command]
 pub fn create_fleet(app: tauri::AppHandle, state: tauri::State<'_, HubState>) -> Result<CreateFleetResult, String> {
     let resource = resource_dir_from(&app);
@@ -547,38 +568,23 @@ pub fn create_fleet(app: tauri::AppHandle, state: tauri::State<'_, HubState>) ->
                 "spawn-timeout".to_string()
             })?;
             let pid = owned.as_ref().map(|c| c.id());
-            Ok(CreateFleetResult {
-                decision: decision_label(kind),
-                token,
-                share_candidates: pick_share_candidates(&list_ifaces()),
-                owned_hub_pid: pid,
-            })
+            Ok(finish_create(resource.as_deref(), token, kind, pid))
         }
         ApplyKind::Attach => {
             *owned = None;
             let token = load_token_from_home().ok_or_else(|| "token-missing".to_string())?;
-            Ok(CreateFleetResult {
-                decision: decision_label(kind),
-                token,
-                share_candidates: pick_share_candidates(&list_ifaces()),
-                owned_hub_pid: None,
-            })
+            Ok(finish_create(resource.as_deref(), token, kind, None))
         }
         ApplyKind::ReuseOwned => {
             let token = load_token_from_home().ok_or_else(|| "token-missing".to_string())?;
             let pid = owned.as_ref().map(|c| c.id());
-            Ok(CreateFleetResult {
-                decision: decision_label(kind),
-                token,
-                share_candidates: pick_share_candidates(&list_ifaces()),
-                owned_hub_pid: pid,
-            })
+            Ok(finish_create(resource.as_deref(), token, kind, pid))
         }
     }
 }
 
 #[tauri::command]
-pub fn join_fleet(uri: String, _state: tauri::State<'_, HubState>) -> Result<JoinFleetResult, String> {
+pub fn join_fleet(app: tauri::AppHandle, uri: String, _state: tauri::State<'_, HubState>) -> Result<JoinFleetResult, String> {
     let (host, port, token) = parse_join_uri(&uri).map_err(|e| e.to_string())?;
     let shares = pick_share_candidates(&list_ifaces());
     let local_ips: Vec<String> = shares.iter().map(|s| s.ipv4.clone()).collect();
@@ -594,12 +600,28 @@ pub fn join_fleet(uri: String, _state: tauri::State<'_, HubState>) -> Result<Joi
     let probe = probe_hub(probe_host, probe_port, &token);
     let action = decide_occupancy(false, true, probe.health_name.as_deref(), probe.auth);
     match apply_decision(false, action)? {
-        ApplyKind::Attach | ApplyKind::ReuseOwned => Ok(JoinFleetResult {
-            webview_origin,
-            token,
-            cursor_hub_url,
-            join_self,
-        }),
+        ApplyKind::Attach | ApplyKind::ReuseOwned => {
+            let existing = crate::attach::read_existing_hub_url();
+            let overwrite = if join_self {
+                existing.as_deref() != Some("127.0.0.1:7380")
+            } else {
+                true
+            };
+            let resource = resource_dir_from(&app);
+            let _ = crate::attach::run_local_attach(
+                resource.as_deref(),
+                &cursor_hub_url,
+                &token,
+                overwrite,
+                None,
+            );
+            Ok(JoinFleetResult {
+                webview_origin,
+                token,
+                cursor_hub_url,
+                join_self,
+            })
+        }
         ApplyKind::Spawn => Err(JOIN_MUST_NOT_SPAWN.into()),
     }
 }
@@ -699,5 +721,21 @@ mod tests {
         assert!(join_self);
         assert_eq!(cursor, "127.0.0.1:7380");
         assert_eq!(origin, "127.0.0.1:7380");
+    }
+
+    #[test]
+    fn may_write_requires_health_and_bearer() {
+        assert!(!may_write_cursor_settings(&Probe {
+            health_name: None,
+            auth: Auth::Skipped,
+        }));
+        assert!(!may_write_cursor_settings(&Probe {
+            health_name: Some("armada-hub".into()),
+            auth: Auth::Unauthorized,
+        }));
+        assert!(may_write_cursor_settings(&Probe {
+            health_name: Some("armada-hub".into()),
+            auth: Auth::Ok,
+        }));
     }
 }

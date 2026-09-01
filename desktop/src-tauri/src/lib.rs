@@ -1,3 +1,4 @@
+mod attach;
 mod hub;
 
 use hub::HubState;
@@ -12,7 +13,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             hub::create_fleet,
             hub::join_fleet,
-            hub::quit_owned_hub
+            hub::quit_owned_hub,
+            attach::local_attach
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application");
