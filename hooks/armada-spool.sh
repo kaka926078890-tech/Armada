@@ -5,19 +5,14 @@ EVENT="${1:-unknown}"
 SPOOL_DIR="${ARMADA_SPOOL_DIR:-$HOME/.cursor/armada/spool}"
 mkdir -p "$SPOOL_DIR" 2>/dev/null || true
 
-# Cursor on Windows keeps hook stdin open until the process exits, so EOF never
-# arrives. `cat` then deadlocks until the 5s hook timeout kills us and spool is empty.
-# bash `read -t` returns what already arrived (compact JSON is one write).
+# Windows Cursor keeps hook stdin open (no EOF). That path is armada-spool.exe.
+# This script is macOS/Linux: Cursor closes stdin, so `cat` is correct.
+# bash 4 `read -N -t` is only a fallback for Git bash still invoking this .sh.
+# Do not use bash 3.2 `read -n`: it stops at newline and `-t` is ignored on a
+# still-open pipe, which truncates __unparsed and deadlocks until the hook timeout.
 read_hook_stdin() {
   _armada_raw=""
-  # -N: do not stop at newline (payloads may contain \n). bash 4+ / Git bash.
   if IFS= read -r -t 1 -N 262144 _armada_raw 2>/dev/null || [ -n "${_armada_raw:-}" ]; then
-    printf '%s' "$_armada_raw"
-    return 0
-  fi
-  _armada_raw=""
-  # bash 3.2 (macOS /bin/sh) has -n/-t but not -N.
-  if IFS= read -r -t 1 -n 262144 _armada_raw 2>/dev/null || [ -n "${_armada_raw:-}" ]; then
     printf '%s' "$_armada_raw"
     return 0
   fi

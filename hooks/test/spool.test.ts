@@ -89,7 +89,13 @@ describe("armada-spool.sh", () => {
     expect(j.__raw.__unparsed).toHaveLength(4000);
   });
 
-  test("does not deadlock when Cursor keeps stdin open after compact JSON", async () => {
+  const shSupportsReadN = Bun.spawnSync(["sh", "-c", "IFS= read -r -t 1 -N 4 x && test ${#x} -eq 4"], {
+    stdin: Buffer.from("abcd"),
+  }).exitCode === 0;
+
+  // Open-stdin is Windows Cursor; production there is armada-spool.exe.
+  // macOS/Linux /bin/sh (bash 3.2 / dash) has no `read -N` and uses `cat`+EOF.
+  test.skipIf(!shSupportsReadN)("does not deadlock when Cursor keeps stdin open after compact JSON", async () => {
     const dir = mkdtempSync(join(tmpdir(), "armada-spool-open-"));
     const body = JSON.stringify({ conversation_id: "c-open", workspace_roots: ["/ws/a"] });
     const proc = Bun.spawn(["sh", SCRIPT, "sessionStart"], {
