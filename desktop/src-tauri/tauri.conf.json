@@ -35,6 +35,9 @@
     ],
     "resources": {
       "resources/": ""
+    },
+    "macOS": {
+      "signingIdentity": "-"
     }
   },
   "plugins": {
