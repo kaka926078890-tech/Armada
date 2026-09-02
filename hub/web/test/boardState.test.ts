@@ -116,13 +116,16 @@ describe("unread dots", () => {
     expect(isUnreadCompleted(base, undefined)).toBe(false);
   });
 
-  test("workspace badge is completed-unread only; running does not light the dot", () => {
+  test("workspace badge counts completed/error/unknown/aborted, not cancelled or running", () => {
     expect(workspaceHasUnread([base], {})).toBe(false);
-    expect(workspaceHasUnread([{ ...base, status: "error", ended_at: 5000 }], {})).toBe(false);
+    expect(workspaceHasUnread([{ ...base, status: "error", ended_at: 5000 }], {})).toBe(true);
+    expect(workspaceHasUnread([{ ...base, status: "unknown", ended_at: 5000 }], {})).toBe(true);
+    expect(workspaceHasUnread([{ ...base, status: "aborted", ended_at: 5000 }], {})).toBe(true);
+    expect(workspaceHasUnread([{ ...base, status: "cancelled", ended_at: 5000 }], {})).toBe(false);
     expect(workspaceHasUnread([{ ...base, status: "completed", ended_at: 5000 }], {})).toBe(true);
   });
 
-  test("workspace unread count is completed-unread only and caps at 99+", () => {
+  test("workspace unread count is alert-unread and caps at 99+", () => {
     const a = { ...base, id: "a", status: "completed", ended_at: 5000 };
     const b = { ...base, id: "b", status: "completed", ended_at: 6000 };
     const live = { ...base, id: "c", status: "running" };

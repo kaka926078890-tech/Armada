@@ -129,14 +129,19 @@ export function isUnreadMessage(run: RunRow, readAt: number | undefined): boolea
   return readAt == null || runActivityTs(run) > readAt;
 }
 
-export function isUnreadCompleted(run: RunRow, readAt: number | undefined): boolean {
-  return run.status === "completed" && isUnreadMessage(run, readAt);
+export function isUnreadAlert(run: RunRow, readAt: number | undefined): boolean {
+  if (!["completed", "error", "unknown", "aborted"].includes(run.status)) return false;
+  return readAt == null || runActivityTs(run) > readAt;
 }
 
-/** 侧栏未读数：仅未读的已完成任务。进行中不计入，避免任务还没结束就提前提示。 */
+export function isUnreadCompleted(run: RunRow, readAt: number | undefined): boolean {
+  return run.status === "completed" && isUnreadAlert(run, readAt);
+}
+
+/** 侧栏未读数：终态未读（完成/失败/异常/中止）。进行中不计入。 */
 export function workspaceUnreadCount(runs: RunRow[], readMap: Record<string, number>): number {
   let n = 0;
-  for (const r of runs) if (isUnreadCompleted(r, readMap[r.id])) n++;
+  for (const r of runs) if (isUnreadAlert(r, readMap[r.id])) n++;
   return n;
 }
 

@@ -1,6 +1,7 @@
 mod attach;
 mod cursor;
 mod hub;
+mod run_alert;
 
 use hub::HubState;
 use tauri::Manager;
@@ -11,6 +12,10 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_deep_link::init())
         .manage(HubState::default())
+        .setup(|app| {
+            run_alert::initialize(app.handle().clone());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             hub::create_fleet,
             hub::join_fleet,
@@ -18,7 +23,8 @@ pub fn run() {
             attach::local_attach,
             cursor::cdp_status,
             cursor::open_workspace,
-            cursor::pick_workspace
+            cursor::pick_workspace,
+            run_alert::show_run_alert
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application");

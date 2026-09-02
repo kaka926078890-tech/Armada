@@ -1,4 +1,4 @@
-import { groupRuns, cardView, COLUMN_LABELS, canArchiveRun, isUnreadCompleted, type ColumnKey, type RunRow } from "../boardState";
+import { groupRuns, cardView, COLUMN_LABELS, canArchiveRun, isUnreadAlert, type ColumnKey, type RunRow } from "../boardState";
 import type { Machine } from "../types";
 import { machineLabel } from "../boardState";
 
@@ -44,7 +44,7 @@ export default function Board({ runs, machines, selected, onSelect, showArchived
             )}
             {g[col].map((r) => {
               const v = cardView(r, now);
-              const unread = isUnreadCompleted(r, readMap[r.id]);
+              const unread = isUnreadAlert(r, readMap[r.id]);
               return (
                 <div key={r.id} className={`group relative min-w-0 text-left rounded-md border ${selected === r.id ? "border-sky-600/80 bg-zinc-900" : "border-transparent bg-zinc-900/50 hover:border-zinc-700"}`}>
                   <button onClick={() => onSelect(r.id)} className="w-full min-w-0 text-left px-2.5 py-2">

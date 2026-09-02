@@ -1,14 +1,29 @@
 import type { RunRow } from "./boardState";
+import { requestDesktopAlert } from "./desktopBridge";
 
 export const BASE_TITLE = "Armada";
 const ASKED_KEY = "armada.notifyAsked.v1";
 
-/** 把 prev 推进到当前 runs，返回本次新变成 completed 的卡片。首次调用前应先 seed。 */
-export function takeNewlyCompleted(prev: Map<string, string>, runs: RunRow[]): RunRow[] {
+export const ALERT_STATUSES = ["completed", "error", "unknown", "aborted"] as const;
+export type AlertStatus = (typeof ALERT_STATUSES)[number];
+
+export const ALERT_TITLE: Record<AlertStatus, string> = {
+  completed: "Armada 任务完成",
+  error: "Armada 任务失败",
+  unknown: "Armada 任务异常",
+  aborted: "Armada 任务已中止",
+};
+
+export function isAlertStatus(s: string): s is AlertStatus {
+  return (ALERT_STATUSES as readonly string[]).includes(s);
+}
+
+/** 把 prev 推进到当前 runs，返回本次新进入 ALERT_STATUSES 的卡片。首次调用前应先 seed。 */
+export function takeNewlyAlertable(prev: Map<string, string>, runs: RunRow[]): RunRow[] {
   const out: RunRow[] = [];
   for (const r of runs) {
     const last = prev.get(r.id);
-    if (r.status === "completed" && last != null && last !== "completed") out.push(r);
+    if (isAlertStatus(r.status) && last != null && !isAlertStatus(last)) out.push(r);
     prev.set(r.id, r.status);
   }
   return out;
@@ -55,9 +70,8 @@ export function startTitleMarquee(text: string): void {
   }, 380);
 }
 
-export function shouldAlert(run: RunRow, opts: { watchingId: string | null; tabVisible: boolean }): boolean {
-  if (opts.tabVisible && opts.watchingId === run.id) return false;
-  return true;
+export function shouldAlert(run: RunRow, opts: { watchingId: string | null }): boolean {
+  return opts.watchingId !== run.id;
 }
 
 function canNotify(): boolean {
@@ -83,7 +97,8 @@ export async function ensureNotifyPermission(): Promise<boolean> {
 export function showDesktopNotification(run: RunRow, onOpen?: (id: string) => void): void {
   if (!canNotify() || Notification.permission !== "granted") return;
   try {
-    const n = new Notification("Armada 任务完成", {
+    const title = isAlertStatus(run.status) ? ALERT_TITLE[run.status] : ALERT_TITLE.completed;
+    const n = new Notification(title, {
       body: completionBody(run),
       tag: `armada-run-${run.id}`,
     });
@@ -97,11 +112,24 @@ export function showDesktopNotification(run: RunRow, onOpen?: (id: string) => vo
 
 export function alertCompletions(
   runs: RunRow[],
-  opts: { watchingId: string | null; tabVisible: boolean; onOpen?: (id: string) => void },
+  opts: { watchingId: string | null; tabVisible: boolean; desktop: boolean; onOpen?: (id: string) => void },
 ): void {
-  const alertable = runs.filter((r) => shouldAlert(r, opts));
+  const alertable = runs.filter((r) => shouldAlert(r, { watchingId: opts.watchingId }));
   if (alertable.length === 0) return;
   if (!opts.tabVisible) startTitleMarquee(completionHeadline(alertable));
+  if (opts.desktop) {
+    for (const r of alertable) {
+      if (!isAlertStatus(r.status)) continue;
+      requestDesktopAlert({
+        runId: r.id,
+        machineId: r.machine_id,
+        workspaceRoot: r.workspace_root,
+        title: ALERT_TITLE[r.status],
+        body: completionBody(r),
+      });
+    }
+    return;
+  }
   void ensureNotifyPermission().then((ok) => {
     if (!ok) return;
     for (const r of alertable) showDesktopNotification(r, opts.onOpen);

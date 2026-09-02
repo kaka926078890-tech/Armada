@@ -12,7 +12,7 @@ function UnreadCount({ n }: { n: number }) {
   return (
     <span
       className="ml-auto shrink-0 min-w-[1.125rem] h-[1.125rem] px-1 rounded-full bg-red-500 text-white text-[11px] font-medium leading-[1.125rem] text-center tabular-nums"
-      title={`${n} 个完成未读`}
+      title={`${n} 个终态未读`}
     >
       {label}
     </span>

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { RunRow } from "../src/boardState";
 import {
-  BASE_TITLE, completionHeadline, shouldAlert, seedRunStatus, takeNewlyCompleted,
+  BASE_TITLE, completionHeadline, shouldAlert, seedRunStatus, takeNewlyAlertable,
 } from "../src/completionNotify";
 
 const base: RunRow = {
@@ -11,30 +11,41 @@ const base: RunRow = {
   ended_at: null, end_reason: null,
 };
 
-describe("takeNewlyCompleted", () => {
+describe("takeNewlyAlertable", () => {
   test("does not fire on seed snapshot", () => {
     const prev = seedRunStatus([{ ...base, status: "completed", ended_at: 9 }]);
-    expect(takeNewlyCompleted(prev, [{ ...base, status: "completed", ended_at: 9 }])).toEqual([]);
+    expect(takeNewlyAlertable(prev, [{ ...base, status: "completed", ended_at: 9 }])).toEqual([]);
   });
 
   test("fires once when running becomes completed", () => {
     const prev = seedRunStatus([base]);
     const done = { ...base, status: "completed", ended_at: 9 };
-    expect(takeNewlyCompleted(prev, [done]).map((r) => r.id)).toEqual(["r-1"]);
-    expect(takeNewlyCompleted(prev, [done])).toEqual([]);
+    expect(takeNewlyAlertable(prev, [done]).map((r) => r.id)).toEqual(["r-1"]);
+    expect(takeNewlyAlertable(prev, [done])).toEqual([]);
   });
 
   test("followup complete after another running cycle fires again", () => {
     const prev = seedRunStatus([{ ...base, status: "completed", ended_at: 9 }]);
     const running = { ...base, status: "running", ended_at: null };
-    expect(takeNewlyCompleted(prev, [running])).toEqual([]);
-    expect(takeNewlyCompleted(prev, [{ ...base, status: "completed", ended_at: 20 }]).map((r) => r.id)).toEqual(["r-1"]);
+    expect(takeNewlyAlertable(prev, [running])).toEqual([]);
+    expect(takeNewlyAlertable(prev, [{ ...base, status: "completed", ended_at: 20 }]).map((r) => r.id)).toEqual(["r-1"]);
   });
 
   test("new completed id that was never seen does not fire (avoid refresh false positive)", () => {
     const prev = seedRunStatus([base]);
     const other = { ...base, id: "r-2", status: "completed", ended_at: 9 };
-    expect(takeNewlyCompleted(prev, [base, other])).toEqual([]);
+    expect(takeNewlyAlertable(prev, [base, other])).toEqual([]);
+  });
+
+  test("running -> error/unknown/aborted fires; cancelled does not", () => {
+    const prevErr = seedRunStatus([base]);
+    expect(takeNewlyAlertable(prevErr, [{ ...base, status: "error" }]).map((r) => r.id)).toEqual(["r-1"]);
+    const prevUnk = seedRunStatus([base]);
+    expect(takeNewlyAlertable(prevUnk, [{ ...base, status: "unknown" }]).map((r) => r.id)).toEqual(["r-1"]);
+    const prevAbort = seedRunStatus([base]);
+    expect(takeNewlyAlertable(prevAbort, [{ ...base, status: "aborted" }]).map((r) => r.id)).toEqual(["r-1"]);
+    const prevCancel = seedRunStatus([base]);
+    expect(takeNewlyAlertable(prevCancel, [{ ...base, status: "cancelled" }])).toEqual([]);
   });
 });
 
@@ -45,9 +56,9 @@ describe("completionHeadline / shouldAlert", () => {
     expect(completionHeadline([])).toBe(BASE_TITLE);
   });
 
-  test("skip when watching that run on a visible tab", () => {
-    expect(shouldAlert(base, { watchingId: "r-1", tabVisible: true })).toBe(false);
-    expect(shouldAlert(base, { watchingId: "r-1", tabVisible: false })).toBe(true);
-    expect(shouldAlert(base, { watchingId: "other", tabVisible: true })).toBe(true);
+  test("skip only when watching that run (detail open), even if tab would be hidden", () => {
+    expect(shouldAlert(base, { watchingId: "r-1" })).toBe(false);
+    expect(shouldAlert(base, { watchingId: "other" })).toBe(true);
+    expect(shouldAlert(base, { watchingId: null })).toBe(true);
   });
 });

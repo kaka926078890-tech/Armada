@@ -1,17 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, clearToken, getToken, setToken } from "./api";
 import { consumeQueryToken, isDesktopShell, searchWithoutToken } from "./tokenBootstrap";
-import { requestDesktop } from "./desktopBridge";
+import { requestDesktop, parseHostOpenRun } from "./desktopBridge";
 import type { Machine } from "./types";
 import type { RunRow } from "./boardState";
 import {
   decodeWorkspaceKey, encodeWorkspaceKey, filterRunsByWorkspace, listWorkspaceSlots, sortConversations,
 } from "./boardState";
+import { applyAlertOpen } from "./alertOpen";
 import Sidebar from "./components/Sidebar";
 import Board from "./components/Board";
 import RunDetail from "./components/RunDetail";
 import { DispatchModal } from "./components/Modals";
-import { alertCompletions, ensureNotifyPermission, seedRunStatus, stopTitleMarquee, takeNewlyCompleted } from "./completionNotify";
+import { alertCompletions, ensureNotifyPermission, seedRunStatus, stopTitleMarquee, takeNewlyAlertable } from "./completionNotify";
+import { applyTheme, loadTheme, saveTheme, type ThemeName } from "./theme";
 
 const WS_KEY = "armada.selectedWorkspace.v1";
 const READ_KEY = "armada.readRuns.v1";
@@ -44,6 +46,7 @@ export default function App() {
   const [dispatchOpen, setDispatchOpen] = useState(false);
   const [loadError, setLoadError] = useState("");
   const [authDenied, setAuthDenied] = useState(false);
+  const [theme, setTheme] = useState<ThemeName>(() => loadTheme());
 
   const slots = useMemo(() => listWorkspaceSlots(machines), [machines]);
   const resolvedWs = useMemo(() => {
@@ -77,6 +80,17 @@ export default function App() {
     setSelectedRun(id);
     persistRead(id);
   }, [persistRead]);
+
+  const openRunFromAlert = useCallback((alert: { runId: string; machineId: string; workspaceRoot: string }) => {
+    const known = runs.some((r) => r.id === alert.runId) || hiddenRuns.some((r) => r.id === alert.runId);
+    if (!known) return;
+    const next = applyAlertOpen(alert);
+    setShowArchived(next.showArchived);
+    setSelectedWs(next.selectedWs);
+    try { localStorage.setItem(WS_KEY, next.selectedWs); } catch { /* ignore */ }
+    setSelectedRun(next.selectedRun);
+    persistRead(next.selectedRun);
+  }, [runs, hiddenRuns, persistRead]);
 
   const refresh = useCallback(() => {
     if (!authed) return;
@@ -147,11 +161,12 @@ export default function App() {
       seenStatus.current = seedRunStatus(runs);
       return;
     }
-    const fresh = takeNewlyCompleted(seenStatus.current, runs);
+    const fresh = takeNewlyAlertable(seenStatus.current, runs);
     if (fresh.length === 0) return;
     alertCompletions(fresh, {
       watchingId: selectedRun,
       tabVisible: document.visibilityState === "visible",
+      desktop: isDesktopShell(window.location.search),
       onOpen: openRun,
     });
   }, [runs, selectedRun, openRun]);
@@ -170,7 +185,22 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!authed) return;
+    applyTheme(theme);
+  }, [theme]);
+
+  useEffect(() => {
+    if (!isDesktopShell(window.location.search)) return;
+    const onHost = (e: MessageEvent) => {
+      const open = parseHostOpenRun(e.data, e.source, window.parent);
+      if (!open) return;
+      openRunFromAlert(open);
+    };
+    window.addEventListener("message", onHost);
+    return () => window.removeEventListener("message", onHost);
+  }, [openRunFromAlert]);
+
+  useEffect(() => {
+    if (!authed || isDesktopShell(window.location.search)) return;
     const once = () => { void ensureNotifyPermission(); };
     window.addEventListener("pointerdown", once, { once: true });
     return () => window.removeEventListener("pointerdown", once);
@@ -228,6 +258,18 @@ export default function App() {
         </button>
         <span className="ml-auto flex items-center gap-3 text-[12px] text-zinc-500">
           在线 {machines.filter((m) => m.status === "online").length}/{machines.length}
+          <button
+            type="button"
+            aria-label="切换明亮/黑夜"
+            onClick={() => {
+              const next = theme === "dark" ? "light" : "dark";
+              saveTheme(next);
+              setTheme(next);
+            }}
+            className="text-zinc-400 hover:text-zinc-100 px-2 py-0.5 rounded border border-zinc-700"
+          >
+            {theme === "dark" ? "明亮" : "黑夜"}
+          </button>
           <button
             type="button"
             onClick={leaveFleet}

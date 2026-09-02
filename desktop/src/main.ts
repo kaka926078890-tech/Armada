@@ -6,6 +6,8 @@ import {
   copiedToast,
   defaultLandingMode,
   firstArmadaJoinUri,
+  firstArmadaOpenRun,
+  formatOpenRunUri,
   noShareIpCopy,
   parseDesktopBoardRequest,
   parsePastedJoin,
@@ -156,9 +158,44 @@ function openBoard(origin: string, token: string) {
     frame.hidden = false;
     frame.src = url;
     document.body.classList.add("board-open");
+    frame.addEventListener("load", () => flushPendingOpen(frame), { once: true });
     return;
   }
   window.location.assign(url);
+}
+
+type OpenRunPayload = { runId: string; machineId: string; workspaceRoot: string };
+let pendingOpenRun: OpenRunPayload | null = null;
+
+function postOpenRun(frame: HTMLIFrameElement, payload: OpenRunPayload): boolean {
+  if (!frame.contentWindow) return false;
+  frame.contentWindow.postMessage(
+    { source: "armada-desktop-host", type: "open-run", ...payload },
+    "*",
+  );
+  return true;
+}
+
+function flushPendingOpen(frame: HTMLIFrameElement) {
+  if (!pendingOpenRun) return;
+  if (postOpenRun(frame, pendingOpenRun)) pendingOpenRun = null;
+}
+
+function handleOpenRun(payload: OpenRunPayload) {
+  const frame = boardEl();
+  if (!frame || frame.hidden || !postOpenRun(frame, payload)) {
+    pendingOpenRun = payload;
+  }
+}
+
+function wireRunAlertClick() {
+  void import("@tauri-apps/api/event")
+    .then(({ listen }) => listen<OpenRunPayload>("run-alert-clicked", (ev) => {
+      handleOpenRun(ev.payload);
+    }))
+    .catch(() => {
+      /* web preview without tauri */
+    });
 }
 
 function leaveBoard() {
@@ -216,6 +253,11 @@ function wireDeepLink() {
   void import("@tauri-apps/plugin-deep-link")
     .then(async (mod) => {
       const apply = (urls: string[]) => {
+        const open = firstArmadaOpenRun(urls);
+        if (open) {
+          handleOpenRun(open);
+          return;
+        }
         const raw = firstArmadaJoinUri(urls);
         if (!raw) return;
         applyLandingMode("join");
@@ -279,18 +321,34 @@ window.addEventListener("DOMContentLoaded", () => {
     if (!frame || e.source !== frame.contentWindow) return;
     const req = parseDesktopBoardRequest(e.data);
     if (!req) return;
-    if (req === "get-share-link") {
+    if (req.type === "get-share-link") {
       void copyShare();
       return;
     }
-    if (req === "leave-fleet") {
+    if (req.type === "leave-fleet") {
       leaveBoard();
+      return;
+    }
+    if (req.type === "run.alert") {
+      void invoke("show_run_alert", {
+        runId: req.runId,
+        machineId: req.machineId,
+        workspaceRoot: req.workspaceRoot,
+        title: req.title,
+        body: req.body,
+        launchUri: formatOpenRunUri({
+          runId: req.runId,
+          machineId: req.machineId,
+          workspaceRoot: req.workspaceRoot,
+        }),
+      }).catch((err) => console.error("show_run_alert", err));
       return;
     }
     void openWorkspaceFromBoard();
   });
 
   wireDeepLink();
+  wireRunAlertClick();
 });
 
 const WATCHDOG_MS = 10_000;

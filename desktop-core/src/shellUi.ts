@@ -14,7 +14,20 @@ export type AttachBanner = { kind: "red" | "info" | "none"; lines: string[] };
 
 export const DESKTOP_BOARD_SOURCE = "armada-desktop";
 
-export type DesktopBoardRequest = "open-workspace" | "get-share-link" | "leave-fleet";
+export type DesktopBoardCommand = "open-workspace" | "get-share-link" | "leave-fleet";
+
+export type DesktopRunAlert = {
+  type: "run.alert";
+  runId: string;
+  machineId: string;
+  workspaceRoot: string;
+  title: string;
+  body: string;
+};
+
+export type DesktopBoardRequest =
+  | { type: DesktopBoardCommand }
+  | DesktopRunAlert;
 
 export type LandingMode = "create" | "join";
 
@@ -28,10 +41,27 @@ export function defaultLandingMode(platform: string): LandingMode {
 
 export function parseDesktopBoardRequest(data: unknown): DesktopBoardRequest | null {
   if (!data || typeof data !== "object") return null;
-  const o = data as { source?: unknown; type?: unknown };
+  const o = data as Record<string, unknown>;
   if (o.source !== DESKTOP_BOARD_SOURCE) return null;
-  if (o.type === "open-workspace" || o.type === "get-share-link" || o.type === "leave-fleet") return o.type;
-  return null;
+  if (o.type === "open-workspace" || o.type === "get-share-link" || o.type === "leave-fleet") {
+    return { type: o.type };
+  }
+  if (o.type !== "run.alert") return null;
+  if (
+    typeof o.runId !== "string" || !o.runId
+    || typeof o.machineId !== "string" || !o.machineId
+    || typeof o.workspaceRoot !== "string" || !o.workspaceRoot
+    || typeof o.title !== "string" || !o.title
+    || typeof o.body !== "string"
+  ) return null;
+  return {
+    type: "run.alert",
+    runId: o.runId,
+    machineId: o.machineId,
+    workspaceRoot: o.workspaceRoot,
+    title: o.title,
+    body: o.body,
+  };
 }
 
 export function shouldShowCreate(platform: string): boolean {
@@ -61,7 +91,9 @@ export function copiedToast(): string {
 export function firstArmadaJoinUri(urls: string[]): string | null {
   for (const u of urls) {
     const t = u.trim();
-    if (t.startsWith("armada:")) return t;
+    if (!t.startsWith("armada:")) continue;
+    const parsed = parseJoinUri(t);
+    if (!("error" in parsed) || parsed.error === "incomplete") return t;
   }
   return null;
 }

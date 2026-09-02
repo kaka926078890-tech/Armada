@@ -41,9 +41,34 @@ describe("defaultLandingMode", () => {
 
 describe("parseDesktopBoardRequest", () => {
   test("accepts open-workspace and get-share-link from the board iframe", () => {
-    expect(parseDesktopBoardRequest({ source: "armada-desktop", type: "open-workspace" })).toBe("open-workspace");
-    expect(parseDesktopBoardRequest({ source: "armada-desktop", type: "get-share-link" })).toBe("get-share-link");
-    expect(parseDesktopBoardRequest({ source: "armada-desktop", type: "leave-fleet" })).toBe("leave-fleet");
+    expect(parseDesktopBoardRequest({ source: "armada-desktop", type: "open-workspace" })).toEqual({ type: "open-workspace" });
+    expect(parseDesktopBoardRequest({ source: "armada-desktop", type: "get-share-link" })).toEqual({ type: "get-share-link" });
+    expect(parseDesktopBoardRequest({ source: "armada-desktop", type: "leave-fleet" })).toEqual({ type: "leave-fleet" });
+  });
+
+  test("parses run.alert with three ids", () => {
+    expect(parseDesktopBoardRequest({
+      source: "armada-desktop",
+      type: "run.alert",
+      runId: "r-1",
+      machineId: "m-1",
+      workspaceRoot: "/ws/a",
+      title: "Armada 任务完成",
+      body: "fix",
+    })).toEqual({
+      type: "run.alert",
+      runId: "r-1",
+      machineId: "m-1",
+      workspaceRoot: "/ws/a",
+      title: "Armada 任务完成",
+      body: "fix",
+    });
+  });
+
+  test("drops run.alert missing workspaceRoot", () => {
+    expect(parseDesktopBoardRequest({
+      source: "armada-desktop", type: "run.alert", runId: "r-1", machineId: "m-1", title: "t", body: "b",
+    })).toBeNull();
   });
 
   test("ignores other origins and types", () => {
