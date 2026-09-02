@@ -49,8 +49,8 @@ export function ingestEvent(db: Database, runs: RunService, sse: SseHub, machine
   if (!run) { (msg as any).__ack = ack(); return; }
   if (!cidBelongsToRun(run, cid, msg.payload)) { (msg as any).__ack = ack(); return; }
   if (submitHook && !run.conversation_id) {
-    const p = typeof msg.payload?.prompt === "string" ? msg.payload.prompt.trim() : "";
-    if (p !== String(run.prompt ?? "").trim()) { (msg as any).__ack = ack(); return; }
+    const p = typeof msg.payload?.prompt === "string" ? msg.payload.prompt : "";
+    if (!runs.submitPromptMatches(run, p)) { (msg as any).__ack = ack(); return; }
   }
 
   const dup = db.query("SELECT id FROM run_events WHERE machine_id=?1 AND ext_seq=?2").get(machineId, extSeq);

@@ -378,4 +378,49 @@ describe("event ingest", () => {
     expect(events.map((e) => e.hook_event_name)).toEqual(["subagentStart", "preToolUse"]);
     ws.close();
   });
+
+  test("image-only beforeSubmitPrompt without runId binds unique waiting run", async () => {
+    const home = mkdtempSync(join(tmpdir(), "armada-ing-"));
+    hub = createServer({ port: 0, home });
+    const ws: WebSocket = await new Promise((res, rej) => {
+      const w = new WebSocket(`ws://127.0.0.1:${hub!.port}/ws?token=${hub!.token}`);
+      w.onopen = () => res(w); w.onerror = rej;
+    });
+    ws.send(JSON.stringify({ type: "register", machineId: "m-1", windowId: "w-1", name: "A", os: "darwin", openWorkspaces: ["/ws/a"] }));
+    await new Promise((r) => setTimeout(r, 100));
+    const api = (p: string, init?: RequestInit) => fetch(`http://127.0.0.1:${hub!.port}${p}`, {
+      ...init, headers: { authorization: `Bearer ${hub!.token}`, ...(init?.headers ?? {}) },
+    });
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    const fd = new FormData();
+    fd.append("file", new File([png], "a.png", { type: "image/png" }));
+    const { blob } = await (await api("/api/blobs", { method: "POST", body: fd })).json() as any;
+    const r = await api("/api/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "", attachmentIds: [blob.id] }),
+    });
+    const { run } = await r.json() as any;
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    await new Promise((r2) => setTimeout(r2, 80));
+    ws.send(JSON.stringify({
+      type: "run.event", source: "hook", hookEventName: "beforeSubmitPrompt",
+      payload: {
+        conversation_id: "cid-img",
+        workspace_roots: ["/ws/a"],
+        prompt: "[Image]\n<image_files>a.png</image_files>",
+      },
+      ts: Date.now(), seq: 1,
+    }));
+    await new Promise((r2) => setTimeout(r2, 120));
+    const after = (await (await api(`/api/runs/${run.id}`)).json()) as any;
+    expect(after.status).toBe("running");
+    expect(after.conversation_id).toBe("cid-img");
+    const events = (await (await api(`/api/runs/${run.id}/events`)).json()) as any[];
+    expect(events).toHaveLength(1);
+    ws.close();
+  });
 });

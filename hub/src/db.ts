@@ -61,6 +61,15 @@ export function openDb(home: string): Database {
   ensureColumn(db, "runs", "archived_at", "archived_at INTEGER");
   ensureColumn(db, "runs", "queued_at", "queued_at INTEGER");
   ensureColumn(db, "runs", "dispatch_seq", "dispatch_seq INTEGER");
+  ensureColumn(db, "runs", "attachments", "attachments TEXT NOT NULL DEFAULT '[]'");
+  db.exec(`CREATE TABLE IF NOT EXISTS blobs (
+    sha256 TEXT PRIMARY KEY,
+    mime TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    refcount INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+  )`);
+  ensureColumn(db, "blobs", "unref_at", "unref_at INTEGER");
   db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_runs_cid_active ON runs(conversation_id) WHERE conversation_id IS NOT NULL AND status IN ('dispatched','binding','running')`);
   return db;
 }

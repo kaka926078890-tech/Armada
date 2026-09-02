@@ -15,10 +15,18 @@ export const api = {
   run: (id: string) => req(`/api/runs/${id}`).then((r) => r.json()),
   events: (id: string, afterSeq = 0, limit = 500) =>
     req(`/api/runs/${id}/events?afterSeq=${afterSeq}&limit=${limit}`).then((r) => r.json()),
-  dispatch: (machineId: string, workspaceRoot: string, prompt: string) =>
-    req("/api/runs", { method: "POST", body: JSON.stringify({ machineId, workspaceRoot, prompt }) }).then((r) => r.json()),
+  dispatch: (machineId: string, workspaceRoot: string, prompt: string, attachmentIds: string[] = []) =>
+    req("/api/runs", { method: "POST", body: JSON.stringify({ machineId, workspaceRoot, prompt, attachmentIds }) }).then((r) => r.json()),
+  followup: (id: string, prompt: string, attachmentIds: string[] = []) =>
+    req(`/api/runs/${id}/followup`, { method: "POST", body: JSON.stringify({ prompt, attachmentIds }) }).then((r) => r.json()),
+  uploadBlob: async (file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    const r = await fetch("/api/blobs", { method: "POST", body: fd, headers: { authorization: `Bearer ${getToken()}` } });
+    if (r.status === 401) { window.dispatchEvent(new Event("armada:unauthorized")); throw new Error("unauthorized"); }
+    return r.json() as Promise<{ blob?: { id: string; sha256: string; mime: string; name: string; size: number }; error?: string }>;
+  },
   cancel: (id: string) => req(`/api/runs/${id}/cancel`, { method: "POST" }).then((r) => r.json()),
-  followup: (id: string, prompt: string) => req(`/api/runs/${id}/followup`, { method: "POST", body: JSON.stringify({ prompt }) }).then((r) => r.json()),
   close: (id: string) => req(`/api/runs/${id}/close`, { method: "POST" }).then((r) => r.json()),
   archive: (id: string) => req(`/api/runs/${id}/archive`, { method: "POST" }).then((r) => r.json()),
   unarchive: (id: string) => req(`/api/runs/${id}/unarchive`, { method: "POST" }).then((r) => r.json()),

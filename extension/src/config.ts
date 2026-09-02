@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 
-export interface ArmadaConfig { hubUrl: string; token: string; cdpPort: number; autoSubmit: boolean; }
+export interface ArmadaConfig { hubUrl: string; token: string; cdpPort: number; autoSubmit: boolean; imagePaste: boolean; }
 
 export function loadConfig(): ArmadaConfig | null {
   const cfg = vscode.workspace.getConfiguration("armada");
@@ -12,5 +12,6 @@ export function loadConfig(): ArmadaConfig | null {
     token,
     cdpPort: cfg.get<number>("cdpPort") || 9222,
     autoSubmit: cfg.get<boolean>("autoSubmit") ?? true,
+    imagePaste: cfg.get<boolean>("imagePaste") ?? true,
   };
 }

@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "fs";
 import { join } from "path";
+import { hasImageMarkers, stripImageMarkers } from "./imageMarkers";
 import { normalizePrompt } from "./promptNormalize";
 import { normalizeWorkspacePath } from "./workspacePath";
 import type { HookMatch, PendingRun } from "./binding";
@@ -70,7 +71,11 @@ export function extractFirstUserPrompt(jsonl: string): string | null {
     const text = flattenUserText(j);
     if (!text) continue;
     const q = QUERY_RE.exec(text);
-    return normalizePrompt(q ? q[1]! : text);
+    const inner = q ? q[1]! : text;
+    const stripped = stripImageMarkers(inner);
+    if (stripped) return stripped;
+    if (hasImageMarkers(inner)) return "";
+    return normalizePrompt(inner);
   }
   return null;
 }
@@ -98,7 +103,7 @@ export function collectTranscriptViews(transcriptsRoot: string): TranscriptFileV
       head = readFileSync(path, { encoding: "utf8" }).slice(0, 16_384);
     } catch { continue; }
     const firstPrompt = extractFirstUserPrompt(head);
-    if (!firstPrompt) continue;
+    if (firstPrompt === null) continue;
     views.push({ path, mtimeMs, firstPrompt, conversationId });
   }
   return views;
@@ -113,10 +118,13 @@ export function matchTranscriptToPending(
   const usable = files.filter((f) => !bound?.has(f.conversationId));
   const fileHits: { file: TranscriptFileView; runs: PendingRun[] }[] = [];
   for (const f of usable) {
-    const runs = pending.filter((p) =>
-      normalizePrompt(p.prompt) === f.firstPrompt
-      && f.mtimeMs >= p.dispatchedAt - TOLERANCE_MS,
-    );
+    const runs = pending.filter((p) => {
+      if (f.mtimeMs < p.dispatchedAt - TOLERANCE_MS) return false;
+      const want = stripImageMarkers(p.prompt);
+      if (want && want === f.firstPrompt) return true;
+      if (!want && !f.firstPrompt && (p.attachmentIds?.length ?? 0) > 0) return true;
+      return false;
+    });
     if (runs.length > 0) fileHits.push({ file: f, runs });
   }
   const ambiguous = fileHits.filter((h) => h.runs.length > 1);

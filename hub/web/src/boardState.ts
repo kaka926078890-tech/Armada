@@ -4,6 +4,7 @@ export interface RunRow {
   transcript_path: string | null; parent_run_id: string | null;
   created_at: number; started_at: number | null; ended_at: number | null; end_reason: string | null;
   archived_at?: number | null;
+  attachments?: string | null;
 }
 
 export type ColumnKey = "waiting" | "running" | "completed" | "cancelled" | "error";
@@ -26,7 +27,16 @@ export function groupRuns(runs: RunRow[]): Record<ColumnKey, RunRow[]> {
 }
 
 export function cardView(run: RunRow, now: number): { title: string; elapsed: string; badge: string } {
-  const title = run.prompt.length > 40 ? run.prompt.slice(0, 40) + "…" : run.prompt;
+    const ids = (() => {
+      try {
+        const p = JSON.parse(run.attachments || "[]");
+        return Array.isArray(p) ? p : [];
+      } catch { return []; }
+    })();
+  const title = run.prompt.trim()
+    ? (run.prompt.length > 40 ? run.prompt.slice(0, 40) + "…" : run.prompt)
+    : (ids.length ? `[${ids.length} 张图片]` : run.prompt);
+
   const from = run.started_at ?? run.created_at;
   const secs = Math.max(0, Math.floor(((run.ended_at ?? now) - from) / 1000));
   const elapsed = secs > 60 ? `${Math.floor(secs / 60)}m${secs % 60}s` : `${secs}s`;

@@ -11,6 +11,8 @@ import {
 } from "./concurrency";
 import { workspacePathIn } from "../../extension/src/workspacePath";
 import { userPromptFromEventPayload } from "../../extension/src/transcriptBind";
+import { collisionKey, hasImageMarkers, stripImageMarkers } from "../../extension/src/imageMarkers";
+import { BlobStore, parseAttachmentIds, type BlobMeta } from "./blobs";
 
 const ACTIVE = ["created", "dispatched", "binding", "running"];
 const DISPATCH_TIMEOUT_MS = 30_000;
@@ -25,10 +27,24 @@ export class RunService {
     private db: Database,
     private registry: Registry,
     private sse: SseHub,
-    opts: { limits?: ConcurrencyLimits } = {},
+    opts: { limits?: ConcurrencyLimits; blobs?: BlobStore } = {},
   ) {
     this.limits = opts.limits ?? limitsFromEnv();
+    this.blobs = opts.blobs;
     registry.onMachineOffline = (id) => this.onMachineOffline(id);
+  }
+
+  private blobs?: BlobStore;
+  private pendingFollowupPrompt = new Map<string, { prompt: string; attachmentIds: string[] }>();
+
+  private terminal(status: string): boolean {
+    return ["completed", "aborted", "error", "cancelled", "unknown"].includes(status);
+  }
+
+  private wsAttachments(ids: string[]): BlobMeta[] | undefined {
+    if (!this.blobs || ids.length === 0) return undefined;
+    const { items } = this.blobs.metas(ids);
+    return items;
   }
 
   private audit(actor: string, action: string, target: string, payload?: object) {
@@ -37,6 +53,10 @@ export class RunService {
   }
 
   private setStatus(id: string, status: string, extra: Record<string, unknown> = {}, actor = "hub") {
+    const prev = this.get(id);
+    if (prev && this.terminal(status) && !this.terminal(prev.status) && this.blobs) {
+      this.blobs.applyRefDelta(parseAttachmentIds(prev.attachments), []);
+    }
     const sets = ["status=?2"]; const vals: unknown[] = [id, status];
     for (const [k, v] of Object.entries(extra)) { sets.push(`${k}=?${vals.length + 1}`); vals.push(v); }
     if (["completed", "aborted", "error", "cancelled", "unknown"].includes(status) && !("ended_at" in extra)) {
@@ -64,11 +84,12 @@ export class RunService {
     ).get(machineId) as { n: number }).n;
   }
 
-  private hasPromptCollision(machineId: string, workspaceRoot: string, norm: string): boolean {
+  private hasPromptCollision(machineId: string, workspaceRoot: string, prompt: string, attachmentIds: string[], exceptId?: string): boolean {
+    const key = collisionKey(prompt, attachmentIds);
     const rows = this.db.query(
-      `SELECT prompt FROM runs WHERE machine_id=?1 AND workspace_root=?2 AND status IN ('queued','dispatched','binding','running')`,
-    ).all(machineId, workspaceRoot) as { prompt: string }[];
-    return rows.some((r) => normalizePrompt(r.prompt) === norm);
+      `SELECT id, prompt, attachments FROM runs WHERE machine_id=?1 AND workspace_root=?2 AND status IN ('queued','dispatched','binding','running')`,
+    ).all(machineId, workspaceRoot) as { id: string; prompt: string; attachments: string }[];
+    return rows.some((r) => r.id !== exceptId && collisionKey(r.prompt, parseAttachmentIds(r.attachments)) === key);
   }
 
   private windowCanAcceptStart(machineId: string, windowId: string): boolean {
@@ -102,9 +123,7 @@ export class RunService {
         this.db.query(`UPDATE runs SET status='dispatched', queued_at=NULL, started_at=?1 WHERE id=?2`).run(now, row.id);
         this.audit("hub", "run.dispatched", row.id);
         this.sse.broadcast(row.id, { type: "run.status", runId: row.id, status: "dispatched" });
-        this.registry.sendTo(machineId, win.windowId, {
-          type: "run.start", runId: row.id, workspaceRoot: row.workspace_root, prompt: row.prompt, dispatchedAt: now,
-        });
+        this.registry.sendTo(machineId, win.windowId, this.startMessage(row, now));
         break;
       }
     } finally {
@@ -113,22 +132,41 @@ export class RunService {
     for (const id of toFail) this.setStatus(id, "error", { end_reason: "WORKSPACE_NOT_OPEN" });
   }
 
+  private startMessage(row: { id: string; workspace_root: string; prompt: string; attachments?: string }, now: number) {
+    const attachments = this.wsAttachments(parseAttachmentIds(row.attachments));
+    return {
+      type: "run.start" as const,
+      runId: row.id,
+      workspaceRoot: row.workspace_root,
+      prompt: row.prompt,
+      dispatchedAt: now,
+      ...(attachments && attachments.length ? { attachments } : {}),
+    };
+  }
+
   create(machineId: string, workspaceRoot: string, prompt: string,
-         opts: { parentRunId?: string; conversationId?: string; via?: "new" | "followup" } = {}) {
+         opts: { parentRunId?: string; conversationId?: string; via?: "new" | "followup"; attachmentIds?: string[] } = {}) {
     const m = this.registry.getMachine(machineId);
     if (!m || m.status !== "online") return { error: "MACHINE_OFFLINE" };
     if (!JSON.parse(m.open_workspaces).includes(workspaceRoot)) return { error: "WORKSPACE_NOT_OPEN" };
     const win = this.registry.findWindowForWorkspace(machineId, workspaceRoot);
     if (!win) return { error: "WORKSPACE_NOT_OPEN" };
 
+    const attachmentIds = opts.attachmentIds ?? [];
+    if (this.blobs && attachmentIds.length) {
+      const checked = this.blobs.metas(attachmentIds);
+      if (checked.error) return { error: checked.error, status: checked.status };
+    } else if (attachmentIds.length && !this.blobs) {
+      return { error: "ATTACHMENT_NOT_FOUND" };
+    }
+    if (!normalizePrompt(prompt) && attachmentIds.length === 0) return { error: "EMPTY_PROMPT" };
+
     const occupying = this.countOccupying(machineId);
     if (occupying >= this.limits.maxPerMachine) return { error: "RUN_LIMIT" };
     const occupyingWs = this.countOccupying(machineId, workspaceRoot);
     if (occupyingWs >= this.limits.maxPerWorkspace) return { error: "RUN_LIMIT" };
 
-    const norm = normalizePrompt(prompt);
-    const collision = this.hasPromptCollision(machineId, workspaceRoot, norm);
-    if (collision) return { error: "PROMPT_COLLISION" };
+    if (this.hasPromptCollision(machineId, workspaceRoot, prompt, attachmentIds)) return { error: "PROMPT_COLLISION" };
 
     if (!this.limits.multiRunPerWindow) {
       const sameWindowActive = this.db.query(
@@ -146,12 +184,14 @@ export class RunService {
     const canStartNow = slotFree && this.windowCanAcceptStart(machineId, win.windowId);
     const status = canStartNow ? "dispatched" : "queued";
     const now = Date.now();
-    this.db.query(`INSERT INTO runs (id, machine_id, window_id, workspace_root, prompt, status, conversation_id, parent_run_id, created_at, queued_at, dispatch_seq)
-                   VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)`)
-      .run(id, machineId, win.windowId, workspaceRoot, prompt, status, opts.conversationId ?? null, opts.parentRunId ?? null, now, status === "queued" ? now : null, nextSeq);
+    const attachmentsJson = JSON.stringify(attachmentIds);
+    this.db.query(`INSERT INTO runs (id, machine_id, window_id, workspace_root, prompt, status, conversation_id, parent_run_id, created_at, queued_at, dispatch_seq, attachments)
+                   VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)`)
+      .run(id, machineId, win.windowId, workspaceRoot, prompt, status, opts.conversationId ?? null, opts.parentRunId ?? null, now, status === "queued" ? now : null, nextSeq, attachmentsJson);
+    this.blobs?.applyRefDelta([], attachmentIds);
     this.audit("operator", "run.create", id, { machineId, workspaceRoot, via: opts.via ?? "new", status });
     if (status === "dispatched") {
-      this.registry.sendTo(machineId, win.windowId, { type: "run.start", runId: id, workspaceRoot, prompt, dispatchedAt: now });
+      this.registry.sendTo(machineId, win.windowId, this.startMessage({ id, workspace_root: workspaceRoot, prompt, attachments: attachmentsJson }, now));
       this.audit("hub", "run.dispatched", id);
     }
     const queuePosition = status === "queued"
@@ -175,22 +215,34 @@ export class RunService {
     return true;
   }
 
+  submitPromptMatches(run: { prompt: string; attachments?: string }, hookPrompt: string): boolean {
+    return this.promptCompatible(run, hookPrompt);
+  }
+
+  private promptCompatible(run: { prompt: string; attachments?: string }, hookPrompt: string): boolean {
+    const a = stripImageMarkers(hookPrompt);
+    const b = stripImageMarkers(run.prompt ?? "");
+    const ids = parseAttachmentIds(run.attachments);
+    if (a && a === b) return true;
+    if (!a && ids.length > 0 && (hasImageMarkers(hookPrompt) || !b)) return true;
+    return false;
+  }
+
   /**
    * 其它窗口误转发、runId 为空时:仅当 prompt 与等待中的任务原文一致才挂靠。
    * 同工作区另一对话的闲聊不得 bind。不含 running。
    */
   findAttachableRun(machineId: string, workspaceRoots: string[], prompt?: string): any | null {
-    const want = typeof prompt === "string" ? prompt.trim() : "";
-    if (!want || workspaceRoots.length === 0) return null;
+    if (typeof prompt !== "string" || workspaceRoots.length === 0) return null;
     const rows = this.db.query(
       `SELECT * FROM runs WHERE machine_id=?1 ORDER BY created_at DESC`,
     ).all(machineId) as any[];
-    return rows.find((r) => {
+    const hits = rows.filter((r) => {
       if (!workspacePathIn(r.workspace_root, workspaceRoots)) return false;
-      if (String(r.prompt ?? "").trim() !== want) return false;
-      if (["dispatched", "binding"].includes(r.status)) return true;
-      return this.isFalseBindTimeout(r) || this.isFalseDispatchTimeout(r);
-    }) ?? null;
+      if (!["dispatched", "binding"].includes(r.status) && !this.isFalseBindTimeout(r) && !this.isFalseDispatchTimeout(r)) return false;
+      return this.promptCompatible(r, prompt);
+    });
+    return hits.length === 1 ? hits[0] : null;
   }
 
   onRunAck(machineId: string, msg: any) {
@@ -203,7 +255,13 @@ export class RunService {
       this.setStatus(run.id, "binding", recoverable
         ? { ended_at: null, end_reason: null, started_at: Date.now() }
         : {}, "extension");
-    } else if (!recoverable) {
+      const pending = this.pendingFollowupPrompt.get(run.id);
+      if (pending !== undefined) {
+        this.pendingFollowupPrompt.delete(run.id);
+        this.recordFollowupPrompt(run, pending.prompt, pending.attachmentIds);
+      }
+    } else {
+      this.pendingFollowupPrompt.delete(run.id);
       this.setStatus(run.id, "error", { end_reason: msg.reason ?? "REJECTED" }, "extension");
       this.promoteNextQueued(machineId);
     }
@@ -396,18 +454,19 @@ export class RunService {
   }
 
   /** Windows 往往没有 beforeSubmitPrompt；hub 先落一条用户句，详情才不会丢续聊原文。 */
-  private recordFollowupPrompt(run: { id: string; machine_id: string }, prompt: string): void {
+  private recordFollowupPrompt(run: { id: string; machine_id: string }, prompt: string, attachmentIds: string[] = []): void {
     const maxSeq = (this.db.query("SELECT COALESCE(MAX(seq),0) AS m FROM run_events WHERE run_id=?1").get(run.id) as { m: number }).m;
     const minExt = (this.db.query("SELECT MIN(ext_seq) AS m FROM run_events WHERE machine_id=?1").get(run.machine_id) as { m: number | null }).m;
     const extSeq = minExt == null || minExt >= 0 ? -1 : minExt - 1;
     const ts = Date.now();
-    const payload = JSON.stringify({ prompt });
+    const body = attachmentIds.length ? { prompt, attachmentIds } : { prompt };
+    const payload = JSON.stringify(body);
     this.db.query(
       `INSERT INTO run_events (run_id, seq, machine_id, ext_seq, source, hook_event_name, payload, ts, post_terminal)
        VALUES (?1,?2,?3,?4,'hub','beforeSubmitPrompt',?5,?6,0)`,
     ).run(run.id, maxSeq + 1, run.machine_id, extSeq, payload, ts);
     this.sse.broadcast(run.id, {
-      type: "run.event", runId: run.id, seq: maxSeq + 1, hookEventName: "beforeSubmitPrompt", payload: { prompt }, ts,
+      type: "run.event", runId: run.id, seq: maxSeq + 1, hookEventName: "beforeSubmitPrompt", payload: body, ts,
     });
   }
 
@@ -415,7 +474,7 @@ export class RunService {
    * 续聊:同一张卡片回到 dispatched,事件继续追加。不新建 child run。
    * 本卡仍占用中 → CONVERSATION_BUSY；同工作区其它卡占用 → WINDOW_BUSY；注入槽被占 → INJECT_SLOT_BUSY。
    */
-  followup(runId: string, prompt: string): { error?: string; run?: any } {
+  followup(runId: string, prompt: string, attachmentIds: string[] = []): { error?: string; run?: any } {
     const run = this.get(runId);
     if (!run) return { error: "NOT_FOUND" };
     if (!run.conversation_id) return { error: "NO_CONVERSATION" };
@@ -426,12 +485,30 @@ export class RunService {
     const win = this.registry.findWindowForWorkspace(run.machine_id, run.workspace_root);
     if (!win) return { error: "WORKSPACE_NOT_OPEN" };
 
+    if (this.blobs && attachmentIds.length) {
+      const checked = this.blobs.metas(attachmentIds);
+      if (checked.error) return { error: checked.error };
+    } else if (attachmentIds.length && !this.blobs) {
+      return { error: "ATTACHMENT_NOT_FOUND" };
+    }
+    if (!normalizePrompt(prompt) && attachmentIds.length === 0) return { error: "EMPTY_PROMPT" };
+    if (this.hasPromptCollision(run.machine_id, run.workspace_root, prompt, attachmentIds, runId)) {
+      return { error: "PROMPT_COLLISION" };
+    }
+
+    this.blobs?.applyRefDelta([], attachmentIds);
+    this.db.query("UPDATE runs SET attachments=?1 WHERE id=?2").run(JSON.stringify(attachmentIds), runId);
+
     this.setStatus(runId, "dispatched", {
       ended_at: null, end_reason: null, started_at: Date.now(), window_id: win.windowId,
     });
-    this.recordFollowupPrompt(run, prompt);
+    if (attachmentIds.length === 0) this.recordFollowupPrompt(run, prompt);
+    else this.pendingFollowupPrompt.set(runId, { prompt, attachmentIds });
+
+    const attachments = this.wsAttachments(attachmentIds);
     this.registry.sendTo(run.machine_id, win.windowId, {
       type: "run.followup", runId, conversationId: run.conversation_id, workspaceRoot: run.workspace_root, prompt,
+      ...(attachments && attachments.length ? { attachments } : {}),
     });
     this.audit("hub", "run.followup", runId, { prompt: prompt.slice(0, 80) });
     return { run: this.get(runId) };

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { api } from "../api";
+import { mergeImageFiles } from "../attachments";
 import type { Machine } from "../types";
 
 const ERR: Record<string, string> = {
@@ -37,6 +38,7 @@ export function DispatchModal({ machines, preset, presetLabel, activeOnWorkspace
   const [machineId, setMachineId] = useState(preset?.machineId ?? online[0]?.id ?? "");
   const [workspace, setWorkspace] = useState(preset?.workspaceRoot ?? "");
   const [prompt, setPrompt] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
   const [error, setError] = useState("");
   const raw = machineId ? online.find((m) => m.id === machineId)?.open_workspaces : undefined;
   const { workspaces, parseFailed } = machineId ? parseWorkspaces(raw) : { workspaces: [] as string[], parseFailed: false };
@@ -70,14 +72,49 @@ export function DispatchModal({ machines, preset, presetLabel, activeOnWorkspace
           </div>
         )}
         <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={6}
-          placeholder="提示词…" className="px-2 py-1.5 rounded bg-zinc-950 border border-zinc-700" />
+          placeholder="提示词…" className="px-2 py-1.5 rounded bg-zinc-950 border border-zinc-700"
+          onPaste={(e) => {
+            const items = [...e.clipboardData.files];
+            if (!items.length) return;
+            const { files: next, rejected } = mergeImageFiles(files, items);
+            if (next.length === files.length && rejected === 0 && !items.some((f) => f.type === "image/png" || f.type === "image/jpeg")) return;
+            e.preventDefault();
+            setFiles(next);
+            if (rejected) setError("最多 4 张图片，已忽略多余文件");
+          }} />
+        <input type="file" accept="image/png,image/jpeg" multiple onChange={(e) => {
+          const picked = [...(e.target.files ?? [])];
+          const { files: next, rejected } = mergeImageFiles(files, picked);
+          setFiles(next);
+          if (rejected) setError("最多 4 张图片，已忽略多余文件");
+          e.target.value = "";
+        }} />
+        {files.length > 0 && (
+          <div className="text-[12px] text-zinc-400 flex flex-col gap-1">
+            {files.map((f, i) => (
+              <div key={i} className="flex justify-between gap-2">
+                <span className="truncate">{f.name || "粘贴的图片"}</span>
+                <button type="button" className="text-zinc-500" onClick={() => setFiles(files.filter((_, j) => j !== i))}>移除</button>
+              </div>
+            ))}
+          </div>
+        )}
         {error && <div className="text-red-400 text-sm">{error}</div>}
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="px-3 py-1.5 rounded bg-zinc-800">取消</button>
-          <button disabled={!machineId || !workspace || !prompt.trim()} onClick={() => {
-            api.dispatch(machineId, workspace, prompt.trim()).then((r) => {
-              if (r.error) setError(ERR[r.error] ?? r.error); else onDone();
-            }).catch((e) => setError(String(e)));
+          <button disabled={!machineId || !workspace || (!prompt.trim() && files.length === 0)} onClick={() => {
+            void (async () => {
+              try {
+                const ids: string[] = [];
+                for (const f of files) {
+                  const r = await api.uploadBlob(f);
+                  if (r.error || !r.blob) { setError(r.error ?? "上传失败"); return; }
+                  ids.push(r.blob.id);
+                }
+                const r = await api.dispatch(machineId, workspace, prompt.trim(), ids);
+                if (r.error) setError(ERR[r.error] ?? r.error); else onDone();
+              } catch (e) { setError(String(e)); }
+            })();
           }} className="px-3 py-1.5 rounded bg-sky-600 hover:bg-sky-500 disabled:opacity-40">派发</button>
         </div>
       </div>

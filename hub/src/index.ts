@@ -9,6 +9,7 @@ import { SseHub } from "./sse";
 import { ingestEvent } from "./ingest";
 import { handleWsMessage, type WsData } from "./ws";
 import { limitsFromEnv, httpStatusForRunError, type ConcurrencyLimits } from "./concurrency";
+import { BlobStore } from "./blobs";
 
 export interface HubServer {
   server: ReturnType<typeof Bun.serve>;
@@ -27,7 +28,8 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
   const registry = new Registry(db);
   const sse = new SseHub();
   const limits = opts.concurrency ?? limitsFromEnv();
-  const runs = new RunService(db, registry, sse, { limits });
+  const blobs = new BlobStore(db, home);
+  const runs = new RunService(db, registry, sse, { limits, blobs });
   registry.onMachinesChanged = () => sse.broadcast("*", { type: "machine.updated" });
 
   registry.inboundHandler = (ws, msg) => {
@@ -67,9 +69,27 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
     return c.json({ machine });
   });
 
+  app.post("/api/blobs", async (c) => {
+    const body = await c.req.parseBody();
+    const file = body["file"];
+    if (!(file instanceof File)) return c.json({ error: "INVALID" }, 400);
+    const bytes = Buffer.from(await file.arrayBuffer());
+    const { blob, error, status } = blobs.put(bytes, file.type || "", file.name || "");
+    if (error) return c.json({ error }, (status as 400 | 413 | 429) ?? 400);
+    return c.json({ blob }, 201);
+  });
+  app.get("/api/blobs/:id", (c) => {
+    const hit = blobs.get(c.req.param("id"));
+    if (!hit) return c.json({ error: "ATTACHMENT_NOT_FOUND" }, 404);
+    return new Response(hit.bytes, {
+      headers: { "content-type": hit.mime, "cache-control": "private, max-age=3600" },
+    });
+  });
+
   app.post("/api/runs", async (c) => {
     const body = await c.req.json();
-    const { run, error, queuePosition } = runs.create(body.machineId, body.workspaceRoot, body.prompt);
+    const attachmentIds = Array.isArray(body.attachmentIds) ? body.attachmentIds.filter((x: unknown) => typeof x === "string") : [];
+    const { run, error, queuePosition } = runs.create(body.machineId, body.workspaceRoot, body.prompt ?? "", { attachmentIds });
     if (error) return c.json({ error }, httpStatusForRunError(error));
     return c.json({ run, queuePosition }, 201);
   });
@@ -129,8 +149,9 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
     if (parent.end_reason === "OPERATOR_CLOSED") {
       return c.json({ error: "CLOSED" }, 400);
     }
-    const { prompt } = await c.req.json();
-    const { run, error } = runs.followup(parent.id, prompt);
+    const { prompt, attachmentIds: rawIds } = await c.req.json();
+    const attachmentIds = Array.isArray(rawIds) ? rawIds.filter((x: unknown) => typeof x === "string") : [];
+    const { run, error } = runs.followup(parent.id, typeof prompt === "string" ? prompt : "", attachmentIds);
     if (error) return c.json({ error }, httpStatusForRunError(error));
     return c.json({ run }, 200);
   });
@@ -175,9 +196,11 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
     },
   });
 
+  blobs.sweep();
   const sweepTimer = setInterval(() => {
     registry.sweep();
     runs.sweepTimeouts();
+    blobs.sweep();
   }, 15_000);
   return {
     server, db, registry, runs, token,

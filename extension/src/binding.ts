@@ -1,11 +1,13 @@
 import { workspacePathIn } from "./workspacePath";
 import { normalizePrompt } from "./promptNormalize";
+import { hasImageMarkers, stripImageMarkers } from "./imageMarkers";
 
 export interface PendingRun {
   runId: string;
   workspaceRoot: string;
   prompt: string;
   dispatchedAt: number; // epoch ms
+  attachmentIds?: string[];
 }
 
 export interface HookEventView {
@@ -69,18 +71,22 @@ export function matchHookToPending(pending: PendingRun[], ev: HookEventView): Ho
   if (!cid || typeof cid !== "string") return null;
   const roots: string[] = Array.isArray(ev.raw?.workspace_roots) ? ev.raw.workspace_roots : [];
   const evMs = ev.ts * 1000;
-  const prompt = typeof ev.raw?.prompt === "string" ? normalizePrompt(ev.raw.prompt) : "";
-  if (!prompt) return null;
-  const hits = pending.filter((p) =>
-    workspacePathIn(p.workspaceRoot, roots)
-    && evMs >= p.dispatchedAt - TOLERANCE_MS
-    && normalizePrompt(p.prompt) === prompt,
-  );
+  const rawPrompt = typeof ev.raw?.prompt === "string" ? ev.raw.prompt : "";
+  const prompt = stripImageMarkers(rawPrompt);
+  const hits = pending.filter((p) => {
+    if (!workspacePathIn(p.workspaceRoot, roots)) return false;
+    if (evMs < p.dispatchedAt - TOLERANCE_MS) return false;
+    const want = stripImageMarkers(p.prompt);
+    if (prompt && want === prompt) return true;
+    const n = p.attachmentIds?.length ?? 0;
+    if (!prompt && n > 0 && (hasImageMarkers(rawPrompt) || !want)) return true;
+    return false;
+  });
   if (hits.length > 1) {
     return { ambiguous: true as const, runs: hits };
   }
   if (hits.length !== 1) {
-    if (!isGarbledHookPrompt(prompt)) return null;
+    if (!isGarbledHookPrompt(rawPrompt)) return null;
     // PowerShell → native exe re-encodes CJK to "???". One waiting run in this
     // workspace+time window is still unambiguous (CDP just submitted it).
     const unique = pending.filter((p) =>

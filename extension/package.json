@@ -34,6 +34,11 @@
           "type": "boolean",
           "default": true,
           "description": "Auto-submit injected prompts via CDP; falls back to clipboard + manual Enter"
+        },
+        "armada.imagePaste": {
+          "type": "boolean",
+          "default": true,
+          "description": "Paste image attachments into Composer via the OS clipboard. If false, runs with attachments are rejected."
         }
       }
     },

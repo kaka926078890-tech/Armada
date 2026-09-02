@@ -103,6 +103,7 @@ npx vsce package --no-dependencies    # 没有 vsce：npm i -g @vscode/vsce
 - 打开 `http://<中台IP>:7380`，粘贴中台令牌。
 - 左侧应出现受控端主机名（绿点）和已开工作区。
 - **+ 派发任务** → 选机器 + 工作区 + prompt。CDP 正常时无需人在受控端回车。
+- 派发/续聊可附带最多 **4** 张 PNG/JPEG（每张 ≤ 8 MiB，合计 ≤ 24 MiB；可多选文件或往输入框粘贴截图）。只附图、prompt 为空也可以派。扩展把原图写入系统剪贴板并在 Composer 里贴出图片芯片；失败不会改成 `@路径`。被控 Cursor 须用启动器拉起（CDP）。可用 `armada.imagePaste`（默认 true）关掉图路径。
 - 详情里看思考 / 工具 / 回复；「续聊同一对话」走同一 `conversation_id`。
 - 取消：中台点取消；受控端 Cursor 若仍要确认，在那台点一下。
 - 同一机器可多条 `running`（默认每机 8、每工作区 4）。**整机同时只有 1 条处于派发/绑定**（CDP 注入串行）。超出限额 → `429 RUN_LIMIT`。同工作区相同 prompt → `409 PROMPT_COLLISION`。关着的工作区不能派（`400 WORKSPACE_NOT_OPEN`）。扩展需 ≥ 0.4.0 才能同一窗口并行第二条。

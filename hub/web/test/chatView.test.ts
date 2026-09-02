@@ -100,6 +100,28 @@ describe("eventsToChat", () => {
     expect(blocks.find((b) => b.kind === "assistant")).toMatchObject({ text: "你好。" });
     expect(blocks.find((b) => b.kind === "subagent")).toMatchObject({ status: "completed", durationMs: 9794 });
   });
+
+  test("transcript image-only user line shows as [图片] instead of dropping", () => {
+    const blocks = eventsToChat([
+      ev({ seq: 1, source: "transcript", payload: JSON.stringify({
+        role: "user", message: { content: [{ type: "text", text: "<user_query>\n[Image]\n<image_files>x.png</image_files>\n</user_query>" }] },
+      }) }),
+      ev({ seq: 2, source: "transcript", payload: JSON.stringify({
+        role: "assistant", message: { content: [{ type: "text", text: "看到了" }] },
+      }) }),
+    ]);
+    expect(blocks).toEqual([
+      { kind: "user", text: "[图片]", seq: 1 },
+      { kind: "assistant", text: "看到了", seq: 2 },
+    ]);
+  });
+
+  test("hub followup with attachmentIds and empty prompt shows [图片]", () => {
+    const blocks = eventsToChat([
+      ev({ seq: 1, hook_event_name: "beforeSubmitPrompt", payload: JSON.stringify({ prompt: "", attachmentIds: ["abc"] }) }),
+    ]);
+    expect(blocks).toEqual([{ kind: "user", text: "[图片]", seq: 1 }]);
+  });
 });
 
 describe("segmentChat", () => {

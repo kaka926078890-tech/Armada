@@ -56,6 +56,9 @@ describe("cardView", () => {
     expect(g.waiting.map((r) => r.id)).toEqual(["q"]);
     expect(cardView({ ...base, status: "queued" }, 5000).badge).toBe("排队中");
   });
+  test("empty prompt with attachments titles [N 张图片]", () => {
+    expect(cardView({ ...base, prompt: "", attachments: JSON.stringify(["a", "b"]) }, 5000).title).toBe("[2 张图片]");
+  });
 });
 
 describe("workspace slots and conversation filter", () => {

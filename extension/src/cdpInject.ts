@@ -68,6 +68,29 @@ export const COMPOSER_VERIFY_JS = `function (prompt) {
   return "MISMATCH:" + els[0].innerText.slice(0, 40);
 }`;
 
+export const COMPOSER_CHIP_COUNT_JS = `function () {
+  var els = ${VISIBLE_ELS};
+  var n = 0;
+  for (var i = 0; i < els.length; i++) {
+    n += els[i].querySelectorAll("img").length;
+  }
+  return n;
+}`;
+
+export const COMPOSER_FOCUS_IMAGE_JS = `function () {
+  var els = ${VISIBLE_ELS};
+  if (!els.length) return "NO_INPUT";
+  var empty = null, withImg = null;
+  for (var i = 0; i < els.length; i++) {
+    var t = els[i].innerText.trim();
+    var imgs = els[i].querySelectorAll("img").length;
+    if (imgs && !withImg) withImg = els[i];
+    if (!t && !imgs && !empty) empty = els[i];
+  }
+  var el = empty || withImg || els[0];
+  el.focus();
+  return "OK";
+}`;
 export const COMPOSER_ENTER_JS = `function (prompt) {
   var els = ${VISIBLE_ELS};
   if (!els.length) return "NO_INPUT";
@@ -81,6 +104,11 @@ export const COMPOSER_ENTER_JS = `function (prompt) {
   if (!el) {
     for (var j = 0; j < els.length; j++) {
       if (!els[j].innerText.trim()) { el = els[j]; break; }
+    }
+  }
+  if (!el) {
+    for (var k = 0; k < els.length; k++) {
+      if (els[k].querySelectorAll("img").length) { el = els[k]; break; }
     }
   }
   if (!el) return "NO_TARGET";
@@ -214,6 +242,96 @@ export function createCdpSubmitter(deps: CdpSubmitterDeps) {
       if (e !== "OK") return { ok: false, reason: `ENTER_FAIL:${e}` };
       return { ok: true };
     } catch (e) {
+      return { ok: false, reason: `CDP_EVAL_FAIL:${String(e)}` };
+    } finally {
+      session.close();
+    }
+  };
+}
+
+export type ImagePasteStep = { bytes: Buffer; mime: string };
+
+export function createImagePaster(deps: CdpSubmitterDeps) {
+  const fetchJson = deps.fetchJson ?? defaultFetchJson;
+  const connect = deps.connect ?? defaultConnect;
+  const sleep = deps.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
+  const log = deps.log ?? (() => {});
+  const meta = process.platform === "win32" ? 2 : 4;
+
+  return async function paste(
+    workspaceRoot: string,
+    prompt: string,
+    steps: ImagePasteStep[],
+    writeClipboard: (bytes: Buffer, mime: string) => void,
+    autoSubmit: boolean,
+  ): Promise<CdpSubmitResult> {
+    let targets: any[];
+    try {
+      targets = await fetchJson(`http://127.0.0.1:${deps.port}/json`, 1500);
+    } catch {
+      return { ok: false, reason: "CDP_UNREACHABLE" };
+    }
+    const base = workspaceRoot.split(/[\\/]/).filter(Boolean).pop() ?? workspaceRoot;
+    const pages = targets.filter(
+      (t) => t.type === "page" && typeof t.title === "string" && t.title.includes(base),
+    );
+    if (pages.length === 0) return { ok: false, reason: "WINDOW_TARGET_NOT_FOUND" };
+    const wsUrl = pages[0].webSocketDebuggerUrl;
+    if (typeof wsUrl !== "string" || !wsUrl) return { ok: false, reason: "NO_WS_URL" };
+
+    let session: CdpSession;
+    try {
+      session = await connect(wsUrl, 2000);
+    } catch (e) {
+      return { ok: false, reason: `CDP_CONNECT_FAIL:${String(e)}` };
+    }
+
+    try {
+      let focused = false;
+      for (let attempt = 0; attempt < 6 && !focused; attempt++) {
+        const r = String(await session.call("Runtime.evaluate", {
+          expression: `(${COMPOSER_FOCUS_IMAGE_JS})()`, returnByValue: true,
+        }).then((x) => x?.result?.value));
+        if (r === "OK") focused = true;
+        else await sleep(800);
+      }
+      if (!focused) return { ok: false, reason: "NO_INPUT_AFTER_RETRY" };
+
+      for (let i = 0; i < steps.length; i++) {
+        const step = steps[i]!;
+        writeClipboard(step.bytes, step.mime);
+        let okChip = false;
+        for (let retry = 0; retry < 3 && !okChip; retry++) {
+          await session.call("Runtime.evaluate", {
+            expression: `(${COMPOSER_FOCUS_IMAGE_JS})()`, returnByValue: true,
+          });
+          await session.call("Input.dispatchKeyEvent", {
+            type: "keyDown", modifiers: meta, key: "v", code: "KeyV", windowsVirtualKeyCode: 86,
+          });
+          await session.call("Input.dispatchKeyEvent", {
+            type: "keyUp", modifiers: meta, key: "v", code: "KeyV", windowsVirtualKeyCode: 86,
+          });
+          await sleep(400);
+          const n = Number(await session.call("Runtime.evaluate", {
+            expression: `(${COMPOSER_CHIP_COUNT_JS})()`, returnByValue: true,
+          }).then((x) => x?.result?.value));
+          if (n >= i + 1) okChip = true;
+        }
+        if (!okChip) return { ok: false, reason: `CHIP_COUNT:${i + 1}` };
+      }
+
+      if (prompt.trim()) {
+        await session.call("Input.insertText", { text: prompt });
+      }
+      if (autoSubmit) {
+        const e = String(await session.call("Runtime.evaluate", {
+          expression: `(${COMPOSER_ENTER_JS})(${JSON.stringify(prompt)})`, returnByValue: true,
+        }).then((x) => x?.result?.value));
+        if (e !== "OK") return { ok: false, reason: `ENTER_FAIL:${e}` };
+      }
+      return { ok: true };
+    } catch (e) {
+      log(`image paste fail: ${String(e)}`);
       return { ok: false, reason: `CDP_EVAL_FAIL:${String(e)}` };
     } finally {
       session.close();

@@ -34,9 +34,10 @@ export function extensionSupportsMultiRunPerWindow(version: string | null | unde
   return c >= 0;
 }
 
-export function httpStatusForRunError(error: string): 400 | 404 | 409 | 429 {
-  if (error === "RUN_LIMIT") return 429;
+export function httpStatusForRunError(error: string): 400 | 404 | 409 | 413 | 429 {
+  if (error === "RUN_LIMIT" || error === "RATE_LIMIT") return 429;
   if (error === "NOT_FOUND") return 404;
+  if (error === "ATTACHMENT_TOO_LARGE" || error === "ATTACHMENT_TOTAL_TOO_LARGE") return 413;
   if ([
     "PROMPT_COLLISION", "CONVERSATION_BUSY", "INJECT_SLOT_BUSY", "WINDOW_BUSY",
     "ALREADY_ACTIVE", "RUN_BUSY", "NO_CONVERSATION", "INVALID_STATE", "ALREADY_TERMINAL",

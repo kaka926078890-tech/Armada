@@ -41,6 +41,16 @@ export interface ExecutorDeps {
    * 返回 false 或抛错时降级为剪贴板粘贴 + 人工回车。
    */
   autoSubmit?: (workspaceRoot: string, prompt: string) => Promise<boolean>;
+  imagePaste?: boolean;
+  fetchBlob?: (id: string) => Promise<{ bytes: Buffer; mime: string }>;
+  writeClipboard?: (bytes: Buffer, mime: string) => void;
+  autoSubmitImages?: (
+    workspaceRoot: string,
+    prompt: string,
+    steps: { bytes: Buffer; mime: string }[],
+    autoSubmit: boolean,
+  ) => Promise<boolean>;
+  autoEnter?: boolean;
   /**
    * Called when conversation_id is already known (followup) so we do not wait for hooks.
    */
@@ -65,12 +75,20 @@ export class Executor {
     return this.deps.globalState.get<string[]>("armada.authorizedWorkspaces", []) ?? [];
   }
 
-  async startRun(msg: { runId: string; workspaceRoot: string; prompt: string; dispatchedAt?: number }): Promise<void> {
+  async startRun(msg: {
+    runId: string; workspaceRoot: string; prompt: string; dispatchedAt?: number;
+    attachments?: { id?: string; sha256?: string; mime?: string; size?: number; name?: string }[];
+  }): Promise<void> {
     const vscode = vs();
     // 过期派发守卫:hub 侧 30s 无 ack 即 DISPATCH_TIMEOUT 进终态;
     // 若 modal 被搁置超过该时长才点"允许",注入已无意义且会污染绑定(真机联调实测)。
     if (typeof msg.dispatchedAt === "number" && Date.now() - msg.dispatchedAt > 30_000) {
       this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: "STALE_DISPATCH" });
+      return;
+    }
+    const attachments = Array.isArray(msg.attachments) ? msg.attachments : [];
+    if (attachments.length && this.deps.imagePaste === false) {
+      this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: "IMAGE_PASTE_DISABLED" });
       return;
     }
     const folders = (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath);
@@ -107,9 +125,19 @@ export class Executor {
         workspaceRoot: msg.workspaceRoot,
         prompt: msg.prompt,
         dispatchedAt: Date.now(),
+        attachmentIds: attachments.map((a) => a.sha256 || a.id).filter((x): x is string => !!x),
       });
       pendingAdded = true;
-      await this.injectPrompt(msg.workspaceRoot, msg.prompt, 1500);
+      if (attachments.length) {
+        const ok = await this.injectImages(msg.workspaceRoot, msg.prompt, attachments);
+        if (!ok) {
+          this.deps.removePending?.(msg.runId);
+          this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: "IMAGE_PASTE_FAILED" });
+          return;
+        }
+      } else {
+        await this.injectPrompt(msg.workspaceRoot, msg.prompt, 1500);
+      }
       this.deps.send({ type: "run.ack", runId: msg.runId, status: "accepted" });
     } catch (e) {
       if (pendingAdded) this.deps.removePending?.(msg.runId);
@@ -119,10 +147,25 @@ export class Executor {
     }
   }
 
-  /**
-   * CDP 写入并回车;失败则剪贴板粘贴后再试一次 CDP(此时草稿已在新框里,走 DRAFT→Enter)。
-   * 第二次仍失败则停在"已粘贴待回车"。
-   */
+  private async injectImages(
+    workspaceRoot: string,
+    prompt: string,
+    attachments: { id?: string; sha256?: string; mime?: string }[],
+  ): Promise<boolean> {
+    if (!this.deps.fetchBlob || !this.deps.autoSubmitImages || !this.deps.writeClipboard) return false;
+    const steps: { bytes: Buffer; mime: string }[] = [];
+    for (const a of attachments) {
+      const id = a.sha256 || a.id;
+      if (!id) return false;
+      const blob = await this.deps.fetchBlob(id);
+      steps.push({ bytes: blob.bytes, mime: blob.mime || a.mime || "image/png" });
+    }
+    try {
+      return await this.deps.autoSubmitImages(workspaceRoot, prompt, steps, this.deps.autoEnter !== false);
+    } catch {
+      return false;
+    }
+  }
   private async injectPrompt(workspaceRoot: string, prompt: string, pasteWaitMs: number): Promise<void> {
     const vscode = vs();
     let submitted = false;
@@ -159,10 +202,15 @@ export class Executor {
     runId: string;
     conversationId: string;
     prompt: string;
-    /** Present on hub `run.followup` (parent workspace); required for pending binding. */
     workspaceRoot: string;
+    attachments?: { id?: string; sha256?: string; mime?: string }[];
   }): Promise<void> {
     const vscode = vs();
+    const attachments = Array.isArray(msg.attachments) ? msg.attachments : [];
+    if (attachments.length && this.deps.imagePaste === false) {
+      this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: "IMAGE_PASTE_DISABLED" });
+      return;
+    }
     const lock = await acquireCdpLock({
       lockPath: this.deps.cdpLockPath ?? join(homedir(), ".cursor", "armada", "cdp.lock"),
       timeoutMs: 25_000,
@@ -174,13 +222,21 @@ export class Executor {
     }
     try {
       await vscode.commands.executeCommand("composer.openComposer", msg.conversationId);
-      await this.injectPrompt(msg.workspaceRoot, msg.prompt, 800);
-      // Binding window starts after inject succeeds (mirrors startRun post-auth pending).
+      if (attachments.length) {
+        const ok = await this.injectImages(msg.workspaceRoot, msg.prompt, attachments);
+        if (!ok) {
+          this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: "IMAGE_PASTE_FAILED" });
+          return;
+        }
+      } else {
+        await this.injectPrompt(msg.workspaceRoot, msg.prompt, 800);
+      }
       this.deps.addPending?.({
         runId: msg.runId,
         workspaceRoot: msg.workspaceRoot,
         prompt: msg.prompt,
         dispatchedAt: Date.now(),
+        attachmentIds: attachments.map((a) => a.sha256 || a.id).filter((x): x is string => !!x),
       });
       this.deps.bindKnown?.({
         runId: msg.runId,

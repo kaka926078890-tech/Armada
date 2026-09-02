@@ -12,6 +12,23 @@ describe("matchHookToPending", () => {
     expect(matchHookToPending([P], ev("sessionStart", 1_001_000, { conversation_id: "c1", workspace_roots: ["/ws/a"] }))).toBeNull();
   });
 
+  test("image-only hook binds unique pending with attachments", () => {
+    const img = { ...P, prompt: "", attachmentIds: ["abc"] };
+    const m = matchHookToPending([img], ev("beforeSubmitPrompt", 1_002_000, {
+      conversation_id: "c1", workspace_roots: ["/ws/a"], prompt: "[Image]\n<image_files>x.png</image_files>",
+    }));
+    expect(m && "run" in m ? m.run.runId : null).toBe("r-1");
+  });
+
+  test("two image-only pendings with the same hook are ambiguous", () => {
+    const a = { ...P, runId: "r-a", prompt: "", attachmentIds: ["a"] };
+    const b = { ...P, runId: "r-b", prompt: "", attachmentIds: ["b"], dispatchedAt: 999_000 };
+    const m = matchHookToPending([a, b], ev("beforeSubmitPrompt", 1_002_000, {
+      conversation_id: "c1", workspace_roots: ["/ws/a"], prompt: "[Image]\n<image_files>x.png</image_files>",
+    }));
+    expect(isAmbiguousMatch(m)).toBe(true);
+  });
+
   test("beforeSubmitPrompt with same prompt → true", () => {
     const m = matchHookToPending([P], ev("beforeSubmitPrompt", 1_002_000, { conversation_id: "c1", workspace_roots: ["/ws/a"], prompt: "hello" }));
     expect(m!.promptMatch).toBe(true);

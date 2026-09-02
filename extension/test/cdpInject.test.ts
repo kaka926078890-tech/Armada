@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
   createCdpSubmitter,
+  createImagePaster,
   COMPOSER_FOCUS_JS,
+  COMPOSER_FOCUS_IMAGE_JS,
+  COMPOSER_CHIP_COUNT_JS,
   COMPOSER_VERIFY_JS,
   COMPOSER_ENTER_JS,
   type CdpSession,
@@ -37,14 +40,19 @@ function deps(over: Partial<Parameters<typeof createCdpSubmitter>[0]> = {}) {
   };
 }
 
-function mockDoc(texts: string[]) {
-  const els = texts.map((innerText) => ({
+function mockDoc(texts: string[], imgCounts: number[] = []) {
+  const els = texts.map((innerText, i) => ({
     innerText,
     offsetWidth: 100,
     offsetHeight: 24,
     focused: false,
+    imgCount: imgCounts[i] ?? 0,
     focus() { this.focused = true; },
     dispatchEvent() { return true; },
+    querySelectorAll(sel: string) {
+      if (sel === "img") return Array.from({ length: this.imgCount }, () => ({}));
+      return [];
+    },
   }));
   return {
     els,
@@ -52,13 +60,22 @@ function mockDoc(texts: string[]) {
   };
 }
 
-function runJs(src: string, texts: string[], prompt: string): { result: string; els: ReturnType<typeof mockDoc>["els"] } {
-  const document = mockDoc(texts);
+function runJs(src: string, texts: string[], prompt: string, imgCounts?: number[]): { result: string; els: ReturnType<typeof mockDoc>["els"] } {
+  const document = mockDoc(texts, imgCounts);
   const KeyboardEvent = class {
     constructor(public type: string, public init?: unknown) {}
   };
   const fn = new Function("document", "KeyboardEvent", `return (${src});`)(document, KeyboardEvent);
   return { result: String(fn(prompt)), els: document.els };
+}
+
+function runJs0(src: string, texts: string[], imgCounts?: number[]): { result: string; els: ReturnType<typeof mockDoc>["els"] } {
+  const document = mockDoc(texts, imgCounts);
+  const KeyboardEvent = class {
+    constructor(public type: string, public init?: unknown) {}
+  };
+  const fn = new Function("document", "KeyboardEvent", `return (${src});`)(document, KeyboardEvent);
+  return { result: String(fn()), els: document.els };
 }
 
 describe("composer picker JS", () => {
@@ -86,6 +103,21 @@ describe("composer picker JS", () => {
   test("ENTER 打在匹配草稿的框而不是 els[0]", () => {
     const { result, els } = runJs(COMPOSER_ENTER_JS, ["当前长对话", "你好"], "你好");
     expect(result).toBe("OK");
+    expect(els[1].focused).toBe(true);
+  });
+
+  test("只附图 ENTER 打在带 img 的框", () => {
+    const { result, els } = runJs(COMPOSER_ENTER_JS, ["旧对话", "chip"], "", [0, 2]);
+    expect(result).toBe("OK");
+    expect(els[1].focused).toBe(true);
+  });
+
+  test("CHIP_COUNT 累加可见框内 img", () => {
+    expect(runJs0(COMPOSER_CHIP_COUNT_JS, ["", ""], [1, 2]).result).toBe("3");
+  });
+
+  test("FOCUS_IMAGE 优先空且无芯片的框", () => {
+    const { els } = runJs0(COMPOSER_FOCUS_IMAGE_JS, ["旧对话", ""], [0, 0]);
     expect(els[1].focused).toBe(true);
   });
 });
@@ -168,5 +200,28 @@ describe("createCdpSubmitter", () => {
     const r = await submit("/Users/x/armada-test-ws", "hi");
     expect(r.ok).toBe(false);
     expect(r.reason).toContain("CDP_CONNECT_FAIL");
+  });
+});
+
+describe("createImagePaster", () => {
+  test("chip count never reaches N → CHIP_COUNT and no Enter", async () => {
+    const log: CallLog[] = [];
+    const paste = createImagePaster(deps({ connect: async () => mockSession(["OK", "OK", "0"], log) }));
+    const r = await paste("/Users/x/armada-test-ws", "hi", [{ bytes: Buffer.from("x"), mime: "image/png" }], () => {}, true);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toContain("CHIP_COUNT");
+    expect(log.some((c) => c.method === "Input.insertText")).toBe(false);
+  });
+
+  test("chips then prompt then Enter; paste uses dispatchKeyEvent not insertText for the image", async () => {
+    const log: CallLog[] = [];
+    const paste = createImagePaster(deps({
+      connect: async () => mockSession(["OK", "OK", "1", "OK"], log),
+    }));
+    const r = await paste("/Users/x/armada-test-ws", "看图", [{ bytes: Buffer.from("x"), mime: "image/png" }], () => {}, true);
+    expect(r.ok).toBe(true);
+    expect(log.some((c) => c.method === "Input.dispatchKeyEvent")).toBe(true);
+    const insert = log.find((c) => c.method === "Input.insertText");
+    expect(insert?.params?.text).toBe("看图");
   });
 });

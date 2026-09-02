@@ -10,7 +10,8 @@ import { SpoolForwarder } from "./spool";
 import { matchHookToPending, claimConversation, eventBelongsToWindow, transcriptPathBelongsToCid, runIdForHook, rememberSubagent, isAmbiguousMatch, dropPendingRuns, type PendingRun, type BindingMatch } from "./binding";
 import { TranscriptTailer } from "./transcript";
 import { Executor, CancelWatcher } from "./executor";
-import { createCdpSubmitter } from "./cdpInject";
+import { createCdpSubmitter, createImagePaster } from "./cdpInject";
+import { writeOsImageClipboard } from "./osClipboard";
 import { mergeHooks, hooksDriftHash, spoolScriptName, shouldInstallArmadaHooks } from "./hooksInstall";
 import { collectTranscriptViews, matchTranscriptToPending, stopPayloadFromTranscriptLine, stopFromTranscriptFileContent, transcriptsDirForWorkspace, isWithinTranscriptBindWindow, FollowupStopGuard } from "./transcriptBind";
 import { TranscriptDirWatcher, debounceLeading, watchTranscriptDir, watchFileSize, TRANSCRIPT_WATCHDOG_MS, TRANSCRIPT_WATCH_DEBOUNCE_MS } from "./transcriptWatch";
@@ -71,7 +72,8 @@ export function activate(context: vscode.ExtensionContext): void {
   const followupStopGuard = new FollowupStopGuard();
 
   const cdpSubmit = config.autoSubmit ? createCdpSubmitter({ port: config.cdpPort, log }) : null;
-  log(`autoSubmit=${config.autoSubmit} cdpPort=${config.cdpPort}`);
+  const imagePaster = createImagePaster({ port: config.cdpPort, log });
+  log(`autoSubmit=${config.autoSubmit} imagePaste=${config.imagePaste} cdpPort=${config.cdpPort}`);
 
   // transcript 事件走独立高段,避免与 spool seq 冲突。
   // 每次启动从时钟播种:不可再从 1e9 重数,否则 UNIQUE(machine_id, ext_seq) 把 stop 当重复丢掉。
@@ -237,6 +239,24 @@ export function activate(context: vscode.ExtensionContext): void {
           return r.ok;
         }
       : undefined,
+    imagePaste: config.imagePaste,
+    autoEnter: config.autoSubmit,
+    writeClipboard: writeOsImageClipboard,
+    fetchBlob: async (id) => {
+      const res = await fetch(`http://${config.hubUrl}/api/blobs/${id}`, {
+        headers: { authorization: `Bearer ${config.token}` },
+      });
+      if (!res.ok) throw new Error(`blob ${res.status}`);
+      const mime = res.headers.get("content-type") || "image/png";
+      const bytes = Buffer.from(await res.arrayBuffer());
+      return { bytes, mime };
+    },
+    autoSubmitImages: async (workspaceRoot, prompt, steps, autoSubmit) => {
+      const r = await imagePaster(workspaceRoot, prompt, steps, writeOsImageClipboard, autoSubmit);
+      if (!r.ok) log(`image paste failed: ${r.reason}`);
+      else log("image paste ok");
+      return r.ok;
+    },
   });
 
   const forwarder = new SpoolForwarder({

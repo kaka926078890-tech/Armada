@@ -1,4 +1,5 @@
 import type { RunEvent } from "./types";
+import { displayUserText } from "../../../extension/src/imageMarkers";
 
 export type ChatBlock =
   | { kind: "user"; text: string; seq: number }
@@ -44,9 +45,8 @@ function transcriptBlocks(ev: RunEvent, p: any): ChatBlock[] {
   const out: ChatBlock[] = [];
   if (role === "user") {
     const text = parts.filter((c) => c?.type === "text").map((c) => String(c.text ?? "")).join("\n");
-    if (/<image_files>|<image_description>|\[Image\]/i.test(text)) return out;
-    const cleaned = extractUserText(text);
-    if (cleaned) out.push({ kind: "user", text: cleaned, seq: ev.seq });
+    const shown = displayUserText(extractUserText(text));
+    if (shown) out.push({ kind: "user", text: shown, seq: ev.seq });
     return out;
   }
   if (role === "assistant") {
@@ -62,8 +62,11 @@ function transcriptBlocks(ev: RunEvent, p: any): ChatBlock[] {
 
 function hookBlocks(ev: RunEvent, p: any): ChatBlock[] {
   const hook = ev.hook_event_name;
-  if (hook === "beforeSubmitPrompt" && typeof p?.prompt === "string" && p.prompt.trim()) {
-    return [{ kind: "user", text: p.prompt.trim(), seq: ev.seq }];
+  if (hook === "beforeSubmitPrompt" && typeof p?.prompt === "string") {
+    const ids = Array.isArray(p?.attachmentIds) ? p.attachmentIds : [];
+    const shown = displayUserText(p.prompt, ids.length);
+    if (shown) return [{ kind: "user", text: shown, seq: ev.seq }];
+    return [];
   }
   if (hook === "afterAgentThought" && typeof p?.text === "string" && p.text.trim()) {
     return [{ kind: "thought", text: p.text.trim(), seq: ev.seq }];

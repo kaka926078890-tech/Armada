@@ -5,6 +5,7 @@ import type { RunRow } from "../boardState";
 import ChatThread from "./ChatThread";
 import { eventsToChat } from "../chatView";
 import { collectEventPages, mergeEvents, EVENT_PAGE_SIZE } from "../loadEvents";
+import { mergeImageFiles } from "../attachments";
 
 const WIDTH_KEY = "armada.detailWidth.v1";
 const DEFAULT_W = 576;
@@ -73,6 +74,7 @@ export default function RunDetail({ runId, onClose, onChanged }: {
   const [run, setRun] = useState<RunRow | null>(null);
   const [events, setEvents] = useState<RunEvent[]>([]);
   const [followup, setFollowup] = useState("");
+  const [followupFiles, setFollowupFiles] = useState<File[]>([]);
   const [followupError, setFollowupError] = useState("");
   const [cancelError, setCancelError] = useState("");
   const [loadError, setLoadError] = useState("");
@@ -144,19 +146,29 @@ export default function RunDetail({ runId, onClose, onChanged }: {
 
   const sendFollowup = useCallback((e?: FormEvent) => {
     e?.preventDefault();
-    if (!run || !followup.trim()) return;
+    if (!run || (!followup.trim() && followupFiles.length === 0)) return;
     setFollowupError("");
-    api.followup(run.id, followup.trim()).then((r) => {
-      if (r?.error) {
-        setFollowupError(r.error === "WINDOW_BUSY"
-          ? "同工作区已有任务在跑。新任务请点「+ 派发任务」开新对话，不要续聊这张旧卡。"
-          : r.error);
-        return;
-      }
-      setFollowup("");
-      onChanged();
-    }).catch((err) => setFollowupError(String(err)));
-  }, [followup, onChanged, run]);
+    void (async () => {
+      try {
+        const ids: string[] = [];
+        for (const f of followupFiles) {
+          const r = await api.uploadBlob(f);
+          if (r.error || !r.blob) { setFollowupError(r.error ?? "上传失败"); return; }
+          ids.push(r.blob.id);
+        }
+        const r = await api.followup(run.id, followup.trim(), ids);
+        if (r?.error) {
+          setFollowupError(r.error === "WINDOW_BUSY"
+            ? "同工作区已有任务在跑。新任务请点「+ 派发任务」开新对话，不要续聊这张旧卡。"
+            : r.error);
+          return;
+        }
+        setFollowup("");
+        setFollowupFiles([]);
+        onChanged();
+      } catch (err) { setFollowupError(String(err)); }
+    })();
+  }, [followup, followupFiles, onChanged, run]);
 
   if (missing) {
     return (
@@ -200,7 +212,7 @@ export default function RunDetail({ runId, onClose, onChanged }: {
         <div className="px-3 py-1.5 text-xs text-red-400 bg-red-950/40 border-b border-red-900/50">{loadError}</div>
       )}
       <div className="flex items-center gap-2 px-4 py-2.5 border-b border-zinc-800/80">
-        <span className="font-medium text-[13px] truncate" title={run.prompt}>{run.prompt.length > 36 ? run.prompt.slice(0, 36) + "…" : run.prompt}</span>
+        <span className="font-medium text-[13px] truncate" title={run.prompt || "图片"}>{(run.prompt || "图片").length > 36 ? (run.prompt || "图片").slice(0, 36) + "…" : (run.prompt || "图片")}</span>
         <span className={`text-xs ${active ? "text-sky-400" : "text-zinc-500"}`}>{STATUS[run.status] ?? run.status}</span>
         <button onClick={onClose} className="ml-auto text-zinc-500 hover:text-zinc-200">✕</button>
       </div>
@@ -243,6 +255,15 @@ export default function RunDetail({ runId, onClose, onChanged }: {
             <textarea
               value={followup}
               onChange={(e) => setFollowup(e.target.value)}
+              onPaste={(e) => {
+                const items = [...e.clipboardData.files];
+                if (!items.length) return;
+                const { files: next, rejected } = mergeImageFiles(followupFiles, items);
+                if (next.length === followupFiles.length && rejected === 0 && !items.some((f) => f.type === "image/png" || f.type === "image/jpeg")) return;
+                e.preventDefault();
+                setFollowupFiles(next);
+                if (rejected) setFollowupError("最多 4 张图片，已忽略多余文件");
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
@@ -250,12 +271,28 @@ export default function RunDetail({ runId, onClose, onChanged }: {
                 }
               }}
               rows={3}
-              placeholder="续聊同一对话…（Enter 发送，Shift+Enter 换行）"
+              placeholder="续聊同一对话…（Enter 发送，Shift+Enter 换行；可粘贴截图）"
               className="flex-1 min-h-[4.5rem] max-h-48 resize-y px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-[13px] placeholder:text-zinc-600 leading-relaxed"
             />
-            <button type="submit" className="px-3 py-2 rounded-lg bg-sky-700 hover:bg-sky-600 text-[13px] shrink-0">发送</button>
+            <button type="submit" disabled={!followup.trim() && followupFiles.length === 0} className="px-3 py-2 rounded-lg bg-sky-700 hover:bg-sky-600 text-[13px] shrink-0 disabled:opacity-40">发送</button>
           </div>
-          {followupError && <div className="text-red-400 text-sm">{followupError}</div>}
+          <input type="file" accept="image/png,image/jpeg" multiple onChange={(e) => {
+            const picked = [...(e.target.files ?? [])];
+            const { files: next, rejected } = mergeImageFiles(followupFiles, picked);
+            setFollowupFiles(next);
+            if (rejected) setFollowupError("最多 4 张图片，已忽略多余文件");
+            e.target.value = "";
+          }} />
+          {followupFiles.length > 0 && (
+            <div className="text-[12px] text-zinc-400 flex flex-col gap-1">
+              {followupFiles.map((f, i) => (
+                <div key={i} className="flex justify-between gap-2">
+                  <span className="truncate">{f.name || "粘贴的图片"}</span>
+                  <button type="button" className="text-zinc-500" onClick={() => setFollowupFiles(followupFiles.filter((_, j) => j !== i))}>移除</button>
+                </div>
+              ))}
+            </div>
+          )}
         </form>
       )}
     </DrawerShell>
