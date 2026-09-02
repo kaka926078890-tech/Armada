@@ -158,9 +158,11 @@ export default function RunDetail({ runId, onClose, onChanged }: {
         }
         const r = await api.followup(run.id, followup.trim(), ids);
         if (r?.error) {
-          setFollowupError(r.error === "WINDOW_BUSY"
-            ? "同工作区已有任务在跑。新任务请点「+ 派发任务」开新对话，不要续聊这张旧卡。"
-            : r.error);
+          setFollowupError(r.error === "INJECT_SLOT_BUSY"
+            ? "正在把另一条任务打进 Composer，几秒后再发即可；对方跑着不影响续聊。"
+            : r.error === "CONVERSATION_BUSY"
+              ? "这张卡自己还在跑，等它停再续。"
+              : r.error);
           return;
         }
         setFollowup("");

@@ -400,7 +400,7 @@ describe("Run dispatch", () => {
     ws2.close();
   });
 
-  test("followup on another card while a run occupies the same workspace → 409 WINDOW_BUSY", async () => {
+  test("followup on a completed card while another run is generating in the same workspace", async () => {
     const { ws, inbound, api } = await startWithExt({ extensionVersion: "0.4.0" });
     const r1 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "a" }) });
     const { run: a } = await r1.json() as any;
@@ -416,10 +416,16 @@ describe("Run dispatch", () => {
     expect(((await (await api(`/api/runs/${b.id}`)).json()) as any).status).toBe("running");
     inbound.length = 0;
     const f = await api(`/api/runs/${a.id}/followup`, { method: "POST", body: JSON.stringify({ prompt: "帮我看看现在Armada是否还有代码没有提交" }) });
-    expect(f.status).toBe(409);
-    expect(((await f.json()) as any).error).toBe("WINDOW_BUSY");
-    expect(((await (await api(`/api/runs/${a.id}`)).json()) as any).status).toBe("completed");
-    expect(inbound.filter((m) => m.type === "run.followup")).toEqual([]);
+    expect(f.status).toBe(200);
+    const { run: again } = await f.json() as any;
+    expect(again.id).toBe(a.id);
+    expect(again.status).toBe("dispatched");
+    expect(((await (await api(`/api/runs/${b.id}`)).json()) as any).status).toBe("running");
+    await new Promise((r) => setTimeout(r, 100));
+    expect(inbound.find((m) => m.type === "run.followup")).toMatchObject({
+      runId: a.id, conversationId: "cid-a", workspaceRoot: "/ws/a",
+      prompt: "帮我看看现在Armada是否还有代码没有提交",
+    });
     ws.close();
   });
 

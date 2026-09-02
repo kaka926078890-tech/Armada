@@ -445,14 +445,6 @@ export class RunService {
     ).get(cid) ?? null;
   }
 
-  /** 同工作区其它卡片仍占用时，续聊会抢回旧对话；新任务应走 +派发 → newAgentChat。 */
-  private workspaceOccupiedByOther(machineId: string, workspaceRoot: string, exceptRunId: string): boolean {
-    const row = this.db.query(
-      `SELECT id FROM runs WHERE machine_id=?1 AND workspace_root=?2 AND id!=?3 AND status IN ('queued','dispatched','binding','running') LIMIT 1`,
-    ).get(machineId, workspaceRoot, exceptRunId);
-    return !!row;
-  }
-
   /** Windows 往往没有 beforeSubmitPrompt；hub 先落一条用户句，详情才不会丢续聊原文。 */
   private recordFollowupPrompt(run: { id: string; machine_id: string }, prompt: string, attachmentIds: string[] = []): void {
     const maxSeq = (this.db.query("SELECT COALESCE(MAX(seq),0) AS m FROM run_events WHERE run_id=?1").get(run.id) as { m: number }).m;
@@ -472,7 +464,8 @@ export class RunService {
 
   /**
    * 续聊:同一张卡片回到 dispatched,事件继续追加。不新建 child run。
-   * 本卡仍占用中 → CONVERSATION_BUSY；同工作区其它卡占用 → WINDOW_BUSY；注入槽被占 → INJECT_SLOT_BUSY。
+   * 本卡仍占用中 → CONVERSATION_BUSY；注入槽被其它 run 占用 → INJECT_SLOT_BUSY。
+   * 同工作区其它卡已在 running 不拦：注入串行、生成并行。
    */
   followup(runId: string, prompt: string, attachmentIds: string[] = []): { error?: string; run?: any } {
     const run = this.get(runId);
@@ -481,7 +474,6 @@ export class RunService {
     if (run.end_reason === "OPERATOR_CLOSED") return { error: "CLOSED" };
     if ((OCCUPYING_STATUSES as readonly string[]).includes(run.status)) return { error: "CONVERSATION_BUSY" };
     if (this.injectSlotCount(run.machine_id) > 0) return { error: "INJECT_SLOT_BUSY" };
-    if (this.workspaceOccupiedByOther(run.machine_id, run.workspace_root, runId)) return { error: "WINDOW_BUSY" };
     const win = this.registry.findWindowForWorkspace(run.machine_id, run.workspace_root);
     if (!win) return { error: "WORKSPACE_NOT_OPEN" };
 
