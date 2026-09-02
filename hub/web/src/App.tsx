@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, clearToken, getToken, setToken } from "./api";
 import { consumeQueryToken, isDesktopShell, searchWithoutToken } from "./tokenBootstrap";
 import { requestDesktop } from "./desktopBridge";
@@ -11,6 +11,7 @@ import Sidebar from "./components/Sidebar";
 import Board from "./components/Board";
 import RunDetail from "./components/RunDetail";
 import { DispatchModal } from "./components/Modals";
+import { alertCompletions, ensureNotifyPermission, seedRunStatus, stopTitleMarquee, takeNewlyCompleted } from "./completionNotify";
 
 const WS_KEY = "armada.selectedWorkspace.v1";
 const READ_KEY = "armada.readRuns.v1";
@@ -139,6 +140,42 @@ export default function App() {
     persistRead(selectedRun);
   }, [selectedRun, selectedEnded, persistRead]);
 
+  const seenStatus = useRef<Map<string, string> | null>(null);
+  useEffect(() => {
+    if (runs.length === 0) return;
+    if (!seenStatus.current) {
+      seenStatus.current = seedRunStatus(runs);
+      return;
+    }
+    const fresh = takeNewlyCompleted(seenStatus.current, runs);
+    if (fresh.length === 0) return;
+    alertCompletions(fresh, {
+      watchingId: selectedRun,
+      tabVisible: document.visibilityState === "visible",
+      onOpen: openRun,
+    });
+  }, [runs, selectedRun, openRun]);
+
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === "visible") stopTitleMarquee();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("focus", stopTitleMarquee);
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("focus", stopTitleMarquee);
+      stopTitleMarquee();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!authed) return;
+    const once = () => { void ensureNotifyPermission(); };
+    window.addEventListener("pointerdown", once, { once: true });
+    return () => window.removeEventListener("pointerdown", once);
+  }, [authed]);
+
   if (!authed) {
     return (
       <div className="h-screen flex items-center justify-center bg-zinc-950 text-zinc-100">
@@ -226,6 +263,7 @@ export default function App() {
             selected={selectedRun}
             onSelect={openRun}
             showArchived={showArchived}
+            readMap={readMap}
             onHide={(id) => { api.archive(id).then(() => { setSelectedRun((cur) => cur === id ? null : cur); refresh(); }); }}
             onUnhide={(id) => { api.unarchive(id).then(refresh); }}
           />
@@ -235,7 +273,7 @@ export default function App() {
         <div className="fixed inset-0 z-40">
           <button type="button" className="absolute inset-0 bg-black/70 backdrop-blur-[2px]" aria-label="关闭详情" onClick={() => setSelectedRun(null)} />
           <div className="absolute inset-y-0 right-0 flex pointer-events-none">
-            <div className="pointer-events-auto h-full">
+            <div className="pointer-events-auto h-full min-h-0">
               <RunDetail runId={selectedRun} onClose={() => setSelectedRun(null)} onChanged={refresh} />
             </div>
           </div>

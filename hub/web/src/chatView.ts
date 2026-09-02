@@ -189,6 +189,11 @@ export type ProcessSegment = {
 
 export type ChatSegment = ChatBlock | ProcessSegment;
 
+/** 详情「复制正文」：只拼助手回复，不含思考/工具/用户句。 */
+export function assistantBodyText(blocks: ChatBlock[]): string {
+  return blocks.filter((b) => b.kind === "assistant").map((b) => b.text).join("\n\n").trim();
+}
+
 /** 有正文后把该轮思考/工具收成一段；尚未出正文时保持一条条列出。 */
 export function segmentChat(blocks: ChatBlock[]): ChatSegment[] {
   const turns: ChatBlock[][] = [];

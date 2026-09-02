@@ -76,16 +76,17 @@ if [[ -f "$ROOT/hooks/hooks.template.json" ]]; then
 fi
 chmod +x "$DEST/hooks/install.sh" "$DEST/hooks/armada-spool.sh"
 
-echo "==> vsix (optional)"
-shopt -s nullglob
-vsixs=("$ROOT"/extension/*.vsix "$ROOT"/extension/dist/*.vsix "$ROOT"/armada-agent-*.vsix)
-if ((${#vsixs[@]} > 0)); then
-  latest="$(printf '%s\n' "${vsixs[@]}" | sort | tail -n 1)"
-  cp "$latest" "$DEST/$(basename "$latest")"
-  echo "    copied $(basename "$latest")"
-else
-  echo "    absent (ok)"
+echo "==> vsix (current extension/package.json version)"
+bash "$ROOT/scripts/pack-extension.sh"
+VER="$(node -p "require('$ROOT/extension/package.json').version")"
+VSIX="$ROOT/extension/armada-agent-$VER.vsix"
+if [[ ! -f "$VSIX" ]]; then
+  echo "error: pack-extension did not produce $VSIX" >&2
+  exit 1
 fi
+rm -f "$DEST"/*.vsix
+cp "$VSIX" "$DEST/$(basename "$VSIX")"
+echo "    copied $(basename "$VSIX")"
 
 echo "ok hub=$DEST/hub bun=$DEST/bun"
 echo "layout: $DEST/hub/src/index.ts -> ../web/dist"

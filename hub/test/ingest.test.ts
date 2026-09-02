@@ -77,9 +77,22 @@ describe("event ingest", () => {
     await new Promise((r) => setTimeout(r, 100));
     const cancelMsg = inbound.find((m) => m.type === "run.cancel");
     expect(cancelMsg).toMatchObject({ runId, conversationId: "cid-1" });
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).status).toBe("cancelled");
     ws.send(JSON.stringify(ev(runId, 1, "stop", { status: "aborted" })));
     await new Promise((r) => setTimeout(r, 100));
     expect(((await (await api(`/api/runs/${runId}`)).json()) as any).status).toBe("cancelled");
+    ws.close();
+  });
+
+  test("cancel then Windows stop error User aborted stays cancelled not error", async () => {
+    const { ws, api, runId } = await startBoundRun();
+    expect((await api(`/api/runs/${runId}/cancel`, { method: "POST" })).status).toBe(200);
+    await new Promise((r) => setTimeout(r, 80));
+    ws.send(JSON.stringify(ev(runId, 1, "stop", { status: "error", error: "User aborted request" })));
+    await new Promise((r) => setTimeout(r, 100));
+    const after = (await (await api(`/api/runs/${runId}`)).json()) as any;
+    expect(after.status).toBe("cancelled");
+    expect(after.end_reason).toBe("cancelled");
     ws.close();
   });
 

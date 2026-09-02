@@ -393,7 +393,7 @@ export function activate(context: vscode.ExtensionContext): void {
           const cid = msg.conversationId ?? b?.conversationId;
           if (cid) {
             cancelWatcher.record(msg.runId, cid, b?.prompt ?? "", Date.now());
-            void executor.cancel(cid);
+            void executor.cancel(cid).catch((e) => log(`cancel error: ${String(e)}`));
           }
           break;
         }

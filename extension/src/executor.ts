@@ -148,7 +148,11 @@ export class Executor {
   }
 
   async cancel(conversationId: string): Promise<void> {
-    await vs().commands.executeCommand("composer.cancelChat", conversationId);
+    try {
+      await vs().commands.executeCommand("composer.cancelChat", conversationId);
+    } catch (e) {
+      console.error(`[armada] cancelChat failed cid=${conversationId}`, e);
+    }
   }
 
   async followup(msg: {

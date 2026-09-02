@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   groupRuns, cardView, listWorkspaceSlots, encodeWorkspaceKey, decodeWorkspaceKey,
   filterRunsByWorkspace, sortConversations, groupSlotsByMachine, isUnreadCompleted, isUnreadMessage,
-  workspaceHasUnread, canArchiveRun, isHubArchived, type RunRow,
+  workspaceHasUnread, workspaceUnreadCount, formatUnreadCount, canArchiveRun, isHubArchived, type RunRow,
 } from "../src/boardState";
 
 const base: RunRow = {
@@ -120,6 +120,18 @@ describe("unread dots", () => {
     expect(workspaceHasUnread([base], {})).toBe(false);
     expect(workspaceHasUnread([{ ...base, status: "error", ended_at: 5000 }], {})).toBe(false);
     expect(workspaceHasUnread([{ ...base, status: "completed", ended_at: 5000 }], {})).toBe(true);
+  });
+
+  test("workspace unread count is completed-unread only and caps at 99+", () => {
+    const a = { ...base, id: "a", status: "completed", ended_at: 5000 };
+    const b = { ...base, id: "b", status: "completed", ended_at: 6000 };
+    const live = { ...base, id: "c", status: "running" };
+    expect(workspaceUnreadCount([a, b, live], {})).toBe(2);
+    expect(workspaceUnreadCount([a, b], { a: 9000 })).toBe(1);
+    expect(formatUnreadCount(0)).toBe("");
+    expect(formatUnreadCount(3)).toBe("3");
+    expect(formatUnreadCount(99)).toBe("99");
+    expect(formatUnreadCount(100)).toBe("99+");
   });
 
   test("cancelled does not badge", () => {

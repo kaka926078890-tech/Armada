@@ -231,6 +231,12 @@ export class RunService {
     this.promoteNextQueued(run.machine_id);
   }
 
+  /** Prefer the stored window if still online; else the live workspace window (Cursor reload changes windowId). */
+  private liveWindowId(run: { machine_id: string; window_id: string | null; workspace_root: string }): string | null {
+    if (run.window_id && this.registry.isConnected(run.machine_id, run.window_id)) return run.window_id;
+    return this.registry.findWindowForWorkspace(run.machine_id, run.workspace_root)?.windowId ?? null;
+  }
+
   onCancelRequested(runId: string): { error?: string } {
     const run = this.get(runId);
     if (!run) return { error: "NOT_FOUND" };
@@ -241,12 +247,23 @@ export class RunService {
     }
     if (!ACTIVE.includes(run.status)) return { error: "ALREADY_TERMINAL" };
     this.cancelRequested.add(runId);
-    if (run.conversation_id && run.window_id) {
-      this.registry.sendTo(run.machine_id, run.window_id, { type: "run.cancel", runId, conversationId: run.conversation_id });
+    const windowId = this.liveWindowId(run);
+    let sent = false;
+    if (run.conversation_id && windowId) {
+      if (windowId !== run.window_id) {
+        this.db.query("UPDATE runs SET window_id=?1 WHERE id=?2").run(windowId, runId);
+      }
+      sent = this.registry.sendTo(run.machine_id, windowId, { type: "run.cancel", runId, conversationId: run.conversation_id });
     }
-    this.audit("operator", "run.cancel.requested", runId);
+    this.audit("operator", "run.cancel.requested", runId, { sent, windowId });
+    this.setStatus(runId, "cancelled", { end_reason: "cancelled" }, "operator");
     this.promoteNextQueued(run.machine_id);
     return {};
+  }
+
+  private isUserAbort(payload: any): boolean {
+    const e = String(payload?.error ?? "");
+    return /user aborted/i.test(e) || e === "cancelled" || e === "canceled";
   }
 
   onStopEvent(runId: string, payload: any) {
@@ -260,7 +277,15 @@ export class RunService {
     else if (s === "aborted") {
       const wasCancel = this.cancelRequested.has(runId);
       this.setStatus(runId, wasCancel ? "cancelled" : "aborted", { end_reason: wasCancel ? "cancelled" : "aborted" }, "extension");
-    } else if (s === "error") this.setStatus(runId, "error", { end_reason: payload?.error ?? "error" }, "extension");
+    } else if (s === "error") {
+      if (this.cancelRequested.has(runId)) {
+        this.setStatus(runId, "cancelled", { end_reason: "cancelled" }, "extension");
+      } else if (this.isUserAbort(payload)) {
+        this.setStatus(runId, "aborted", { end_reason: "aborted" }, "extension");
+      } else {
+        this.setStatus(runId, "error", { end_reason: payload?.error ?? "error" }, "extension");
+      }
+    }
     this.cancelRequested.delete(runId);
     this.promoteNextQueued(run.machine_id);
   }
@@ -318,9 +343,33 @@ export class RunService {
     ).get(cid) ?? null;
   }
 
+  /** 同工作区其它卡片仍占用时，续聊会抢回旧对话；新任务应走 +派发 → newAgentChat。 */
+  private workspaceOccupiedByOther(machineId: string, workspaceRoot: string, exceptRunId: string): boolean {
+    const row = this.db.query(
+      `SELECT id FROM runs WHERE machine_id=?1 AND workspace_root=?2 AND id!=?3 AND status IN ('queued','dispatched','binding','running') LIMIT 1`,
+    ).get(machineId, workspaceRoot, exceptRunId);
+    return !!row;
+  }
+
+  /** Windows 往往没有 beforeSubmitPrompt；hub 先落一条用户句，详情才不会丢续聊原文。 */
+  private recordFollowupPrompt(run: { id: string; machine_id: string }, prompt: string): void {
+    const maxSeq = (this.db.query("SELECT COALESCE(MAX(seq),0) AS m FROM run_events WHERE run_id=?1").get(run.id) as { m: number }).m;
+    const minExt = (this.db.query("SELECT MIN(ext_seq) AS m FROM run_events WHERE machine_id=?1").get(run.machine_id) as { m: number | null }).m;
+    const extSeq = minExt == null || minExt >= 0 ? -1 : minExt - 1;
+    const ts = Date.now();
+    const payload = JSON.stringify({ prompt });
+    this.db.query(
+      `INSERT INTO run_events (run_id, seq, machine_id, ext_seq, source, hook_event_name, payload, ts, post_terminal)
+       VALUES (?1,?2,?3,?4,'hub','beforeSubmitPrompt',?5,?6,0)`,
+    ).run(run.id, maxSeq + 1, run.machine_id, extSeq, payload, ts);
+    this.sse.broadcast(run.id, {
+      type: "run.event", runId: run.id, seq: maxSeq + 1, hookEventName: "beforeSubmitPrompt", payload: { prompt }, ts,
+    });
+  }
+
   /**
    * 续聊:同一张卡片回到 dispatched,事件继续追加。不新建 child run。
-   * 本卡仍占用中 → CONVERSATION_BUSY；注入槽被其它 run 占用 → INJECT_SLOT_BUSY。
+   * 本卡仍占用中 → CONVERSATION_BUSY；同工作区其它卡占用 → WINDOW_BUSY；注入槽被占 → INJECT_SLOT_BUSY。
    */
   followup(runId: string, prompt: string): { error?: string; run?: any } {
     const run = this.get(runId);
@@ -329,10 +378,14 @@ export class RunService {
     if (run.end_reason === "OPERATOR_CLOSED") return { error: "CLOSED" };
     if ((OCCUPYING_STATUSES as readonly string[]).includes(run.status)) return { error: "CONVERSATION_BUSY" };
     if (this.injectSlotCount(run.machine_id) > 0) return { error: "INJECT_SLOT_BUSY" };
+    if (this.workspaceOccupiedByOther(run.machine_id, run.workspace_root, runId)) return { error: "WINDOW_BUSY" };
     const win = this.registry.findWindowForWorkspace(run.machine_id, run.workspace_root);
     if (!win) return { error: "WORKSPACE_NOT_OPEN" };
 
-    this.setStatus(runId, "dispatched", { ended_at: null, end_reason: null, started_at: Date.now() });
+    this.setStatus(runId, "dispatched", {
+      ended_at: null, end_reason: null, started_at: Date.now(), window_id: win.windowId,
+    });
+    this.recordFollowupPrompt(run, prompt);
     this.registry.sendTo(run.machine_id, win.windowId, {
       type: "run.followup", runId, conversationId: run.conversation_id, workspaceRoot: run.workspace_root, prompt,
     });

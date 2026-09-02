@@ -320,6 +320,37 @@ describe("Run dispatch", () => {
     ws.close();
   });
 
+  test("cancel running marks cancelled immediately and still sends run.cancel", async () => {
+    const { ws, inbound, api } = await startWithExt();
+    const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "hello" }) });
+    const { run } = await r.json() as any;
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId: run.id, conversationId: "cid-1", transcriptPath: null, promptMatch: true }));
+    await new Promise((r2) => setTimeout(r2, 100));
+    inbound.length = 0;
+    const cr = await api(`/api/runs/${run.id}/cancel`, { method: "POST" });
+    expect(cr.status).toBe(200);
+    await new Promise((r2) => setTimeout(r2, 100));
+    expect(((await (await api(`/api/runs/${run.id}`)).json()) as any).status).toBe("cancelled");
+    expect(inbound.find((m) => m.type === "run.cancel")).toMatchObject({ runId: run.id, conversationId: "cid-1" });
+    ws.close();
+  });
+
+  test("cancel binding without conversation_id still marks cancelled", async () => {
+    const { ws, inbound, api } = await startWithExt();
+    const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "hello" }) });
+    const { run } = await r.json() as any;
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    await new Promise((r2) => setTimeout(r2, 80));
+    inbound.length = 0;
+    const cr = await api(`/api/runs/${run.id}/cancel`, { method: "POST" });
+    expect(cr.status).toBe(200);
+    await new Promise((r2) => setTimeout(r2, 80));
+    expect(((await (await api(`/api/runs/${run.id}`)).json()) as any).status).toBe("cancelled");
+    expect(inbound.filter((m) => m.type === "run.cancel")).toEqual([]);
+    ws.close();
+  });
+
   test("cancel queued does not send run.cancel and promotes next", async () => {
     const { ws, inbound, api } = await startWithExt({ extensionVersion: "0.4.0" });
     const r1 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "a" }) });
@@ -336,6 +367,59 @@ describe("Run dispatch", () => {
     expect(inbound.filter((m) => m.type === "run.cancel")).toEqual([]);
     expect(inbound.filter((m) => m.type === "run.start")).toEqual([]);
     expect(((await (await api(`/api/runs/${a.id}`)).json()) as any).status).toBe("dispatched");
+    ws.close();
+  });
+
+  test("cancel after Cursor reload sends run.cancel to the live window, not the stale window_id", async () => {
+    const { ws, api } = await startWithExt();
+    const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "hello" }) });
+    const { run } = await r.json() as any;
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId: run.id, conversationId: "cid-1", transcriptPath: null, promptMatch: true }));
+    await new Promise((r2) => setTimeout(r2, 100));
+    ws.close();
+    await new Promise((r2) => setTimeout(r2, 50));
+
+    const ws2: WebSocket = await new Promise((res, rej) => {
+      const w = new WebSocket(`ws://127.0.0.1:${hub!.port}/ws?token=${hub!.token}`);
+      w.onopen = () => res(w); w.onerror = rej;
+    });
+    const inbound2: any[] = [];
+    ws2.addEventListener("message", (e) => inbound2.push(JSON.parse(String(e.data))));
+    ws2.send(JSON.stringify({
+      type: "register", machineId: "m-1", windowId: "w-2", name: "Mac-A",
+      os: "darwin-arm64", openWorkspaces: ["/ws/a"], extensionVersion: "0.4.0",
+    }));
+    await new Promise((r2) => setTimeout(r2, 100));
+    inbound2.length = 0;
+
+    const cr = await api(`/api/runs/${run.id}/cancel`, { method: "POST" });
+    expect(cr.status).toBe(200);
+    await new Promise((r2) => setTimeout(r2, 100));
+    expect(inbound2.find((m) => m.type === "run.cancel")).toMatchObject({ runId: run.id, conversationId: "cid-1" });
+    ws2.close();
+  });
+
+  test("followup on another card while a run occupies the same workspace → 409 WINDOW_BUSY", async () => {
+    const { ws, inbound, api } = await startWithExt({ extensionVersion: "0.4.0" });
+    const r1 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "a" }) });
+    const { run: a } = await r1.json() as any;
+    ws.send(JSON.stringify({ type: "run.ack", runId: a.id, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId: a.id, conversationId: "cid-a", transcriptPath: null, promptMatch: true }));
+    ws.send(JSON.stringify({ type: "run.event", runId: a.id, source: "hook", hookEventName: "stop", payload: { status: "completed" }, ts: Date.now(), seq: 1 }));
+    await new Promise((r) => setTimeout(r, 150));
+    const r2 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "b" }) });
+    const { run: b } = await r2.json() as any;
+    ws.send(JSON.stringify({ type: "run.ack", runId: b.id, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId: b.id, conversationId: "cid-b", transcriptPath: null, promptMatch: true }));
+    await new Promise((r) => setTimeout(r, 150));
+    expect(((await (await api(`/api/runs/${b.id}`)).json()) as any).status).toBe("running");
+    inbound.length = 0;
+    const f = await api(`/api/runs/${a.id}/followup`, { method: "POST", body: JSON.stringify({ prompt: "帮我看看现在Armada是否还有代码没有提交" }) });
+    expect(f.status).toBe(409);
+    expect(((await f.json()) as any).error).toBe("WINDOW_BUSY");
+    expect(((await (await api(`/api/runs/${a.id}`)).json()) as any).status).toBe("completed");
+    expect(inbound.filter((m) => m.type === "run.followup")).toEqual([]);
     ws.close();
   });
 
@@ -390,6 +474,8 @@ describe("Run dispatch", () => {
     expect(inbound.find((m) => m.type === "run.followup")).toMatchObject({
       runId: run.id, conversationId: "cid-1", workspaceRoot: "/ws/a", prompt: "继续",
     });
+    const events = (await (await api(`/api/runs/${run.id}/events`)).json()) as any[];
+    expect(events.some((e) => e.hook_event_name === "beforeSubmitPrompt" && JSON.parse(e.payload).prompt === "继续")).toBe(true);
     ws.close();
   });
 

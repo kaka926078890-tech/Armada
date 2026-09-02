@@ -133,9 +133,20 @@ export function isUnreadCompleted(run: RunRow, readAt: number | undefined): bool
   return run.status === "completed" && isUnreadMessage(run, readAt);
 }
 
-/** 侧栏红点：仅未读的已完成任务。进行中不亮，避免任务还没结束就提前提示。 */
+/** 侧栏未读数：仅未读的已完成任务。进行中不计入，避免任务还没结束就提前提示。 */
+export function workspaceUnreadCount(runs: RunRow[], readMap: Record<string, number>): number {
+  let n = 0;
+  for (const r of runs) if (isUnreadCompleted(r, readMap[r.id])) n++;
+  return n;
+}
+
+export function formatUnreadCount(n: number): string {
+  if (n <= 0) return "";
+  return n > 99 ? "99+" : String(n);
+}
+
 export function workspaceHasUnread(runs: RunRow[], readMap: Record<string, number>): boolean {
-  return runs.some((r) => isUnreadCompleted(r, readMap[r.id]));
+  return workspaceUnreadCount(runs, readMap) > 0;
 }
 
 export function isHubArchived(run: Pick<RunRow, "archived_at">): boolean {

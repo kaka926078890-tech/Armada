@@ -4,8 +4,9 @@
   "workspaces": ["hub", "extension", "hub/web"],
   "scripts": {
     "test": "bun test hub/test extension/test hooks/test hub/web/test desktop-core/test",
+    "pack:extension": "bash scripts/pack-extension.sh",
     "dev:hub": "bun run hub/src/index.ts --lan",
     "dev:web": "bash scripts/dev-web.sh",
-    "dev:desktop": "bun run --cwd desktop tauri dev"
+    "dev:desktop": "bun run pack:extension && bun run --cwd desktop tauri dev"
   }
 }

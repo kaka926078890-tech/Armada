@@ -138,6 +138,48 @@ pub fn classify_vsix_cli(success: bool, stdout: &str, stderr: &str) -> &'static 
     }
 }
 
+pub fn vsix_semver(path: &Path) -> Option<(u64, u64, u64)> {
+    let stem = path.file_stem()?.to_str()?;
+    let ver = stem.rsplit_once('-')?.1;
+    let mut parts = ver.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    let patch = parts.next()?.parse().ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    Some((major, minor, patch))
+}
+
+fn vsix_rank(path: &Path) -> (u8, u64, u64, u64) {
+    match vsix_semver(path) {
+        Some((major, minor, patch)) => (1, major, minor, patch),
+        None => (0, 0, 0, 0),
+    }
+}
+
+pub fn find_latest_vsix(roots: &[PathBuf]) -> Option<PathBuf> {
+    let mut best: Option<((u8, u64, u64, u64), PathBuf)> = None;
+    for root in roots {
+        let Ok(rd) = fs::read_dir(root) else {
+            continue;
+        };
+        for ent in rd.filter_map(|e| e.ok()) {
+            let path = ent.path();
+            if path.extension().and_then(|x| x.to_str()) != Some("vsix") {
+                continue;
+            }
+            let rank = vsix_rank(&path);
+            match &best {
+                None => best = Some((rank, path)),
+                Some((prev, _)) if rank > *prev => best = Some((rank, path)),
+                _ => {}
+            }
+        }
+    }
+    best.map(|(_, path)| path)
+}
+
 pub fn find_vsix(roots: &[PathBuf]) -> Option<PathBuf> {
     if let Ok(p) = env::var("ARMADA_VSIX") {
         let pb = PathBuf::from(p);
@@ -145,21 +187,15 @@ pub fn find_vsix(roots: &[PathBuf]) -> Option<PathBuf> {
             return Some(pb);
         }
     }
-    for root in roots {
-        let Ok(rd) = fs::read_dir(root) else {
-            continue;
-        };
-        let mut found: Vec<PathBuf> = rd
-            .filter_map(|e| e.ok())
-            .map(|e| e.path())
-            .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("vsix"))
-            .collect();
-        found.sort();
-        if let Some(last) = found.pop() {
-            return Some(last);
-        }
-    }
-    None
+    find_latest_vsix(roots)
+}
+
+pub fn vsix_install_cli_args(vsix: &Path) -> Vec<String> {
+    vec![
+        "--install-extension".into(),
+        vsix.to_string_lossy().into_owned(),
+        "--force".into(),
+    ]
 }
 
 pub fn vsix_search_roots(resource_dir: Option<&Path>) -> Vec<PathBuf> {
@@ -194,8 +230,7 @@ fn cursor_cli_candidates() -> Vec<PathBuf> {
 
 fn try_install_vsix(cli: &Path, vsix: &Path) -> Option<(bool, String, String)> {
     let out = Command::new(cli)
-        .arg("--install-extension")
-        .arg(vsix)
+        .args(vsix_install_cli_args(vsix))
         .output()
         .ok()?;
     Some((
@@ -507,6 +542,53 @@ mod tests {
         );
         assert_eq!(classify_vsix_cli(true, "successfully installed", ""), "ok");
         assert_eq!(classify_vsix_cli(false, "", "not found"), "manual-path-shown");
+    }
+
+    fn find_vsix_no_env(roots: &[PathBuf]) -> Option<PathBuf> {
+        let saved = env::var("ARMADA_VSIX").ok();
+        env::remove_var("ARMADA_VSIX");
+        let got = find_vsix(roots);
+        match saved {
+            Some(v) => env::set_var("ARMADA_VSIX", v),
+            None => env::remove_var("ARMADA_VSIX"),
+        }
+        got
+    }
+
+    #[test]
+    fn find_vsix_prefers_semver_not_lexicographic_filename() {
+        let dir = scratch("vsix-semver");
+        fs::write(dir.join("armada-agent-0.4.8.vsix"), b"old").unwrap();
+        fs::write(dir.join("armada-agent-0.4.12.vsix"), b"new").unwrap();
+        let got = find_vsix_no_env(&[dir.clone()]).expect("vsix");
+        assert_eq!(got.file_name().unwrap(), "armada-agent-0.4.12.vsix");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn find_vsix_picks_highest_semver_across_roots() {
+        let resources = scratch("vsix-res");
+        let repo = scratch("vsix-ext");
+        fs::write(resources.join("armada-agent-0.4.8.vsix"), b"bundled").unwrap();
+        fs::write(repo.join("armada-agent-0.4.12.vsix"), b"source").unwrap();
+        let got = find_vsix_no_env(&[resources.clone(), repo.clone()]).expect("vsix");
+        assert_eq!(got.file_name().unwrap(), "armada-agent-0.4.12.vsix");
+        let _ = fs::remove_dir_all(&resources);
+        let _ = fs::remove_dir_all(&repo);
+    }
+
+    #[test]
+    fn vsix_install_cli_force_upgrades() {
+        let vsix = PathBuf::from("/tmp/armada-agent-0.4.12.vsix");
+        let args = vsix_install_cli_args(&vsix);
+        assert_eq!(
+            args,
+            [
+                "--install-extension",
+                "/tmp/armada-agent-0.4.12.vsix",
+                "--force"
+            ]
+        );
     }
 
     #[test]

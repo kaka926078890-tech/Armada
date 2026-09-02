@@ -243,7 +243,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\armada-cursor.ps1 C:
 | `PROMPT_COLLISION` | **中台**：同工作区已有相同 prompt 在跑或排队，改文案后再派 |
 | `CONVERSATION_BUSY` | **中台**：该对话仍在运行，结束后才能续聊 |
 | `INJECT_SLOT_BUSY` | **中台**：正在向该机注入另一条任务，稍后再续聊 |
-| `WINDOW_BUSY` | **受控**：扩展 < 0.4.0 或关闭了同窗并行 |
+| `WINDOW_BUSY` | **中台**：同工作区已有任务在跑时不要续聊旧卡，用「+ 派发任务」开新对话；或扩展 < 0.4.0 / 关了同窗并行 |
 | 一直「待本机回车」但黄字是「绑定中」，约 1 分钟后进异常 | **受控**：Windows 须装 **armada-agent ≥ 0.4.12** 并 Reload。0.4.10 扫描窗 20s 会 BIND_TIMEOUT。 |
 | 本机对话已结束，看板仍「运行中」 | **受控**：须 ≥ 0.4.12。0.4.11 Reload 后 `ext_seq` 撞号，hub 丢掉合成 `stop`。日志：`stop synthesized` / `adopt r-…`。**不要为此升级中台 hub** |
 | 一直「待本机回车」且蓝字是「已预填,待本机回车」 | **受控**：Cursor 不是启动器拉起的（Windows：托盘未退干净就又点了图标） |
@@ -255,7 +255,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\armada-cursor.ps1 C:
 | 动作 | 中台端 | 受控端 |
 | --- | --- | --- |
 | 新任务 | `run.start` → 新对话 + CDP 注入并模拟 Enter | 用 `armada-cursor.sh` / `.ps1` 开着目标工作区。CDP 失败则变剪贴板，需 **回车** |
-| 取消 | `run.cancel`，扩展尝试 `cancelChat` | 若 UI 仍要确认则点一下 |
+| 取消 | `run.cancel`，看板立即进已取消；扩展尝试 `cancelChat` | Windows 停会话后常报 `User aborted`，中台仍记已取消。若 IDE 里还在跑，点一下停止 |
 | 续聊 | `POST /api/runs/:id/followup` 注入同一对话 | CDP 失败时同样要回车 |
 
 没有 desktopBridge；不能远程打开未开的工作区（v1.5 候选）。

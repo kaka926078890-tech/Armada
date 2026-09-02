@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { eventsToChat, extractUserText, segmentChat } from "../src/chatView";
+import { assistantBodyText, eventsToChat, extractUserText, segmentChat } from "../src/chatView";
 import type { ChatBlock } from "../src/chatView";
 import type { RunEvent } from "../src/types";
 
@@ -131,5 +131,12 @@ describe("segmentChat", () => {
       user(4, "b"), thought(5, "t2"), tool(6, "Read"),
     ]);
     expect(segs.map((s) => s.kind)).toEqual(["user", "process", "assistant", "user", "thought", "tool"]);
+  });
+
+  test("assistantBodyText joins assistant replies and skips process", () => {
+    expect(assistantBodyText([
+      user(1, "hi"), thought(2, "想"), asst(3, "先改。"), asst(4, "好了。"),
+    ])).toBe("先改。\n\n好了。");
+    expect(assistantBodyText([user(1, "hi")])).toBe("");
   });
 });

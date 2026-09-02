@@ -114,6 +114,55 @@ export function AssistantMarkdown({ text }: { text: string }) {
   );
 }
 
+function CopyIcon() {
+  return (
+    <svg viewBox="0 0 16 16" className="size-3.5" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden>
+      <rect x="5.5" y="1.5" width="9" height="9" rx="1.5" />
+      <path d="M10.5 5.5H2.5a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1v-3" />
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg viewBox="0 0 16 16" className="size-3.5" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden>
+      <path d="M3.5 8.5l3 3 6-6.5" />
+    </svg>
+  );
+}
+
+function copyText(text: string): void {
+  const fallback = () => {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand("copy"); } catch { /* ignore */ }
+    ta.remove();
+  };
+  if (!navigator.clipboard?.writeText) { fallback(); return; }
+  void navigator.clipboard.writeText(text).catch(fallback);
+}
+
+function CopyIconButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      aria-label={copied ? "已复制" : "复制正文"}
+      title={copied ? "已复制" : "复制正文"}
+      onClick={() => {
+        copyText(text);
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1600);
+      }}
+      className="mt-1.5 p-1 rounded text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800"
+    >
+      {copied ? <CheckIcon /> : <CopyIcon />}
+    </button>
+  );
+}
+
 export default function ChatThread({ blocks }: { blocks: ChatBlock[] }) {
   if (blocks.length === 0) {
     return <div className="text-zinc-500 text-sm px-1 py-8 text-center">等待对话内容…</div>;
@@ -134,7 +183,12 @@ export default function ChatThread({ blocks }: { blocks: ChatBlock[] }) {
           );
         }
         if (s.kind === "assistant") {
-          return <div key={key} className="px-0.5"><AssistantMarkdown text={s.text} /></div>;
+          return (
+            <div key={key} className="px-0.5">
+              <AssistantMarkdown text={s.text} />
+              <CopyIconButton text={s.text} />
+            </div>
+          );
         }
         return <ProcessStep key={key} block={s} />;
       })}

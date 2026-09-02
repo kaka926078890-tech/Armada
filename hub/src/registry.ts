@@ -157,6 +157,10 @@ export class Registry {
     }
   }
 
+  isConnected(machineId: string, windowId: string): boolean {
+    return this.conns.has(`${machineId}:${windowId}`);
+  }
+
   sendTo(machineId: string, windowId: string, msg: object): boolean {
     const c = this.conns.get(`${machineId}:${windowId}`);
     if (!c) return false;

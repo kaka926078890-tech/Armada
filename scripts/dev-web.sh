@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
-# Local debug: hub API on :7380 + Vite HMR board on :5173.
+# Local debug: board and API share the original hub origin :7380.
+# Vite HMR on :5173 is not used — that was a second URL and broke bookmarks / tokens.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+
+port_busy() {
+  lsof -nP -iTCP:7380 -sTCP:LISTEN >/dev/null 2>&1
+}
 
 cleanup() {
   if [[ -n "${HUB_PID:-}" ]]; then
@@ -11,10 +16,14 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-echo "==> hub  http://127.0.0.1:7380  (API / 已构建的 dist)"
-bun run hub/src/index.ts --lan &
-HUB_PID=$!
+if port_busy; then
+  echo "==> hub already on http://127.0.0.1:7380 (reuse, no second process)"
+else
+  echo "==> hub  http://127.0.0.1:7380"
+  bun run hub/src/index.ts --lan &
+  HUB_PID=$!
+fi
 
-echo "==> web  http://127.0.0.1:5173  (Vite，改看板热更新；API 代理到 7380)"
-echo "    粘贴 ~/.armada/token 即可进看板。创建/加入舰队请另开：bun run dev:desktop"
-bun run --cwd hub/web dev -- --host 127.0.0.1 --port 5173
+echo "==> board http://127.0.0.1:7380  (hub 托管 dist；改 hub/web 会重建，浏览器刷新即可)"
+echo "    粘贴 ~/.armada/token。创建/加入舰队请另开：bun run dev:desktop"
+bun run --cwd hub/web build -- --watch

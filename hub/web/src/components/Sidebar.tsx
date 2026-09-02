@@ -2,12 +2,21 @@ import { useState } from "react";
 import type { Machine } from "../types";
 import type { RunRow } from "../boardState";
 import {
-  encodeWorkspaceKey, filterRunsByWorkspace, groupSlotsByMachine, isUnreadCompleted,
-  type WorkspaceSlot,
+  encodeWorkspaceKey, filterRunsByWorkspace, formatUnreadCount, groupSlotsByMachine,
+  workspaceUnreadCount, type WorkspaceSlot,
 } from "../boardState";
 
-function RedDot({ title }: { title: string }) {
-  return <span className="ml-auto shrink-0 w-2 h-2 rounded-full bg-red-500" title={title} />;
+function UnreadCount({ n }: { n: number }) {
+  const label = formatUnreadCount(n);
+  if (!label) return null;
+  return (
+    <span
+      className="ml-auto shrink-0 min-w-[1.125rem] h-[1.125rem] px-1 rounded-full bg-red-500 text-white text-[11px] font-medium leading-[1.125rem] text-center tabular-nums"
+      title={`${n} 个完成未读`}
+    >
+      {label}
+    </span>
+  );
 }
 
 function PencilIcon() {
@@ -101,7 +110,7 @@ export default function Sidebar({
                 />
               ) : (
                 <>
-                  <span className="text-[13px] font-medium truncate" title={g.machineName}>{g.machineName}</span>
+                  <span className="min-w-0 flex-1 text-[13px] font-medium truncate" title={g.machineName}>{g.machineName}</span>
                   <button
                     type="button"
                     aria-label="重命名电脑"
@@ -116,7 +125,7 @@ export default function Sidebar({
             {g.workspaces.map((s) => {
               const key = encodeWorkspaceKey(s.machineId, s.root);
               const wsRuns = filterRunsByWorkspace(allRuns, s.machineId, s.root);
-              const doneUnread = wsRuns.some((r) => isUnreadCompleted(r, readMap[r.id]));
+              const unread = workspaceUnreadCount(wsRuns, readMap);
               return (
                 <button
                   key={key}
@@ -125,7 +134,7 @@ export default function Sidebar({
                 >
                   <span className="text-zinc-600 text-[11px] shrink-0">–</span>
                   <span className="min-w-0 flex-1 text-[13px] truncate" title={s.root}>{s.root.split("/").pop()}</span>
-                  {doneUnread && <RedDot title="有完成未读" />}
+                  <UnreadCount n={unread} />
                 </button>
               );
             })}
