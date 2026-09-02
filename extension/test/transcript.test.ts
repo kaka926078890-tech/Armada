@@ -56,4 +56,16 @@ describe("TranscriptTailer", () => {
     t.poll("r1");
     expect(lines).toEqual(["old", "new"]);
   });
+
+  test("attach fromEnd skips existing lines (new window followup must not replay turn_ended)", () => {
+    const fs = fakeFs('{"type":"turn_ended","status":"success"}\n');
+    const lines: string[] = [];
+    const t = new TranscriptTailer({ readFile: fs.readFile, onLine: (_r, l) => lines.push(l) });
+    t.attach("r1", "/p", { fromEnd: true });
+    t.poll("r1");
+    expect(lines).toEqual([]);
+    fs.append('{"role":"user"}\n{"type":"turn_ended","status":"success"}\n');
+    t.poll("r1");
+    expect(lines).toEqual(['{"role":"user"}', '{"type":"turn_ended","status":"success"}']);
+  });
 });

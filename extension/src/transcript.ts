@@ -7,11 +7,15 @@ export class TranscriptTailer {
   private tails = new Map<string, { path: string; offset: number; buf: string }>();
   constructor(private opts: TranscriptTailerOpts) {}
 
-  attach(runId: string, path: string): void {
+  attach(runId: string, path: string, opts?: { fromEnd?: boolean }): void {
     const existing = this.tails.get(runId);
     // 续聊会再次 bind 同一 run:不得把 offset 打回 0,否则整份 transcript 会重复灌进详情
     if (existing && existing.path === path) return;
-    this.tails.set(runId, { path, offset: 0, buf: "" });
+    let offset = 0;
+    if (opts?.fromEnd) {
+      offset = this.opts.readFile(path, Number.MAX_SAFE_INTEGER).size;
+    }
+    this.tails.set(runId, { path, offset, buf: "" });
   }
 
   poll(runId: string): void {

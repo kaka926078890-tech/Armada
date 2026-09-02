@@ -12,7 +12,7 @@ import { TranscriptTailer } from "./transcript";
 import { Executor, CancelWatcher } from "./executor";
 import { createCdpSubmitter } from "./cdpInject";
 import { mergeHooks, hooksDriftHash, spoolScriptName, shouldInstallArmadaHooks } from "./hooksInstall";
-import { collectTranscriptViews, matchTranscriptToPending, stopPayloadFromTranscriptLine, stopFromTranscriptFileContent, transcriptsDirForWorkspace, isWithinTranscriptBindWindow } from "./transcriptBind";
+import { collectTranscriptViews, matchTranscriptToPending, stopPayloadFromTranscriptLine, stopFromTranscriptFileContent, transcriptsDirForWorkspace, isWithinTranscriptBindWindow, FollowupStopGuard } from "./transcriptBind";
 import { TranscriptDirWatcher, debounceLeading, watchTranscriptDir, watchFileSize, TRANSCRIPT_WATCHDOG_MS, TRANSCRIPT_WATCH_DEBOUNCE_MS } from "./transcriptWatch";
 import { createExtSeq } from "./extSeq";
 import { hubRunsNeedingTranscriptFollow } from "./adoptRuns";
@@ -68,6 +68,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const childConversations = new Map<string, string>();
   const sizeWatches = new Map<string, () => void>();
   const cancelWatcher = new CancelWatcher();
+  const followupStopGuard = new FollowupStopGuard();
 
   const cdpSubmit = config.autoSubmit ? createCdpSubmitter({ port: config.cdpPort, log }) : null;
   log(`autoSubmit=${config.autoSubmit} cdpPort=${config.cdpPort}`);
@@ -91,7 +92,10 @@ export function activate(context: vscode.ExtensionContext): void {
     onLine: (runId, line) => {
       let payload: any = { __raw_line: line };
       try { payload = JSON.parse(line); } catch { /* 保留原始行 */ }
-      if (payload?.role === "user") stopSent.delete(runId);
+      if (payload?.role === "user") {
+        followupStopGuard.onUser(runId);
+        stopSent.delete(runId);
+      }
       core.enqueue({ type: "run.event", runId, source: "transcript", payload, ts: Date.now(), seq: nextExtSeq() });
       // Windows: stop hook 同样被 PS 5s 杀掉。合成 hub 已有的 stop 契约，不改 ingest。
       // 不 detach：续聊同一 path 才能保住 offset，避免重放旧 turn_ended 把 followup 立刻收口。
@@ -103,6 +107,7 @@ export function activate(context: vscode.ExtensionContext): void {
   });
 
   const emitSynthesizedStop = (runId: string, stop: { status: string; error?: string }): void => {
+    if (!followupStopGuard.shouldEmitStop(runId)) return;
     if (stopSent.has(runId)) return;
     stopSent.add(runId);
     const owner = boundRuns.get(runId);
@@ -121,6 +126,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const maybeCompleteFromDisk = (runId: string): void => {
     if (process.platform !== "win32") return;
+    if (!followupStopGuard.shouldEmitStop(runId)) return;
     const path = boundPaths.get(runId);
     if (!path) return;
     let content = "";
@@ -137,12 +143,17 @@ export function activate(context: vscode.ExtensionContext): void {
     const path = match.transcriptPath && transcriptPathBelongsToCid(match.transcriptPath, match.conversationId)
       ? match.transcriptPath
       : null;
+    const fromEnd = via === "followup";
+    if (fromEnd) {
+      followupStopGuard.arm(match.run.runId);
+      stopSent.delete(match.run.runId);
+    }
     core.enqueue({ type: "run.bound", runId: match.run.runId, conversationId: match.conversationId, transcriptPath: path, promptMatch: match.promptMatch });
     log(`run.bound ${match.run.runId} cid=${match.conversationId} via=${via}`);
     watchWorkspaceTranscripts(match.run.workspaceRoot);
     if (path) {
       boundPaths.set(match.run.runId, path);
-      tailer.attach(match.run.runId, path);
+      tailer.attach(match.run.runId, path, { fromEnd });
       tailer.poll(match.run.runId);
       sizeWatches.get(match.run.runId)?.();
       sizeWatches.set(match.run.runId, watchFileSize(path, () => {
@@ -331,7 +342,9 @@ export function activate(context: vscode.ExtensionContext): void {
         const path = dir ? join(dir, t.conversationId, `${t.conversationId}.jsonl`) : null;
         if (!path || !existsSync(path) || !transcriptPathBelongsToCid(path, t.conversationId)) continue;
         boundPaths.set(t.runId, path);
-        tailer.attach(t.runId, path);
+        followupStopGuard.arm(t.runId);
+        stopSent.delete(t.runId);
+        tailer.attach(t.runId, path, { fromEnd: true });
         tailer.poll(t.runId);
         sizeWatches.get(t.runId)?.();
         sizeWatches.set(t.runId, watchFileSize(path, () => {
@@ -366,7 +379,7 @@ export function activate(context: vscode.ExtensionContext): void {
       core.sendRegister({
         type: "register", machineId, windowId,
         name: hostname(), os: `${process.platform}-${process.arch}`,
-        cursorVersion: vscode.version, extensionVersion: "0.4.12",
+        cursorVersion: vscode.version, extensionVersion: "0.4.13",
         openWorkspaces: workspaces(),
       });
     });

@@ -166,6 +166,35 @@ export function stopFromTranscriptFileContent(content: string): { status: string
   return stopPayloadFromTranscriptLine(lines[lines.length - 1]!);
 }
 
+/** Prompt text from a hub/extension event payload (hook prompt or transcript user). */
+export function userPromptFromEventPayload(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  const p = payload as { prompt?: unknown; role?: unknown };
+  if (typeof p.prompt === "string" && p.prompt.trim()) return normalizePrompt(p.prompt);
+  if (p.role === "user") return extractFirstUserPrompt(JSON.stringify(payload));
+  return null;
+}
+
+/**
+ * After followup/adopt, Windows may still see the previous turn_ended as the
+ * file's last line. Suppress synthesized stop until a new user line arrives.
+ */
+export class FollowupStopGuard {
+  private waitingUser = new Set<string>();
+
+  arm(runId: string): void {
+    this.waitingUser.add(runId);
+  }
+
+  onUser(runId: string): void {
+    this.waitingUser.delete(runId);
+  }
+
+  shouldEmitStop(runId: string): boolean {
+    return !this.waitingUser.has(runId);
+  }
+}
+
 /**
  * How long after dispatch we keep scanning for the first jsonl so we can
  * bind the run.

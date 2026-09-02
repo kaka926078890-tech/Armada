@@ -10,6 +10,7 @@ import {
   OCCUPYING_STATUSES,
 } from "./concurrency";
 import { workspacePathIn } from "../../extension/src/workspacePath";
+import { userPromptFromEventPayload } from "../../extension/src/transcriptBind";
 
 const ACTIVE = ["created", "dispatched", "binding", "running"];
 const DISPATCH_TIMEOUT_MS = 30_000;
@@ -272,6 +273,7 @@ export class RunService {
     // BIND_TIMEOUT / DISPATCH_TIMEOUT 误杀后真实事件仍可能到达
     const recoverable = this.isFalseBindTimeout(run) || this.isFalseDispatchTimeout(run);
     if (!ACTIVE.includes(run.status) && !recoverable) return;
+    if (this.shouldIgnoreStaleFollowupStop(run)) return;
     const s = payload?.status;
     if (s === "completed") this.setStatus(runId, "completed", { end_reason: "completed" }, "extension");
     else if (s === "aborted") {
@@ -288,6 +290,48 @@ export class RunService {
     }
     this.cancelRequested.delete(runId);
     this.promoteNextQueued(run.machine_id);
+  }
+
+  /**
+   * Windows followup re-tails the jsonl from offset 0 (new window / reload).
+   * Historical turn_ended is synthesized as stop/completed before the new
+   * user prompt exists. Ignore that until a non-hub user event matches the
+   * followup prompt. Bound/ack resets started_at, so key off the hub
+   * followup event seq, not started_at.
+   */
+  private latestHubFollowup(runId: string): { seq: number; prompt: string } | null {
+    const row = this.db.query(
+      `SELECT seq, payload FROM run_events
+       WHERE run_id=?1 AND source='hub' AND hook_event_name='beforeSubmitPrompt'
+       ORDER BY seq DESC LIMIT 1`,
+    ).get(runId) as { seq: number; payload: string } | null;
+    if (!row) return null;
+    try {
+      const prompt = (JSON.parse(row.payload) as { prompt?: unknown }).prompt;
+      if (typeof prompt !== "string" || !prompt.trim()) return null;
+      return { seq: row.seq, prompt: normalizePrompt(prompt) };
+    } catch {
+      return null;
+    }
+  }
+
+  private hasMatchingLiveUser(runId: string, want: string, afterSeq: number): boolean {
+    const rows = this.db.query(
+      `SELECT payload FROM run_events WHERE run_id=?1 AND seq>?2 AND source!='hub'`,
+    ).all(runId, afterSeq) as { payload: string }[];
+    for (const row of rows) {
+      let payload: unknown = row.payload;
+      try { payload = JSON.parse(row.payload); } catch { /* keep raw */ }
+      const got = userPromptFromEventPayload(payload);
+      if (got && normalizePrompt(got) === want) return true;
+    }
+    return false;
+  }
+
+  private shouldIgnoreStaleFollowupStop(run: { id: string }): boolean {
+    const followup = this.latestHubFollowup(run.id);
+    if (!followup) return false;
+    return !this.hasMatchingLiveUser(run.id, followup.prompt, followup.seq);
   }
 
   sweepTimeouts(now = Date.now()) {

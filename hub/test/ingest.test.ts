@@ -330,6 +330,36 @@ describe("event ingest", () => {
     ws.close();
   });
 
+  test("followup then stale transcript stop must not complete before the new user turn", async () => {
+    const { ws, api, runId } = await startBoundRun();
+    ws.send(JSON.stringify(ev(runId, 1, "stop", { status: "completed" })));
+    await new Promise((r) => setTimeout(r, 100));
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).status).toBe("completed");
+    const f = await api(`/api/runs/${runId}/followup`, { method: "POST", body: JSON.stringify({ prompt: "Findesk，core还有代码没有提交pr" }) });
+    expect(f.status).toBe(200);
+    ws.send(JSON.stringify({ type: "run.ack", runId, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId, conversationId: "cid-1", transcriptPath: "/tmp/t.jsonl", promptMatch: true }));
+    await new Promise((r) => setTimeout(r, 80));
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).status).toBe("running");
+    ws.send(JSON.stringify({
+      type: "run.event", runId, source: "transcript", seq: 10,
+      payload: { role: "user", message: { content: [{ type: "text", text: "<user_query>\n上传一下77 服务器\n</user_query>" }] } },
+      ts: Date.now(),
+    }));
+    ws.send(JSON.stringify(ev(runId, 11, "stop", { status: "completed" })));
+    await new Promise((r) => setTimeout(r, 120));
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).status).toBe("running");
+    ws.send(JSON.stringify({
+      type: "run.event", runId, source: "transcript", seq: 12,
+      payload: { role: "user", message: { content: [{ type: "text", text: "<user_query>\nFindesk，core还有代码没有提交pr\n</user_query>" }] } },
+      ts: Date.now(),
+    }));
+    ws.send(JSON.stringify(ev(runId, 13, "stop", { status: "completed" })));
+    await new Promise((r) => setTimeout(r, 120));
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).status).toBe("completed");
+    ws.close();
+  });
+
   test("subagent hooks with parent_conversation_id still attach to the parent run", async () => {
     const { ws, api, runId } = await startBoundRun();
     ws.send(JSON.stringify(ev(runId, 1, "subagentStart", {

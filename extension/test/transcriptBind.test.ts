@@ -14,6 +14,8 @@ import {
   isWithinTranscriptBindWindow,
   TRANSCRIPT_BIND_WINDOW_MS,
   stopFromTranscriptFileContent,
+  FollowupStopGuard,
+  userPromptFromEventPayload,
 } from "../src/transcriptBind";
 
 const CID = "c9597541-e291-40c9-9041-772c292acc24";
@@ -163,6 +165,32 @@ describe("stopFromTranscriptFileContent", () => {
       `{"role":"user","message":{"content":[{"type":"text","text":"followup"}]}}`,
     ].join("\n");
     expect(stopFromTranscriptFileContent(body)).toBeNull();
+  });
+});
+
+describe("FollowupStopGuard", () => {
+  test("armed run suppresses stop until a new user line", () => {
+    const g = new FollowupStopGuard();
+    g.arm("r1");
+    expect(g.shouldEmitStop("r1")).toBe(false);
+    g.onUser("r1");
+    expect(g.shouldEmitStop("r1")).toBe(true);
+  });
+
+  test("unarmed run still emits stop (first bind of a finished turn)", () => {
+    const g = new FollowupStopGuard();
+    expect(g.shouldEmitStop("r-new")).toBe(true);
+  });
+});
+
+describe("userPromptFromEventPayload", () => {
+  test("pulls user_query from a transcript user object", () => {
+    expect(userPromptFromEventPayload(JSON.parse(WRAP.split("\n")[0]!))).toBe("你好v2");
+  });
+
+  test("pulls hook beforeSubmitPrompt.prompt", () => {
+    expect(userPromptFromEventPayload({ prompt: "Findesk，core还有代码没有提交pr" }))
+      .toBe("Findesk，core还有代码没有提交pr");
   });
 });
 
