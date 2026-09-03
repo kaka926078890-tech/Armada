@@ -43,6 +43,18 @@ if [[ ! -d "$ROOT/hub/web/dist" ]]; then
 fi
 cp -R "$ROOT/hub/web/dist/." "$DEST/hub/web/dist/"
 
+# hub/src imports these via ../../extension/src/* (repo layout). Packaged
+# layout is Resources/{hub,extension} so the same relative path must exist.
+echo "==> copy extension modules imported by hub"
+mkdir -p "$DEST/extension/src"
+for f in promptNormalize.ts workspacePath.ts transcriptBind.ts imageMarkers.ts; do
+  if [[ ! -f "$ROOT/extension/src/$f" ]]; then
+    echo "error: missing $ROOT/extension/src/$f (required by packaged hub)" >&2
+    exit 1
+  fi
+  cp "$ROOT/extension/src/$f" "$DEST/extension/src/"
+done
+
 echo "==> bun install --production (hono)"
 (
   cd "$DEST/hub"
@@ -61,6 +73,12 @@ if [[ ! -f "$BUN_SRC" ]]; then
 fi
 cp "$BUN_SRC" "$DEST/bun"
 chmod +x "$DEST/bun"
+
+echo "==> smoke: packaged hub can resolve extension imports"
+(
+  cd "$DEST/hub"
+  "$DEST/bun" --eval "await import('./src/concurrency.ts'); await import('./src/runs.ts')"
+)
 
 echo "==> copy armada-cursor + hooks"
 mkdir -p "$DEST/scripts" "$DEST/hooks"

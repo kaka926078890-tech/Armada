@@ -41,6 +41,20 @@ const SEL = 'div.aislash-editor-input[contenteditable="true"], div.tiptap[conten
  */
 const VISIBLE_ELS = `Array.prototype.slice.call(document.querySelectorAll(${JSON.stringify(SEL)})).filter(function (e) { return e.offsetWidth > 0 && e.offsetHeight > 0; })`;
 
+/** 2026-09-03 P1：芯片是 .ai-input-full-input-box 里的 .context-pill-image（不在 contenteditable，也不在输入框 8 层祖先内）。整页还有 transcript 药丸，必须限定本输入框。 */
+const CHIP_HELPERS = `function armadaChipRoot(el) {
+  var n = el;
+  for (var i = 0; i < 16 && n; i++) {
+    if (/\\bai-input-full-input-box\\b/.test(String(n.className || ""))) return n;
+    n = n.parentElement;
+  }
+  return el;
+}
+function armadaChipCount(el) {
+  var root = armadaChipRoot(el);
+  return root.querySelectorAll ? root.querySelectorAll(".context-pill-image").length : 0;
+}`;
+
 /** 导出供单测直接 eval(注入 mock document) */
 export const COMPOSER_FOCUS_JS = `function (prompt) {
   var els = ${VISIBLE_ELS};
@@ -69,21 +83,27 @@ export const COMPOSER_VERIFY_JS = `function (prompt) {
 }`;
 
 export const COMPOSER_CHIP_COUNT_JS = `function () {
+  ${CHIP_HELPERS}
   var els = ${VISIBLE_ELS};
+  var seen = [];
   var n = 0;
   for (var i = 0; i < els.length; i++) {
-    n += els[i].querySelectorAll("img").length;
+    var r = armadaChipRoot(els[i]);
+    if (seen.indexOf(r) >= 0) continue;
+    seen.push(r);
+    n += armadaChipCount(els[i]);
   }
   return n;
 }`;
 
 export const COMPOSER_FOCUS_IMAGE_JS = `function () {
+  ${CHIP_HELPERS}
   var els = ${VISIBLE_ELS};
   if (!els.length) return "NO_INPUT";
   var empty = null, withImg = null;
   for (var i = 0; i < els.length; i++) {
     var t = els[i].innerText.trim();
-    var imgs = els[i].querySelectorAll("img").length;
+    var imgs = armadaChipCount(els[i]);
     if (imgs && !withImg) withImg = els[i];
     if (!t && !imgs && !empty) empty = els[i];
   }
@@ -92,6 +112,7 @@ export const COMPOSER_FOCUS_IMAGE_JS = `function () {
   return "OK";
 }`;
 export const COMPOSER_ENTER_JS = `function (prompt) {
+  ${CHIP_HELPERS}
   var els = ${VISIBLE_ELS};
   if (!els.length) return "NO_INPUT";
   var promptT = String(prompt || "").trim();
@@ -108,7 +129,7 @@ export const COMPOSER_ENTER_JS = `function (prompt) {
   }
   if (!el) {
     for (var k = 0; k < els.length; k++) {
-      if (els[k].querySelectorAll("img").length) { el = els[k]; break; }
+      if (armadaChipCount(els[k])) { el = els[k]; break; }
     }
   }
   if (!el) return "NO_TARGET";
@@ -301,7 +322,12 @@ export function createImagePaster(deps: CdpSubmitterDeps) {
         const step = steps[i]!;
         writeClipboard(step.bytes, step.mime);
         let okChip = false;
+        // 先数芯片：已经贴上的不得再 Cmd+V（探测失败也不连贴三张）。
         for (let retry = 0; retry < 3 && !okChip; retry++) {
+          const n = Number(await session.call("Runtime.evaluate", {
+            expression: `(${COMPOSER_CHIP_COUNT_JS})()`, returnByValue: true,
+          }).then((x) => x?.result?.value));
+          if (n >= i + 1) { okChip = true; break; }
           await session.call("Runtime.evaluate", {
             expression: `(${COMPOSER_FOCUS_IMAGE_JS})()`, returnByValue: true,
           });
@@ -312,16 +338,22 @@ export function createImagePaster(deps: CdpSubmitterDeps) {
             type: "keyUp", modifiers: meta, key: "v", code: "KeyV", windowsVirtualKeyCode: 86,
           });
           await sleep(400);
+        }
+        if (!okChip) {
           const n = Number(await session.call("Runtime.evaluate", {
             expression: `(${COMPOSER_CHIP_COUNT_JS})()`, returnByValue: true,
           }).then((x) => x?.result?.value));
-          if (n >= i + 1) okChip = true;
+          okChip = n >= i + 1;
         }
         if (!okChip) return { ok: false, reason: `CHIP_COUNT:${i + 1}` };
       }
 
       if (prompt.trim()) {
         await session.call("Input.insertText", { text: prompt });
+        const v = String(await session.call("Runtime.evaluate", {
+          expression: `(${COMPOSER_VERIFY_JS})(${JSON.stringify(prompt)})`, returnByValue: true,
+        }).then((x) => x?.result?.value));
+        if (v !== "OK") return { ok: false, reason: `VERIFY_FAIL:${v}` };
       }
       if (autoSubmit) {
         const e = String(await session.call("Runtime.evaluate", {

@@ -40,20 +40,61 @@ function deps(over: Partial<Parameters<typeof createCdpSubmitter>[0]> = {}) {
   };
 }
 
-function mockDoc(texts: string[], imgCounts: number[] = []) {
-  const els = texts.map((innerText, i) => ({
-    innerText,
-    offsetWidth: 100,
-    offsetHeight: 24,
-    focused: false,
-    imgCount: imgCounts[i] ?? 0,
-    focus() { this.focused = true; },
-    dispatchEvent() { return true; },
+/** P1 真机：芯片在 .ai-input-full-input-box 内、输入框 8 层祖先之外；composer-bar 上另有 transcript 药丸不得计入。 */
+function mockDoc(texts: string[], pillCounts: number[] = [], shareBox = false) {
+  const strayTranscriptPills = [{}, {}, {}];
+  const makeBox = (pills: object[]) => ({
+    className: "ai-input-full-input-box full-input-box ",
+    offsetHeight: 113,
+    parentElement: {
+      className: "composer-bar editor",
+      offsetHeight: 800,
+      querySelectorAll(sel: string) {
+        if (sel === ".context-pill-image") return strayTranscriptPills;
+        return [];
+      },
+    },
     querySelectorAll(sel: string) {
-      if (sel === "img") return Array.from({ length: this.imgCount }, () => ({}));
+      if (sel === ".context-pill-image") return pills;
       return [];
     },
-  }));
+  });
+  const sharedPills = shareBox
+    ? Array.from({ length: pillCounts[0] ?? 0 }, () => ({ className: "context-pill-image" }))
+    : null;
+  const sharedBox = shareBox ? makeBox(sharedPills!) : null;
+  const els = texts.map((innerText, i) => {
+    const el: {
+      innerText: string;
+      offsetWidth: number;
+      offsetHeight: number;
+      className: string;
+      focused: boolean;
+      parentElement: object | undefined;
+      focus: () => void;
+      dispatchEvent: () => boolean;
+      querySelectorAll: (sel: string) => object[];
+    } = {
+      innerText,
+      offsetWidth: 100,
+      offsetHeight: 24,
+      className: "aislash-editor-input",
+      focused: false,
+      parentElement: undefined,
+      focus() { this.focused = true; },
+      dispatchEvent() { return true; },
+      querySelectorAll() { return []; },
+    };
+    let node: { parentElement?: object } = el;
+    for (let w = 0; w < 8; w++) {
+      const wrap = { className: "", offsetHeight: 22, parentElement: undefined as object | undefined, querySelectorAll() { return []; } };
+      node.parentElement = wrap;
+      node = wrap;
+    }
+    const pills = sharedPills ?? Array.from({ length: pillCounts[i] ?? 0 }, () => ({ className: "context-pill-image" }));
+    node.parentElement = sharedBox ?? makeBox(pills);
+    return el;
+  });
   return {
     els,
     querySelectorAll() { return els; },
@@ -69,8 +110,8 @@ function runJs(src: string, texts: string[], prompt: string, imgCounts?: number[
   return { result: String(fn(prompt)), els: document.els };
 }
 
-function runJs0(src: string, texts: string[], imgCounts?: number[]): { result: string; els: ReturnType<typeof mockDoc>["els"] } {
-  const document = mockDoc(texts, imgCounts);
+function runJs0(src: string, texts: string[], pillCounts?: number[], shareBox = false): { result: string; els: ReturnType<typeof mockDoc>["els"] } {
+  const document = mockDoc(texts, pillCounts, shareBox);
   const KeyboardEvent = class {
     constructor(public type: string, public init?: unknown) {}
   };
@@ -106,14 +147,22 @@ describe("composer picker JS", () => {
     expect(els[1].focused).toBe(true);
   });
 
-  test("只附图 ENTER 打在带 img 的框", () => {
+  test("只附图 ENTER 打在带芯片的框", () => {
     const { result, els } = runJs(COMPOSER_ENTER_JS, ["旧对话", "chip"], "", [0, 2]);
     expect(result).toBe("OK");
     expect(els[1].focused).toBe(true);
   });
 
-  test("CHIP_COUNT 累加可见框内 img", () => {
+  test("CHIP_COUNT 累加各输入框 .context-pill-image", () => {
     expect(runJs0(COMPOSER_CHIP_COUNT_JS, ["", ""], [1, 2]).result).toBe("3");
+  });
+
+  test("CHIP_COUNT 不把 8 层内的空祖先当根，且不计 composer-bar 上的 transcript 药丸", () => {
+    expect(runJs0(COMPOSER_CHIP_COUNT_JS, [""], [1]).result).toBe("1");
+  });
+
+  test("CHIP_COUNT 同输入框两个 editor 不重复计药丸", () => {
+    expect(runJs0(COMPOSER_CHIP_COUNT_JS, ["", ""], [1], true).result).toBe("1");
   });
 
   test("FOCUS_IMAGE 优先空且无芯片的框", () => {
@@ -206,21 +255,32 @@ describe("createCdpSubmitter", () => {
 describe("createImagePaster", () => {
   test("chip count never reaches N → CHIP_COUNT and no Enter", async () => {
     const log: CallLog[] = [];
-    const paste = createImagePaster(deps({ connect: async () => mockSession(["OK", "OK", "0"], log) }));
+    const paste = createImagePaster(deps({ connect: async () => mockSession(["OK", "0"], log) }));
     const r = await paste("/Users/x/armada-test-ws", "hi", [{ bytes: Buffer.from("x"), mime: "image/png" }], () => {}, true);
     expect(r.ok).toBe(false);
     expect(r.reason).toContain("CHIP_COUNT");
     expect(log.some((c) => c.method === "Input.insertText")).toBe(false);
   });
 
-  test("chips then prompt then Enter; paste uses dispatchKeyEvent not insertText for the image", async () => {
+  test("already counted chips skip extra Cmd+V", async () => {
     const log: CallLog[] = [];
     const paste = createImagePaster(deps({
-      connect: async () => mockSession(["OK", "OK", "1", "OK"], log),
+      connect: async () => mockSession(["OK", "1", "OK", "OK"], log),
     }));
     const r = await paste("/Users/x/armada-test-ws", "看图", [{ bytes: Buffer.from("x"), mime: "image/png" }], () => {}, true);
     expect(r.ok).toBe(true);
-    expect(log.some((c) => c.method === "Input.dispatchKeyEvent")).toBe(true);
+    expect(log.filter((c) => c.method === "Input.dispatchKeyEvent")).toHaveLength(0);
+    expect(log.find((c) => c.method === "Input.insertText")?.params?.text).toBe("看图");
+  });
+
+  test("chips then prompt then Enter; paste uses dispatchKeyEvent not insertText for the image", async () => {
+    const log: CallLog[] = [];
+    const paste = createImagePaster(deps({
+      connect: async () => mockSession(["OK", "0", "OK", "1", "OK", "OK"], log),
+    }));
+    const r = await paste("/Users/x/armada-test-ws", "看图", [{ bytes: Buffer.from("x"), mime: "image/png" }], () => {}, true);
+    expect(r.ok).toBe(true);
+    expect(log.filter((c) => c.method === "Input.dispatchKeyEvent")).toHaveLength(2);
     const insert = log.find((c) => c.method === "Input.insertText");
     expect(insert?.params?.text).toBe("看图");
   });

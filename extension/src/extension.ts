@@ -399,7 +399,7 @@ export function activate(context: vscode.ExtensionContext): void {
       core.sendRegister({
         type: "register", machineId, windowId,
         name: hostname(), os: `${process.platform}-${process.arch}`,
-        cursorVersion: vscode.version, extensionVersion: "0.4.13",
+        cursorVersion: vscode.version, extensionVersion: "0.4.14",
         openWorkspaces: workspaces(),
       });
     });
