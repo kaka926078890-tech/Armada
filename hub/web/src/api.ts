@@ -19,6 +19,8 @@ export const api = {
     req("/api/runs", { method: "POST", body: JSON.stringify({ machineId, workspaceRoot, prompt, attachmentIds }) }).then((r) => r.json()),
   followup: (id: string, prompt: string, attachmentIds: string[] = []) =>
     req(`/api/runs/${id}/followup`, { method: "POST", body: JSON.stringify({ prompt, attachmentIds }) }).then((r) => r.json()),
+  renameRun: (id: string, title: string) =>
+    req(`/api/runs/${id}`, { method: "PATCH", body: JSON.stringify({ title }) }).then((r) => r.json()),
   uploadBlob: async (file: File) => {
     const fd = new FormData();
     fd.append("file", file);

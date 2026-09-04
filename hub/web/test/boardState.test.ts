@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 import {
   groupRuns, cardView, listWorkspaceSlots, encodeWorkspaceKey, decodeWorkspaceKey,
   filterRunsByWorkspace, sortConversations, groupSlotsByMachine, isUnreadCompleted, isUnreadMessage,
-  workspaceHasUnread, workspaceUnreadCount, formatUnreadCount, canArchiveRun, isHubArchived, type RunRow,
+  workspaceHasUnread, workspaceUnreadCount, formatUnreadCount, canArchiveRun, isHubArchived,
+  workspaceFolderName, workspaceHasLiveRun, type RunRow,
 } from "../src/boardState";
 
 const base: RunRow = {
@@ -59,6 +60,9 @@ describe("cardView", () => {
   test("empty prompt with attachments titles [N 张图片]", () => {
     expect(cardView({ ...base, prompt: "", attachments: JSON.stringify(["a", "b"]) }, 5000).title).toBe("[2 张图片]");
   });
+  test("operator title wins over prompt", () => {
+    expect(cardView({ ...base, prompt: "第一句很长", title: "短标题" }, 5000).title).toBe("短标题");
+  });
 });
 
 describe("workspace slots and conversation filter", () => {
@@ -77,8 +81,8 @@ describe("workspace slots and conversation filter", () => {
       { id: "m-b", name: "电脑B", os: "darwin", status: "online", open_workspaces: '["/ws/a","/ws/b"]' },
     ]));
     expect(grouped.map((g) => g.machineName)).toEqual(["电脑A", "电脑B"]);
-    expect(grouped[0].workspaces.map((w) => w.root.split("/").pop())).toEqual(["a", "b"]);
-    expect(grouped[1].workspaces.map((w) => w.root.split("/").pop())).toEqual(["a", "b"]);
+    expect(grouped[0].workspaces.map((w) => workspaceFolderName(w.root))).toEqual(["a", "b"]);
+    expect(grouped[1].workspaces.map((w) => workspaceFolderName(w.root))).toEqual(["a", "b"]);
   });
 
   test("encode/decode workspace key round-trips paths with pipes", () => {
@@ -159,5 +163,29 @@ describe("unread dots", () => {
     expect(canArchiveRun({ status: "completed" })).toBe(true);
     expect(isHubArchived({ archived_at: 9 })).toBe(true);
     expect(isHubArchived({ archived_at: null })).toBe(false);
+  });
+});
+
+describe("workspaceFolderName", () => {
+  test("posix and windows paths both show the last folder", () => {
+    expect(workspaceFolderName("/Users/apple/Desktop/desk")).toBe("desk");
+    expect(workspaceFolderName("C:\\Users\\apple\\Desktop\\desk")).toBe("desk");
+    expect(workspaceFolderName("C:\\Users\\apple\\Desktop\\desk\\")).toBe("desk");
+    expect(workspaceFolderName("/ws/a")).toBe("a");
+  });
+  test("falls back to the original string when there is no folder segment", () => {
+    expect(workspaceFolderName("/")).toBe("/");
+    expect(workspaceFolderName("desk")).toBe("desk");
+  });
+});
+
+describe("workspaceHasLiveRun", () => {
+  test("true for in-flight statuses, false after terminal", () => {
+    expect(workspaceHasLiveRun([{ ...base, status: "running" }])).toBe(true);
+    expect(workspaceHasLiveRun([{ ...base, status: "queued" }])).toBe(true);
+    expect(workspaceHasLiveRun([{ ...base, status: "dispatched" }])).toBe(true);
+    expect(workspaceHasLiveRun([{ ...base, status: "completed" }])).toBe(false);
+    expect(workspaceHasLiveRun([{ ...base, status: "error" }, { ...base, id: "r-2", status: "running" }])).toBe(true);
+    expect(workspaceHasLiveRun([])).toBe(false);
   });
 });

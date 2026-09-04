@@ -17,7 +17,7 @@ import { collectTranscriptViews, matchTranscriptToPending, stopPayloadFromTransc
 import { TranscriptDirWatcher, debounceLeading, watchTranscriptDir, watchFileSize, TRANSCRIPT_WATCHDOG_MS, TRANSCRIPT_WATCH_DEBOUNCE_MS } from "./transcriptWatch";
 import { createExtSeq } from "./extSeq";
 import { hubRunsNeedingTranscriptFollow } from "./adoptRuns";
-import { noteOwnerBsp, clearGeneration, synthesizedStopPayload } from "./generationStamp";
+import { noteOwnerBsp, clearGeneration, synthesizedStopPayload, noteHubGeneration } from "./generationStamp";
 
 let client: { dispose: () => void } | null = null;
 
@@ -372,6 +372,7 @@ export function activate(context: vscode.ExtensionContext): void {
         boundPaths.set(t.runId, path);
         followupStopGuard.arm(t.runId);
         stopSent.delete(t.runId);
+        noteHubGeneration(lastGenerationId, t.runId, t.liveGenerationId);
         tailer.attach(t.runId, path, { fromEnd: true });
         tailer.poll(t.runId);
         sizeWatches.get(t.runId)?.();
@@ -427,6 +428,7 @@ export function activate(context: vscode.ExtensionContext): void {
           break;
         case "run.start":
           // pendingRuns is populated inside Executor after auth + newAgentChat (not here).
+          noteHubGeneration(lastGenerationId, msg.runId, msg.generation_id);
           void executor.startRun(msg).catch((e) => log(`startRun error: ${String(e)}`));
           break;
         case "run.cancel": {
@@ -440,6 +442,7 @@ export function activate(context: vscode.ExtensionContext): void {
           break;
         }
         case "run.followup":
+          noteHubGeneration(lastGenerationId, msg.runId, msg.generation_id);
           void executor.followup(msg);
           break;
         case "event.ack":

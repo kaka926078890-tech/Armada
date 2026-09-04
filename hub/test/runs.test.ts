@@ -12,6 +12,7 @@ async function startWithExt(opts: {
   extensionVersion?: string;
   openWorkspaces?: string[];
   concurrency?: ConcurrencyLimits;
+  os?: string;
 } = {}) {
   const home = mkdtempSync(join(tmpdir(), "armada-runs-"));
   hub = createServer({ port: 0, home, concurrency: opts.concurrency });
@@ -23,7 +24,7 @@ async function startWithExt(opts: {
   ws.addEventListener("message", (e) => inbound.push(JSON.parse(String(e.data))));
   ws.send(JSON.stringify({
     type: "register", machineId: "m-1", windowId: "w-1", name: "Mac-A",
-    os: "darwin-arm64", openWorkspaces: opts.openWorkspaces ?? ["/ws/a"],
+    os: opts.os ?? "darwin-arm64", openWorkspaces: opts.openWorkspaces ?? ["/ws/a"],
     extensionVersion: opts.extensionVersion,
   }));
   await new Promise((r) => setTimeout(r, 100));
@@ -499,6 +500,7 @@ describe("Run dispatch", () => {
     const { run: again } = await f.json() as any;
     expect(again.id).toBe(run.id);
     expect(again.status).toBe("dispatched");
+    expect(again.prompt).toBe("继续");
     expect(again.ended_at).toBeNull();
     expect(again.parent_run_id).toBeNull();
     await new Promise((r2) => setTimeout(r2, 100));
@@ -509,6 +511,96 @@ describe("Run dispatch", () => {
     const listed = (await (await api("/api/runs")).json()) as any[];
     expect(listed.filter((x) => x.conversation_id === "cid-1")).toHaveLength(1);
     ws.close();
+  });
+
+  test("PATCH /api/runs/:id sets display title without changing inject prompt", async () => {
+    const { ws, api } = await startWithExt();
+    const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "第一句" }) });
+    const { run } = await r.json() as any;
+    const patched = await api(`/api/runs/${run.id}`, { method: "PATCH", body: JSON.stringify({ title: "看板标题" }) });
+    expect(patched.status).toBe(200);
+    const { run: renamed } = await patched.json() as any;
+    expect(renamed.title).toBe("看板标题");
+    expect(renamed.prompt).toBe("第一句");
+    expect(renamed.status).toBe("dispatched");
+    const listed = (await (await api("/api/runs")).json()) as any[];
+    const row = listed.find((x) => x.id === run.id);
+    expect(row.title).toBe("看板标题");
+    expect(row.prompt).toBe("第一句");
+    ws.close();
+  });
+
+  test("followup updates prompt but keeps operator title", async () => {
+    const { ws, api } = await startWithExt();
+    const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "第一句" }) });
+    const { run } = await r.json() as any;
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId: run.id, conversationId: "cid-title", transcriptPath: "/tmp/t.jsonl", promptMatch: true }));
+    await new Promise((r2) => setTimeout(r2, 80));
+    ws.send(JSON.stringify({ type: "run.event", runId: run.id, source: "hook", hookEventName: "stop", payload: { status: "completed" }, ts: Date.now(), seq: 1 }));
+    await new Promise((r2) => setTimeout(r2, 80));
+    await api(`/api/runs/${run.id}`, { method: "PATCH", body: JSON.stringify({ title: "固定名" }) });
+    const f = await api(`/api/runs/${run.id}/followup`, { method: "POST", body: JSON.stringify({ prompt: "继续" }) });
+    expect(f.status).toBe(200);
+    const { run: again } = await f.json() as any;
+    expect(again.prompt).toBe("继续");
+    expect(again.title).toBe("固定名");
+    ws.close();
+  });
+
+  test("rename title is not blocked by occupying prompt collision", async () => {
+    const { ws, api } = await startWithExt({ extensionVersion: "0.4.0" });
+    const a = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "hello" }) });
+    expect(a.status).toBe(201);
+    const b = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "其它" }) });
+    expect(b.status).toBe(201);
+    const { run: other } = await b.json() as any;
+    const patched = await api(`/api/runs/${other.id}`, { method: "PATCH", body: JSON.stringify({ title: "hello" }) });
+    expect(patched.status).toBe(200);
+    const { run: renamed } = await patched.json() as any;
+    expect(renamed.title).toBe("hello");
+    expect(renamed.prompt).toBe("其它");
+    ws.close();
+  });
+
+  test("win32 dispatch arms a hub generation_id so synthesized stop can complete", async () => {
+    const { ws, inbound, api } = await startWithExt({ os: "win32-x64" });
+    const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "hello" }) });
+    const { run } = await r.json() as any;
+    await new Promise((r2) => setTimeout(r2, 100));
+    const start = inbound.find((m) => m.type === "run.start");
+    expect(typeof start.generation_id).toBe("string");
+    expect(start.generation_id.length).toBeGreaterThan(8);
+    const live = (await (await api(`/api/runs/${run.id}`)).json()) as any;
+    expect(live.live_generation_id).toBe(start.generation_id);
+
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId: run.id, conversationId: "cid-1", transcriptPath: "/tmp/t.jsonl", promptMatch: true }));
+    await new Promise((r2) => setTimeout(r2, 80));
+    ws.send(JSON.stringify({
+      type: "run.event", runId: run.id, source: "hook", hookEventName: "stop",
+      payload: { status: "completed", conversation_id: "cid-1", generation_id: start.generation_id },
+      ts: Date.now(), seq: 1,
+    }));
+    await new Promise((r2) => setTimeout(r2, 80));
+    expect(((await (await api(`/api/runs/${run.id}`)).json()) as any).status).toBe("completed");
+
+    inbound.length = 0;
+    const f = await api(`/api/runs/${run.id}/followup`, { method: "POST", body: JSON.stringify({ prompt: "下一轮" }) });
+    expect(f.status).toBe(200);
+    await new Promise((r2) => setTimeout(r2, 80));
+    const follow = inbound.find((m) => m.type === "run.followup");
+    expect(typeof follow.generation_id).toBe("string");
+    expect(follow.generation_id).not.toBe(start.generation_id);
+    ws.close();
+  });
+
+  test("darwin run.start has no hub-issued generation_id", async () => {
+    const { inbound, api } = await startWithExt();
+    await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "hello" }) });
+    await new Promise((r2) => setTimeout(r2, 80));
+    const start = inbound.find((m) => m.type === "run.start");
+    expect(start.generation_id).toBeUndefined();
   });
 
   test("followup on operator-closed parent → 400 CLOSED", async () => {

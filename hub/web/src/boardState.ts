@@ -1,10 +1,15 @@
 export interface RunRow {
   id: string; machine_id: string; window_id: string | null; workspace_root: string;
-  prompt: string; status: string; conversation_id: string | null;
+  prompt: string; title?: string | null; status: string; conversation_id: string | null;
   transcript_path: string | null; parent_run_id: string | null;
   created_at: number; started_at: number | null; ended_at: number | null; end_reason: string | null;
   archived_at?: number | null;
   attachments?: string | null;
+}
+
+/** 卡片展示名：操作员改过的 title 优先，否则最近一次注入的 prompt。 */
+export function runDisplayName(run: Pick<RunRow, "title" | "prompt">): string {
+  return (run.title ?? "").trim() || run.prompt.trim();
 }
 
 export type ColumnKey = "waiting" | "running" | "completed" | "cancelled" | "error";
@@ -33,9 +38,10 @@ export function cardView(run: RunRow, now: number): { title: string; elapsed: st
         return Array.isArray(p) ? p : [];
       } catch { return []; }
     })();
-  const title = run.prompt.trim()
-    ? (run.prompt.length > 40 ? run.prompt.slice(0, 40) + "…" : run.prompt)
-    : (ids.length ? `[${ids.length} 张图片]` : run.prompt);
+  const named = runDisplayName(run);
+  const title = named
+    ? (named.length > 40 ? named.slice(0, 40) + "…" : named)
+    : (ids.length ? `[${ids.length} 张图片]` : named);
 
   const from = run.started_at ?? run.created_at;
   const secs = Math.max(0, Math.floor(((run.ended_at ?? now) - from) / 1000));
@@ -120,6 +126,18 @@ export function filterRunsByWorkspace(runs: RunRow[], machineId: string, root: s
 }
 
 const LIVE = new Set(["created", "queued", "dispatched", "binding", "running"]);
+
+/** 工作区展示名：路径最后一段。Windows `\` 与 POSIX `/` 都认。 */
+export function workspaceFolderName(root: string): string {
+  const trimmed = root.replace(/[\\/]+$/, "");
+  if (!trimmed) return root;
+  const sep = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+  return (sep >= 0 ? trimmed.slice(sep + 1) : trimmed) || root;
+}
+
+export function workspaceHasLiveRun(runs: RunRow[]): boolean {
+  return runs.some((r) => LIVE.has(r.status));
+}
 
 export function sortConversations(runs: RunRow[]): RunRow[] {
   return runs.toSorted((a, b) => {

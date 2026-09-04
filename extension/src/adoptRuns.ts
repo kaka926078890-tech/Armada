@@ -5,6 +5,7 @@ export interface HubRunRow {
   conversation_id: string | null;
   workspace_root: string;
   prompt?: string;
+  live_generation_id?: string | null;
 }
 
 export interface AdoptTarget {
@@ -12,6 +13,7 @@ export interface AdoptTarget {
   conversationId: string;
   workspaceRoot: string;
   prompt: string;
+  liveGenerationId?: string;
 }
 
 /** Hub runs this window must re-attach after Reload (in-memory boundRuns is gone). */
@@ -28,6 +30,7 @@ export function hubRunsNeedingTranscriptFollow(machineId: string, runs: HubRunRo
       conversationId: r.conversation_id,
       workspaceRoot: r.workspace_root,
       prompt: r.prompt ?? "",
+      liveGenerationId: typeof r.live_generation_id === "string" ? r.live_generation_id : undefined,
     });
   }
   return out;

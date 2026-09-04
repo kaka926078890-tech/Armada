@@ -12,6 +12,7 @@
  *   composer 非空时:内容等于待注入 prompt(重载恢复的草稿)则直接提交;否则交调用方降级。
  * - 提交: 派发 keydown/keyup Enter(bubbles+composed),实证可触发 beforeSubmitPrompt。
  * - 同窗多个 composer 时优先空框(当前对话非空时 els[0] 是旧框,会误跳过回车)。
+ * - 草稿匹配认完整 prompt 后缀(剪贴板追加后 prompt 在末尾);禁止 16 字任意位置子串。
  */
 
 export interface CdpSubmitResult {
@@ -37,9 +38,14 @@ const SEL = 'div.aislash-editor-input[contenteditable="true"], div.tiptap[conten
 /**
  * 同窗常有多个可见 composer(当前对话 + newAgentChat 新开的空框)。
  * 取 els[0] 会命中旧对话 → 误报 NON_EMPTY、只粘贴不回车。
- * 优先空框;否则匹配 prompt 前缀的草稿框。
+ * 优先空框;否则完整 prompt 相等或以其结尾的草稿框(最长优先:残留+续聊长于「请继续」)。
  */
 const VISIBLE_ELS = `Array.prototype.slice.call(document.querySelectorAll(${JSON.stringify(SEL)})).filter(function (e) { return e.offsetWidth > 0 && e.offsetHeight > 0; })`;
+
+const DRAFT_HELPERS = `function armadaDraftHit(t, promptT) {
+  if (!promptT) return false;
+  return t === promptT || t.endsWith(promptT);
+}`;
 
 /** 2026-09-03 P1：芯片是 .ai-input-full-input-box 里的 .context-pill-image（不在 contenteditable，也不在输入框 8 层祖先内）。整页还有 transcript 药丸，必须限定本输入框。 */
 const CHIP_HELPERS = `function armadaChipRoot(el) {
@@ -57,15 +63,15 @@ function armadaChipCount(el) {
 
 /** 导出供单测直接 eval(注入 mock document) */
 export const COMPOSER_FOCUS_JS = `function (prompt) {
+  ${DRAFT_HELPERS}
   var els = ${VISIBLE_ELS};
   if (!els.length) return "NO_INPUT";
   var promptT = String(prompt || "").trim();
-  var prefix = promptT.slice(0, 16);
-  var empty = null, matched = null;
+  var empty = null, matched = null, matchedLen = -1;
   for (var i = 0; i < els.length; i++) {
     var t = els[i].innerText.trim();
     if (!t) { if (!empty) empty = els[i]; }
-    else if (prefix && t.indexOf(prefix) === 0) { if (!matched) matched = els[i]; }
+    else if (armadaDraftHit(t, promptT) && t.length > matchedLen) { matched = els[i]; matchedLen = t.length; }
   }
   if (empty) { empty.focus(); return "OK"; }
   if (matched) { matched.focus(); return "DRAFT"; }
@@ -73,10 +79,12 @@ export const COMPOSER_FOCUS_JS = `function (prompt) {
 }`;
 
 export const COMPOSER_VERIFY_JS = `function (prompt) {
+  ${DRAFT_HELPERS}
   var els = ${VISIBLE_ELS};
-  var prefix = String(prompt || "").slice(0, 16);
+  var promptT = String(prompt || "").trim();
   for (var i = 0; i < els.length; i++) {
-    if (els[i].innerText.indexOf(prefix) !== -1) return "OK";
+    var t = els[i].innerText.trim();
+    if (armadaDraftHit(t, promptT)) return "OK";
   }
   if (!els.length) return "NO_INPUT";
   return "MISMATCH:" + els[0].innerText.slice(0, 40);
@@ -85,15 +93,16 @@ export const COMPOSER_VERIFY_JS = `function (prompt) {
 export const COMPOSER_CHIP_COUNT_JS = `function () {
   ${CHIP_HELPERS}
   var els = ${VISIBLE_ELS};
-  var seen = [];
-  var n = 0;
+  if (!els.length) return 0;
+  var empty = null, withImg = null;
   for (var i = 0; i < els.length; i++) {
-    var r = armadaChipRoot(els[i]);
-    if (seen.indexOf(r) >= 0) continue;
-    seen.push(r);
-    n += armadaChipCount(els[i]);
+    var t = els[i].innerText.trim();
+    var imgs = armadaChipCount(els[i]);
+    if (imgs && !withImg) withImg = els[i];
+    if (!t && !imgs && !empty) empty = els[i];
   }
-  return n;
+  var el = empty || withImg || els[0];
+  return armadaChipCount(el);
 }`;
 
 export const COMPOSER_FOCUS_IMAGE_JS = `function () {
@@ -113,14 +122,14 @@ export const COMPOSER_FOCUS_IMAGE_JS = `function () {
 }`;
 export const COMPOSER_ENTER_JS = `function (prompt) {
   ${CHIP_HELPERS}
+  ${DRAFT_HELPERS}
   var els = ${VISIBLE_ELS};
   if (!els.length) return "NO_INPUT";
   var promptT = String(prompt || "").trim();
-  var prefix = promptT.slice(0, 16);
-  var el = null;
+  var el = null, matchedLen = -1;
   for (var i = 0; i < els.length; i++) {
     var t = els[i].innerText.trim();
-    if (prefix && t.indexOf(prefix) === 0) { el = els[i]; break; }
+    if (armadaDraftHit(t, promptT) && t.length > matchedLen) { el = els[i]; matchedLen = t.length; }
   }
   if (!el) {
     for (var j = 0; j < els.length; j++) {

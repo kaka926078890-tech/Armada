@@ -12,7 +12,7 @@ import {
 import { workspacePathIn } from "../../extension/src/workspacePath";
 import { collisionKey, hasImageMarkers, stripImageMarkers } from "../../extension/src/imageMarkers";
 import { BlobStore, parseAttachmentIds, type BlobMeta } from "./blobs";
-import { appendRetired, decideArm, decideStop, parseRetiredIds } from "./generationOwnership";
+import { appendRetired, decideArm, decideStop, parseRetiredIds, isWindowsMachineOs, genOf } from "./generationOwnership";
 
 const ACTIVE = ["created", "dispatched", "binding", "running"];
 const DISPATCH_TIMEOUT_MS = 30_000;
@@ -123,7 +123,9 @@ export class RunService {
         this.db.query(`UPDATE runs SET status='dispatched', queued_at=NULL, started_at=?1 WHERE id=?2`).run(now, row.id);
         this.audit("hub", "run.dispatched", row.id);
         this.sse.broadcast(row.id, { type: "run.status", runId: row.id, status: "dispatched" });
-        this.registry.sendTo(machineId, win.windowId, this.startMessage(row, now));
+        this.attachHubGenerationIfWindows(row.id, machineId);
+        const live = this.get(row.id);
+        this.registry.sendTo(machineId, win.windowId, this.startMessage(live ?? row, now));
         break;
       }
     } finally {
@@ -132,8 +134,9 @@ export class RunService {
     for (const id of toFail) this.setStatus(id, "error", { end_reason: "WORKSPACE_NOT_OPEN" });
   }
 
-  private startMessage(row: { id: string; workspace_root: string; prompt: string; attachments?: string }, now: number) {
+  private startMessage(row: { id: string; workspace_root: string; prompt: string; attachments?: string; live_generation_id?: string | null }, now: number) {
     const attachments = this.wsAttachments(parseAttachmentIds(row.attachments));
+    const gen = genOf(row.live_generation_id);
     return {
       type: "run.start" as const,
       runId: row.id,
@@ -141,7 +144,20 @@ export class RunService {
       prompt: row.prompt,
       dispatchedAt: now,
       ...(attachments && attachments.length ? { attachments } : {}),
+      ...(gen ? { generation_id: gen } : {}),
     };
+  }
+
+  /** Windows 无 BSP：hub 签发本轮 generation，扩展合成 stop 回显。Mac 仍只由 BSP 武装。 */
+  private attachHubGenerationIfWindows(runId: string, machineId: string): string | null {
+    const os = this.registry.getMachine(machineId)?.os;
+    if (!isWindowsMachineOs(os)) return null;
+    const run = this.get(runId);
+    if (!run) return null;
+    const gen = randomUUID();
+    this.persistGeneration(runId, gen, this.retiredState(run));
+    this.audit("hub", "GEN_ARMED", runId, { generation_id: gen, source: "hub_windows" });
+    return gen;
   }
 
   create(machineId: string, workspaceRoot: string, prompt: string,
@@ -191,7 +207,8 @@ export class RunService {
     this.blobs?.applyRefDelta([], attachmentIds);
     this.audit("operator", "run.create", id, { machineId, workspaceRoot, via: opts.via ?? "new", status });
     if (status === "dispatched") {
-      this.registry.sendTo(machineId, win.windowId, this.startMessage({ id, workspace_root: workspaceRoot, prompt, attachments: attachmentsJson }, now));
+      this.attachHubGenerationIfWindows(id, machineId);
+      this.registry.sendTo(machineId, win.windowId, this.startMessage(this.get(id), now));
       this.audit("hub", "run.dispatched", id);
     }
     const queuePosition = status === "queued"
@@ -361,6 +378,11 @@ export class RunService {
       this.audit("hub", "GEN_ARMED", runId, { generation_id: d.gen });
       return;
     }
+    if (d.action === "rearm") {
+      this.persistGeneration(runId, d.gen, appendRetired(retired, d.retire));
+      this.audit("hub", "GEN_ARMED", runId, { generation_id: d.gen, retired: d.retire });
+      return;
+    }
     if (d.reason === "already_armed_same") return;
     this.audit("hub", "GEN_ARMED_SKIP", runId, { reason: d.reason, generation_id: payload?.generation_id ?? null });
   }
@@ -372,6 +394,15 @@ export class RunService {
     return !!row;
   }
 
+  private liveTurnSettled(runId: string, live: string | null): boolean {
+    if (!live) return false;
+    const row = this.db.query(
+      `SELECT 1 AS n FROM run_events WHERE run_id=?1 AND hook_event_name='afterAgentResponse'
+       AND json_extract(payload, '$.generation_id')=?2 LIMIT 1`,
+    ).get(runId, live) as { n: number } | null;
+    return !!row;
+  }
+
   onStopEvent(runId: string, payload: any) {
     const run = this.get(runId);
     if (!run) return;
@@ -379,6 +410,7 @@ export class RunService {
     const recoverable = this.isFalseBindTimeout(run) || this.isFalseDispatchTimeout(run);
     if (!ACTIVE.includes(run.status) && !recoverable) return;
     const retired = this.retiredState(run);
+    const live = genOf(run.live_generation_id);
     const d = decideStop({
       stopCid: payload?.conversation_id,
       runConversationId: run.conversation_id,
@@ -386,12 +418,14 @@ export class RunService {
       liveGenerationId: run.live_generation_id ?? null,
       hasHubFollowup: this.hasHubFollowup(runId),
       retired,
+      liveTurnSettled: this.liveTurnSettled(runId, live),
     });
     if (d.action === "ignore") {
       this.audit("hub", d.audit, runId, { live: run.live_generation_id ?? null, stop: payload?.generation_id ?? null });
       return;
     }
     if (d.audit === "STOP_NO_GEN_INITIAL") this.audit("hub", "STOP_NO_GEN_INITIAL", runId, {});
+    if (d.audit === "STOP_SESSION_GEN") this.audit("hub", "STOP_SESSION_GEN", runId, { live, stop: payload?.generation_id ?? null });
     const s = payload?.status;
     if (s === "completed") this.setStatus(runId, "completed", { end_reason: "completed" }, "extension");
     else if (s === "aborted") {
@@ -408,7 +442,7 @@ export class RunService {
     } else {
       return;
     }
-    this.persistGeneration(runId, null, retired);
+    this.persistGeneration(runId, null, appendRetired(retired, run.live_generation_id));
     this.cancelRequested.delete(runId);
     this.promoteNextQueued(run.machine_id);
   }
@@ -509,23 +543,38 @@ export class RunService {
       return { error: "PROMPT_COLLISION" };
     }
 
-    this.blobs?.applyRefDelta([], attachmentIds);
-    this.db.query("UPDATE runs SET attachments=?1 WHERE id=?2").run(JSON.stringify(attachmentIds), runId);
-
+    this.blobs?.applyRefDelta(parseAttachmentIds(run.attachments), attachmentIds);
     this.setStatus(runId, "dispatched", {
       ended_at: null, end_reason: null, started_at: Date.now(), window_id: win.windowId,
+      prompt, attachments: JSON.stringify(attachmentIds),
     });
     this.retireLiveGeneration(runId);
+    this.attachHubGenerationIfWindows(runId, run.machine_id);
     this.cancelRequested.delete(runId);
-    if (attachmentIds.length === 0) this.recordFollowupPrompt(run, prompt);
+    if (attachmentIds.length === 0) this.recordFollowupPrompt({ id: runId, machine_id: run.machine_id }, prompt);
     else this.pendingFollowupPrompt.set(runId, { prompt, attachmentIds });
 
+    const live = this.get(runId);
+    const gen = genOf(live?.live_generation_id);
     const attachments = this.wsAttachments(attachmentIds);
     this.registry.sendTo(run.machine_id, win.windowId, {
       type: "run.followup", runId, conversationId: run.conversation_id, workspaceRoot: run.workspace_root, prompt,
       ...(attachments && attachments.length ? { attachments } : {}),
+      ...(gen ? { generation_id: gen } : {}),
     });
     this.audit("hub", "run.followup", runId, { prompt: prompt.slice(0, 80) });
+    return { run: this.get(runId) };
+  }
+
+  /** 操作员改卡片展示标题。只写 runs.title，不改 prompt / cid，不派发。 */
+  rename(runId: string, title: string): { error?: string; run?: any } {
+    const run = this.get(runId);
+    if (!run) return { error: "NOT_FOUND" };
+    const next = title.trim();
+    if (!next) return { error: "EMPTY_PROMPT" };
+    this.db.query("UPDATE runs SET title=?1 WHERE id=?2").run(next, runId);
+    this.audit("operator", "run.rename", runId, { title: next.slice(0, 80) });
+    this.sse.broadcast(runId, { type: "run.status", runId, status: run.status });
     return { run: this.get(runId) };
   }
 

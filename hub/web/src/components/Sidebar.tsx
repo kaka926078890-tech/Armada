@@ -3,7 +3,7 @@ import type { Machine } from "../types";
 import type { RunRow } from "../boardState";
 import {
   encodeWorkspaceKey, filterRunsByWorkspace, formatUnreadCount, groupSlotsByMachine,
-  workspaceUnreadCount, type WorkspaceSlot,
+  workspaceFolderName, workspaceHasLiveRun, workspaceUnreadCount, type WorkspaceSlot,
 } from "../boardState";
 
 function UnreadCount({ n }: { n: number }) {
@@ -25,6 +25,17 @@ function PencilIcon() {
       <path d="M11.2 2.4l2.4 2.4L5.2 13H2.8v-2.4L11.2 2.4z" />
       <path d="M9.6 4l2.4 2.4" />
     </svg>
+  );
+}
+
+function LiveSpinner() {
+  return (
+    <span
+      className="size-3 shrink-0 rounded-full border-[1.5px] border-sky-500/30 border-t-sky-400 animate-spin"
+      role="img"
+      aria-label="任务执行中"
+      title="任务执行中"
+    />
   );
 }
 
@@ -126,6 +137,7 @@ export default function Sidebar({
               const key = encodeWorkspaceKey(s.machineId, s.root);
               const wsRuns = filterRunsByWorkspace(allRuns, s.machineId, s.root);
               const unread = workspaceUnreadCount(wsRuns, readMap);
+              const live = workspaceHasLiveRun(wsRuns);
               return (
                 <button
                   key={key}
@@ -133,7 +145,10 @@ export default function Sidebar({
                   className={`w-full text-left pl-7 pr-3 py-1 flex items-center gap-1.5 ${key === selectedKey ? "bg-zinc-900 text-zinc-100" : "hover:bg-zinc-900/50 text-zinc-400"}`}
                 >
                   <span className="text-zinc-600 text-[11px] shrink-0">–</span>
-                  <span className="min-w-0 flex-1 text-[13px] truncate" title={s.root}>{s.root.split("/").pop()}</span>
+                  <span className="min-w-0 flex-1 flex items-center gap-1.5">
+                    <span className="min-w-0 truncate text-[13px]" title={s.root}>{workspaceFolderName(s.root)}</span>
+                    {live ? <LiveSpinner /> : null}
+                  </span>
                   <UnreadCount n={unread} />
                 </button>
               );

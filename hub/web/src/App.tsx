@@ -6,6 +6,7 @@ import type { Machine } from "./types";
 import type { RunRow } from "./boardState";
 import {
   decodeWorkspaceKey, encodeWorkspaceKey, filterRunsByWorkspace, listWorkspaceSlots, sortConversations,
+  workspaceFolderName,
 } from "./boardState";
 import { applyAlertOpen } from "./alertOpen";
 import Sidebar from "./components/Sidebar";
@@ -372,6 +373,7 @@ export default function App() {
             readMap={readMap}
             onHide={(id) => { api.archive(id).then(() => { setSelectedRun((cur) => cur === id ? null : cur); refresh(); }); }}
             onUnhide={(id) => { api.unarchive(id).then(refresh); }}
+            onRename={(id, prompt) => { api.renameRun(id, prompt).then(refresh); }}
           />
         </div>
       </div>
@@ -389,7 +391,7 @@ export default function App() {
         <DispatchModal
           machines={machines}
           preset={preset}
-          presetLabel={`${presetSlot?.machineName ?? preset.machineId} · ${preset.workspaceRoot.split("/").pop()}`}
+          presetLabel={`${presetSlot?.machineName ?? preset.machineId} · ${workspaceFolderName(preset.workspaceRoot)}`}
           activeOnWorkspace={filterRunsByWorkspace(runs, preset.machineId, preset.workspaceRoot)
             .filter((r) => ["queued", "dispatched", "binding", "running"].includes(r.status)).length}
           onClose={() => setDispatchOpen(false)}

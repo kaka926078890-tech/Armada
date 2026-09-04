@@ -76,11 +76,48 @@ describe("eventsToChat", () => {
         role: "assistant", message: { content: [{ type: "text", text: "旧回答" }] },
       }) }),
     ]);
+    // seq 归位：orphan BSP 不得垫到助手后面
     expect(blocks.map((b) => `${b.kind}:${"text" in b ? b.text : ""}`)).toEqual([
+      "user:你会什么技能",
       "user:旧问题",
       "assistant:旧回答",
-      "user:你会什么技能",
     ]);
+  });
+
+  test("orphan mid-range BSP users insert by seq, not after latest assistant (screenshot disorder)", () => {
+    // Real shape: jsonl missing some user lines; hooks still have them. Old code dumped
+    // extraUsers after the whole transcript → commit/push bubbles under "已经 push 了".
+    const blocks = eventsToChat([
+      ev({ seq: 10, source: "transcript", payload: JSON.stringify({
+        role: "user", message: { content: [{ type: "text", text: "<user_query>\n先看 SSRF\n</user_query>" }] },
+      }) }),
+      ev({ seq: 11, source: "transcript", payload: JSON.stringify({
+        role: "assistant", message: { content: [{ type: "text", text: "先改文案。" }] },
+      }) }),
+      ev({ seq: 20, hook_event_name: "beforeSubmitPrompt", payload: JSON.stringify({
+        prompt: "帮我commit提交一下内容，然后告诉我两个分支我换台电脑交叉review一下",
+      }) }),
+      ev({ seq: 30, source: "transcript", payload: JSON.stringify({
+        role: "user", message: { content: [{ type: "text", text: "<user_query>\npush了么？我再让另一台电脑review一下\n</user_query>" }] },
+      }) }),
+      ev({ seq: 31, source: "transcript", payload: JSON.stringify({
+        role: "assistant", message: { content: [{ type: "text", text: "已经 push 了，本地与 origin 一致。" }] },
+      }) }),
+      ev({ seq: 25, hook_event_name: "beforeSubmitPrompt", payload: JSON.stringify({
+        prompt: "push一下，要rebase一下最新的main",
+      }) }),
+    ]);
+    const ua = blocks.filter((b) => b.kind === "user" || b.kind === "assistant");
+    expect(ua.map((b) => b.kind)).toEqual([
+      "user", "assistant", "user", "user", "user", "assistant",
+    ]);
+    expect(ua.map((b) => b.seq)).toEqual([10, 11, 20, 25, 30, 31]);
+    expect(ua[2]).toMatchObject({
+      kind: "user",
+      text: "帮我commit提交一下内容，然后告诉我两个分支我换台电脑交叉review一下",
+    });
+    expect(ua[3]).toMatchObject({ kind: "user", text: "push一下，要rebase一下最新的main" });
+    expect(ua[5]).toMatchObject({ kind: "assistant", text: "已经 push 了，本地与 origin 一致。" });
   });
 
   test("empty afterAgentResponse still keeps cid-owned transcript body when leftover prompt matches hooks", () => {
@@ -103,6 +140,30 @@ describe("eventsToChat", () => {
     ];
     const blocks = eventsToChat(events);
     expect(assistantBodyText(blocks)).toContain("0. 总览");
+  });
+
+  test("cross-turn identical user lines from transcript both survive", () => {
+    const blocks = eventsToChat([
+      ev({ seq: 1, source: "transcript", payload: JSON.stringify({
+        role: "user", message: { content: [{ type: "text", text: "<user_query>\n继续\n</user_query>" }] },
+      }) }),
+      ev({ seq: 2, source: "transcript", payload: JSON.stringify({
+        role: "assistant", message: { content: [{ type: "text", text: "好的" }] },
+      }) }),
+      ev({ seq: 10, source: "transcript", payload: JSON.stringify({
+        role: "user", message: { content: [{ type: "text", text: "<user_query>\n继续\n</user_query>" }] },
+      }) }),
+      ev({ seq: 11, source: "transcript", payload: JSON.stringify({
+        role: "assistant", message: { content: [{ type: "text", text: "好的" }] },
+      }) }),
+    ]);
+    const ua = blocks.filter((b) => b.kind === "user" || b.kind === "assistant");
+    expect(ua.map((b) => `${b.kind}:${"text" in b ? b.text : ""}:${b.seq}`)).toEqual([
+      "user:继续:1",
+      "assistant:好的:2",
+      "user:继续:10",
+      "assistant:好的:11",
+    ]);
   });
 
   test("transcript image-only user line shows as [图片] instead of dropping", () => {

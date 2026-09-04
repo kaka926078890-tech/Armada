@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { api, getToken } from "../api";
 import type { RunEvent } from "../types";
-import type { RunRow } from "../boardState";
+import { workspaceFolderName, runDisplayName, type RunRow } from "../boardState";
 import ChatThread from "./ChatThread";
 import { eventsToChat } from "../chatView";
 import { collectEventPages, mergeEvents, EVENT_PAGE_SIZE } from "../loadEvents";
@@ -85,6 +85,9 @@ export default function RunDetail({ runId, onClose, onChanged }: {
   const [cancelError, setCancelError] = useState("");
   const [loadError, setLoadError] = useState("");
   const [missing, setMissing] = useState(false);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState("");
+  const [titleError, setTitleError] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
   const jumpedRef = useRef<string | null>(null);
@@ -99,6 +102,8 @@ export default function RunDetail({ runId, onClose, onChanged }: {
     setCancelError("");
     setLoadError("");
     setMissing(false);
+    setEditingTitle(false);
+    setTitleError("");
 
     api.run(runId).then((r) => {
       if (aborted) return;
@@ -210,22 +215,57 @@ export default function RunDetail({ runId, onClose, onChanged }: {
   }
   const active = ["dispatched", "binding", "running"].includes(run.status);
   const STATUS: Record<string, string> = {
+    created: "已创建", queued: "排队中",
     dispatched: "已派发", binding: "绑定中", running: "运行中",
     completed: "已完成", cancelled: "已取消", aborted: "已中止", error: "异常", unknown: "未知",
   };
   const chat = eventsToChat(events);
+  const titleText = runDisplayName(run) || "图片";
+  const commitTitle = () => {
+    const next = titleDraft.trim();
+    setEditingTitle(false);
+    if (!next || next === runDisplayName(run)) return;
+    setTitleError("");
+    api.renameRun(run.id, next).then((r) => {
+      if (r?.error) { setTitleError(r.error); return; }
+      if (r?.run) setRun(r.run);
+      onChanged();
+    }).catch((err) => setTitleError(String(err)));
+  };
   return (
     <DrawerShell>
       {loadError && (
         <div className="px-3 py-1.5 text-xs text-red-400 bg-red-950/40 border-b border-red-900/50">{loadError}</div>
       )}
       <div className="flex items-center gap-2 px-4 py-2.5 border-b border-zinc-800/80">
-        <span className="font-medium text-[13px] truncate" title={run.prompt || "图片"}>{(run.prompt || "图片").length > 36 ? (run.prompt || "图片").slice(0, 36) + "…" : (run.prompt || "图片")}</span>
-        <span className={`text-xs ${active ? "text-sky-400" : "text-zinc-500"}`}>{STATUS[run.status] ?? run.status}</span>
+        {editingTitle ? (
+          <input
+            autoFocus
+            className="min-w-0 flex-1 bg-zinc-900 border border-zinc-700 rounded px-1.5 py-0.5 text-[13px] text-zinc-100"
+            value={titleDraft}
+            onChange={(e) => setTitleDraft(e.target.value)}
+            onBlur={commitTitle}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") { e.preventDefault(); commitTitle(); }
+              if (e.key === "Escape") setEditingTitle(false);
+            }}
+          />
+        ) : (
+          <button
+            type="button"
+            className="font-medium text-[13px] truncate text-left min-w-0 flex-1 hover:text-sky-300"
+            title={`${titleText}（点击修改标题）`}
+            onClick={() => { setTitleDraft(runDisplayName(run)); setEditingTitle(true); }}
+          >
+            {titleText.length > 36 ? `${titleText.slice(0, 36)}…` : titleText}
+          </button>
+        )}
+        <span className={`text-xs shrink-0 ${active ? "text-sky-400" : "text-zinc-500"}`}>{STATUS[run.status] ?? run.status}</span>
         <button onClick={onClose} className="ml-auto text-zinc-500 hover:text-zinc-200">✕</button>
       </div>
       <div className="px-4 py-2 text-[11px] text-zinc-500 border-b border-zinc-800/80">
-        <div className="truncate" title={run.workspace_root}>{run.workspace_root.split("/").pop()}</div>
+        <div className="truncate" title={run.workspace_root}>{workspaceFolderName(run.workspace_root)}</div>
+        {titleError && <div className="mt-1 text-red-400">{titleError}</div>}
         <div className="mt-2 flex gap-2">
           {active && <button onClick={() => {
             setCancelError("");

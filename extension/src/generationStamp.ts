@@ -16,6 +16,13 @@ export function clearGeneration(map: Map<string, string>, runId: string): void {
   map.delete(runId);
 }
 
+/** Hub-issued gen for platforms without beforeSubmitPrompt (Windows). Empty is ignored. */
+export function noteHubGeneration(map: Map<string, string>, runId: string, generationId: unknown): void {
+  const gen = typeof generationId === "string" ? generationId : "";
+  if (!gen) return;
+  map.set(runId, gen);
+}
+
 export function synthesizedStopPayload(
   stop: { status: string; error?: string },
   lastGenerationId: string | undefined,

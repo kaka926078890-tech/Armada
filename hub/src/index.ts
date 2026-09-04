@@ -99,6 +99,16 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
     const r = runs.get(c.req.param("id"));
     return r ? c.json(r) : c.json({ error: "NOT_FOUND" }, 404);
   });
+  app.patch("/api/runs/:id", async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const title = typeof body.title === "string" ? body.title
+      : typeof body.prompt === "string" ? body.prompt
+      : null;
+    if (title == null) return c.json({ error: "INVALID" }, 400);
+    const { run, error } = runs.rename(c.req.param("id"), title);
+    if (error) return c.json({ error }, httpStatusForRunError(error));
+    return c.json({ run });
+  });
   app.post("/api/runs/:id/cancel", (c) => {
     const { error } = runs.onCancelRequested(c.req.param("id"));
     if (error) return c.json({ error }, error === "NOT_FOUND" ? 404 : 409);

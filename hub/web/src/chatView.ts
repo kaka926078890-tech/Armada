@@ -101,18 +101,10 @@ function hookBlocks(ev: RunEvent, p: any): ChatBlock[] {
 
 function dedupe(blocks: ChatBlock[]): ChatBlock[] {
   const out: ChatBlock[] = [];
-  const seenUser = new Set<string>();
-  const seenAsst = new Set<string>();
   const subIdx = new Map<string, number>();
   let lastThought = "";
   for (const b of blocks) {
-    if (b.kind === "user") {
-      if (seenUser.has(b.text)) continue;
-      seenUser.add(b.text);
-    } else if (b.kind === "assistant") {
-      if (seenAsst.has(b.text)) continue;
-      seenAsst.add(b.text);
-    } else if (b.kind === "thought") {
+    if (b.kind === "thought") {
       if (b.text === lastThought) continue;
       lastThought = b.text;
     } else if (b.kind === "subagent") {
@@ -134,11 +126,20 @@ function finish(blocks: ChatBlock[]): ChatBlock[] {
   return dedupe(filtered);
 }
 
+/** Stable by seq so same-seq transcript parts keep relative order. */
+function orderBySeq(blocks: ChatBlock[]): ChatBlock[] {
+  return blocks
+    .map((b, i) => ({ b, i }))
+    .sort((a, c) => a.b.seq - c.b.seq || a.i - c.i)
+    .map(({ b }) => b);
+}
+
 /**
  * 把 run_events 收成可读对话。
  * 有 transcript 时以它为骨架(和 IDE 一致);其后新到的 hook 作为「正在进行」补在末尾。
  * 尚无 transcript 时(刚开始跑)完全用 hook 拼。
- * 续聊 fromEnd tail 会丢掉首轮 jsonl:若更早的 hook 里已有助手回复,接到 transcript 前面,避免原 prompt 被 append 到文末。
+ * 续聊 fromEnd tail 会丢掉首轮 jsonl:若更早的 hook 里已有助手回复,接到 transcript 前面。
+ * 对不上 transcript 的用户句(extraUsers)按 seq 插回时间线,禁止整包垫在最新助手后面。
  */
 export function eventsToChat(events: RunEvent[]): ChatBlock[] {
   const sorted = [...events].sort((a, b) => a.seq - b.seq);
@@ -170,12 +171,19 @@ export function eventsToChat(events: RunEvent[]): ChatBlock[] {
   }
 
   const txUser = new Set(fromTx.filter((b) => b.kind === "user").map((b) => b.kind === "user" ? b.text : ""));
-  const extraUsers = pendingUsers.filter((b) => b.kind === "user" && !txUser.has(b.text));
-  const prefixHooks = Number.isFinite(firstTx) ? fromHooks.filter((b) => b.seq < firstTx) : [];
-  if (prefixHooks.some((b) => b.kind === "assistant")) {
-    return finish([...prefixHooks, ...fromTx, ...extraUsers, ...liveHooks]);
-  }
-  return finish([...fromTx, ...extraUsers, ...liveHooks]);
+  const txAsst = new Set(fromTx.filter((b) => b.kind === "assistant").map((b) => b.kind === "assistant" ? b.text : ""));
+  const dropTxDup = (b: ChatBlock) => {
+    if (b.kind === "user" && txUser.has(b.text)) return false;
+    if (b.kind === "assistant" && txAsst.has(b.text)) return false;
+    return true;
+  };
+  const prefixHooks = Number.isFinite(firstTx) ? fromHooks.filter((b) => b.seq < firstTx).filter(dropTxDup) : [];
+  const live = liveHooks.filter(dropTxDup);
+  const prefixUser = new Set(prefixHooks.filter((b) => b.kind === "user").map((b) => b.kind === "user" ? b.text : ""));
+  const extraUsers = pendingUsers.filter((b) => b.kind === "user" && !txUser.has(b.text) && !prefixUser.has(b.text));
+  // fromEnd 丢掉首轮 jsonl 时 prefix 接到前面；仅有 orphan BSP 用户句时也要保留，不能只在有 prefix 助手时才接。
+  const skeleton = [...prefixHooks, ...fromTx];
+  return finish(orderBySeq([...skeleton, ...extraUsers, ...live]));
 }
 
 const PROCESS = new Set(["thought", "tool", "file", "subagent"]);

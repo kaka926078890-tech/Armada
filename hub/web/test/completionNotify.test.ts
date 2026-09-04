@@ -31,9 +31,10 @@ describe("takeNewlyAlertable", () => {
     expect(takeNewlyAlertable(prev, [{ ...base, status: "completed", ended_at: 20 }]).map((r) => r.id)).toEqual(["r-1"]);
   });
 
-  test("new completed id that was never seen does not fire (avoid refresh false positive)", () => {
+  test("after seed, a new id that appears already completed fires (same as unread red)", () => {
     const prev = seedRunStatus([base]);
     const other = { ...base, id: "r-2", status: "completed", ended_at: 9 };
+    expect(takeNewlyAlertable(prev, [base, other]).map((r) => r.id)).toEqual(["r-2"]);
     expect(takeNewlyAlertable(prev, [base, other])).toEqual([]);
   });
 

@@ -1,6 +1,6 @@
-import { groupRuns, cardView, COLUMN_LABELS, canArchiveRun, isUnreadAlert, type ColumnKey, type RunRow } from "../boardState";
+import { useState } from "react";
+import { groupRuns, cardView, COLUMN_LABELS, canArchiveRun, isUnreadAlert, machineLabel, workspaceFolderName, runDisplayName, type ColumnKey, type RunRow } from "../boardState";
 import type { Machine } from "../types";
-import { machineLabel } from "../boardState";
 
 const COL_ACCENT: Record<ColumnKey, string> = {
   waiting: "border-t-amber-500",
@@ -18,18 +18,32 @@ const BADGE_COLOR: Record<ColumnKey, string> = {
   error: "text-red-400",
 };
 
-export default function Board({ runs, machines, selected, onSelect, showArchived, onHide, onUnhide, readMap }: {
+export default function Board({ runs, machines, selected, onSelect, showArchived, onHide, onUnhide, readMap, onRename }: {
   runs: RunRow[]; machines: Machine[]; selected: string | null; onSelect: (id: string) => void;
   showArchived: boolean;
   onHide: (id: string) => void;
   onUnhide: (id: string) => void;
   readMap: Record<string, number>;
+  onRename: (id: string, title: string) => void;
 }) {
   const g = groupRuns(runs);
   const now = Date.now();
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
   const nameOf = (id: string) => {
     const m = machines.find((x) => x.id === id);
     return m ? machineLabel(m) : id;
+  };
+  const startEdit = (r: RunRow) => {
+    setDraft(runDisplayName(r));
+    setEditingId(r.id);
+  };
+  const commitEdit = (id: string) => {
+    const t = draft.trim();
+    setEditingId(null);
+    const row = runs.find((x) => x.id === id);
+    if (!t || !row || t === runDisplayName(row)) return;
+    onRename(id, t);
   };
   return (
     <main className="flex-1 min-w-0 overflow-x-auto flex gap-2 p-3">
@@ -45,36 +59,61 @@ export default function Board({ runs, machines, selected, onSelect, showArchived
             {g[col].map((r) => {
               const v = cardView(r, now);
               const unread = isUnreadAlert(r, readMap[r.id]);
+              const editing = editingId === r.id;
               return (
                 <div key={r.id} className={`group relative min-w-0 text-left rounded-md border ${selected === r.id ? "border-sky-600/80 bg-zinc-900" : "border-transparent bg-zinc-900/50 hover:border-zinc-700"}`}>
-                  <button onClick={() => onSelect(r.id)} className="w-full min-w-0 text-left px-2.5 py-2">
-                    <div className="text-[13px] font-medium leading-snug text-zinc-100 pr-10 break-all">{v.title}</div>
-                    <div className="text-[11px] text-zinc-500 mt-1 truncate">{nameOf(r.machine_id)} · {r.workspace_root.split("/").pop()}</div>
-                    {r.status === "binding" && (
-                      <div className="text-[11px] text-sky-500/80 mt-1">已提交,正在关联会话</div>
-                    )}
-                    {(r.status === "dispatched" || r.status === "created") && (
-                      <div className="text-[11px] text-amber-500/80 mt-1">已预填,待本机回车</div>
-                    )}
-                    <div className="text-[11px] text-zinc-500 mt-1 flex justify-between items-center">
-                      <span className={`inline-flex items-center gap-1.5 ${BADGE_COLOR[col]}`}>
-                        {unread ? <span className="size-1.5 shrink-0 rounded-full bg-red-500" title="完成未读" /> : null}
-                        {v.badge}
-                      </span>
-                      <span className="text-zinc-600">{v.elapsed}</span>
+                  {editing ? (
+                    <div className="px-2.5 py-2">
+                      <input
+                        autoFocus
+                        className="w-full bg-zinc-950 border border-sky-700 rounded px-1.5 py-0.5 text-[13px] text-zinc-100"
+                        value={draft}
+                        onChange={(e) => setDraft(e.target.value)}
+                        onBlur={() => commitEdit(r.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") { e.preventDefault(); commitEdit(r.id); }
+                          if (e.key === "Escape") setEditingId(null);
+                        }}
+                      />
                     </div>
-                  </button>
-                  {showArchived ? (
-                    <button type="button" onClick={(e) => { e.stopPropagation(); onUnhide(r.id); }}
-                      className="absolute top-1.5 right-1.5 text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 opacity-0 group-hover:opacity-100">
-                      取消隐藏
+                  ) : (
+                    <button onClick={() => onSelect(r.id)} className="w-full min-w-0 text-left px-2.5 py-2">
+                      <div className="text-[13px] font-medium leading-snug text-zinc-100 pr-16 break-all">{v.title}</div>
+                      <div className="text-[11px] text-zinc-500 mt-1 truncate">{nameOf(r.machine_id)} · {workspaceFolderName(r.workspace_root)}</div>
+                      {r.status === "binding" && (
+                        <div className="text-[11px] text-sky-500/80 mt-1">已提交,正在关联会话</div>
+                      )}
+                      {(r.status === "dispatched" || r.status === "created") && (
+                        <div className="text-[11px] text-amber-500/80 mt-1">已预填,待本机回车</div>
+                      )}
+                      <div className="text-[11px] text-zinc-500 mt-1 flex justify-between items-center">
+                        <span className={`inline-flex items-center gap-1.5 ${BADGE_COLOR[col]}`}>
+                          {unread ? <span className="size-1.5 shrink-0 rounded-full bg-red-500" title="完成未读" /> : null}
+                          {v.badge}
+                        </span>
+                        <span className="text-zinc-600">{v.elapsed}</span>
+                      </div>
                     </button>
-                  ) : canArchiveRun(r) ? (
-                    <button type="button" onClick={(e) => { e.stopPropagation(); onHide(r.id); }}
-                      className="absolute top-1.5 right-1.5 text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 opacity-0 group-hover:opacity-100">
-                      隐藏
-                    </button>
-                  ) : null}
+                  )}
+                  {!editing && (
+                    <div className="absolute top-1.5 right-1.5 flex gap-1 opacity-0 group-hover:opacity-100">
+                      <button type="button" onClick={(e) => { e.stopPropagation(); startEdit(r); }}
+                        className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300">
+                        改标题
+                      </button>
+                      {showArchived ? (
+                        <button type="button" onClick={(e) => { e.stopPropagation(); onUnhide(r.id); }}
+                          className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300">
+                          取消隐藏
+                        </button>
+                      ) : canArchiveRun(r) ? (
+                        <button type="button" onClick={(e) => { e.stopPropagation(); onHide(r.id); }}
+                          className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300">
+                          隐藏
+                        </button>
+                      ) : null}
+                    </div>
+                  )}
                 </div>
               );
             })}

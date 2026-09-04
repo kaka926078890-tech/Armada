@@ -1,9 +1,19 @@
 import { describe, expect, test } from "bun:test";
-import { parseRetiredIds, appendRetired, decideArm, decideStop } from "../src/generationOwnership";
+import { parseRetiredIds, appendRetired, decideArm, decideStop, isWindowsMachineOs } from "../src/generationOwnership";
 
 const CID = "cid-1";
 const G = "gen-new";
 const GOLD = "gen-old";
+
+describe("isWindowsMachineOs", () => {
+  test("win32 prefix only", () => {
+    expect(isWindowsMachineOs("win32")).toBe(true);
+    expect(isWindowsMachineOs("win32-x64")).toBe(true);
+    expect(isWindowsMachineOs("darwin-arm64")).toBe(false);
+    expect(isWindowsMachineOs("linux-x64")).toBe(false);
+    expect(isWindowsMachineOs(undefined)).toBe(false);
+  });
+});
 
 describe("parseRetiredIds", () => {
   test("parses array; garbage becomes empty and parseFailed", () => {
@@ -35,18 +45,22 @@ describe("decideArm", () => {
   test("arms owner BSP", () => {
     expect(decideArm(base)).toEqual({ action: "arm", gen: G });
   });
-  test("skips non-BSP, missing gen, cid mismatch, gen===cid, retired, already_armed", () => {
+  test("skips non-BSP, missing gen, cid mismatch, gen===cid, retired", () => {
     expect(decideArm({ ...base, hookEventName: "afterAgentResponse" }).action).toBe("skip");
     expect(decideArm({ ...base, generationId: "" }).action).toBe("skip");
     expect(decideArm({ ...base, eventCid: "other" }).action).toBe("skip");
     expect(decideArm({ ...base, generationId: CID }).action).toBe("skip");
     expect(decideArm({ ...base, retired: [G] }).action).toBe("skip");
-    expect(decideArm({ ...base, liveGenerationId: GOLD }).action).toBe("skip");
   });
   test("same live gen is skip already_armed_same (idempotent, no overwrite needed)", () => {
     const d = decideArm({ ...base, liveGenerationId: G });
     expect(d.action).toBe("skip");
     expect(d).toMatchObject({ reason: "already_armed_same" });
+  });
+  test("new owner BSP while armed rearms and retires the stale live gen", () => {
+    expect(decideArm({ ...base, liveGenerationId: GOLD })).toEqual({
+      action: "rearm", gen: G, retire: GOLD,
+    });
   });
 });
 
@@ -75,5 +89,13 @@ describe("decideStop", () => {
   });
   test("missing stop cid still can apply (Windows synth)", () => {
     expect(decideStop({ ...base, stopCid: undefined })).toEqual({ action: "apply" });
+  });
+  test("Cursor 3.18 session stop uses a sidecar gen; apply only after live turn settled", () => {
+    // Real 17:43: AAR c65e24cc then stop 6ff69bf9 same cid — composer never emits its own stop.
+    const sidecar = { ...base, stopGenerationId: "6ff69bf9-237c-45c6-a7fb-a77b554fb0cb", liveGenerationId: G };
+    expect(decideStop(sidecar)).toEqual({ action: "ignore", audit: "STOP_GEN_MISMATCH" });
+    expect(decideStop({ ...sidecar, liveTurnSettled: true })).toEqual({ action: "apply", audit: "STOP_SESSION_GEN" });
+    expect(decideStop({ ...sidecar, liveTurnSettled: true, retired: ["6ff69bf9-237c-45c6-a7fb-a77b554fb0cb"] }))
+      .toEqual({ action: "ignore", audit: "STOP_GEN_RETIRED" });
   });
 });

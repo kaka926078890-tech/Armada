@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { noteOwnerBsp, clearGeneration, synthesizedStopPayload } from "../src/generationStamp";
+import { noteOwnerBsp, clearGeneration, synthesizedStopPayload, noteHubGeneration } from "../src/generationStamp";
 
 describe("generationStamp", () => {
   test("only owner beforeSubmitPrompt stores gen", () => {
@@ -16,6 +16,15 @@ describe("generationStamp", () => {
     const m = new Map([["r1", "g1"]]);
     clearGeneration(m, "r1");
     expect(synthesizedStopPayload({ status: "completed" }, m.get("r1"), "c1").ok).toBe(false);
+  });
+  test("hub-issued generation is stored for synthesized stop", () => {
+    const m = new Map<string, string>();
+    noteHubGeneration(m, "r1", "hub-g1");
+    expect(m.get("r1")).toBe("hub-g1");
+    noteHubGeneration(m, "r1", "");
+    expect(m.get("r1")).toBe("hub-g1");
+    const r = synthesizedStopPayload({ status: "completed" }, m.get("r1"), "c1");
+    expect(r).toEqual({ ok: true, payload: { status: "completed", generation_id: "hub-g1", conversation_id: "c1" } });
   });
   test("stamps generation_id and conversation_id", () => {
     const r = synthesizedStopPayload({ status: "completed" }, "g1", "c1");

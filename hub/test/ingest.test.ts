@@ -523,4 +523,36 @@ describe("event ingest", () => {
     expect(events).toHaveLength(1);
     ws.close();
   });
+
+  test("sidecar stop after live afterAgentResponse completes (Cursor 3.18 background gen)", async () => {
+    const { ws, api, runId } = await startBoundRun();
+    const live = "c65e24cc-3c30-4b57-8dc1-45b2b78b9a4d";
+    const sidecar = "6ff69bf9-237c-45c6-a7fb-a77b554fb0cb";
+    ws.send(JSON.stringify(ev(runId, 1, "beforeSubmitPrompt", {
+      conversation_id: "cid-1", generation_id: live, prompt: "hi",
+    })));
+    ws.send(JSON.stringify(ev(runId, 2, "afterAgentResponse", {
+      conversation_id: "cid-1", generation_id: live, text: "## 根因（不是样式改坏了）",
+    })));
+    ws.send(JSON.stringify(ev(runId, 3, "stop", {
+      conversation_id: "cid-1", generation_id: sidecar, status: "completed", model: "default",
+    })));
+    await new Promise((r) => setTimeout(r, 120));
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).status).toBe("completed");
+    ws.close();
+  });
+
+  test("sidecar stop before live afterAgentResponse stays running", async () => {
+    const { ws, api, runId } = await startBoundRun();
+    const live = "c65e24cc-3c30-4b57-8dc1-45b2b78b9a4d";
+    ws.send(JSON.stringify(ev(runId, 1, "beforeSubmitPrompt", {
+      conversation_id: "cid-1", generation_id: live, prompt: "hi",
+    })));
+    ws.send(JSON.stringify(ev(runId, 2, "stop", {
+      conversation_id: "cid-1", generation_id: "6ff69bf9-237c-45c6-a7fb-a77b554fb0cb", status: "completed",
+    })));
+    await new Promise((r) => setTimeout(r, 120));
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).status).toBe("running");
+    ws.close();
+  });
 });

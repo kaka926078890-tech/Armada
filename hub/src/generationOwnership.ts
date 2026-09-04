@@ -2,6 +2,11 @@ export function genOf(v: unknown): string | null {
   return typeof v === "string" && v.trim() ? v : null;
 }
 
+/** Cursor Windows 扩展上报 `win32` / `win32-x64`；该平台不装 Armada hooks。 */
+export function isWindowsMachineOs(os: string | null | undefined): boolean {
+  return typeof os === "string" && os.toLowerCase().startsWith("win32");
+}
+
 export function parseRetiredIds(raw: unknown): { ids: string[]; parseFailed: boolean } {
   if (raw == null || raw === "") return { ids: [], parseFailed: false };
   if (Array.isArray(raw)) {
@@ -35,6 +40,7 @@ export type ArmInput = {
 
 export type ArmDecision =
   | { action: "arm"; gen: string }
+  | { action: "rearm"; gen: string; retire: string }
   | { action: "skip"; reason: string };
 
 export function decideArm(input: ArmInput): ArmDecision {
@@ -47,7 +53,7 @@ export function decideArm(input: ArmInput): ArmDecision {
   if (gen === cid) return { action: "skip", reason: "gen_eq_cid" };
   if (input.retired.includes(gen)) return { action: "skip", reason: "retired" };
   if (input.liveGenerationId && input.liveGenerationId === gen) return { action: "skip", reason: "already_armed_same" };
-  if (input.liveGenerationId) return { action: "skip", reason: "already_armed" };
+  if (input.liveGenerationId) return { action: "rearm", gen, retire: input.liveGenerationId };
   return { action: "arm", gen };
 }
 
@@ -58,10 +64,12 @@ export type StopInput = {
   liveGenerationId: string | null | undefined;
   hasHubFollowup: boolean;
   retired: string[];
+  /** Live composer already has afterAgentResponse; Cursor may then stop a sidecar gen. */
+  liveTurnSettled?: boolean;
 };
 
 export type StopDecision =
-  | { action: "apply"; audit?: "STOP_NO_GEN_INITIAL" }
+  | { action: "apply"; audit?: "STOP_NO_GEN_INITIAL" | "STOP_SESSION_GEN" }
   | { action: "ignore"; audit: string };
 
 export function decideStop(input: StopInput): StopDecision {
@@ -72,7 +80,10 @@ export function decideStop(input: StopInput): StopDecision {
   if (gen && input.retired.includes(gen)) return { action: "ignore", audit: "STOP_GEN_RETIRED" };
   const live = genOf(input.liveGenerationId);
   if (gen && live && gen === live) return { action: "apply" };
-  if (gen && live && gen !== live) return { action: "ignore", audit: "STOP_GEN_MISMATCH" };
+  if (gen && live && gen !== live) {
+    if (input.liveTurnSettled) return { action: "apply", audit: "STOP_SESSION_GEN" };
+    return { action: "ignore", audit: "STOP_GEN_MISMATCH" };
+  }
   if (gen && !live) return { action: "ignore", audit: "STOP_UNARMED" };
   if (!gen && live) return { action: "ignore", audit: "STOP_NO_GEN" };
   if (!gen && !live && input.hasHubFollowup) return { action: "ignore", audit: "STOP_NO_GEN" };

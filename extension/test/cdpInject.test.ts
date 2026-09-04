@@ -137,6 +137,45 @@ describe("composer picker JS", () => {
     expect(runJs(COMPOSER_FOCUS_JS, ["当前长对话内容"], "你好").result).toBe("NON_EMPTY:当前长对话内容");
   });
 
+  // 2026-09-03 10:49 真机：续聊 prompt 对不上框里已有的半截字，剪贴板追加后仍按「必须开头匹配」拒回车。
+  const leftover = "帮我重新启动并";
+  const followup = "为什么ACP不吃这份改动，是原先限定了这部分内容对么？";
+  const pasted = leftover + followup;
+
+  test("10:49 残留半截字且不含 prompt → 仍 NON_EMPTY（不误打进旧草稿）", () => {
+    expect(runJs(COMPOSER_FOCUS_JS, [leftover], followup).result).toBe(`NON_EMPTY:${leftover}`);
+  });
+
+  test("10:49 剪贴板追加后 prompt 在框中部 → DRAFT（应回车）", () => {
+    const { result, els } = runJs(COMPOSER_FOCUS_JS, [pasted], followup);
+    expect(result).toBe("DRAFT");
+    expect(els[0].focused).toBe(true);
+  });
+
+  test("他框中部含 16 字片段不得 DRAFT；完整 prompt 在末尾的框才命中", () => {
+    const fragment = followup.slice(0, 16);
+    const other = `请看这段：${fragment}，不是本轮。`;
+    const { result, els } = runJs(COMPOSER_FOCUS_JS, [other, pasted], followup);
+    expect(result).toBe("DRAFT");
+    expect(els[0].focused).toBe(false);
+    expect(els[1].focused).toBe(true);
+  });
+
+  test("短句「继续」不把仅中部提及的旧框当草稿", () => {
+    expect(runJs(COMPOSER_FOCUS_JS, ["请继续之前的方案讨论"], "继续").result)
+      .toBe("NON_EMPTY:请继续之前的方案讨论");
+    const { result, els } = runJs(COMPOSER_FOCUS_JS, ["请继续之前的方案讨论", "残留继续"], "继续");
+    expect(result).toBe("DRAFT");
+    expect(els[1].focused).toBe(true);
+  });
+
+  test("10:49 追加后 ENTER 打在含 prompt 的框，即使不是以 prompt 开头", () => {
+    const { result, els } = runJs(COMPOSER_ENTER_JS, ["旧对话", pasted], followup);
+    expect(result).toBe("OK");
+    expect(els[0].focused).toBe(false);
+    expect(els[1].focused).toBe(true);
+  });
+
   test("VERIFY 在多框中找匹配 prompt 的那一个", () => {
     expect(runJs(COMPOSER_VERIFY_JS, ["当前长对话", "你好世界"], "你好世界").result).toBe("OK");
   });
@@ -153,8 +192,12 @@ describe("composer picker JS", () => {
     expect(els[1].focused).toBe(true);
   });
 
-  test("CHIP_COUNT 累加各输入框 .context-pill-image", () => {
-    expect(runJs0(COMPOSER_CHIP_COUNT_JS, ["", ""], [1, 2]).result).toBe("3");
+  test("CHIP_COUNT 只计 FOCUS_IMAGE 会选的目标框，邻框有图不算", () => {
+    expect(runJs0(COMPOSER_CHIP_COUNT_JS, ["旧对话带图", ""], [2, 0]).result).toBe("0");
+  });
+
+  test("CHIP_COUNT 无空框时计带芯片的目标框", () => {
+    expect(runJs0(COMPOSER_CHIP_COUNT_JS, ["chip"], [2]).result).toBe("2");
   });
 
   test("CHIP_COUNT 不把 8 层内的空祖先当根，且不计 composer-bar 上的 transcript 药丸", () => {

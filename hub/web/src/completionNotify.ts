@@ -23,7 +23,9 @@ export function takeNewlyAlertable(prev: Map<string, string>, runs: RunRow[]): R
   const out: RunRow[] = [];
   for (const r of runs) {
     const last = prev.get(r.id);
-    if (isAlertStatus(r.status) && last != null && !isAlertStatus(last)) out.push(r);
+    // After seed: new id already terminal (fast local test) still fires — same as unread red.
+    // Seed snapshot itself uses seedRunStatus and must not toast history.
+    if (isAlertStatus(r.status) && (last == null || !isAlertStatus(last))) out.push(r);
     prev.set(r.id, r.status);
   }
   return out;
@@ -36,14 +38,14 @@ export function seedRunStatus(runs: RunRow[]): Map<string, string> {
 export function completionHeadline(runs: RunRow[]): string {
   if (runs.length === 0) return BASE_TITLE;
   if (runs.length === 1) {
-    const t = runs[0].prompt.replace(/\s+/g, " ").trim().slice(0, 40);
+    const t = (runs[0].title || runs[0].prompt).replace(/\s+/g, " ").trim().slice(0, 40);
     return `【完成】${t} — ${BASE_TITLE}     `;
   }
   return `【${runs.length} 个任务完成】${BASE_TITLE}     `;
 }
 
 export function completionBody(run: RunRow): string {
-  return run.prompt.replace(/\s+/g, " ").trim().slice(0, 120);
+  return (run.title || run.prompt).replace(/\s+/g, " ").trim().slice(0, 120);
 }
 
 let marqueeTimer: ReturnType<typeof setInterval> | null = null;
