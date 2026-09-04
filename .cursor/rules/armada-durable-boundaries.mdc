@@ -1,0 +1,29 @@
+---
+description: Armada — three keys, no heuristic gates, failing test on real event shape before a fix
+alwaysApply: true
+---
+
+# Armada durable design
+
+## Three keys (do not substitute)
+
+| Key | Owns |
+| --- | --- |
+| window + workspace | dispatch / inject routing |
+| `conversation_id` | which events belong on a run |
+| `generation_id` | busy vs idle |
+
+Completed-turn **assistant body** comes from cid-owned transcript. Hooks are in-flight only. Do not drop jsonl because hooks contain `run.prompt`. `afterAgentResponse.text` may be empty.
+
+## Forbidden
+
+Prompt string / `includes` as stop or reconstruction gates. Dual-track latches. Thought text as fake body. Per-incident special cases.
+
+```text
+❌ BAD: hookHasPrompt(fromHooks, prompt) → discard transcript
+✅ GOOD: ingest enforces cid; eventsToChat keeps cid-owned jsonl; stop matches generation_id
+```
+
+## Feasibility then full fix
+
+Failing test on the real event shape first. Then one shared-boundary change. Adjacent gaps: tell the developer, do not silently expand.
