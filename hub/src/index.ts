@@ -10,6 +10,7 @@ import { ingestEvent } from "./ingest";
 import { handleWsMessage, type WsData } from "./ws";
 import { limitsFromEnv, httpStatusForRunError, type ConcurrencyLimits } from "./concurrency";
 import { BlobStore } from "./blobs";
+import { readUiPrefs, writeUiPrefs, mergeUiPrefs } from "./uiPrefs";
 
 export interface HubServer {
   server: ReturnType<typeof Bun.serve>;
@@ -140,6 +141,35 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
     return new Response(rows.map((r) => JSON.stringify(r)).join("\n") + "\n", {
       headers: { "content-type": "application/x-ndjson", "content-disposition": "attachment; filename=armada-audit.jsonl" },
     });
+  });
+
+  app.get("/api/ui-prefs", (c) => {
+    const r = readUiPrefs(home);
+    if (!r.ok) {
+      db.query("INSERT INTO audit (ts, actor, action, target, payload) VALUES (?1,'hub','UI_PREFS_READ_FAIL',?2,?3)")
+        .run(Date.now(), home, JSON.stringify({ error: r.error }));
+      return c.json({ error: "READ_FAIL" }, 503);
+    }
+    return c.json({ ...r.prefs, source: r.source });
+  });
+  app.put("/api/ui-prefs", async (c) => {
+    const body = await c.req.json().catch(() => null);
+    if (!body || typeof body !== "object" || Array.isArray(body)) return c.json({ error: "INVALID" }, 400);
+    const cur = readUiPrefs(home);
+    if (!cur.ok) {
+      db.query("INSERT INTO audit (ts, actor, action, target, payload) VALUES (?1,'hub','UI_PREFS_READ_FAIL',?2,?3)")
+        .run(Date.now(), home, JSON.stringify({ error: cur.error }));
+      return c.json({ error: "READ_FAIL" }, 503);
+    }
+    try {
+      const next = mergeUiPrefs(cur.prefs, body as Record<string, unknown>);
+      writeUiPrefs(home, next);
+      return c.json(next);
+    } catch {
+      db.query("INSERT INTO audit (ts, actor, action, target, payload) VALUES (?1,'hub','UI_PREFS_WRITE_FAIL',?2,?3)")
+        .run(Date.now(), home, "{}");
+      return c.json({ error: "WRITE_FAIL" }, 500);
+    }
   });
 
   app.post("/api/runs/:id/followup", async (c) => {

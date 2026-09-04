@@ -14,10 +14,12 @@ import RunDetail from "./components/RunDetail";
 import { DispatchModal } from "./components/Modals";
 import { alertCompletions, ensureNotifyPermission, seedRunStatus, stopTitleMarquee, takeNewlyAlertable } from "./completionNotify";
 import { applyTheme, loadTheme, saveTheme, type ThemeName } from "./theme";
-
-const WS_KEY = "armada.selectedWorkspace.v1";
-const READ_KEY = "armada.readRuns.v1";
-const READ_SEEDED = "armada.readRuns.seeded.v1";
+import {
+  WS_KEY, READ_KEY, READ_SEEDED,
+  loadLocalUiPrefsMirror, applyUiPrefsToLocalStorage,
+  shouldMigrateLocal, shouldSeedReadRuns,
+  type UiPrefs, type UiPrefsGetResponse,
+} from "./uiPrefs";
 
 function bootstrapTokenFromQuery(): string {
   const current = getToken();
@@ -41,12 +43,21 @@ export default function App() {
   const [hiddenRuns, setHiddenRuns] = useState<RunRow[]>([]);
   const [showArchived, setShowArchived] = useState(false);
   const [selectedRun, setSelectedRun] = useState<string | null>(null);
-  const [selectedWs, setSelectedWs] = useState<string | null>(() => localStorage.getItem(WS_KEY));
+  const [selectedWs, setSelectedWs] = useState<string | null>(() => {
+    try { return localStorage.getItem(WS_KEY); } catch { return null; }
+  });
   const [readMap, setReadMap] = useState<Record<string, number>>(loadReadMap);
+  const [readRunsSeeded, setReadRunsSeeded] = useState(() => {
+    try { return localStorage.getItem(READ_SEEDED) === "1"; } catch { return false; }
+  });
+  const [prefsReady, setPrefsReady] = useState(false);
   const [dispatchOpen, setDispatchOpen] = useState(false);
   const [loadError, setLoadError] = useState("");
   const [authDenied, setAuthDenied] = useState(false);
   const [theme, setTheme] = useState<ThemeName>(() => loadTheme());
+  const readMapRef = useRef(readMap);
+  readMapRef.current = readMap;
+  const readPatchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const slots = useMemo(() => listWorkspaceSlots(machines), [machines]);
   const resolvedWs = useMemo(() => {
@@ -66,14 +77,20 @@ export default function App() {
     setReadMap((prev) => {
       const next = { ...prev, [runId]: Date.now() };
       try { localStorage.setItem(READ_KEY, JSON.stringify(next)); } catch { /* quota / private */ }
+      readMapRef.current = next;
       return next;
     });
+    if (readPatchTimer.current) clearTimeout(readPatchTimer.current);
+    readPatchTimer.current = setTimeout(() => {
+      void api.putUiPrefs({ readRuns: readMapRef.current }).catch(() => {});
+    }, 300);
   }, []);
 
   const selectWorkspace = useCallback((key: string) => {
     setSelectedWs(key);
     try { localStorage.setItem(WS_KEY, key); } catch { /* ignore */ }
     setSelectedRun(null);
+    void api.putUiPrefs({ selectedWorkspace: key }).catch(() => {});
   }, []);
 
   const openRun = useCallback((id: string) => {
@@ -88,6 +105,7 @@ export default function App() {
     setShowArchived(next.showArchived);
     setSelectedWs(next.selectedWs);
     try { localStorage.setItem(WS_KEY, next.selectedWs); } catch { /* ignore */ }
+    void api.putUiPrefs({ selectedWorkspace: next.selectedWs }).catch(() => {});
     setSelectedRun(next.selectedRun);
     persistRead(next.selectedRun);
   }, [runs, hiddenRuns, persistRead]);
@@ -124,6 +142,49 @@ export default function App() {
   }, [refresh]);
 
   useEffect(() => {
+    if (!authed) {
+      setPrefsReady(false);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const local = loadLocalUiPrefsMirror();
+      try {
+        const remote = await api.getUiPrefs() as UiPrefsGetResponse;
+        if (cancelled) return;
+        const { source, ...prefs } = remote;
+        applyUiPrefsToLocalStorage(prefs);
+        setTheme(prefs.theme);
+        setSelectedWs(prefs.selectedWorkspace);
+        setReadMap(prefs.readRuns);
+        setReadRunsSeeded(prefs.readRunsSeeded);
+        if (shouldMigrateLocal(source, local)) {
+          try {
+            const migrated = await api.putUiPrefs({
+              theme: local.theme,
+              selectedWorkspace: local.selectedWorkspace,
+              readRuns: local.readRuns,
+              readRunsSeeded: local.readRunsSeeded,
+              detailWidth: local.detailWidth,
+            }) as UiPrefs;
+            if (cancelled) return;
+            applyUiPrefsToLocalStorage(migrated);
+            setTheme(migrated.theme);
+            setSelectedWs(migrated.selectedWorkspace);
+            setReadMap(migrated.readRuns);
+            setReadRunsSeeded(migrated.readRunsSeeded);
+          } catch { /* keep hub defaults already applied */ }
+        }
+      } catch {
+        // READ_FAIL / network: keep localStorage state; do not invent hub file
+      } finally {
+        if (!cancelled) setPrefsReady(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [authed]);
+
+  useEffect(() => {
     if (!authed) return;
     const es = new EventSource(`/api/events?token=${encodeURIComponent(getToken())}`);
     es.onmessage = () => refresh();
@@ -131,8 +192,7 @@ export default function App() {
   }, [authed, refresh]);
 
   useEffect(() => {
-    if (runs.length === 0) return;
-    if (localStorage.getItem(READ_SEEDED)) return;
+    if (!shouldSeedReadRuns({ prefsReady, readRunsSeeded, runsLength: runs.length })) return;
     const seed: Record<string, number> = {};
     for (const r of runs) seed[r.id] = Date.now();
     try {
@@ -140,13 +200,16 @@ export default function App() {
       localStorage.setItem(READ_SEEDED, "1");
     } catch { /* ignore */ }
     setReadMap(seed);
-  }, [runs]);
+    setReadRunsSeeded(true);
+    void api.putUiPrefs({ readRuns: seed, readRunsSeeded: true }).catch(() => {});
+  }, [runs, prefsReady, readRunsSeeded]);
 
   useEffect(() => {
     if (!resolvedWs || resolvedWs === selectedWs) return;
     try { localStorage.setItem(WS_KEY, resolvedWs); } catch { /* ignore */ }
     setSelectedWs(resolvedWs);
-  }, [resolvedWs, selectedWs]);
+    if (prefsReady) void api.putUiPrefs({ selectedWorkspace: resolvedWs }).catch(() => {});
+  }, [resolvedWs, selectedWs, prefsReady]);
 
   const selectedEnded = runs.find((r) => r.id === selectedRun)?.ended_at ?? null;
   useEffect(() => {
@@ -265,6 +328,7 @@ export default function App() {
               const next = theme === "dark" ? "light" : "dark";
               saveTheme(next);
               setTheme(next);
+              void api.putUiPrefs({ theme: next }).catch(() => {});
             }}
             className="text-zinc-400 hover:text-zinc-100 px-2 py-0.5 rounded border border-zinc-700"
           >

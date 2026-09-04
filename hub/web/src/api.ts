@@ -32,5 +32,15 @@ export const api = {
   unarchive: (id: string) => req(`/api/runs/${id}/unarchive`, { method: "POST" }).then((r) => r.json()),
   renameMachine: (id: string, displayName: string) =>
     req(`/api/machines/${id}`, { method: "PATCH", body: JSON.stringify({ displayName }) }).then((r) => r.json()),
+  getUiPrefs: () => req("/api/ui-prefs").then(async (r) => {
+    if (r.status === 503) throw new Error("READ_FAIL");
+    if (!r.ok) throw new Error(`ui-prefs ${r.status}`);
+    return r.json();
+  }),
+  putUiPrefs: (partial: Record<string, unknown>) =>
+    req("/api/ui-prefs", { method: "PUT", body: JSON.stringify(partial) }).then(async (r) => {
+      if (!r.ok) throw new Error(`ui-prefs put ${r.status}`);
+      return r.json();
+    }),
   streamUrl: (id: string) => `/api/runs/${id}/stream?token=${encodeURIComponent(getToken())}`,
 };

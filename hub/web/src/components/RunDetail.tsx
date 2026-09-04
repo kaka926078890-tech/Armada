@@ -6,10 +6,11 @@ import ChatThread from "./ChatThread";
 import { eventsToChat } from "../chatView";
 import { collectEventPages, mergeEvents, EVENT_PAGE_SIZE } from "../loadEvents";
 import { mergeImageFiles } from "../attachments";
+import { WIDTH_KEY } from "../uiPrefs";
 
-const WIDTH_KEY = "armada.detailWidth.v1";
 const DEFAULT_W = 576;
 const MIN_W = 400;
+let widthPatchTimer: ReturnType<typeof setTimeout> | null = null;
 
 function loadDetailWidth(): number {
   try {
@@ -21,6 +22,11 @@ function loadDetailWidth(): number {
 
 function persistDetailWidth(n: number): void {
   try { localStorage.setItem(WIDTH_KEY, String(n)); } catch { /* ignore */ }
+  if (widthPatchTimer) clearTimeout(widthPatchTimer);
+  widthPatchTimer = setTimeout(() => {
+    widthPatchTimer = null;
+    void api.putUiPrefs({ detailWidth: n }).catch(() => {});
+  }, 200);
 }
 
 function clampWidth(n: number): number {
