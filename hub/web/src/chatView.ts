@@ -134,21 +134,16 @@ function finish(blocks: ChatBlock[]): ChatBlock[] {
   return dedupe(filtered);
 }
 
-function hookHasPrompt(blocks: ChatBlock[], prompt: string): boolean {
-  const p = prompt.trim();
-  if (!p) return false;
-  return blocks.some((b) => b.kind === "user" && (b.text === p || b.text.includes(p) || p.includes(b.text)));
-}
-
 /**
  * 把 run_events 收成可读对话。
  * 有 transcript 时以它为骨架(和 IDE 一致);其后新到的 hook 作为「正在进行」补在末尾。
  * 尚无 transcript 时(刚开始跑)完全用 hook 拼。
- * 若 hooks 已含本任务 prompt,则丢弃 transcript(避免同窗其它对话的 jsonl 污染详情)。
+ * 续聊 fromEnd tail 会丢掉首轮 jsonl:若更早的 hook 里已有助手回复,接到 transcript 前面,避免原 prompt 被 append 到文末。
  */
-export function eventsToChat(events: RunEvent[], prompt?: string): ChatBlock[] {
+export function eventsToChat(events: RunEvent[]): ChatBlock[] {
   const sorted = [...events].sort((a, b) => a.seq - b.seq);
   const lastTx = sorted.reduce((m, e) => e.source === "transcript" ? Math.max(m, e.seq) : m, 0);
+  const firstTx = sorted.reduce((m, e) => e.source === "transcript" ? Math.min(m, e.seq) : m, Infinity);
   const fromTx: ChatBlock[] = [];
   const pendingUsers: ChatBlock[] = [];
   const fromHooks: ChatBlock[] = [];
@@ -174,10 +169,12 @@ export function eventsToChat(events: RunEvent[], prompt?: string): ChatBlock[] {
     if (ev.seq > lastTx) liveHooks.push(...hb);
   }
 
-  if (prompt && hookHasPrompt(fromHooks, prompt)) return finish(fromHooks);
-
   const txUser = new Set(fromTx.filter((b) => b.kind === "user").map((b) => b.kind === "user" ? b.text : ""));
   const extraUsers = pendingUsers.filter((b) => b.kind === "user" && !txUser.has(b.text));
+  const prefixHooks = Number.isFinite(firstTx) ? fromHooks.filter((b) => b.seq < firstTx) : [];
+  if (prefixHooks.some((b) => b.kind === "assistant")) {
+    return finish([...prefixHooks, ...fromTx, ...extraUsers, ...liveHooks]);
+  }
   return finish([...fromTx, ...extraUsers, ...liveHooks]);
 }
 

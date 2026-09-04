@@ -207,7 +207,7 @@ export default function RunDetail({ runId, onClose, onChanged }: {
     dispatched: "已派发", binding: "绑定中", running: "运行中",
     completed: "已完成", cancelled: "已取消", aborted: "已中止", error: "异常", unknown: "未知",
   };
-  const chat = eventsToChat(events, run.prompt);
+  const chat = eventsToChat(events);
   return (
     <DrawerShell>
       {loadError && (

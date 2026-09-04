@@ -83,22 +83,26 @@ describe("eventsToChat", () => {
     ]);
   });
 
-  test("with prompt, prefers hooks over unrelated transcript", () => {
-    const blocks = eventsToChat([
-      ev({ seq: 1, hook_event_name: "beforeSubmitPrompt", payload: JSON.stringify({ prompt: "说一句你好" }) }),
-      ev({ seq: 2, hook_event_name: "afterAgentResponse", payload: JSON.stringify({ text: "你好。" }) }),
-      ev({ seq: 3, hook_event_name: "subagentStart", payload: JSON.stringify({ description: "说一句你好", subagent_model: "cursor-grok-4.6-high" }) }),
-      ev({ seq: 4, hook_event_name: "subagentStop", payload: JSON.stringify({ description: "说一句你好", status: "completed", duration_ms: 9794, subagent_model: "cursor-grok-4.6-high" }) }),
-      ev({ seq: 10, source: "transcript", payload: JSON.stringify({
-        role: "user", message: { content: [{ type: "text", text: "[Image]\n<image_files>x.png</image_files>" }] },
+  test("empty afterAgentResponse still keeps cid-owned transcript body when leftover prompt matches hooks", () => {
+    const leftover = "Findesk-fde rebase leftover TL;DR ".repeat(4).trim();
+    expect(leftover.length).toBeGreaterThanOrEqual(80);
+    expect(leftover.includes("0. 总览")).toBe(false);
+    const followup = "排查 office_doc";
+    const events = [
+      ev({ seq: 1, hook_event_name: "beforeSubmitPrompt", payload: JSON.stringify({ prompt: leftover }) }),
+      ev({ seq: 10, source: "hub", hook_event_name: "beforeSubmitPrompt", payload: JSON.stringify({ prompt: followup }) }),
+      ev({ seq: 11, hook_event_name: "beforeSubmitPrompt", payload: JSON.stringify({ prompt: followup }) }),
+      ev({ seq: 20, source: "transcript", payload: JSON.stringify({
+        role: "user", message: { content: [{ type: "text", text: `<user_query>\n${followup}\n</user_query>` }] },
       }) }),
-      ev({ seq: 11, source: "transcript", payload: JSON.stringify({
-        role: "assistant", message: { content: [{ type: "text", text: "这段不该出现在本任务里" }] },
+      ev({ seq: 21, hook_event_name: "afterAgentThought", payload: JSON.stringify({ text: "E_STDIN_EMPTY" }) }),
+      ev({ seq: 30, source: "transcript", payload: JSON.stringify({
+        role: "assistant", message: { content: [{ type: "text", text: "## 0. 总览\n| 项 | 内容 |\n" }] },
       }) }),
-    ], "说一句你好");
-    expect(blocks.map((b) => b.kind)).toEqual(["user", "assistant", "subagent"]);
-    expect(blocks.find((b) => b.kind === "assistant")).toMatchObject({ text: "你好。" });
-    expect(blocks.find((b) => b.kind === "subagent")).toMatchObject({ status: "completed", durationMs: 9794 });
+      ev({ seq: 31, hook_event_name: "afterAgentResponse", payload: JSON.stringify({ text: "" }) }),
+    ];
+    const blocks = eventsToChat(events);
+    expect(assistantBodyText(blocks)).toContain("0. 总览");
   });
 
   test("transcript image-only user line shows as [图片] instead of dropping", () => {
@@ -121,6 +125,49 @@ describe("eventsToChat", () => {
       ev({ seq: 1, hook_event_name: "beforeSubmitPrompt", payload: JSON.stringify({ prompt: "", attachmentIds: ["abc"] }) }),
     ]);
     expect(blocks).toEqual([{ kind: "user", text: "[图片]", seq: 1 }]);
+  });
+
+  // 现网曾靠 hookHasPrompt 走纯 hook 路径碰巧同形；现在测 fromEnd 合并。
+  test("fromEnd prefix hooks plus transcript still show both turns", () => {
+    const prompt = "不完全是重名。\n\n更精确地说：\n\n1. 先加过 test。";
+    const blocks = eventsToChat([
+      ev({ seq: 1, hook_event_name: "beforeSubmitPrompt", payload: JSON.stringify({ prompt }) }),
+      ev({ seq: 2, hook_event_name: "afterAgentResponse", payload: JSON.stringify({ text: "第一轮答复。" }) }),
+      ev({ seq: 3, hook_event_name: "beforeSubmitPrompt", payload: JSON.stringify({ prompt: "长期方案呢？" }) }),
+      ev({ seq: 4, hook_event_name: "afterAgentResponse", payload: JSON.stringify({ text: "## 11. 修订记录\n完。" }) }),
+      ev({ seq: 10, source: "transcript", payload: JSON.stringify({
+        role: "user", message: { content: [{ type: "text", text: "<user_query>\n长期方案呢？\n</user_query>" }] },
+      }) }),
+      ev({ seq: 11, source: "transcript", payload: JSON.stringify({
+        role: "assistant", message: { content: [{ type: "text", text: "## 11. 修订记录\n完。" }] },
+      }) }),
+    ]);
+    expect(blocks.map((b) => b.kind)).toEqual(["user", "assistant", "user", "assistant"]);
+    expect(blocks[0]).toMatchObject({ kind: "user", seq: 1 });
+    if (blocks[0].kind === "user") expect(blocks[0].text.startsWith("不完全是重名。")).toBe(true);
+    expect(blocks[1]).toMatchObject({ kind: "assistant", text: "第一轮答复。" });
+    expect(blocks[2]).toMatchObject({ kind: "user", text: "长期方案呢？" });
+    expect(blocks[3]).toMatchObject({ kind: "assistant", text: "## 11. 修订记录\n完。" });
+  });
+
+  test("when followup tails fromEnd, hook turns before first transcript stay in front", () => {
+    const blocks = eventsToChat([
+      ev({ seq: 1, hook_event_name: "beforeSubmitPrompt", payload: JSON.stringify({ prompt: "先修槽位" }) }),
+      ev({ seq: 2, hook_event_name: "afterAgentResponse", payload: JSON.stringify({ text: "第一轮答复。" }) }),
+      ev({ seq: 3, hook_event_name: "beforeSubmitPrompt", payload: JSON.stringify({ prompt: "长期方案呢？" }) }),
+      ev({ seq: 10, source: "transcript", payload: JSON.stringify({
+        role: "user", message: { content: [{ type: "text", text: "<user_query>\n长期方案呢？\n</user_query>" }] },
+      }) }),
+      ev({ seq: 11, source: "transcript", payload: JSON.stringify({
+        role: "assistant", message: { content: [{ type: "text", text: "## 11. 修订记录" }] },
+      }) }),
+    ]);
+    expect(blocks.map((b) => `${b.kind}:${"text" in b ? b.text : ""}`)).toEqual([
+      "user:先修槽位",
+      "assistant:第一轮答复。",
+      "user:长期方案呢？",
+      "assistant:## 11. 修订记录",
+    ]);
   });
 });
 
