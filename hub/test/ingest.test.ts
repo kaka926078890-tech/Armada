@@ -330,7 +330,32 @@ describe("event ingest", () => {
     ws.close();
   });
 
-  test("followup then stale transcript stop must not complete before the new user turn", async () => {
+  test("followup then mismatched composer BSP still completes on matching generation stop", async () => {
+    const { ws, api, runId } = await startBoundRun();
+    ws.send(JSON.stringify(ev(runId, 1, "beforeSubmitPrompt", {
+      conversation_id: "cid-1", generation_id: "g-first", prompt: "hi",
+    })));
+    ws.send(JSON.stringify(ev(runId, 2, "stop", { status: "completed", conversation_id: "cid-1", generation_id: "g-first" })));
+    await new Promise((r) => setTimeout(r, 100));
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).status).toBe("completed");
+    const f = await api(`/api/runs/${runId}/followup`, { method: "POST", body: JSON.stringify({ prompt: "帮我仓内的所有仓库都更新到最新的main分支，然后拉取一下最新的OCR相关代码" }) });
+    expect(f.status).toBe(200);
+    ws.send(JSON.stringify({ type: "run.ack", runId, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId, conversationId: "cid-1", transcriptPath: "/tmp/t.jsonl", promptMatch: true }));
+    await new Promise((r) => setTimeout(r, 80));
+    ws.send(JSON.stringify(ev(runId, 10, "stop", { status: "aborted", conversation_id: "cid-1", generation_id: "g-first" })));
+    await new Promise((r) => setTimeout(r, 80));
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).status).toBe("running");
+    ws.send(JSON.stringify(ev(runId, 11, "beforeSubmitPrompt", {
+      conversation_id: "cid-1", generation_id: "g-new", prompt: "我合并完了代码，帮我仓内的所有仓库都更新到最新的main",
+    })));
+    ws.send(JSON.stringify(ev(runId, 12, "stop", { status: "completed", conversation_id: "cid-1", generation_id: "g-new" })));
+    await new Promise((r) => setTimeout(r, 120));
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).status).toBe("completed");
+    ws.close();
+  });
+
+  test("followup then gen-less transcript stop stays running even if user text matches", async () => {
     const { ws, api, runId } = await startBoundRun();
     ws.send(JSON.stringify(ev(runId, 1, "stop", { status: "completed" })));
     await new Promise((r) => setTimeout(r, 100));
@@ -356,7 +381,82 @@ describe("event ingest", () => {
     }));
     ws.send(JSON.stringify(ev(runId, 13, "stop", { status: "completed" })));
     await new Promise((r) => setTimeout(r, 120));
-    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).status).toBe("completed");
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).status).toBe("running");
+    ws.close();
+  });
+
+  test("followup after gen-less complete: late foreign generation abort is UNARMED not complete", async () => {
+    const { ws, api, runId } = await startBoundRun();
+    ws.send(JSON.stringify(ev(runId, 1, "stop", { status: "completed" })));
+    await new Promise((r) => setTimeout(r, 80));
+    const f = await api(`/api/runs/${runId}/followup`, { method: "POST", body: JSON.stringify({ prompt: "下一轮" }) });
+    expect(f.status).toBe(200);
+    ws.send(JSON.stringify({ type: "run.ack", runId, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId, conversationId: "cid-1", transcriptPath: "/tmp/t.jsonl", promptMatch: true }));
+    await new Promise((r) => setTimeout(r, 80));
+    ws.send(JSON.stringify(ev(runId, 10, "stop", { status: "aborted", conversation_id: "cid-1", generation_id: "g-old" })));
+    await new Promise((r) => setTimeout(r, 80));
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).status).toBe("running");
+    ws.close();
+  });
+
+  test("retired generation stop after armed followup does not complete", async () => {
+    const { ws, api, runId } = await startBoundRun();
+    ws.send(JSON.stringify(ev(runId, 1, "beforeSubmitPrompt", {
+      conversation_id: "cid-1", generation_id: "g-old", prompt: "hi",
+    })));
+    ws.send(JSON.stringify(ev(runId, 2, "stop", { status: "completed", conversation_id: "cid-1", generation_id: "g-old" })));
+    await new Promise((r) => setTimeout(r, 80));
+    const f = await api(`/api/runs/${runId}/followup`, { method: "POST", body: JSON.stringify({ prompt: "下一轮" }) });
+    expect(f.status).toBe(200);
+    ws.send(JSON.stringify({ type: "run.ack", runId, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId, conversationId: "cid-1", transcriptPath: "/tmp/t.jsonl", promptMatch: true }));
+    await new Promise((r) => setTimeout(r, 80));
+    ws.send(JSON.stringify(ev(runId, 10, "stop", { status: "completed", conversation_id: "cid-1", generation_id: "g-old" })));
+    await new Promise((r) => setTimeout(r, 80));
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).status).toBe("running");
+    ws.close();
+  });
+
+  test("dirty session-id generation does not arm or complete; child stop stays running", async () => {
+    const { ws, api, runId } = await startBoundRun();
+    ws.send(JSON.stringify(ev(runId, 1, "beforeSubmitPrompt", {
+      conversation_id: "cid-1", generation_id: "cid-1", prompt: "hi",
+    })));
+    ws.send(JSON.stringify(ev(runId, 2, "stop", { status: "completed", conversation_id: "cid-1", generation_id: "cid-1" })));
+    await new Promise((r) => setTimeout(r, 100));
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).status).toBe("running");
+    ws.send(JSON.stringify(ev(runId, 3, "subagentStart", {
+      conversation_id: "cid-child", parent_conversation_id: "cid-1",
+    })));
+    ws.send(JSON.stringify(ev(runId, 4, "stop", { status: "completed", conversation_id: "cid-child", generation_id: "g-child" })));
+    await new Promise((r) => setTimeout(r, 100));
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).status).toBe("running");
+    const events = (await (await api(`/api/runs/${runId}/events`)).json()) as any[];
+    expect(events.some((e) => e.hook_event_name === "stop" && JSON.parse(e.payload).conversation_id === "cid-child")).toBe(true);
+    ws.close();
+  });
+
+  test("cancel then followup then matching abort is aborted not cancelled", async () => {
+    const { ws, api, runId } = await startBoundRun();
+    ws.send(JSON.stringify(ev(runId, 1, "beforeSubmitPrompt", {
+      conversation_id: "cid-1", generation_id: "g-1", prompt: "hi",
+    })));
+    expect((await api(`/api/runs/${runId}/cancel`, { method: "POST" })).status).toBe(200);
+    await new Promise((r) => setTimeout(r, 80));
+    const f = await api(`/api/runs/${runId}/followup`, { method: "POST", body: JSON.stringify({ prompt: "下一轮" }) });
+    expect(f.status).toBe(200);
+    ws.send(JSON.stringify({ type: "run.ack", runId, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId, conversationId: "cid-1", transcriptPath: "/tmp/t.jsonl", promptMatch: true }));
+    await new Promise((r) => setTimeout(r, 80));
+    ws.send(JSON.stringify(ev(runId, 10, "beforeSubmitPrompt", {
+      conversation_id: "cid-1", generation_id: "g-new", prompt: "下一轮",
+    })));
+    ws.send(JSON.stringify(ev(runId, 11, "stop", { status: "aborted", conversation_id: "cid-1", generation_id: "g-new" })));
+    await new Promise((r) => setTimeout(r, 120));
+    const after = (await (await api(`/api/runs/${runId}`)).json()) as any;
+    expect(after.status).toBe("aborted");
+    expect(after.end_reason).toBe("aborted");
     ws.close();
   });
 

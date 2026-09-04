@@ -75,6 +75,10 @@ export function ingestEvent(db: Database, runs: RunService, sse: SseHub, machine
       run = runs.get(runId) ?? run;
     }
   }
+  run = runs.get(runId) ?? run;
+  if (msg.hookEventName === "beforeSubmitPrompt") {
+    runs.tryArmLiveGeneration(runId, msg.hookEventName, msg.payload, cid);
+  }
   if (msg.hookEventName === "subagentStart" && typeof cid === "string" && run.conversation_id && cid !== run.conversation_id) {
     const set = subagentCids.get(runId) ?? new Set<string>();
     set.add(cid);

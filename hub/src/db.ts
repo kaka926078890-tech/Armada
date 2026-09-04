@@ -62,6 +62,8 @@ export function openDb(home: string): Database {
   ensureColumn(db, "runs", "queued_at", "queued_at INTEGER");
   ensureColumn(db, "runs", "dispatch_seq", "dispatch_seq INTEGER");
   ensureColumn(db, "runs", "attachments", "attachments TEXT NOT NULL DEFAULT '[]'");
+  ensureColumn(db, "runs", "live_generation_id", "live_generation_id TEXT");
+  ensureColumn(db, "runs", "retired_generation_ids", "retired_generation_ids TEXT NOT NULL DEFAULT '[]'");
   db.exec(`CREATE TABLE IF NOT EXISTS blobs (
     sha256 TEXT PRIMARY KEY,
     mime TEXT NOT NULL,

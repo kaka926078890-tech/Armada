@@ -17,6 +17,7 @@ import { collectTranscriptViews, matchTranscriptToPending, stopPayloadFromTransc
 import { TranscriptDirWatcher, debounceLeading, watchTranscriptDir, watchFileSize, TRANSCRIPT_WATCHDOG_MS, TRANSCRIPT_WATCH_DEBOUNCE_MS } from "./transcriptWatch";
 import { createExtSeq } from "./extSeq";
 import { hubRunsNeedingTranscriptFollow } from "./adoptRuns";
+import { noteOwnerBsp, clearGeneration, synthesizedStopPayload } from "./generationStamp";
 
 let client: { dispose: () => void } | null = null;
 
@@ -64,6 +65,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const pendingRuns: PendingRun[] = [];
   const boundRuns = new Map<string, { conversationId: string; prompt: string }>();
+  const lastGenerationId = new Map<string, string>();
   const boundPaths = new Map<string, string>();
   const stopSent = new Set<string>();
   const childConversations = new Map<string, string>();
@@ -111,15 +113,17 @@ export function activate(context: vscode.ExtensionContext): void {
   const emitSynthesizedStop = (runId: string, stop: { status: string; error?: string }): void => {
     if (!followupStopGuard.shouldEmitStop(runId)) return;
     if (stopSent.has(runId)) return;
-    stopSent.add(runId);
     const owner = boundRuns.get(runId);
+    const stamped = synthesizedStopPayload(stop, lastGenerationId.get(runId), owner?.conversationId);
+    if (!stamped.ok) return;
+    stopSent.add(runId);
     core.enqueue({
       type: "run.event",
       runId,
       conversationId: owner?.conversationId,
       source: "hook",
       hookEventName: "stop",
-      payload: { ...stop, conversation_id: owner?.conversationId },
+      payload: stamped.payload,
       ts: Date.now(),
       seq: nextExtSeq(),
     });
@@ -149,6 +153,7 @@ export function activate(context: vscode.ExtensionContext): void {
     if (fromEnd) {
       followupStopGuard.arm(match.run.runId);
       stopSent.delete(match.run.runId);
+      clearGeneration(lastGenerationId, match.run.runId);
     }
     core.enqueue({ type: "run.bound", runId: match.run.runId, conversationId: match.conversationId, transcriptPath: path, promptMatch: match.promptMatch });
     log(`run.bound ${match.run.runId} cid=${match.conversationId} via=${via}`);
@@ -281,6 +286,9 @@ export function activate(context: vscode.ExtensionContext): void {
       const cid = (ev.raw as any)?.conversation_id as string | undefined;
       const runId = (match && "run" in match ? match.run.runId : undefined)
         ?? runIdForHook(boundRuns, childConversations, cid);
+      if (runId) {
+        noteOwnerBsp(lastGenerationId, runId, ev.hook, ev.raw as any, boundRuns.get(runId)?.conversationId);
+      }
       if (ev.hook === "stop" && runId) {
         const owner = boundRuns.get(runId);
         if (owner && owner.conversationId === cid) {
@@ -399,7 +407,7 @@ export function activate(context: vscode.ExtensionContext): void {
       core.sendRegister({
         type: "register", machineId, windowId,
         name: hostname(), os: `${process.platform}-${process.arch}`,
-        cursorVersion: vscode.version, extensionVersion: "0.4.14",
+        cursorVersion: vscode.version, extensionVersion: "0.4.16",
         openWorkspaces: workspaces(),
       });
     });
@@ -423,6 +431,7 @@ export function activate(context: vscode.ExtensionContext): void {
           break;
         case "run.cancel": {
           const b = boundRuns.get(msg.runId);
+          clearGeneration(lastGenerationId, msg.runId);
           const cid = msg.conversationId ?? b?.conversationId;
           if (cid) {
             cancelWatcher.record(msg.runId, cid, b?.prompt ?? "", Date.now());

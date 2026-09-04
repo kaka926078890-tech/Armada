@@ -2,7 +2,7 @@
   "name": "armada-agent",
   "displayName": "Armada Agent",
   "publisher": "armada",
-  "version": "0.4.14",
+  "version": "0.4.16",
   "private": true,
   "engines": {
     "vscode": "^1.96.0"

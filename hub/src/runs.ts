@@ -10,9 +10,9 @@ import {
   OCCUPYING_STATUSES,
 } from "./concurrency";
 import { workspacePathIn } from "../../extension/src/workspacePath";
-import { userPromptFromEventPayload } from "../../extension/src/transcriptBind";
 import { collisionKey, hasImageMarkers, stripImageMarkers } from "../../extension/src/imageMarkers";
 import { BlobStore, parseAttachmentIds, type BlobMeta } from "./blobs";
+import { appendRetired, decideArm, decideStop, parseRetiredIds } from "./generationOwnership";
 
 const ACTIVE = ["created", "dispatched", "binding", "running"];
 const DISPATCH_TIMEOUT_MS = 30_000;
@@ -306,6 +306,7 @@ export class RunService {
     }
     if (!ACTIVE.includes(run.status)) return { error: "ALREADY_TERMINAL" };
     this.cancelRequested.add(runId);
+    this.retireLiveGeneration(runId);
     const windowId = this.liveWindowId(run);
     let sent = false;
     if (run.conversation_id && windowId) {
@@ -325,13 +326,72 @@ export class RunService {
     return /user aborted/i.test(e) || e === "cancelled" || e === "canceled";
   }
 
+  private retiredState(run: { id: string; retired_generation_ids?: string | null; live_generation_id?: string | null }): string[] {
+    const parsed = parseRetiredIds(run.retired_generation_ids);
+    if (parsed.parseFailed) this.audit("hub", "RETIRED_PARSE_FAIL", run.id, {});
+    return parsed.ids;
+  }
+
+  private persistGeneration(runId: string, live: string | null, retired: string[]) {
+    this.db.query("UPDATE runs SET live_generation_id=?1, retired_generation_ids=?2 WHERE id=?3")
+      .run(live, JSON.stringify(retired), runId);
+  }
+
+  retireLiveGeneration(runId: string): void {
+    const run = this.get(runId);
+    if (!run) return;
+    const retired = appendRetired(this.retiredState(run), run.live_generation_id);
+    this.persistGeneration(runId, null, retired);
+  }
+
+  tryArmLiveGeneration(runId: string, hookEventName: string | null, payload: any, eventCid: unknown): void {
+    const run = this.get(runId);
+    if (!run) return;
+    const retired = this.retiredState(run);
+    const d = decideArm({
+      hookEventName,
+      generationId: payload?.generation_id,
+      eventCid,
+      runConversationId: run.conversation_id,
+      liveGenerationId: run.live_generation_id ?? null,
+      retired,
+    });
+    if (d.action === "arm") {
+      this.persistGeneration(runId, d.gen, retired);
+      this.audit("hub", "GEN_ARMED", runId, { generation_id: d.gen });
+      return;
+    }
+    if (d.reason === "already_armed_same") return;
+    this.audit("hub", "GEN_ARMED_SKIP", runId, { reason: d.reason, generation_id: payload?.generation_id ?? null });
+  }
+
+  private hasHubFollowup(runId: string): boolean {
+    const row = this.db.query(
+      `SELECT 1 AS n FROM run_events WHERE run_id=?1 AND source='hub' AND hook_event_name='beforeSubmitPrompt' LIMIT 1`,
+    ).get(runId) as { n: number } | null;
+    return !!row;
+  }
+
   onStopEvent(runId: string, payload: any) {
     const run = this.get(runId);
     if (!run) return;
     // BIND_TIMEOUT / DISPATCH_TIMEOUT 误杀后真实事件仍可能到达
     const recoverable = this.isFalseBindTimeout(run) || this.isFalseDispatchTimeout(run);
     if (!ACTIVE.includes(run.status) && !recoverable) return;
-    if (this.shouldIgnoreStaleFollowupStop(run)) return;
+    const retired = this.retiredState(run);
+    const d = decideStop({
+      stopCid: payload?.conversation_id,
+      runConversationId: run.conversation_id,
+      stopGenerationId: payload?.generation_id,
+      liveGenerationId: run.live_generation_id ?? null,
+      hasHubFollowup: this.hasHubFollowup(runId),
+      retired,
+    });
+    if (d.action === "ignore") {
+      this.audit("hub", d.audit, runId, { live: run.live_generation_id ?? null, stop: payload?.generation_id ?? null });
+      return;
+    }
+    if (d.audit === "STOP_NO_GEN_INITIAL") this.audit("hub", "STOP_NO_GEN_INITIAL", runId, {});
     const s = payload?.status;
     if (s === "completed") this.setStatus(runId, "completed", { end_reason: "completed" }, "extension");
     else if (s === "aborted") {
@@ -345,51 +405,12 @@ export class RunService {
       } else {
         this.setStatus(runId, "error", { end_reason: payload?.error ?? "error" }, "extension");
       }
+    } else {
+      return;
     }
+    this.persistGeneration(runId, null, retired);
     this.cancelRequested.delete(runId);
     this.promoteNextQueued(run.machine_id);
-  }
-
-  /**
-   * Windows followup re-tails the jsonl from offset 0 (new window / reload).
-   * Historical turn_ended is synthesized as stop/completed before the new
-   * user prompt exists. Ignore that until a non-hub user event matches the
-   * followup prompt. Bound/ack resets started_at, so key off the hub
-   * followup event seq, not started_at.
-   */
-  private latestHubFollowup(runId: string): { seq: number; prompt: string } | null {
-    const row = this.db.query(
-      `SELECT seq, payload FROM run_events
-       WHERE run_id=?1 AND source='hub' AND hook_event_name='beforeSubmitPrompt'
-       ORDER BY seq DESC LIMIT 1`,
-    ).get(runId) as { seq: number; payload: string } | null;
-    if (!row) return null;
-    try {
-      const prompt = (JSON.parse(row.payload) as { prompt?: unknown }).prompt;
-      if (typeof prompt !== "string" || !prompt.trim()) return null;
-      return { seq: row.seq, prompt: normalizePrompt(prompt) };
-    } catch {
-      return null;
-    }
-  }
-
-  private hasMatchingLiveUser(runId: string, want: string, afterSeq: number): boolean {
-    const rows = this.db.query(
-      `SELECT payload FROM run_events WHERE run_id=?1 AND seq>?2 AND source!='hub'`,
-    ).all(runId, afterSeq) as { payload: string }[];
-    for (const row of rows) {
-      let payload: unknown = row.payload;
-      try { payload = JSON.parse(row.payload); } catch { /* keep raw */ }
-      const got = userPromptFromEventPayload(payload);
-      if (got && normalizePrompt(got) === want) return true;
-    }
-    return false;
-  }
-
-  private shouldIgnoreStaleFollowupStop(run: { id: string }): boolean {
-    const followup = this.latestHubFollowup(run.id);
-    if (!followup) return false;
-    return !this.hasMatchingLiveUser(run.id, followup.prompt, followup.seq);
   }
 
   sweepTimeouts(now = Date.now()) {
@@ -494,6 +515,8 @@ export class RunService {
     this.setStatus(runId, "dispatched", {
       ended_at: null, end_reason: null, started_at: Date.now(), window_id: win.windowId,
     });
+    this.retireLiveGeneration(runId);
+    this.cancelRequested.delete(runId);
     if (attachmentIds.length === 0) this.recordFollowupPrompt(run, prompt);
     else this.pendingFollowupPrompt.set(runId, { prompt, attachmentIds });
 
