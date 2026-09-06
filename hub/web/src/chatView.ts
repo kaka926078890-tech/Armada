@@ -7,7 +7,63 @@ export type ChatBlock =
   | { kind: "thought"; text: string; seq: number }
   | { kind: "tool"; name: string; summary: string; seq: number }
   | { kind: "file"; path: string; seq: number }
-  | { kind: "subagent"; title: string; status: string; durationMs?: number; model?: string; seq: number };
+  | {
+    kind: "subagent";
+    title: string;
+    status: string;
+    seq: number;
+    id?: string;
+    task?: string;
+    cid?: string;
+    text?: string;
+    durationMs?: number;
+    model?: string;
+  };
+
+type SubagentBlock = Extract<ChatBlock, { kind: "subagent" }>;
+
+function normTask(s: string | undefined): string {
+  return (s ?? "").replace(/\s+/g, " ").trim();
+}
+
+function betterTitle(a: string, b: string): string {
+  const ag = !a || a === "子代理";
+  const bg = !b || b === "子代理";
+  if (ag && !bg) return b;
+  if (bg && !ag) return a;
+  return b || a;
+}
+
+function mergeSubagent(prev: SubagentBlock, next: SubagentBlock): SubagentBlock {
+  const prevDone = prev.status === "completed" || prev.status === "error";
+  const nextDone = next.status === "completed" || next.status === "error";
+  return {
+    kind: "subagent",
+    seq: prev.seq,
+    id: next.id || prev.id,
+    title: betterTitle(prev.title, next.title),
+    status: nextDone || !prevDone ? next.status : prev.status,
+    task: normTask(next.task) ? next.task : prev.task,
+    cid: next.cid || prev.cid,
+    text: next.text || prev.text,
+    durationMs: next.durationMs ?? prev.durationMs,
+    model: next.model || prev.model,
+  };
+}
+
+function subagentFromHook(p: any, status: string, seq: number): SubagentBlock {
+  const title = String(p?.description || "").trim() || "子代理";
+  return {
+    kind: "subagent",
+    seq,
+    id: String(p?.subagent_id ?? "").trim() || undefined,
+    title,
+    status,
+    task: typeof p?.task === "string" ? p.task : undefined,
+    durationMs: typeof p?.duration_ms === "number" ? p.duration_ms : undefined,
+    model: String(p?.subagent_model ?? p?.model ?? ""),
+  };
+}
 
 function parsePayload(raw: string): any {
   try { return JSON.parse(raw); } catch { return null; }
@@ -52,6 +108,18 @@ function transcriptBlocks(ev: RunEvent, p: any): ChatBlock[] {
   if (role === "assistant") {
     for (const c of parts) {
       if (c?.type === "text" && c.text) out.push({ kind: "assistant", text: String(c.text), seq: ev.seq });
+      if (c?.type === "tool_use" && c.name === "Task") {
+        const input = (c.input ?? {}) as Record<string, unknown>;
+        out.push({
+          kind: "subagent",
+          seq: ev.seq,
+          title: String(input.description ?? "").trim() || "子代理",
+          status: "running",
+          task: typeof input.prompt === "string" ? input.prompt : undefined,
+          model: String(input.model ?? ""),
+        });
+        continue;
+      }
       if (c?.type === "tool_use" && c.name) {
         out.push({ kind: "tool", name: String(c.name), summary: toolSummary(String(c.name), c.input), seq: ev.seq });
       }
@@ -82,35 +150,41 @@ function hookBlocks(ev: RunEvent, p: any): ChatBlock[] {
     return [{ kind: "assistant", text, seq: ev.seq }];
   }
   if (hook === "subagentStart") {
-    const title = String(p?.description || "").trim() || "子代理";
-    return [{ kind: "subagent", title, status: "running", model: String(p?.subagent_model ?? p?.model ?? ""), seq: ev.seq }];
+    return [subagentFromHook(p, "running", ev.seq)];
   }
   if (hook === "subagentStop") {
-    const title = String(p?.description || "").trim() || "子代理";
-    return [{
-      kind: "subagent",
-      title,
-      status: String(p?.status ?? "completed"),
-      durationMs: typeof p?.duration_ms === "number" ? p.duration_ms : undefined,
-      model: String(p?.subagent_model ?? p?.model ?? ""),
-      seq: ev.seq,
-    }];
+    return [subagentFromHook(p, String(p?.status ?? "completed"), ev.seq)];
   }
   return [];
 }
 
 function dedupe(blocks: ChatBlock[]): ChatBlock[] {
   const out: ChatBlock[] = [];
-  const subIdx = new Map<string, number>();
+  const subById = new Map<string, number>();
+  const subByTask = new Map<string, number>();
   let lastThought = "";
   for (const b of blocks) {
     if (b.kind === "thought") {
       if (b.text === lastThought) continue;
       lastThought = b.text;
     } else if (b.kind === "subagent") {
-      const prev = subIdx.get(b.title);
-      if (prev !== undefined) { out[prev] = b; continue; }
-      subIdx.set(b.title, out.length);
+      const id = (b.id ?? "").trim();
+      const task = normTask(b.task);
+      let prev: number | undefined;
+      if (id) prev = subById.get(id);
+      if (prev === undefined && task) prev = subByTask.get(task);
+      if (prev !== undefined) {
+        const old = out[prev];
+        if (old.kind === "subagent") {
+          const merged = mergeSubagent(old, b);
+          out[prev] = merged;
+          if ((merged.id ?? "").trim()) subById.set(merged.id!.trim(), prev);
+          if (normTask(merged.task)) subByTask.set(normTask(merged.task), prev);
+        }
+        continue;
+      }
+      if (id) subById.set(id, out.length);
+      if (task) subByTask.set(task, out.length);
     }
     out.push(b);
   }
@@ -119,10 +193,7 @@ function dedupe(blocks: ChatBlock[]): ChatBlock[] {
 
 function finish(blocks: ChatBlock[]): ChatBlock[] {
   const hasSub = blocks.some((b) => b.kind === "subagent");
-  let filtered = hasSub ? blocks.filter((b) => !(b.kind === "tool" && b.name === "Task")) : blocks;
-  if (filtered.some((b) => b.kind === "subagent" && b.status === "completed")) {
-    filtered = filtered.filter((b) => !(b.kind === "subagent" && b.status === "running"));
-  }
+  const filtered = hasSub ? blocks.filter((b) => !(b.kind === "tool" && b.name === "Task")) : blocks;
   return dedupe(filtered);
 }
 
@@ -134,12 +205,62 @@ function orderBySeq(blocks: ChatBlock[]): ChatBlock[] {
     .map(({ b }) => b);
 }
 
+/** extraUsers 里 hub+hook 同文案只留先到的一条；transcript 跨轮同句不走这里。 */
+function uniqueUserText(blocks: ChatBlock[]): ChatBlock[] {
+  const seen = new Set<string>();
+  const out: ChatBlock[] = [];
+  for (const b of blocks) {
+    if (b.kind === "user") {
+      if (seen.has(b.text)) continue;
+      seen.add(b.text);
+    }
+    out.push(b);
+  }
+  return out;
+}
+
+type ChildAcc = { cid: string; task: string; texts: string[] };
+
+function takeChildLine(p: any): { cid: string; role: string; text: string } | null {
+  const cid = typeof p?.__subagent_cid === "string" ? p.__subagent_cid : "";
+  if (!cid) return null;
+  const role = typeof p?.role === "string" ? p.role : "";
+  const parts: any[] = Array.isArray(p?.message?.content) ? p.message.content : [];
+  const text = parts.filter((c) => c?.type === "text").map((c) => String(c.text ?? "")).join("\n");
+  return { cid, role, text };
+}
+
+function lastAssistant(texts: string[]): string {
+  for (let i = texts.length - 1; i >= 0; i--) {
+    const t = texts[i]!.trim();
+    if (t) return t;
+  }
+  return "";
+}
+
+function attachChildText(blocks: ChatBlock[], children: Map<string, ChildAcc>): ChatBlock[] {
+  const unused = [...children.values()];
+  return blocks.map((b) => {
+    if (b.kind !== "subagent") return b;
+    const i = unused.findIndex((c) =>
+      (b.cid && c.cid === b.cid) || (normTask(c.task) !== "" && normTask(c.task) === normTask(b.task)),
+    );
+    if (i < 0) return b;
+    const [c] = unused.splice(i, 1);
+    if (!c) return b;
+    return { ...b, cid: c.cid, text: lastAssistant(c.texts) || b.text };
+  });
+}
+
 /**
  * 把 run_events 收成可读对话。
  * 有 transcript 时以它为骨架(和 IDE 一致);其后新到的 hook 作为「正在进行」补在末尾。
  * 尚无 transcript 时(刚开始跑)完全用 hook 拼。
  * 续聊 fromEnd tail 会丢掉首轮 jsonl:若更早的 hook 里已有助手回复,接到 transcript 前面。
  * 对不上 transcript 的用户句(extraUsers)按 seq 插回时间线,禁止整包垫在最新助手后面。
+ * 续聊 hub 合成 BSP 与 Mac composer hook 同文案双发:extraUsers 按 text 留最早 seq。
+ * 子代理卡片来自父 jsonl 的 Task tool_use；Start/Stop 按 subagent_id 或 task 合并；
+ * 子代理 jsonl 只填卡片正文，不进父助手骨架。
  */
 export function eventsToChat(events: RunEvent[]): ChatBlock[] {
   const sorted = [...events].sort((a, b) => a.seq - b.seq);
@@ -149,16 +270,28 @@ export function eventsToChat(events: RunEvent[]): ChatBlock[] {
   const pendingUsers: ChatBlock[] = [];
   const fromHooks: ChatBlock[] = [];
   const liveHooks: ChatBlock[] = [];
+  const subFromHooks: ChatBlock[] = [];
+  const children = new Map<string, ChildAcc>();
 
   for (const ev of sorted) {
     const p = parsePayload(ev.payload);
     if (!p) continue;
+    if (ev.source === "subagent-transcript") {
+      const line = takeChildLine(p);
+      if (!line) continue;
+      let acc = children.get(line.cid);
+      if (!acc) { acc = { cid: line.cid, task: "", texts: [] }; children.set(line.cid, acc); }
+      if (line.role === "user" && !acc.task) acc.task = extractUserText(line.text);
+      if (line.role === "assistant" && line.text) acc.texts.push(line.text);
+      continue;
+    }
     if (ev.source === "transcript") {
       fromTx.push(...transcriptBlocks(ev, p));
       continue;
     }
     const hb = hookBlocks(ev, p);
     fromHooks.push(...hb);
+    for (const b of hb) if (b.kind === "subagent") subFromHooks.push(b);
     if (lastTx === 0) {
       liveHooks.push(...hb);
       continue;
@@ -180,10 +313,11 @@ export function eventsToChat(events: RunEvent[]): ChatBlock[] {
   const prefixHooks = Number.isFinite(firstTx) ? fromHooks.filter((b) => b.seq < firstTx).filter(dropTxDup) : [];
   const live = liveHooks.filter(dropTxDup);
   const prefixUser = new Set(prefixHooks.filter((b) => b.kind === "user").map((b) => b.kind === "user" ? b.text : ""));
-  const extraUsers = pendingUsers.filter((b) => b.kind === "user" && !txUser.has(b.text) && !prefixUser.has(b.text));
-  // fromEnd 丢掉首轮 jsonl 时 prefix 接到前面；仅有 orphan BSP 用户句时也要保留，不能只在有 prefix 助手时才接。
+  const extraUsers = uniqueUserText(
+    pendingUsers.filter((b) => b.kind === "user" && !txUser.has(b.text) && !prefixUser.has(b.text)),
+  );
   const skeleton = [...prefixHooks, ...fromTx];
-  return finish(orderBySeq([...skeleton, ...extraUsers, ...live]));
+  return attachChildText(finish(orderBySeq([...skeleton, ...extraUsers, ...live, ...subFromHooks])), children);
 }
 
 const PROCESS = new Set(["thought", "tool", "file", "subagent"]);

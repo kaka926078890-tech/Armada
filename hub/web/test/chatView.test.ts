@@ -120,6 +120,28 @@ describe("eventsToChat", () => {
     expect(ua[5]).toMatchObject({ kind: "assistant", text: "已经 push 了，本地与 origin 一致。" });
   });
 
+  test("hub+hook followup BSP of the same text is one extra user until jsonl arrives (r-0f0eadc6)", () => {
+    // Real shape: followup writes hub beforeSubmitPrompt then Mac composer hook with
+    // the same prompt; transcript user_query is still in-flight. extraUsers must not
+    // paint two identical pills (screenshot 2026-09-04).
+    const followup = "先处理已经review出来的内容的问题";
+    const blocks = eventsToChat([
+      ev({ seq: 2275, source: "transcript", payload: JSON.stringify({
+        role: "user", message: { content: [{ type: "text", text: "<user_query>\nreview结果出来了么？\n</user_query>" }] },
+      }) }),
+      ev({ seq: 2279, source: "transcript", payload: JSON.stringify({
+        role: "assistant", message: { content: [{ type: "text", text: "三个审查被中断，正在重拉。" }] },
+      }) }),
+      ev({ seq: 2286, source: "hub", hook_event_name: "beforeSubmitPrompt", payload: JSON.stringify({ prompt: followup }) }),
+      ev({ seq: 2287, hook_event_name: "beforeSubmitPrompt", payload: JSON.stringify({ prompt: followup }) }),
+    ]);
+    const users = blocks.filter((b) => b.kind === "user");
+    expect(users.map((b) => `${b.seq}:${"text" in b ? b.text : ""}`)).toEqual([
+      "2275:review结果出来了么？",
+      `2286:${followup}`,
+    ]);
+  });
+
   test("empty afterAgentResponse still keeps cid-owned transcript body when leftover prompt matches hooks", () => {
     const leftover = "Findesk-fde rebase leftover TL;DR ".repeat(4).trim();
     expect(leftover.length).toBeGreaterThanOrEqual(80);
@@ -211,6 +233,34 @@ describe("eventsToChat", () => {
     expect(blocks[3]).toMatchObject({ kind: "assistant", text: "## 11. 修订记录\n完。" });
   });
 
+  test("background Task follow-up turn after parent turn_ended still shows the review body", () => {
+    // Real shape (r-0f0eadc6 / a746cf16): parent launches run_in_background Tasks,
+    // jsonl writes turn_ended, then Cursor injects a follow-up user_query and the
+    // parent assistant summarizes the child return. Armada must keep that body.
+    const blocks = eventsToChat([
+      ev({ seq: 2275, source: "transcript", payload: JSON.stringify({
+        role: "user", message: { content: [{ type: "text", text: "<user_query>\nreview结果出来了么？\n</user_query>" }] },
+      }) }),
+      ev({ seq: 2279, source: "transcript", payload: JSON.stringify({
+        role: "assistant", message: { content: [{ type: "text", text: "**还没有。** 上次三个 Kimi K3 审查在跑到一半时被中断，没有产出结论。" }] },
+      }) }),
+      ev({ seq: 2280, source: "transcript", payload: JSON.stringify({ type: "turn_ended", status: "success" }) }),
+      ev({ seq: 2282, hook_event_name: "stop", payload: JSON.stringify({
+        status: "completed", conversation_id: "a746cf16-81d3-4fe7-8d57-67903fb845a8",
+      }) }),
+      ev({ seq: 2300, source: "transcript", payload: JSON.stringify({
+        role: "user", message: { content: [{ type: "text", text: "<user_query>Perform any necessary follow-up actions in response to the subagent completion above.</user_query>" }] },
+      }) }),
+      ev({ seq: 2301, source: "transcript", payload: JSON.stringify({
+        role: "assistant", message: { content: [{ type: "text", text: "[web 审查](a7bcf55d) 已完成，middleware / finclaw 两个还在跑。\n\n**结论：可合并，无 Critical。**" }] },
+      }) }),
+    ]);
+    expect(assistantBodyText(blocks)).toContain("可合并，无 Critical");
+    const asst = blocks.filter((b) => b.kind === "assistant");
+    expect(asst).toHaveLength(2);
+    expect(asst[1]).toMatchObject({ kind: "assistant", seq: 2301 });
+  });
+
   test("when followup tails fromEnd, hook turns before first transcript stay in front", () => {
     const blocks = eventsToChat([
       ev({ seq: 1, hook_event_name: "beforeSubmitPrompt", payload: JSON.stringify({ prompt: "先修槽位" }) }),
@@ -229,6 +279,88 @@ describe("eventsToChat", () => {
       "user:长期方案呢？",
       "assistant:## 11. 修订记录",
     ]);
+  });
+
+  test("parallel Task starts with empty description stay three cards; one stop does not drop the others", () => {
+    // Real Cursor 3.18: subagentStart.description is empty; title was "子代理" and
+    // collapsed. finish() then dropped every running card once any sibling completed.
+    const mwTask = "Independent Senior Code Review of FULL chatkit-middleware branch.";
+    const webTask = "Independent Senior Code Review of FULL chatkit-web branch.";
+    const fcTask = "Independent Senior Code Review of FULL finclaw branch.";
+    const blocks = eventsToChat([
+      ev({ seq: 1, source: "transcript", payload: JSON.stringify({
+        role: "user", message: { content: [{ type: "text", text: "<user_query>\nreview\n</user_query>" }] },
+      }) }),
+      ev({ seq: 2, source: "transcript", payload: JSON.stringify({
+        role: "assistant", message: { content: [
+          { type: "text", text: "并行审查。" },
+          { type: "tool_use", name: "Task", input: { description: "Kimi MW branch review", prompt: mwTask, model: "kimi-k3-max" } },
+          { type: "tool_use", name: "Task", input: { description: "Kimi web branch review", prompt: webTask, model: "kimi-k3-max" } },
+          { type: "tool_use", name: "Task", input: { description: "Kimi finclaw branch review", prompt: fcTask, model: "kimi-k3-max" } },
+        ] },
+      }) }),
+      ev({ seq: 3, hook_event_name: "subagentStart", payload: JSON.stringify({
+        subagent_id: "call-mw\nfc_0", task: mwTask, model: "kimi-k3-max",
+      }) }),
+      ev({ seq: 4, hook_event_name: "subagentStart", payload: JSON.stringify({
+        subagent_id: "call-web\nfc_1", task: webTask, model: "kimi-k3-max",
+      }) }),
+      ev({ seq: 5, hook_event_name: "subagentStart", payload: JSON.stringify({
+        subagent_id: "call-fc\nfc_2", task: fcTask, model: "kimi-k3-max",
+      }) }),
+      ev({ seq: 6, hook_event_name: "subagentStop", payload: JSON.stringify({
+        subagent_id: "call-web\nfc_1", task: webTask, description: "Kimi web branch review",
+        status: "completed", duration_ms: 235344, model: "kimi-k3-max",
+      }) }),
+    ]);
+    const subs = blocks.filter((b) => b.kind === "subagent");
+    expect(subs).toHaveLength(3);
+    expect(subs.map((b) => b.kind === "subagent" ? `${b.title}:${b.status}` : "")).toEqual([
+      "Kimi MW branch review:running",
+      "Kimi web branch review:completed",
+      "Kimi finclaw branch review:running",
+    ]);
+  });
+
+  test("child jsonl assistant return attaches to the matching Task card, not the parent body", () => {
+    const webTask = "Independent Senior Code Review of FULL chatkit-web branch.";
+    const review = "# chatkit-web 独立评审\n\n**结论：可合并，无 Critical。**";
+    const blocks = eventsToChat([
+      ev({ seq: 1, source: "transcript", payload: JSON.stringify({
+        role: "user", message: { content: [{ type: "text", text: "<user_query>\nreview\n</user_query>" }] },
+      }) }),
+      ev({ seq: 2, source: "transcript", payload: JSON.stringify({
+        role: "assistant", message: { content: [
+          { type: "text", text: "先拉审查。" },
+          { type: "tool_use", name: "Task", input: { description: "Kimi web branch review", prompt: webTask } },
+        ] },
+      }) }),
+      ev({ seq: 10, source: "subagent-transcript", payload: JSON.stringify({
+        __subagent_cid: "a7bcf55d-baaa-41fb-95ec-e4b600bc9773",
+        role: "user",
+        message: { content: [{ type: "text", text: `<user_query>\n${webTask}\n</user_query>` }] },
+      }) }),
+      ev({ seq: 11, source: "subagent-transcript", payload: JSON.stringify({
+        __subagent_cid: "a7bcf55d-baaa-41fb-95ec-e4b600bc9773",
+        role: "assistant",
+        message: { content: [{ type: "text", text: "Let me start by reading the diff." }] },
+      }) }),
+      ev({ seq: 12, source: "subagent-transcript", payload: JSON.stringify({
+        __subagent_cid: "a7bcf55d-baaa-41fb-95ec-e4b600bc9773",
+        role: "assistant",
+        message: { content: [{ type: "text", text: review }] },
+      }) }),
+    ]);
+    expect(assistantBodyText(blocks)).toBe("先拉审查。");
+    expect(assistantBodyText(blocks)).not.toContain("可合并，无 Critical");
+    const subs = blocks.filter((b) => b.kind === "subagent");
+    expect(subs).toHaveLength(1);
+    expect(subs[0]).toMatchObject({
+      kind: "subagent",
+      title: "Kimi web branch review",
+      text: review,
+      cid: "a7bcf55d-baaa-41fb-95ec-e4b600bc9773",
+    });
   });
 });
 

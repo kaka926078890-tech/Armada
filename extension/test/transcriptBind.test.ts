@@ -8,6 +8,8 @@ import {
   cursorProjectSlug,
   extractFirstUserPrompt,
   listLeafTranscripts,
+  listSubagentTranscripts,
+  childCidFromSubagentPath,
   matchTranscriptToPending,
   stopPayloadFromTranscriptLine,
   transcriptsDirForWorkspace,
@@ -53,6 +55,24 @@ describe("conversationIdFromTranscriptPath", () => {
     expect(conversationIdFromTranscriptPath(
       `c:/Users/PC/.cursor/projects/c-Users-PC-Desktop-work/agent-transcripts/${CID}/subagents/child.jsonl`,
     )).toBeNull();
+  });
+
+  test("childCidFromSubagentPath reads the child uuid and listSubagentTranscripts finds sibling jsonl", () => {
+    const parent = `c:/Users/PC/.cursor/projects/c-Users-PC-Desktop-work/agent-transcripts/${CID}/${CID}.jsonl`;
+    const child = "a7bcf55d-baaa-41fb-95ec-e4b600bc9773";
+    expect(childCidFromSubagentPath(
+      `/Users/apple/.cursor/projects/desk/agent-transcripts/${CID}/subagents/${child}.jsonl`,
+    )).toBe(child);
+    expect(childCidFromSubagentPath(parent)).toBeNull();
+
+    const root = mkdtempSync(join(tmpdir(), "armada-sub-"));
+    const leafDir = join(root, CID);
+    mkdirSync(join(leafDir, "subagents"), { recursive: true });
+    writeFileSync(join(leafDir, `${CID}.jsonl`), "{}");
+    writeFileSync(join(leafDir, "subagents", `${child}.jsonl`), "{}\n");
+    writeFileSync(join(leafDir, "subagents", "not-a-uuid.jsonl"), "{}\n");
+    const listed = listSubagentTranscripts(join(leafDir, `${CID}.jsonl`));
+    expect(listed).toEqual([join(leafDir, "subagents", `${child}.jsonl`)]);
   });
 });
 

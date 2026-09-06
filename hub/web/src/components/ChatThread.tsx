@@ -28,20 +28,25 @@ function ProcessStep({ block }: { block: ChatBlock }) {
     );
   }
   if (block.kind === "subagent") {
-    const done = block.status === "completed";
+    const done = block.status === "completed" || block.status === "error";
     return (
       <div className="flex items-start gap-2 text-[12px]">
         <span className="text-sky-500 mt-0.5">▸</span>
         <div className="min-w-0">
           <div className="text-zinc-300">
-            子代理{done ? " 已回复" : " 运行中"}
-            {done && block.title ? <span className="text-zinc-500"> · {block.title}</span> : null}
+            子代理{done ? (block.status === "error" ? " 失败" : " 已回复") : " 运行中"}
+            {block.title && block.title !== "子代理" ? <span className="text-zinc-500"> · {block.title}</span> : null}
           </div>
           <div className="text-zinc-600 mt-0.5">
             {block.model ? modelLabel(block.model) : ""}
             {block.durationMs != null ? ` · ${durationLabel(block.durationMs)}` : ""}
             {done ? " · Completed" : ""}
           </div>
+          {block.text ? (
+            <div className="mt-1.5 text-zinc-400 whitespace-pre-wrap leading-relaxed max-h-64 overflow-y-auto">
+              <AssistantMarkdown text={block.text} />
+            </div>
+          ) : null}
         </div>
       </div>
     );

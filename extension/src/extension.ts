@@ -8,12 +8,12 @@ import { loadConfig } from "./config";
 import { WsClientCore } from "./wsClient";
 import { SpoolForwarder } from "./spool";
 import { matchHookToPending, claimConversation, eventBelongsToWindow, transcriptPathBelongsToCid, runIdForHook, rememberSubagent, isAmbiguousMatch, dropPendingRuns, type PendingRun, type BindingMatch } from "./binding";
-import { TranscriptTailer } from "./transcript";
+import { TranscriptTailer, shouldUnfollowOnHookStop } from "./transcript";
 import { Executor, CancelWatcher } from "./executor";
 import { createCdpSubmitter, createImagePaster } from "./cdpInject";
 import { writeOsImageClipboard } from "./osClipboard";
 import { mergeHooks, hooksDriftHash, spoolScriptName, shouldInstallArmadaHooks } from "./hooksInstall";
-import { collectTranscriptViews, matchTranscriptToPending, stopPayloadFromTranscriptLine, stopFromTranscriptFileContent, transcriptsDirForWorkspace, isWithinTranscriptBindWindow, FollowupStopGuard } from "./transcriptBind";
+import { collectTranscriptViews, matchTranscriptToPending, stopPayloadFromTranscriptLine, stopFromTranscriptFileContent, transcriptsDirForWorkspace, isWithinTranscriptBindWindow, FollowupStopGuard, listSubagentTranscripts, childCidFromSubagentPath } from "./transcriptBind";
 import { TranscriptDirWatcher, debounceLeading, watchTranscriptDir, watchFileSize, TRANSCRIPT_WATCHDOG_MS, TRANSCRIPT_WATCH_DEBOUNCE_MS } from "./transcriptWatch";
 import { createExtSeq } from "./extSeq";
 import { hubRunsNeedingTranscriptFollow } from "./adoptRuns";
@@ -93,9 +93,15 @@ export function activate(context: vscode.ExtensionContext): void {
         return { content: buf.toString("utf8"), size };
       } catch { return { content: "", size: offset }; }
     },
-    onLine: (runId, line) => {
+    onLine: (runId, line, meta) => {
       let payload: any = { __raw_line: line };
       try { payload = JSON.parse(line); } catch { /* 保留原始行 */ }
+      const childCid = childCidFromSubagentPath(meta.path);
+      if (childCid) {
+        payload = { ...payload, __subagent_cid: childCid };
+        core.enqueue({ type: "run.event", runId, source: "subagent-transcript", payload, ts: Date.now(), seq: nextExtSeq() });
+        return;
+      }
       if (payload?.role === "user") {
         followupStopGuard.onUser(runId);
         stopSent.delete(runId);
@@ -142,6 +148,31 @@ export function activate(context: vscode.ExtensionContext): void {
     else stopSent.delete(runId);
   };
 
+  const watchKey = (runId: string, path: string) => `${runId}\0${path}`;
+
+  const ensureSizeWatch = (runId: string, path: string): void => {
+    const k = watchKey(runId, path);
+    if (sizeWatches.has(k)) return;
+    sizeWatches.set(k, watchFileSize(path, () => {
+      attachSubagentTails(runId, boundPaths.get(runId));
+      tailer.poll(runId);
+      maybeCompleteFromDisk(runId);
+    }));
+  };
+
+  const attachSubagentTails = (runId: string, parentPath: string | undefined): void => {
+    if (!parentPath) return;
+    for (const child of listSubagentTranscripts(parentPath)) {
+      tailer.attach(runId, child);
+      ensureSizeWatch(runId, child);
+    }
+  };
+
+  const followBoundTranscripts = (runId: string): void => {
+    attachSubagentTails(runId, boundPaths.get(runId));
+    tailer.poll(runId);
+  };
+
   const applyBinding = (match: BindingMatch, via: string): void => {
     const idx = pendingRuns.indexOf(match.run);
     if (idx >= 0) pendingRuns.splice(idx, 1);
@@ -161,12 +192,8 @@ export function activate(context: vscode.ExtensionContext): void {
     if (path) {
       boundPaths.set(match.run.runId, path);
       tailer.attach(match.run.runId, path, { fromEnd });
-      tailer.poll(match.run.runId);
-      sizeWatches.get(match.run.runId)?.();
-      sizeWatches.set(match.run.runId, watchFileSize(path, () => {
-        tailer.poll(match.run.runId);
-        maybeCompleteFromDisk(match.run.runId);
-      }));
+      ensureSizeWatch(match.run.runId, path);
+      followBoundTranscripts(match.run.runId);
       maybeCompleteFromDisk(match.run.runId);
     }
   };
@@ -196,7 +223,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const onTranscriptDisk = debounceLeading(() => {
     tryBindFromTranscripts();
-    for (const id of boundRuns.keys()) tailer.poll(id);
+    for (const id of boundRuns.keys()) followBoundTranscripts(id);
   }, TRANSCRIPT_WATCH_DEBOUNCE_MS);
 
   const dirWatch = new TranscriptDirWatcher({
@@ -291,10 +318,18 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       if (ev.hook === "stop" && runId) {
         const owner = boundRuns.get(runId);
-        if (owner && owner.conversationId === cid) {
+        if (shouldUnfollowOnHookStop({
+          hook: ev.hook,
+          ownerConversationId: owner?.conversationId,
+          eventConversationId: cid,
+        })) {
           tailer.detach(runId);
-          sizeWatches.get(runId)?.();
-          sizeWatches.delete(runId);
+          for (const [k, stop] of [...sizeWatches]) {
+            if (k === runId || k.startsWith(`${runId}\0`)) {
+              stop();
+              sizeWatches.delete(k);
+            }
+          }
         }
       }
       core.enqueue({
@@ -346,7 +381,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const transcriptPoll = setInterval(() => {
     tryBindFromTranscripts();
     for (const id of boundRuns.keys()) {
-      tailer.poll(id);
+      followBoundTranscripts(id);
       maybeCompleteFromDisk(id);
     }
   }, TRANSCRIPT_WATCHDOG_MS);
@@ -374,12 +409,8 @@ export function activate(context: vscode.ExtensionContext): void {
         stopSent.delete(t.runId);
         noteHubGeneration(lastGenerationId, t.runId, t.liveGenerationId);
         tailer.attach(t.runId, path, { fromEnd: true });
-        tailer.poll(t.runId);
-        sizeWatches.get(t.runId)?.();
-        sizeWatches.set(t.runId, watchFileSize(path, () => {
-          tailer.poll(t.runId);
-          maybeCompleteFromDisk(t.runId);
-        }));
+        ensureSizeWatch(t.runId, path);
+        followBoundTranscripts(t.runId);
         maybeCompleteFromDisk(t.runId);
       }
     } catch (e) {

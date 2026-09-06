@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "fs";
-import { join } from "path";
+import { dirname, join } from "path";
 import { hasImageMarkers, stripImageMarkers } from "./imageMarkers";
 import { normalizePrompt } from "./promptNormalize";
 import { normalizeWorkspacePath } from "./workspacePath";
@@ -8,6 +8,7 @@ import type { HookMatch, PendingRun } from "./binding";
 const TOLERANCE_MS = 5_000;
 const CID_RE = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const LEAF_RE = new RegExp(`/agent-transcripts/(${CID_RE})/\\1\\.jsonl$`, "i");
+const SUB_RE = new RegExp(`/subagents/(${CID_RE})\\.jsonl$`, "i");
 const QUERY_RE = /<user_query>\s*([\s\S]*?)\s*<\/user_query>/;
 
 export interface TranscriptFileView {
@@ -43,6 +44,24 @@ export function transcriptsDirForWorkspace(cursorHome: string, workspaceRoot: st
 export function conversationIdFromTranscriptPath(path: string): string | null {
   const m = LEAF_RE.exec(path.replace(/\\/g, "/"));
   return m ? m[1] : null;
+}
+
+export function childCidFromSubagentPath(path: string): string | null {
+  const m = SUB_RE.exec(path.replace(/\\/g, "/"));
+  return m ? m[1] : null;
+}
+
+/** Parent jsonl `.../cid/cid.jsonl` → sibling `.../cid/subagents/<child>.jsonl`. */
+export function listSubagentTranscripts(parentJsonl: string): string[] {
+  const dir = join(dirname(parentJsonl), "subagents");
+  let names: string[];
+  try { names = readdirSync(dir); } catch { return []; }
+  const out: string[] = [];
+  for (const name of names) {
+    const p = join(dir, name);
+    if (childCidFromSubagentPath(p)) out.push(p);
+  }
+  return out;
 }
 
 function flattenUserText(raw: unknown): string {

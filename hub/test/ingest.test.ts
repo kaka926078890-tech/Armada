@@ -70,6 +70,47 @@ describe("event ingest", () => {
     ws.close();
   });
 
+  test("after completed stop, subagent-transcript still stores (child jsonl follow)", async () => {
+    const { ws, api, runId } = await startBoundRun();
+    ws.send(JSON.stringify(ev(runId, 1, "stop", { status: "completed", conversation_id: "cid-1" })));
+    await new Promise((r) => setTimeout(r, 80));
+    ws.send(JSON.stringify({
+      type: "run.event", runId, source: "subagent-transcript", seq: 2, ts: Date.now(),
+      payload: {
+        __subagent_cid: "a7bcf55d-baaa-41fb-95ec-e4b600bc9773",
+        role: "assistant",
+        message: { content: [{ type: "text", text: "**结论：可合并，无 Critical。**" }] },
+      },
+    }));
+    await new Promise((r) => setTimeout(r, 100));
+    const events = (await (await api(`/api/runs/${runId}/events`)).json()) as any[];
+    expect(events).toHaveLength(2);
+    expect(events[1].source).toBe("subagent-transcript");
+    expect(events[1].post_terminal).toBe(1);
+    expect(JSON.parse(events[1].payload).__subagent_cid).toBe("a7bcf55d-baaa-41fb-95ec-e4b600bc9773");
+    ws.close();
+  });
+
+  test("after completed stop, later transcript assistant still stores (background Task follow-up)", async () => {
+    const { ws, api, runId } = await startBoundRun();
+    ws.send(JSON.stringify(ev(runId, 1, "stop", { status: "completed", conversation_id: "cid-1" })));
+    await new Promise((r) => setTimeout(r, 80));
+    ws.send(JSON.stringify({
+      type: "run.event", runId, source: "transcript", seq: 2, ts: Date.now(),
+      payload: {
+        role: "assistant",
+        message: { content: [{ type: "text", text: "**结论：可合并，无 Critical。**" }] },
+      },
+    }));
+    await new Promise((r) => setTimeout(r, 100));
+    const events = (await (await api(`/api/runs/${runId}/events`)).json()) as any[];
+    expect(events).toHaveLength(2);
+    expect(events[1].source).toBe("transcript");
+    expect(events[1].post_terminal).toBe(1);
+    expect(JSON.parse(events[1].payload).message.content[0].text).toContain("可合并，无 Critical");
+    ws.close();
+  });
+
   test("cancel requested → stop aborted → cancelled", async () => {
     const { ws, inbound, api, runId } = await startBoundRun();
     const cr = await api(`/api/runs/${runId}/cancel`, { method: "POST" });
