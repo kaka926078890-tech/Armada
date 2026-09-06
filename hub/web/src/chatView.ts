@@ -76,6 +76,20 @@ export function extractUserText(raw: string): string {
   return raw.replace(/<timestamp>[\s\S]*?<\/timestamp>\s*/g, "").trim();
 }
 
+/** Cursor 协议注入的用户句，不是操作员输入；详情不画成气泡。不参与忙/闲。 */
+function isCursorProtocolUser(text: string): boolean {
+  const t = text.trim();
+  return (
+    t.startsWith("Perform any necessary follow-up actions") ||
+    t.startsWith("Implement the plan as specified")
+  );
+}
+
+function emitUser(text: string, seq: number): ChatBlock[] {
+  if (!text || isCursorProtocolUser(text)) return [];
+  return [{ kind: "user", text, seq }];
+}
+
 function basename(p: string): string {
   const parts = p.split(/[\\/]/).filter(Boolean);
   return parts.at(-1) ?? p;
@@ -102,8 +116,7 @@ function transcriptBlocks(ev: RunEvent, p: any): ChatBlock[] {
   if (role === "user") {
     const text = parts.filter((c) => c?.type === "text").map((c) => String(c.text ?? "")).join("\n");
     const shown = displayUserText(extractUserText(text));
-    if (shown) out.push({ kind: "user", text: shown, seq: ev.seq });
-    return out;
+    return emitUser(shown, ev.seq);
   }
   if (role === "assistant") {
     for (const c of parts) {
@@ -133,8 +146,7 @@ function hookBlocks(ev: RunEvent, p: any): ChatBlock[] {
   if (hook === "beforeSubmitPrompt" && typeof p?.prompt === "string") {
     const ids = Array.isArray(p?.attachmentIds) ? p.attachmentIds : [];
     const shown = displayUserText(p.prompt, ids.length);
-    if (shown) return [{ kind: "user", text: shown, seq: ev.seq }];
-    return [];
+    return emitUser(shown, ev.seq);
   }
   if (hook === "afterAgentThought" && typeof p?.text === "string" && p.text.trim()) {
     return [{ kind: "thought", text: p.text.trim(), seq: ev.seq }];

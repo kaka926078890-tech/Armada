@@ -259,6 +259,26 @@ describe("eventsToChat", () => {
     const asst = blocks.filter((b) => b.kind === "assistant");
     expect(asst).toHaveLength(2);
     expect(asst[1]).toMatchObject({ kind: "assistant", seq: 2301 });
+    expect(blocks.filter((b) => b.kind === "user").map((b) => b.kind === "user" ? b.text : "")).toEqual([
+      "review结果出来了么？",
+    ]);
+  });
+
+  test("Cursor plan-mode protocol user_query is not a operator bubble (r-0f0eadc6 seq 2358)", () => {
+    const blocks = eventsToChat([
+      ev({ seq: 2300, source: "transcript", payload: JSON.stringify({
+        role: "user", message: { content: [{ type: "text", text: "<user_query>\n先处理已经review出来的内容的问题\n</user_query>" }] },
+      }) }),
+      ev({ seq: 2301, source: "transcript", payload: JSON.stringify({
+        role: "assistant", message: { content: [{ type: "text", text: "先写计划。" }] },
+      }) }),
+      ev({ seq: 2358, hook_event_name: "beforeSubmitPrompt", payload: JSON.stringify({
+        prompt: "Implement the plan as specified, it is attached for your reference. Do NOT edit the plan file itself.\n\nTo-do's from the plan:\n1. Fix extraUsers",
+      }) }),
+    ]);
+    expect(blocks.filter((b) => b.kind === "user")).toEqual([
+      { kind: "user", text: "先处理已经review出来的内容的问题", seq: 2300 },
+    ]);
   });
 
   test("when followup tails fromEnd, hook turns before first transcript stay in front", () => {
