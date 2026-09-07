@@ -71,13 +71,23 @@ if [[ ! -f "$BUN_SRC" ]]; then
   echo "error: bun binary not a file: $BUN_SRC" >&2
   exit 1
 fi
-cp "$BUN_SRC" "$DEST/bun"
-chmod +x "$DEST/bun"
+# Windows CreateProcess needs bun.exe; Git Bash `bun` is often a PE file without suffix.
+UNAME="$(uname -s 2>/dev/null || true)"
+if [[ "$UNAME" == MINGW* || "$UNAME" == MSYS* || "$UNAME" == CYGWIN* || -n "${MSYSTEM:-}" ]]; then
+  cp "$BUN_SRC" "$DEST/bun.exe"
+  chmod +x "$DEST/bun.exe"
+  BUN_BIN="$DEST/bun.exe"
+else
+  rm -f "$DEST/bun.exe"
+  cp "$BUN_SRC" "$DEST/bun"
+  chmod +x "$DEST/bun"
+  BUN_BIN="$DEST/bun"
+fi
 
 echo "==> smoke: packaged hub can resolve extension imports"
 (
   cd "$DEST/hub"
-  "$DEST/bun" --eval "await import('./src/concurrency.ts'); await import('./src/runs.ts')"
+  "$BUN_BIN" --eval "await import('./src/concurrency.ts'); await import('./src/runs.ts')"
 )
 
 echo "==> copy armada-cursor + hooks"
@@ -96,7 +106,7 @@ chmod +x "$DEST/hooks/install.sh" "$DEST/hooks/armada-spool.sh"
 
 echo "==> vsix (current extension/package.json version)"
 bash "$ROOT/scripts/pack-extension.sh"
-VER="$(node -p "require('$ROOT/extension/package.json').version")"
+VER="$(cd "$ROOT/extension" && node -p "require('./package.json').version")"
 VSIX="$ROOT/extension/armada-agent-$VER.vsix"
 if [[ ! -f "$VSIX" ]]; then
   echo "error: pack-extension did not produce $VSIX" >&2
@@ -106,5 +116,5 @@ rm -f "$DEST"/*.vsix
 cp "$VSIX" "$DEST/$(basename "$VSIX")"
 echo "    copied $(basename "$VSIX")"
 
-echo "ok hub=$DEST/hub bun=$DEST/bun"
+echo "ok hub=$DEST/hub bun=$BUN_BIN"
 echo "layout: $DEST/hub/src/index.ts -> ../web/dist"

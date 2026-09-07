@@ -352,8 +352,8 @@ window.addEventListener("DOMContentLoaded", () => {
 });
 
 const WATCHDOG_MS = 10_000;
-let openWsWatchdog: ReturnType<typeof setTimeout> | null = null;
-let openWsZombiePoll: ReturnType<typeof setInterval> | null = null;
+let openWsWatchdog: number | null = null;
+let openWsZombiePoll: number | null = null;
 
 function clearOpenWorkspaceTimers() {
   if (openWsWatchdog !== null) {

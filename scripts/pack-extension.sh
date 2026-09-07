@@ -12,7 +12,8 @@ if [[ ! -f "$EXT/package.json" ]]; then
   exit 1
 fi
 
-VER="$(node -p "require('$EXT/package.json').version")"
+# Read version from cwd so Node does not see a Git-Bash /c/... path on Windows.
+VER="$(cd "$EXT" && node -p "require('./package.json').version")"
 if [[ -z "$VER" ]]; then
   echo "error: could not read extension version" >&2
   exit 1

@@ -449,9 +449,11 @@ fn find_bun_from(
         return Ok(p.to_path_buf());
     }
     if let Some(dir) = resource_dir {
-        let bundled = dir.join("bun");
-        if bundled.is_file() {
-            return Ok(bundled);
+        for name in ["bun.exe", "bun"] {
+            let bundled = dir.join(name);
+            if bundled.is_file() {
+                return Ok(bundled);
+            }
         }
         let recorded = dir.join("bun.path");
         if let Ok(s) = fs::read_to_string(&recorded) {
