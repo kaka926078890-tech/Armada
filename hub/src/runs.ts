@@ -155,7 +155,8 @@ export class RunService {
     const run = this.get(runId);
     if (!run) return null;
     const gen = randomUUID();
-    this.persistGeneration(runId, gen, this.retiredState(run));
+    const retired = appendRetired(this.retiredState(run), run.live_generation_id);
+    this.persistGeneration(runId, gen, retired);
     this.audit("hub", "GEN_ARMED", runId, { generation_id: gen, source: "hub_windows" });
     return gen;
   }
@@ -548,7 +549,7 @@ export class RunService {
       ended_at: null, end_reason: null, started_at: Date.now(), window_id: win.windowId,
       prompt, attachments: JSON.stringify(attachmentIds),
     });
-    this.retireLiveGeneration(runId);
+    // Mac: live gen stays until owner BSP rearms. Windows: attachHubGenerationIfWindows replaces it.
     this.attachHubGenerationIfWindows(runId, run.machine_id);
     this.cancelRequested.delete(runId);
     if (attachmentIds.length === 0) this.recordFollowupPrompt({ id: runId, machine_id: run.machine_id }, prompt);

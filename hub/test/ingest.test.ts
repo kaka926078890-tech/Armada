@@ -459,6 +459,34 @@ describe("event ingest", () => {
     ws.close();
   });
 
+  // Intel 2026-09-07 r-47657619: MACHINE_OFFLINE unlocked followup while Grok gen
+  // 7bdd3717 was still live. followup retired it; Cursor never sent BSP for 「继续」;
+  // 14:28 stops 7bdd3717 / 836ee87e were STOP_GEN_RETIRED / STOP_UNARMED; card stuck 运行中.
+  test("darwin followup after MACHINE_OFFLINE keeps in-flight gen so its stop still completes", async () => {
+    const { ws, api, runId } = await startBoundRun();
+    const live = "7bdd3717-c359-4673-b3a2-593564232bf6";
+    ws.send(JSON.stringify(ev(runId, 1, "beforeSubmitPrompt", {
+      conversation_id: "cid-1", generation_id: live, prompt: "那就单独测试一遍Grok",
+    })));
+    await new Promise((r) => setTimeout(r, 80));
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).live_generation_id).toBe(live);
+    hub!.runs.onMachineOffline("m-1");
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).status).toBe("unknown");
+    const f = await api(`/api/runs/${runId}/followup`, { method: "POST", body: JSON.stringify({ prompt: "继续" }) });
+    expect(f.status).toBe(200);
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).live_generation_id).toBe(live);
+    ws.send(JSON.stringify({ type: "run.ack", runId, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId, conversationId: "cid-1", transcriptPath: "/tmp/t.jsonl", promptMatch: true }));
+    await new Promise((r) => setTimeout(r, 80));
+    ws.send(JSON.stringify(ev(runId, 10, "stop", { status: "completed", conversation_id: "cid-1", generation_id: live })));
+    ws.send(JSON.stringify(ev(runId, 11, "stop", {
+      status: "completed", conversation_id: "cid-1", generation_id: "836ee87e-798d-45db-a766-c6dac22b0382",
+    })));
+    await new Promise((r) => setTimeout(r, 120));
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).status).toBe("completed");
+    ws.close();
+  });
+
   test("dirty session-id generation does not arm or complete; child stop stays running", async () => {
     const { ws, api, runId } = await startBoundRun();
     ws.send(JSON.stringify(ev(runId, 1, "beforeSubmitPrompt", {
