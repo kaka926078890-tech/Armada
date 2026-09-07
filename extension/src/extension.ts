@@ -17,7 +17,7 @@ import { collectTranscriptViews, matchTranscriptToPending, stopPayloadFromTransc
 import { TranscriptDirWatcher, debounceLeading, watchTranscriptDir, watchFileSize, TRANSCRIPT_WATCHDOG_MS, TRANSCRIPT_WATCH_DEBOUNCE_MS } from "./transcriptWatch";
 import { createExtSeq } from "./extSeq";
 import { hubRunsNeedingTranscriptFollow } from "./adoptRuns";
-import { noteOwnerBsp, clearGeneration, synthesizedStopPayload, noteHubGeneration, onFollowupBindGeneration } from "./generationStamp";
+import { noteOwnerBsp, clearGeneration, synthesizedStopPayload, noteHubGeneration, onFollowupBindGeneration, shouldSynthesizeTranscriptStop } from "./generationStamp";
 
 let client: { dispose: () => void } | null = null;
 
@@ -107,9 +107,10 @@ export function activate(context: vscode.ExtensionContext): void {
         stopSent.delete(runId);
       }
       core.enqueue({ type: "run.event", runId, source: "transcript", payload, ts: Date.now(), seq: nextExtSeq() });
-      // Windows: stop hook 同样被 PS 5s 杀掉。合成 hub 已有的 stop 契约，不改 ingest。
+      // jsonl turn_ended is the durable idle signal. Cursor stop/AAR hooks can miss
+      // it (5s timeout, sidecar gen). Synth the hub stop contract on every OS.
       // 不 detach：续聊同一 path 才能保住 offset，避免重放旧 turn_ended 把 followup 立刻收口。
-      if (process.platform !== "win32") return;
+      if (!shouldSynthesizeTranscriptStop()) return;
       const stop = stopPayloadFromTranscriptLine(line);
       if (!stop) return;
       emitSynthesizedStop(runId, stop);
@@ -137,7 +138,7 @@ export function activate(context: vscode.ExtensionContext): void {
   };
 
   const maybeCompleteFromDisk = (runId: string): void => {
-    if (process.platform !== "win32") return;
+    if (!shouldSynthesizeTranscriptStop()) return;
     if (!followupStopGuard.shouldEmitStop(runId)) return;
     const path = boundPaths.get(runId);
     if (!path) return;
@@ -439,7 +440,7 @@ export function activate(context: vscode.ExtensionContext): void {
       core.sendRegister({
         type: "register", machineId, windowId,
         name: hostname(), os: `${process.platform}-${process.arch}`,
-        cursorVersion: vscode.version, extensionVersion: "0.4.17",
+        cursorVersion: vscode.version, extensionVersion: "0.4.18",
         openWorkspaces: workspaces(),
       });
     });

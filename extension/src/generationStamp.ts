@@ -33,6 +33,11 @@ export function noteHubGeneration(map: Map<string, string>, runId: string, gener
   map.set(runId, gen);
 }
 
+/** jsonl `turn_ended` is the durable idle signal. Hooks can miss it on every OS. */
+export function shouldSynthesizeTranscriptStop(_platform: string = process.platform): boolean {
+  return true;
+}
+
 export function synthesizedStopPayload(
   stop: { status: string; error?: string },
   lastGenerationId: string | undefined,

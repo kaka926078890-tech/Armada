@@ -427,7 +427,7 @@ export class RunService {
     if (d.audit === "STOP_NO_GEN_INITIAL") this.audit("hub", "STOP_NO_GEN_INITIAL", runId, {});
     if (d.audit === "STOP_SESSION_GEN") this.audit("hub", "STOP_SESSION_GEN", runId, { live, stop: payload?.generation_id ?? null });
     const s = payload?.status;
-    if (s === "completed") this.setStatus(runId, "completed", { end_reason: "completed" }, "extension");
+    if (s === "completed" || s === "success") this.setStatus(runId, "completed", { end_reason: "completed" }, "extension");
     else if (s === "aborted") {
       const wasCancel = this.cancelRequested.has(runId);
       this.setStatus(runId, wasCancel ? "cancelled" : "aborted", { end_reason: wasCancel ? "cancelled" : "aborted" }, "extension");

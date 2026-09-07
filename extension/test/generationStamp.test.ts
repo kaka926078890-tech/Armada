@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { noteOwnerBsp, clearGeneration, synthesizedStopPayload, noteHubGeneration, onFollowupBindGeneration } from "../src/generationStamp";
+import { noteOwnerBsp, clearGeneration, synthesizedStopPayload, noteHubGeneration, onFollowupBindGeneration, shouldSynthesizeTranscriptStop } from "../src/generationStamp";
 
 describe("generationStamp", () => {
   test("only owner beforeSubmitPrompt stores gen", () => {
@@ -41,5 +41,11 @@ describe("generationStamp", () => {
   test("stamps generation_id and conversation_id", () => {
     const r = synthesizedStopPayload({ status: "completed" }, "g1", "c1");
     expect(r).toEqual({ ok: true, payload: { status: "completed", generation_id: "g1", conversation_id: "c1" } });
+  });
+  test("jsonl turn_ended is synthesized on darwin and win32 (hooks can miss after a finished composer turn)", () => {
+    expect(shouldSynthesizeTranscriptStop("darwin")).toBe(true);
+    expect(shouldSynthesizeTranscriptStop("darwin-arm64")).toBe(true);
+    expect(shouldSynthesizeTranscriptStop("win32")).toBe(true);
+    expect(shouldSynthesizeTranscriptStop("linux")).toBe(true);
   });
 });

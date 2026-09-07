@@ -565,6 +565,20 @@ describe("event ingest", () => {
     ws.close();
   });
 
+  test("stop status success with matching gen completes (Cursor jsonl/hook uses success, not completed)", async () => {
+    const { ws, api, runId } = await startBoundRun();
+    const live = "c65e24cc-3c30-4b57-8dc1-45b2b78b9a4d";
+    ws.send(JSON.stringify(ev(runId, 1, "beforeSubmitPrompt", {
+      conversation_id: "cid-1", generation_id: live, prompt: "现在测试进度卡在哪里了？",
+    })));
+    ws.send(JSON.stringify(ev(runId, 2, "stop", {
+      conversation_id: "cid-1", generation_id: live, status: "success",
+    })));
+    await new Promise((r) => setTimeout(r, 120));
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).status).toBe("completed");
+    ws.close();
+  });
+
   test("sidecar stop after live afterAgentResponse completes (Cursor 3.18 background gen)", async () => {
     const { ws, api, runId } = await startBoundRun();
     const live = "c65e24cc-3c30-4b57-8dc1-45b2b78b9a4d";
