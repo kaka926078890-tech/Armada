@@ -17,7 +17,7 @@ import { collectTranscriptViews, matchTranscriptToPending, stopPayloadFromTransc
 import { TranscriptDirWatcher, debounceLeading, watchTranscriptDir, watchFileSize, TRANSCRIPT_WATCHDOG_MS, TRANSCRIPT_WATCH_DEBOUNCE_MS } from "./transcriptWatch";
 import { createExtSeq } from "./extSeq";
 import { hubRunsNeedingTranscriptFollow } from "./adoptRuns";
-import { noteOwnerBsp, clearGeneration, synthesizedStopPayload, noteHubGeneration } from "./generationStamp";
+import { noteOwnerBsp, clearGeneration, synthesizedStopPayload, noteHubGeneration, onFollowupBindGeneration } from "./generationStamp";
 
 let client: { dispose: () => void } | null = null;
 
@@ -184,7 +184,7 @@ export function activate(context: vscode.ExtensionContext): void {
     if (fromEnd) {
       followupStopGuard.arm(match.run.runId);
       stopSent.delete(match.run.runId);
-      clearGeneration(lastGenerationId, match.run.runId);
+      onFollowupBindGeneration(lastGenerationId, match.run.runId);
     }
     core.enqueue({ type: "run.bound", runId: match.run.runId, conversationId: match.conversationId, transcriptPath: path, promptMatch: match.promptMatch });
     log(`run.bound ${match.run.runId} cid=${match.conversationId} via=${via}`);
@@ -439,7 +439,7 @@ export function activate(context: vscode.ExtensionContext): void {
       core.sendRegister({
         type: "register", machineId, windowId,
         name: hostname(), os: `${process.platform}-${process.arch}`,
-        cursorVersion: vscode.version, extensionVersion: "0.4.16",
+        cursorVersion: vscode.version, extensionVersion: "0.4.17",
         openWorkspaces: workspaces(),
       });
     });

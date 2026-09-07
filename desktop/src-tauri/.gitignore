@@ -12,4 +12,5 @@
 /resources/scripts/
 /resources/hooks/
 /resources/*.vsix
+/resources/extension/
 /resources/bun.path

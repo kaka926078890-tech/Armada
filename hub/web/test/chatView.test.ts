@@ -142,6 +142,43 @@ describe("eventsToChat", () => {
     ]);
   });
 
+  test("hub+hook BSP is one user when transcript has not arrived yet (screenshot 2026-09-07)", () => {
+    // Real shape: previous turn is hook-only (AAR table); followup writes hub BSP then
+    // Mac composer BSP. lastTx===0 used to dump both into liveHooks with no uniqueUserText.
+    const followup = "需要如何处理？而且需要处理一下考虑Windows, Mac Intel, Mac Arm版本的差异";
+    const blocks = eventsToChat([
+      ev({ seq: 1, hook_event_name: "beforeSubmitPrompt", payload: JSON.stringify({ prompt: "核对 checksum" }) }),
+      ev({ seq: 2, hook_event_name: "afterAgentResponse", payload: JSON.stringify({ text: "## 根因\n| 字段 | 值 |" }) }),
+      ev({ seq: 10, source: "hub", hook_event_name: "beforeSubmitPrompt", payload: JSON.stringify({ prompt: followup }) }),
+      ev({ seq: 11, hook_event_name: "beforeSubmitPrompt", payload: JSON.stringify({ prompt: followup }) }),
+    ]);
+    expect(blocks.map((b) => `${b.kind}:${"text" in b ? b.text : ""}`)).toEqual([
+      "user:核对 checksum",
+      "assistant:## 根因\n| 字段 | 值 |",
+      `user:${followup}`,
+    ]);
+  });
+
+  test("fromEnd prefixHooks hub+hook BSP of the same text is one user", () => {
+    // firstTx is the later jsonl line; both BSP seqs are < firstTx so they used to
+    // land in prefixHooks twice. extraUsers uniqueUserText never saw them.
+    const followup = "需要如何处理？而且需要处理一下考虑Windows, Mac Intel, Mac Arm版本的差异";
+    const blocks = eventsToChat([
+      ev({ seq: 1, hook_event_name: "beforeSubmitPrompt", payload: JSON.stringify({ prompt: "核对 checksum" }) }),
+      ev({ seq: 2, hook_event_name: "afterAgentResponse", payload: JSON.stringify({ text: "## 根因" }) }),
+      ev({ seq: 10, source: "hub", hook_event_name: "beforeSubmitPrompt", payload: JSON.stringify({ prompt: followup }) }),
+      ev({ seq: 11, hook_event_name: "beforeSubmitPrompt", payload: JSON.stringify({ prompt: followup }) }),
+      ev({ seq: 20, source: "transcript", payload: JSON.stringify({
+        role: "assistant", message: { content: [{ type: "text", text: "先改 pin。" }] },
+      }) }),
+    ]);
+    const users = blocks.filter((b) => b.kind === "user");
+    expect(users.map((b) => `${b.seq}:${"text" in b ? b.text : ""}`)).toEqual([
+      "1:核对 checksum",
+      `10:${followup}`,
+    ]);
+  });
+
   test("empty afterAgentResponse still keeps cid-owned transcript body when leftover prompt matches hooks", () => {
     const leftover = "Findesk-fde rebase leftover TL;DR ".repeat(4).trim();
     expect(leftover.length).toBeGreaterThanOrEqual(80);

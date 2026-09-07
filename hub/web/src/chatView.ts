@@ -270,7 +270,8 @@ function attachChildText(blocks: ChatBlock[], children: Map<string, ChildAcc>): 
  * 尚无 transcript 时(刚开始跑)完全用 hook 拼。
  * 续聊 fromEnd tail 会丢掉首轮 jsonl:若更早的 hook 里已有助手回复,接到 transcript 前面。
  * 对不上 transcript 的用户句(extraUsers)按 seq 插回时间线,禁止整包垫在最新助手后面。
- * 续聊 hub 合成 BSP 与 Mac composer hook 同文案双发:extraUsers 按 text 留最早 seq。
+ * 续聊 hub 合成 BSP 与 Mac composer hook 同文案双发:所有 hook 用户句都走 extraUsers,按 text 留最早 seq。
+ * prefixHooks 不含用户句,避免 fromEnd 下同一 BSP 在前缀里再画一次。
  * 子代理卡片来自父 jsonl 的 Task tool_use；Start/Stop 按 subagent_id 或 task 合并；
  * 子代理 jsonl 只填卡片正文，不进父助手骨架。
  */
@@ -304,12 +305,14 @@ export function eventsToChat(events: RunEvent[]): ChatBlock[] {
     const hb = hookBlocks(ev, p);
     fromHooks.push(...hb);
     for (const b of hb) if (b.kind === "subagent") subFromHooks.push(b);
-    if (lastTx === 0) {
-      liveHooks.push(...hb);
-      continue;
-    }
+    // Hook 用户句一律进 pendingUsers，由 extraUsers uniqueUserText 收口。
+    // lastTx===0 时若跟 thought/AAR 一起进 liveHooks，hub+composer 双 BSP 会画出两条相同气泡。
     if (ev.hook_event_name === "beforeSubmitPrompt") {
       pendingUsers.push(...hb);
+      continue;
+    }
+    if (lastTx === 0) {
+      liveHooks.push(...hb);
       continue;
     }
     if (ev.seq > lastTx) liveHooks.push(...hb);
@@ -322,11 +325,13 @@ export function eventsToChat(events: RunEvent[]): ChatBlock[] {
     if (b.kind === "assistant" && txAsst.has(b.text)) return false;
     return true;
   };
-  const prefixHooks = Number.isFinite(firstTx) ? fromHooks.filter((b) => b.seq < firstTx).filter(dropTxDup) : [];
+  // 前缀只留助手/过程；用户句走 extraUsers，避免 fromEnd 下 hub+hook 同文案在 prefix 里各画一条。
+  const prefixHooks = Number.isFinite(firstTx)
+    ? fromHooks.filter((b) => b.seq < firstTx && b.kind !== "user").filter(dropTxDup)
+    : [];
   const live = liveHooks.filter(dropTxDup);
-  const prefixUser = new Set(prefixHooks.filter((b) => b.kind === "user").map((b) => b.kind === "user" ? b.text : ""));
   const extraUsers = uniqueUserText(
-    pendingUsers.filter((b) => b.kind === "user" && !txUser.has(b.text) && !prefixUser.has(b.text)),
+    pendingUsers.filter((b) => b.kind === "user" && !txUser.has(b.text)),
   );
   const skeleton = [...prefixHooks, ...fromTx];
   return attachChildText(finish(orderBySeq([...skeleton, ...extraUsers, ...live, ...subFromHooks])), children);

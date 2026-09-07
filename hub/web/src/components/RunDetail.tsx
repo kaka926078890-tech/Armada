@@ -6,6 +6,7 @@ import ChatThread from "./ChatThread";
 import { eventsToChat } from "../chatView";
 import { collectEventPages, mergeEvents, EVENT_PAGE_SIZE } from "../loadEvents";
 import { mergeImageFiles } from "../attachments";
+import { endFollowupSend, isFollowupSendEnter, tryBeginFollowupSend } from "../followupSend";
 import { WIDTH_KEY } from "../uiPrefs";
 
 const DEFAULT_W = 576;
@@ -91,6 +92,9 @@ export default function RunDetail({ runId, onClose, onChanged }: {
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
   const jumpedRef = useRef<string | null>(null);
+  const sendingRef = useRef(false);
+  const [sending, setSending] = useState(false);
+  const sendEpoch = useRef(0);
 
   useEffect(() => {
     jumpedRef.current = null;
@@ -104,6 +108,9 @@ export default function RunDetail({ runId, onClose, onChanged }: {
     setMissing(false);
     setEditingTitle(false);
     setTitleError("");
+    sendingRef.current = false;
+    setSending(false);
+    sendEpoch.current += 1;
 
     api.run(runId).then((r) => {
       if (aborted) return;
@@ -158,7 +165,10 @@ export default function RunDetail({ runId, onClose, onChanged }: {
   const sendFollowup = useCallback((e?: FormEvent) => {
     e?.preventDefault();
     if (!run || (!followup.trim() && followupFiles.length === 0)) return;
+    if (!tryBeginFollowupSend(sendingRef)) return;
+    setSending(true);
     setFollowupError("");
+    const epoch = sendEpoch.current;
     void (async () => {
       try {
         const ids: string[] = [];
@@ -180,6 +190,12 @@ export default function RunDetail({ runId, onClose, onChanged }: {
         setFollowupFiles([]);
         onChanged();
       } catch (err) { setFollowupError(String(err)); }
+      finally {
+        if (sendEpoch.current === epoch) {
+          endFollowupSend(sendingRef);
+          setSending(false);
+        }
+      }
     })();
   }, [followup, followupFiles, onChanged, run]);
 
@@ -313,16 +329,15 @@ export default function RunDetail({ runId, onClose, onChanged }: {
                 if (rejected) setFollowupError("最多 4 张图片，已忽略多余文件");
               }}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  sendFollowup();
-                }
+                if (!isFollowupSendEnter(e)) return;
+                e.preventDefault();
+                sendFollowup();
               }}
               rows={3}
               placeholder="续聊同一对话…（Enter 发送，Shift+Enter 换行；可粘贴截图）"
               className="flex-1 min-h-[4.5rem] max-h-48 resize-y px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-[13px] placeholder:text-zinc-600 leading-relaxed"
             />
-            <button type="submit" disabled={!followup.trim() && followupFiles.length === 0} className="px-3 py-2 rounded-lg bg-sky-700 hover:bg-sky-600 text-[13px] shrink-0 disabled:opacity-40">发送</button>
+            <button type="submit" disabled={sending || (!followup.trim() && followupFiles.length === 0)} className="px-3 py-2 rounded-lg bg-sky-700 hover:bg-sky-600 text-[13px] shrink-0 disabled:opacity-40">发送</button>
           </div>
           <input type="file" accept="image/png,image/jpeg" multiple onChange={(e) => {
             const picked = [...(e.target.files ?? [])];

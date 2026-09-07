@@ -16,6 +16,16 @@ export function clearGeneration(map: Map<string, string>, runId: string): void {
   map.delete(runId);
 }
 
+/**
+ * Followup attach fromEnd. FollowupStopGuard already blocks the previous
+ * turn_ended; this must not drop the hub-issued gen for this turn's synth stop.
+ */
+export function onFollowupBindGeneration(map: Map<string, string>, runId: string): void {
+  const keep = map.get(runId);
+  clearGeneration(map, runId);
+  noteHubGeneration(map, runId, keep);
+}
+
 /** Hub-issued gen for platforms without beforeSubmitPrompt (Windows). Empty is ignored. */
 export function noteHubGeneration(map: Map<string, string>, runId: string, generationId: unknown): void {
   const gen = typeof generationId === "string" ? generationId : "";
