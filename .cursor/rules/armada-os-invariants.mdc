@@ -1,0 +1,30 @@
+---
+description: Mac vs Windows — hooks, bind, stop synthesis; counterpart-OS is the gate
+globs: extension/**,hooks/**,desktop/**,hub/src/runs.ts,hub/src/generationOwnership.ts
+alwaysApply: false
+---
+
+# Armada OS invariants
+
+规格必须有 **Mac vs Windows 对照表**，禁止写「也支持 Windows」一笔带过。一边绿不算完成。
+
+| | macOS | Windows |
+| --- | --- | --- |
+| Hooks | 安装 Armada hooks → BSP 武装 gen | **不装** hooks |
+| Bind | hook BSP + jsonl | jsonl 首句 prompt + 时间窗 |
+| 忙/闲 | 主会话 BSP `generation_id`；jsonl `turn_ended` 合成 stop（stamp live gen） | hub 签发 gen；合成 stop **必须** stamp；无 gen 不合成 |
+| 注入锁 | `O_EXLOCK` | pidfile；贴图 metaKey 不同 |
+
+## Do
+
+- 闲信号以 stamp 了 live gen 的 jsonl `turn_ended` 为准；hook stop 只做加速，不要再分出第三条实现。
+- `status=success` 与 `completed` 同等收口（Cursor jsonl 用 success）。
+- 乱码 hook prompt（`???` / U+FFFD）只允许 **唯一 pending** 时 bind。
+
+## Don't
+
+```text
+❌ 把 Windows 专用 stop 补丁再复制成 Mac `if (darwin)` 特判
+❌ 无 lastGenerationId 仍合成 stop
+❌ 用 venv/bin 或 shebang 当 Windows 启动器证据
+```
