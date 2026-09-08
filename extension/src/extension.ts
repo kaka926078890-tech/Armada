@@ -252,6 +252,7 @@ export function activate(context: vscode.ExtensionContext): void {
       const i = pendingRuns.findIndex((r) => r.runId === runId);
       if (i >= 0) pendingRuns.splice(i, 1);
     },
+    onInjected: (runId) => cancelWatcher.noteInjection(runId, Date.now()),
     bindKnown: ({ runId, conversationId, workspaceRoot }) => {
       const run = pendingRuns.find((r) => r.runId === runId);
       if (!run) return;

@@ -4,8 +4,26 @@ import type { PendingRun } from "./binding";
 import { acquireCdpLock } from "./cdpLock";
 import { workspacePathIn } from "./workspacePath";
 
+const CANCEL_RECORD_WINDOW_MS = 20_000;
+
+/**
+ * 一次 `beforeSubmitPrompt` 归属于 Armada 自身注入的时间宽限。
+ * spool → forwarder 轮询为 1s（`extension.ts` 的 `spoolPoll`）；5s 给积压留 5 倍余量。
+ */
+const INJECT_ATTRIBUTION_MS = 5_000;
+
 export class CancelWatcher {
   private records = new Map<string, { cid: string; prompt: string; at: number; count: number }>();
+  /** Armada 自己最后一次把 prompt 提交进 composer 的时刻，按 runId。 */
+  private lastInjectAt = new Map<string, number>();
+
+  /** Called by Executor right after our own submit lands (CDP enter or clipboard paste). */
+  noteInjection(runId: string, nowMs: number): void {
+    for (const [id, at] of this.lastInjectAt) {
+      if (nowMs - at > CANCEL_RECORD_WINDOW_MS) this.lastInjectAt.delete(id);
+    }
+    this.lastInjectAt.set(runId, nowMs);
+  }
 
   record(runId: string, conversationId: string, prompt: string, nowMs: number): void {
     this.records.set(runId, { cid: conversationId, prompt, at: nowMs, count: 0 });
@@ -16,7 +34,11 @@ export class CancelWatcher {
     for (const [runId, r] of this.records) {
       if (ev.raw?.conversation_id !== r.cid) continue;
       if (ev.raw?.prompt !== r.prompt) continue;
-      if (nowMs - r.at > 20_000) { this.records.delete(runId); continue; }
+      if (nowMs - r.at > CANCEL_RECORD_WINDOW_MS) { this.records.delete(runId); continue; }
+      // 只有 Armada 自己迟到的注入才归我们收拾。人手动重发同一段文字形状一致
+      // （同 cid、同 prompt、全新 generation_id），取消它会打断用户自己的轮次。
+      const injectedAt = this.lastInjectAt.get(runId);
+      if (injectedAt === undefined || nowMs - injectedAt > INJECT_ATTRIBUTION_MS) continue;
       if (r.count >= 2) return null;
       r.count += 1;
       return r.cid;
@@ -36,6 +58,8 @@ export interface ExecutorDeps {
   addPending?: (run: PendingRun) => void;
   /** Drop a pending entry on INJECT_FAILED after it was already added. */
   removePending?: (runId: string) => void;
+  /** Our own submit landed. Only such submits may be re-cancelled after run.cancel. */
+  onInjected?: (runId: string) => void;
   /**
    * 全自动提交(CDP DOM 注入)。返回 true 表示提示词已写入并提交;
    * 返回 false 或抛错时降级为剪贴板粘贴 + 人工回车。
@@ -138,6 +162,7 @@ export class Executor {
       } else {
         await this.injectPrompt(msg.workspaceRoot, msg.prompt, 1500);
       }
+      this.deps.onInjected?.(msg.runId);
       this.deps.send({ type: "run.ack", runId: msg.runId, status: "accepted" });
     } catch (e) {
       if (pendingAdded) this.deps.removePending?.(msg.runId);
@@ -231,6 +256,7 @@ export class Executor {
       } else {
         await this.injectPrompt(msg.workspaceRoot, msg.prompt, 800);
       }
+      this.deps.onInjected?.(msg.runId);
       this.deps.addPending?.({
         runId: msg.runId,
         workspaceRoot: msg.workspaceRoot,
