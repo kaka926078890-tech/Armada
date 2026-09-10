@@ -39,6 +39,8 @@ Prompt 字符串只用于 **尚未 bind 的首次挂靠**。一旦有 cid，prom
 
 ## Feasibility then full fix
 
+先过 `armada-feasibility-before-solution`（真机形状 + 写路径点通），再写方案/生产。
+
 1. 命名不变量与 **一个** 共享边界。
-2. 先写必红测试（真实 hook/jsonl 形状）。测不红则不准改生产。
+2. 夹具入仓后必红测试。测不红则不准改生产。
 3. 最小生产改动 + 留下该测试。相邻问题列出询问。

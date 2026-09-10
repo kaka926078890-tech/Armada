@@ -35,6 +35,35 @@ export function seedRunStatus(runs: RunRow[]): Map<string, string> {
   return new Map(runs.map((r) => [r.id, r.status]));
 }
 
+export const NEED_INPUT_TITLE = "Armada 需要你处理";
+
+export function pendingAskId(run: RunRow): string | null {
+  const id = run.pending_ask?.request_id;
+  return typeof id === "string" && id.trim() ? id : null;
+}
+
+export function seedAskStatus(runs: RunRow[]): Map<string, string | null> {
+  return new Map(runs.map((r) => [r.id, pendingAskId(r)]));
+}
+
+/** 新出现或换了 request_id 的 pending_ask。变 null 只更新快照，不弹完成。 */
+export function takeNewlyNeedInput(prev: Map<string, string | null>, runs: RunRow[]): RunRow[] {
+  const out: RunRow[] = [];
+  for (const r of runs) {
+    const next = pendingAskId(r);
+    const last = prev.get(r.id);
+    if (next && next !== last) out.push(r);
+    prev.set(r.id, next);
+  }
+  return out;
+}
+
+export function needInputBody(run: RunRow): string {
+  const prompt = run.pending_ask?.questions?.[0]?.prompt;
+  if (typeof prompt === "string" && prompt.trim()) return prompt.replace(/\s+/g, " ").trim().slice(0, 120);
+  return completionBody(run);
+}
+
 export function completionHeadline(runs: RunRow[]): string {
   if (runs.length === 0) return BASE_TITLE;
   if (runs.length === 1) {
@@ -99,10 +128,11 @@ export async function ensureNotifyPermission(): Promise<boolean> {
 export function showDesktopNotification(run: RunRow, onOpen?: (id: string) => void): void {
   if (!canNotify() || Notification.permission !== "granted") return;
   try {
-    const title = isAlertStatus(run.status) ? ALERT_TITLE[run.status] : ALERT_TITLE.completed;
+    const title = pendingAskId(run) ? NEED_INPUT_TITLE
+      : isAlertStatus(run.status) ? ALERT_TITLE[run.status] : ALERT_TITLE.completed;
     const n = new Notification(title, {
-      body: completionBody(run),
-      tag: `armada-run-${run.id}`,
+      body: pendingAskId(run) ? needInputBody(run) : completionBody(run),
+      tag: pendingAskId(run) ? `armada-ask-${run.id}` : `armada-run-${run.id}`,
     });
     n.onclick = () => {
       try { window.focus(); } catch { /* ignore */ }
@@ -110,6 +140,31 @@ export function showDesktopNotification(run: RunRow, onOpen?: (id: string) => vo
       n.close();
     };
   } catch { /* ignore */ }
+}
+
+export function alertNeedInput(
+  runs: RunRow[],
+  opts: { watchingId: string | null; tabVisible: boolean; desktop: boolean; onOpen?: (id: string) => void },
+): void {
+  const alertable = runs.filter((r) => shouldAlert(r, { watchingId: opts.watchingId }));
+  if (alertable.length === 0) return;
+  if (!opts.tabVisible) startTitleMarquee(`${NEED_INPUT_TITLE}     `);
+  if (opts.desktop) {
+    for (const r of alertable) {
+      requestDesktopAlert({
+        runId: r.id,
+        machineId: r.machine_id,
+        workspaceRoot: r.workspace_root,
+        title: NEED_INPUT_TITLE,
+        body: needInputBody(r),
+      });
+    }
+    return;
+  }
+  void ensureNotifyPermission().then((ok) => {
+    if (!ok) return;
+    for (const r of alertable) showDesktopNotification(r, opts.onOpen);
+  });
 }
 
 export function alertCompletions(

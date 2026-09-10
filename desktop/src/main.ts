@@ -1,13 +1,17 @@
 import { invoke } from "@tauri-apps/api/core";
 import {
   afterOpenWorkspaceFeedback,
+  advertiseFailedCopy,
   boardUrl,
   cdpZombieCopy,
   copiedToast,
+  defaultDiscoverable,
   defaultLandingMode,
+  discoveredRowView,
   firstArmadaJoinUri,
   firstArmadaOpenRun,
   formatOpenRunUri,
+  noOpenFleetsCopy,
   noShareIpCopy,
   parseDesktopBoardRequest,
   parsePastedJoin,
@@ -40,6 +44,8 @@ type CreateFleetResult = {
   ownedHubPid: number | null;
   webviewOrigin?: string;
   attach?: LocalAttachView | null;
+  advertised?: boolean;
+  advertiseError?: string | null;
 };
 
 type JoinFleetResult = {
@@ -51,6 +57,81 @@ type JoinFleetResult = {
 };
 
 let lastShareUri = "";
+
+type FoundFleet = { id: string; name: string; ipv4: string; port: number; joinUri: string };
+const discovered = new Map<string, FoundFleet>();
+const DISCOVERED_CAP = 32;
+
+function discoveredEmptyEl() {
+  return document.querySelector<HTMLParagraphElement>("#discovered-empty");
+}
+function discoveredListEl() {
+  return document.querySelector<HTMLElement>("#discovered-list");
+}
+
+function renderDiscovered() {
+  const list = discoveredListEl();
+  const empty = discoveredEmptyEl();
+  if (!list || !empty) return;
+  const rows = [...discovered.values()].slice(0, DISCOVERED_CAP);
+  empty.textContent = noOpenFleetsCopy();
+  empty.hidden = rows.length > 0;
+  list.replaceChildren();
+  for (const row of rows) {
+    const view = discoveredRowView({ name: row.name, ipv4: row.ipv4, port: row.port });
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "fleet-row";
+    btn.dataset.id = row.id;
+    const title = document.createElement("span");
+    title.className = "fleet-title";
+    title.textContent = view.title;
+    const sub = document.createElement("span");
+    sub.className = "fleet-sub";
+    sub.textContent = view.subtitle;
+    btn.append(title, sub);
+    btn.addEventListener("click", () => {
+      const found = discovered.get(row.id);
+      if (found) joinFromPaste(found.joinUri);
+    });
+    list.append(btn);
+  }
+}
+
+function startJoinBrowse() {
+  discovered.clear();
+  renderDiscovered();
+  void invoke("start_fleet_browse").catch(() => {
+    renderDiscovered();
+  });
+}
+
+function stopJoinBrowse() {
+  void invoke("stop_fleet_browse").catch(() => {
+    /* web preview without tauri */
+  });
+}
+
+function wireDiscovery() {
+  void import("@tauri-apps/api/event")
+    .then(({ listen }) => {
+      void listen<FoundFleet>("fleet-found", (ev) => {
+        const row = ev.payload;
+        if (!row?.id || !row.joinUri) return;
+        if (discovered.size >= DISCOVERED_CAP && !discovered.has(row.id)) return;
+        discovered.set(row.id, row);
+        renderDiscovered();
+      });
+      void listen<{ id: string }>("fleet-lost", (ev) => {
+        if (!ev.payload?.id) return;
+        discovered.delete(ev.payload.id);
+        renderDiscovered();
+      });
+    })
+    .catch(() => {
+      /* web preview without tauri */
+    });
+}
 
 function setErr(msg: string) {
   const el = errEl();
@@ -138,6 +219,8 @@ function applyLandingMode(mode: LandingMode) {
   const jPane = joinPane();
   if (cPane) cPane.hidden = mode !== "create";
   if (jPane) jPane.hidden = mode !== "join";
+  if (mode === "join") startJoinBrowse();
+  else stopJoinBrowse();
 }
 
 function toastAttach(attach: LocalAttachView | null | undefined) {
@@ -152,6 +235,7 @@ function toastAttach(attach: LocalAttachView | null | undefined) {
 }
 
 function openBoard(origin: string, token: string) {
+  stopJoinBrowse();
   const url = boardUrl(origin, token);
   const frame = boardEl();
   if (frame) {
@@ -208,9 +292,12 @@ function leaveBoard() {
   document.body.classList.remove("board-open");
   setErr("");
   setBusy(false);
-  void invoke("quit_owned_hub").catch(() => {
-    /* attach mode has no owned child */
-  });
+  const mode: LandingMode = modeJoin()?.checked ? "join" : "create";
+  void invoke("quit_owned_hub")
+    .catch(() => {
+      /* attach mode has no owned child */
+    })
+    .finally(() => applyLandingMode(mode));
 }
 
 function rememberShareFromCreate(candidates: ShareCandidate[], token: string) {
@@ -297,10 +384,14 @@ window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#create")?.addEventListener("click", () => {
     setErr("");
     setBusy(true);
-    void invoke<CreateFleetResult>("create_fleet")
+    void invoke<CreateFleetResult>("create_fleet", {
+      discoverable: document.querySelector<HTMLInputElement>("#discoverable")?.checked ?? defaultDiscoverable(),
+    })
       .then((r) => {
         rememberShareFromCreate(r.shareCandidates, r.token);
         toastAttach(r.attach);
+        const wanted = document.querySelector<HTMLInputElement>("#discoverable")?.checked ?? defaultDiscoverable();
+        if (wanted && !r.advertised) showToast(advertiseFailedCopy(), "err");
         if (!shouldOpenBoardAfterCreate(r.shareCandidates)) {
           setErr(noShareIpCopy());
           return;
@@ -349,6 +440,7 @@ window.addEventListener("DOMContentLoaded", () => {
 
   wireDeepLink();
   wireRunAlertClick();
+  wireDiscovery();
 });
 
 const WATCHDOG_MS = 10_000;

@@ -13,6 +13,7 @@ import { workspacePathIn } from "../../extension/src/workspacePath";
 import { collisionKey, hasImageMarkers, stripImageMarkers } from "../../extension/src/imageMarkers";
 import { BlobStore, parseAttachmentIds, type BlobMeta } from "./blobs";
 import { appendRetired, decideArm, decideStop, parseRetiredIds, isWindowsMachineOs, genOf } from "./generationOwnership";
+import { parsePendingAsk, continueAllowed, optionInAsk, type PendingAsk } from "./pendingAsk";
 
 const ACTIVE = ["created", "dispatched", "binding", "running"];
 const DISPATCH_TIMEOUT_MS = 30_000;
@@ -36,6 +37,8 @@ export class RunService {
 
   private blobs?: BlobStore;
   private pendingFollowupPrompt = new Map<string, { prompt: string; attachmentIds: string[] }>();
+  private askInFlight = new Set<string>();
+  private askTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   private terminal(status: string): boolean {
     return ["completed", "aborted", "error", "cancelled", "unknown"].includes(status);
@@ -63,6 +66,10 @@ export class RunService {
       sets.push(`ended_at=?${vals.length + 1}`); vals.push(Date.now());
     }
     this.db.query(`UPDATE runs SET ${sets.join(", ")} WHERE id=?1`).run(...vals as any);
+    if (this.terminal(status) || status !== "running") {
+      this.db.query("UPDATE runs SET pending_ask=NULL WHERE id=?1").run(id);
+      this.clearAskInFlight(id);
+    }
     this.audit(actor, `run.${status}`, id, extra);
     this.sse.broadcast(id, { type: "run.status", runId: id, status });
   }
@@ -266,6 +273,10 @@ export class RunService {
   onRunAck(machineId: string, msg: any) {
     const run = this.get(msg.runId);
     if (!run) return;
+    if (this.askInFlight.has(run.id)) {
+      this.onAnswerAskAck(run.id, msg);
+      return;
+    }
     const recoverable = this.isFalseDispatchTimeout(run);
     if (run.status !== "dispatched" && !recoverable) return;
     if (recoverable && this.denyReviveIfSlotBusy(machineId, run.id)) return;
@@ -477,28 +488,146 @@ export class RunService {
     this.promoteNextQueued(machineId);
   }
 
+  private hydrateRun(row: any): any {
+    if (!row) return row;
+    return { ...row, pending_ask: parsePendingAsk(row.pending_ask) };
+  }
+
   list(status?: string, machineId?: string, archived?: string) {
     let sql = "SELECT * FROM runs WHERE 1=1"; const args: string[] = [];
     if (status) { sql += " AND status=?"; args.push(status); }
     if (machineId) { sql += " AND machine_id=?"; args.push(machineId); }
     if (archived === "1") sql += " AND archived_at IS NOT NULL";
     else if (archived !== "all") sql += " AND archived_at IS NULL";
-    return this.db.query(sql + " ORDER BY created_at DESC").all(...args);
+    return (this.db.query(sql + " ORDER BY created_at DESC").all(...args) as any[]).map((r) => this.hydrateRun(r));
   }
 
   get(id: string): any {
-    return this.db.query("SELECT * FROM runs WHERE id=?1").get(id) ?? null;
+    return this.hydrateRun(this.db.query("SELECT * FROM runs WHERE id=?1").get(id) ?? null);
   }
 
   getByConversation(cid: string): any {
-    return this.db.query("SELECT * FROM runs WHERE conversation_id=?1 ORDER BY created_at DESC LIMIT 1").get(cid) ?? null;
+    return this.hydrateRun(this.db.query("SELECT * FROM runs WHERE conversation_id=?1 ORDER BY created_at DESC LIMIT 1").get(cid) ?? null);
   }
 
   getActiveByConversation(cid: string): any {
-    return this.db.query(
+    return this.hydrateRun(this.db.query(
       `SELECT * FROM runs WHERE conversation_id=?1 AND status IN ('created','dispatched','binding','running')
        ORDER BY created_at DESC LIMIT 1`,
-    ).get(cid) ?? null;
+    ).get(cid) ?? null);
+  }
+
+  private clearAskInFlight(id: string): void {
+    this.askInFlight.delete(id);
+    const t = this.askTimers.get(id);
+    if (t) clearTimeout(t);
+    this.askTimers.delete(id);
+  }
+
+  private onAnswerAskAck(runId: string, msg: any): void {
+    this.clearAskInFlight(runId);
+    if (msg.status === "accepted") return;
+    this.sse.broadcast(runId, {
+      type: "run.ask", runId, state: "submit_failed", error: msg.reason ?? "REJECTED",
+    });
+  }
+
+  applyAskQuestion(runId: string, payload: unknown): void {
+    const run = this.get(runId);
+    if (!run || run.status !== "running") return;
+    const incoming = parsePendingAsk(payload);
+    if (!incoming) return;
+    const existing = parsePendingAsk(run.pending_ask);
+    const next: PendingAsk = existing && existing.request_id === incoming.request_id
+      ? {
+          ...existing,
+          detect_via: existing.detect_via === "jsonl" && incoming.detect_via !== "jsonl"
+            ? incoming.detect_via
+            : existing.detect_via,
+        }
+      : incoming;
+    this.db.query("UPDATE runs SET pending_ask=?1 WHERE id=?2").run(JSON.stringify(next), runId);
+    this.audit("extension", "run.pending_ask", runId, { request_id: next.request_id });
+    this.sse.broadcast(runId, { type: "run.status", runId, status: "running" });
+  }
+
+  resolveAskQuestion(runId: string, requestId?: unknown): void {
+    const run = this.get(runId);
+    if (!run) return;
+    const pending = parsePendingAsk(run.pending_ask);
+    if (!pending) return;
+    if (typeof requestId === "string" && requestId && requestId !== pending.request_id) return;
+    this.clearAskInFlight(runId);
+    this.db.query("UPDATE runs SET pending_ask=NULL WHERE id=?1").run(runId);
+    this.sse.broadcast(runId, { type: "run.status", runId, status: run.status });
+  }
+
+  answerAsk(runId: string, body: any): { error?: string; run?: any; already?: boolean } {
+    const run = this.get(runId);
+    if (!run) return { error: "NOT_FOUND" };
+    const request_id = typeof body?.request_id === "string" ? body.request_id.trim() : "";
+    const ask = parsePendingAsk(run.pending_ask);
+    if (!ask) {
+      if (request_id && this.wasAskResolved(runId, request_id)) return { already: true };
+      return { error: "NO_PENDING_ASK" };
+    }
+    if (run.status !== "running") return { error: "NO_PENDING_ASK" };
+    if (!request_id || request_id !== ask.request_id) return { error: "ASK_MISMATCH" };
+    const action = body?.action === "skip" ? "skip" : body?.action === "continue" ? "continue" : "";
+    if (!action) return { error: "ASK_INVALID_OPTION" };
+    let answers: { question_id: string; option_ids: string[] }[] = [];
+    if (action === "continue") {
+      if (!continueAllowed(ask)) return { error: "ASK_INVALID_OPTION" };
+      const raw = Array.isArray(body?.answers) ? body.answers : [];
+      const first = raw[0] as Record<string, unknown> | undefined;
+      const qid = typeof first?.question_id === "string" && first.question_id.trim()
+        ? first.question_id.trim()
+        : ask.questions[0].id;
+      const option_ids = Array.isArray(first?.option_ids)
+        ? first.option_ids.filter((x): x is string => typeof x === "string" && x.trim() !== "")
+        : [];
+      if (option_ids.length !== 1) return { error: "ASK_INVALID_OPTION" };
+      if (!optionInAsk(ask, qid, option_ids[0])) return { error: "ASK_INVALID_OPTION" };
+      answers = [{ question_id: qid, option_ids }];
+    }
+    if (this.askInFlight.has(runId)) return { error: "ASK_IN_FLIGHT" };
+    const windowId = this.liveWindowId(run);
+    if (!windowId) return { error: "WORKSPACE_NOT_OPEN" };
+
+    this.askInFlight.add(runId);
+    const t = setTimeout(() => {
+      if (!this.askInFlight.has(runId)) return;
+      this.clearAskInFlight(runId);
+      this.sse.broadcast(runId, { type: "run.ask", runId, state: "submit_failed", error: "ASK_SUBMIT_FAILED" });
+    }, 15_000);
+    if (typeof (t as any).unref === "function") (t as any).unref();
+    this.askTimers.set(runId, t);
+
+    this.registry.sendTo(run.machine_id, windowId, {
+      type: "run.answerAsk",
+      runId,
+      conversationId: run.conversation_id,
+      workspaceRoot: run.workspace_root,
+      request_id: ask.request_id,
+      action,
+      answers,
+    });
+    this.audit("operator", "run.answerAsk", runId, {
+      request_id: ask.request_id, action, option_ids: answers[0]?.option_ids ?? [],
+    });
+    return { run: this.get(runId) };
+  }
+
+  private wasAskResolved(runId: string, requestId: string): boolean {
+    const rows = this.db.query(
+      `SELECT payload FROM run_events WHERE run_id=?1 AND hook_event_name='askQuestionResolved' ORDER BY seq DESC LIMIT 20`,
+    ).all(runId) as { payload: string }[];
+    return rows.some((r) => {
+      try {
+        const p = JSON.parse(r.payload);
+        return p?.request_id === requestId;
+      } catch { return false; }
+    });
   }
 
   /** Windows 往往没有 beforeSubmitPrompt；hub 先落一条用户句，详情才不会丢续聊原文。 */

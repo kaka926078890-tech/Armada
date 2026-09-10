@@ -3,7 +3,7 @@ import {
   groupRuns, cardView, listWorkspaceSlots, encodeWorkspaceKey, decodeWorkspaceKey,
   filterRunsByWorkspace, sortConversations, groupSlotsByMachine, isUnreadCompleted, isUnreadMessage,
   workspaceHasUnread, workspaceUnreadCount, formatUnreadCount, canArchiveRun, isHubArchived,
-  workspaceFolderName, workspaceHasLiveRun, type RunRow,
+  workspaceFolderName, workspaceHasLiveRun, isUnreadNeedInput, type RunRow,
 } from "../src/boardState";
 
 const base: RunRow = {
@@ -62,6 +62,12 @@ describe("cardView", () => {
   });
   test("operator title wins over prompt", () => {
     expect(cardView({ ...base, prompt: "第一句很长", title: "短标题" }, 5000).title).toBe("短标题");
+  });
+  test("running + pending_ask badge is 待处理", () => {
+    expect(cardView({
+      ...base,
+      pending_ask: { request_id: "ask-1", questions: [{ id: "q0", prompt: "q", options: [] }] },
+    }, 5000).badge).toBe("待处理");
   });
 });
 
@@ -148,6 +154,17 @@ describe("unread dots", () => {
     const run = { ...base, status: "cancelled", ended_at: 9 };
     expect(isUnreadMessage(run, undefined)).toBe(false);
     expect(workspaceHasUnread([run], {})).toBe(false);
+  });
+
+  test("pending_ask unread adds to workspace count with terminal unread", () => {
+    const need = {
+      ...base,
+      pending_ask: { request_id: "ask-1", questions: [{ id: "q0", prompt: "q", options: [] }], detected_at: 5000 },
+    };
+    const done = { ...base, id: "r-2", status: "completed", ended_at: 9 };
+    expect(isUnreadNeedInput(need, undefined)).toBe(true);
+    expect(workspaceUnreadCount([need, done], {})).toBe(2);
+    expect(isUnreadNeedInput(need, 9000)).toBe(false);
   });
 
   test("display_name wins over hostname in the tree", () => {

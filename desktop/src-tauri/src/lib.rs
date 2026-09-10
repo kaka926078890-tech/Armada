@@ -1,5 +1,6 @@
 mod attach;
 mod cursor;
+mod discovery;
 mod hub;
 mod run_alert;
 
@@ -20,6 +21,8 @@ pub fn run() {
             hub::create_fleet,
             hub::join_fleet,
             hub::quit_owned_hub,
+            hub::start_fleet_browse,
+            hub::stop_fleet_browse,
             attach::local_attach,
             cursor::cdp_status,
             cursor::open_workspace,

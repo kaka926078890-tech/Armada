@@ -8,6 +8,15 @@ export type ChatBlock =
   | { kind: "tool"; name: string; summary: string; seq: number }
   | { kind: "file"; path: string; seq: number }
   | {
+    kind: "ask";
+    seq: number;
+    request_id: string;
+    prompt: string;
+    options: { id: string; label: string; text: string }[];
+    action: "pending" | "submitting" | "submit_failed" | "resolved";
+    error?: string;
+  }
+  | {
     kind: "subagent";
     title: string;
     status: string;
@@ -63,6 +72,45 @@ function subagentFromHook(p: any, status: string, seq: number): SubagentBlock {
     durationMs: typeof p?.duration_ms === "number" ? p.duration_ms : undefined,
     model: String(p?.subagent_model ?? p?.model ?? ""),
   };
+}
+
+export const ASK_TOOL_NAME = "AskQuestion";
+
+function askOptionsFromInput(input: Record<string, unknown> | undefined): { id: string; label: string; text: string }[] {
+  const questions = Array.isArray(input?.questions) ? input.questions : [];
+  const q = questions[0] as Record<string, unknown> | undefined;
+  const opts = Array.isArray(q?.options) ? q.options : [];
+  const out: { id: string; label: string; text: string }[] = [];
+  for (const item of opts) {
+    if (!item || typeof item !== "object") continue;
+    const o = item as Record<string, unknown>;
+    const id = typeof o.id === "string" ? o.id.trim() : "";
+    if (!id) continue;
+    const label = typeof o.label === "string" && o.label.trim() ? o.label.trim() : id;
+    const text = typeof o.text === "string" && o.text.trim() ? o.text.trim() : label;
+    out.push({ id, label, text });
+  }
+  return out;
+}
+
+function askPromptFromInput(input: Record<string, unknown> | undefined): string {
+  const questions = Array.isArray(input?.questions) ? input.questions : [];
+  const q = questions[0] as Record<string, unknown> | undefined;
+  const prompt = typeof q?.prompt === "string" ? q.prompt.trim() : "";
+  return prompt || "Questions";
+}
+
+function askBlockFromPayload(p: any, seq: number, action: "pending" | "resolved"): ChatBlock | null {
+  const request_id = typeof p?.request_id === "string" && p.request_id.trim() ? p.request_id.trim() : "";
+  const questions = Array.isArray(p?.questions) ? p.questions : [];
+  if (request_id && questions.length) {
+    const q = questions[0] as Record<string, unknown>;
+    const prompt = typeof q?.prompt === "string" && q.prompt.trim() ? q.prompt.trim() : "Questions";
+    const options = askOptionsFromInput({ questions });
+    if (!options.length) return null;
+    return { kind: "ask", seq, request_id, prompt, options, action };
+  }
+  return null;
 }
 
 function parsePayload(raw: string): any {
@@ -133,6 +181,21 @@ function transcriptBlocks(ev: RunEvent, p: any): ChatBlock[] {
         });
         continue;
       }
+      if (c?.type === "tool_use" && c.name === ASK_TOOL_NAME) {
+        const input = (c.input ?? {}) as Record<string, unknown>;
+        const options = askOptionsFromInput(input);
+        if (options.length) {
+          out.push({
+            kind: "ask",
+            seq: ev.seq,
+            request_id: typeof c.id === "string" && c.id.trim() ? c.id.trim() : `ask-jsonl-${ev.seq}`,
+            prompt: askPromptFromInput(input),
+            options,
+            action: "resolved",
+          });
+        }
+        continue;
+      }
       if (c?.type === "tool_use" && c.name) {
         out.push({ kind: "tool", name: String(c.name), summary: toolSummary(String(c.name), c.input), seq: ev.seq });
       }
@@ -167,6 +230,15 @@ function hookBlocks(ev: RunEvent, p: any): ChatBlock[] {
   if (hook === "subagentStop") {
     return [subagentFromHook(p, String(p?.status ?? "completed"), ev.seq)];
   }
+  if (hook === "askQuestion") {
+    const b = askBlockFromPayload(p, ev.seq, "pending");
+    return b ? [b] : [];
+  }
+  if (hook === "askQuestionResolved") {
+    const request_id = typeof p?.request_id === "string" ? p.request_id : "";
+    if (!request_id) return [];
+    return [{ kind: "ask", seq: ev.seq, request_id, prompt: "", options: [], action: "resolved" }];
+  }
   return [];
 }
 
@@ -174,11 +246,36 @@ function dedupe(blocks: ChatBlock[]): ChatBlock[] {
   const out: ChatBlock[] = [];
   const subById = new Map<string, number>();
   const subByTask = new Map<string, number>();
+  const askById = new Map<string, number>();
+  const askByPrompt = new Map<string, number>();
   let lastThought = "";
   for (const b of blocks) {
     if (b.kind === "thought") {
       if (b.text === lastThought) continue;
       lastThought = b.text;
+    } else if (b.kind === "ask") {
+      let prev = b.request_id ? askById.get(b.request_id) : undefined;
+      const pkey = b.prompt.trim();
+      if (prev === undefined && pkey) prev = askByPrompt.get(pkey);
+      if (prev !== undefined) {
+        const old = out[prev];
+        if (old.kind === "ask") {
+          const merged: typeof old = {
+            ...old,
+            prompt: b.prompt || old.prompt,
+            options: b.options.length ? b.options : old.options,
+            action: b.action === "pending" ? old.action === "resolved" ? "pending" : b.action : b.action,
+            error: b.error || old.error,
+            request_id: b.request_id || old.request_id,
+          };
+          out[prev] = merged;
+          if (merged.request_id) askById.set(merged.request_id, prev);
+          if (merged.prompt.trim()) askByPrompt.set(merged.prompt.trim(), prev);
+        }
+        continue;
+      }
+      if (b.request_id) askById.set(b.request_id, out.length);
+      if (pkey) askByPrompt.set(pkey, out.length);
     } else if (b.kind === "subagent") {
       const id = (b.id ?? "").trim();
       const task = normTask(b.task);
@@ -337,6 +434,34 @@ export function eventsToChat(events: RunEvent[]): ChatBlock[] {
   return attachChildText(finish(orderBySeq([...skeleton, ...extraUsers, ...live, ...subFromHooks])), children);
 }
 
+export type PendingAskView = {
+  request_id: string;
+  questions: { prompt: string; options: { id: string; label: string; text: string }[] }[];
+};
+
+export function mergePendingAsk(blocks: ChatBlock[], pending: PendingAskView | null | undefined): ChatBlock[] {
+  if (!pending?.request_id || !pending.questions?.[0]) {
+    return blocks.map((b) => (b.kind === "ask" && b.action === "pending" ? { ...b, action: "resolved" as const } : b));
+  }
+  const q = pending.questions[0];
+  const card: Extract<ChatBlock, { kind: "ask" }> = {
+    kind: "ask",
+    seq: Number.MAX_SAFE_INTEGER,
+    request_id: pending.request_id,
+    prompt: q.prompt,
+    options: q.options ?? [],
+    action: "pending",
+  };
+  const idx = blocks.findIndex((b) =>
+    b.kind === "ask" && (b.request_id === pending.request_id || (q.prompt && b.prompt === q.prompt)),
+  );
+  if (idx < 0) return [...blocks, card];
+  const copy = [...blocks];
+  const old = copy[idx];
+  if (old.kind === "ask") copy[idx] = { ...old, ...card, seq: old.seq };
+  return copy;
+}
+
 const PROCESS = new Set(["thought", "tool", "file", "subagent"]);
 
 export type ProcessSegment = {
@@ -355,17 +480,7 @@ export function assistantBodyText(blocks: ChatBlock[]): string {
 
 /** 有正文后把该轮思考/工具收成一段；尚未出正文时保持一条条列出。 */
 export function segmentChat(blocks: ChatBlock[]): ChatSegment[] {
-  const turns: ChatBlock[][] = [];
-  let cur: ChatBlock[] = [];
-  for (const b of blocks) {
-    if (b.kind === "user" && cur.length > 0) {
-      turns.push(cur);
-      cur = [];
-    }
-    cur.push(b);
-  }
-  if (cur.length) turns.push(cur);
-
+  const turns = splitChatTurns(blocks);
   const out: ChatSegment[] = [];
   for (const turn of turns) {
     if (!turn.some((b) => b.kind === "assistant")) {
@@ -388,5 +503,32 @@ export function segmentChat(blocks: ChatBlock[]): ChatSegment[] {
     flush();
   }
   return out;
+}
+
+export const INITIAL_VISIBLE_TURNS = 3;
+
+export function splitChatTurns(blocks: ChatBlock[]): ChatBlock[][] {
+  const turns: ChatBlock[][] = [];
+  let cur: ChatBlock[] = [];
+  for (const b of blocks) {
+    if (b.kind === "user" && cur.length > 0) {
+      turns.push(cur);
+      cur = [];
+    }
+    cur.push(b);
+  }
+  if (cur.length) turns.push(cur);
+  return turns;
+}
+
+export function initialHiddenPrefixTurns(blocks: ChatBlock[], keep = INITIAL_VISIBLE_TURNS): number {
+  return Math.max(0, splitChatTurns(blocks).length - keep);
+}
+
+export function recentTurnsWindow(blocks: ChatBlock[], hiddenPrefixTurns: number): ChatBlock[] {
+  const turns = splitChatTurns(blocks);
+  if (turns.length === 0) return blocks;
+  const start = Math.min(Math.max(0, hiddenPrefixTurns), turns.length);
+  return turns.slice(start).flat();
 }
 

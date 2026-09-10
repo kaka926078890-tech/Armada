@@ -168,7 +168,88 @@ function CopyIconButton({ text }: { text: string }) {
   );
 }
 
-export default function ChatThread({ blocks }: { blocks: ChatBlock[] }) {
+function AskCard({ block, onAnswerAsk }: {
+  block: Extract<ChatBlock, { kind: "ask" }>;
+  onAnswerAsk?: (body: {
+    request_id: string;
+    action: "continue" | "skip";
+    answers?: { question_id: string; option_ids: string[] }[];
+  }) => Promise<void> | void;
+}) {
+  const [picked, setPicked] = useState(block.options[0]?.id ?? "");
+  const [busy, setBusy] = useState(false);
+  const pending = block.action === "pending" || block.action === "submit_failed";
+  const interactive = pending && !!onAnswerAsk;
+  const submit = async (action: "continue" | "skip") => {
+    if (!onAnswerAsk || busy) return;
+    setBusy(true);
+    try {
+      await onAnswerAsk({
+        request_id: block.request_id,
+        action,
+        answers: action === "continue" ? [{ question_id: "q0", option_ids: [picked] }] : [],
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2.5">
+      <div className="text-[11px] uppercase tracking-wide text-zinc-500 mb-1">Questions</div>
+      <div className="text-[13px] text-zinc-200 whitespace-pre-wrap leading-relaxed">{block.prompt}</div>
+      <div className="mt-2 flex flex-col gap-1.5">
+        {block.options.map((o) => (
+          <label key={o.id} className="flex items-start gap-2 text-[13px] text-zinc-300">
+            <input
+              type="radio"
+              name={`ask-${block.request_id}`}
+              className="mt-1"
+              disabled={!interactive || busy}
+              checked={picked === o.id}
+              onChange={() => setPicked(o.id)}
+            />
+            <span><span className="text-zinc-500 font-mono mr-1">{o.label}</span>{o.text}</span>
+          </label>
+        ))}
+      </div>
+      {block.action === "resolved" ? (
+        <div className="mt-2 text-[12px] text-zinc-500">已处理</div>
+      ) : null}
+      {block.action === "submit_failed" || block.error ? (
+        <div className="mt-2 text-[12px] text-red-400">{block.error || "提交失败，请到本机点 Continue / Skip"}</div>
+      ) : null}
+      {interactive ? (
+        <div className="mt-2.5 flex gap-2">
+          <button
+            type="button"
+            disabled={busy || !picked}
+            onClick={() => void submit("continue")}
+            className="px-2.5 py-1 rounded-md bg-sky-700 hover:bg-sky-600 text-[12px] disabled:opacity-40"
+          >
+            Continue
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void submit("skip")}
+            className="px-2.5 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700 text-[12px] disabled:opacity-40"
+          >
+            Skip
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export default function ChatThread({ blocks, onAnswerAsk }: {
+  blocks: ChatBlock[];
+  onAnswerAsk?: (body: {
+    request_id: string;
+    action: "continue" | "skip";
+    answers?: { question_id: string; option_ids: string[] }[];
+  }) => Promise<void> | void;
+}) {
   if (blocks.length === 0) {
     return <div className="text-zinc-500 text-sm px-1 py-8 text-center">等待对话内容…</div>;
   }
@@ -194,6 +275,9 @@ export default function ChatThread({ blocks }: { blocks: ChatBlock[] }) {
               <CopyIconButton text={s.text} />
             </div>
           );
+        }
+        if (s.kind === "ask") {
+          return <AskCard key={key} block={s} onAnswerAsk={onAnswerAsk} />;
         }
         return <ProcessStep key={key} block={s} />;
       })}

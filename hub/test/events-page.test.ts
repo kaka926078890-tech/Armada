@@ -45,4 +45,40 @@ describe("GET /api/runs/:id/events pagination", () => {
     expect(rest.at(-1).hook_event_name).toBe("afterAgentResponse");
     ws.close();
   });
+
+  test("fromEnd returns the latest page ascending; beforeSeq pages backward", async () => {
+    const home = mkdtempSync(join(tmpdir(), "armada-evtail-"));
+    hub = createServer({ port: 0, home });
+    const ws: WebSocket = await new Promise((res, rej) => {
+      const w = new WebSocket(`ws://127.0.0.1:${hub!.port}/ws?token=${hub!.token}`);
+      w.onopen = () => res(w); w.onerror = rej;
+    });
+    ws.send(JSON.stringify({ type: "register", machineId: "m-1", windowId: "w-1", name: "A", os: "darwin", openWorkspaces: ["/ws/a"] }));
+    await new Promise((r) => setTimeout(r, 80));
+    const api = (p: string, init?: RequestInit) => fetch(`http://127.0.0.1:${hub!.port}${p}`, {
+      ...init, headers: { "content-type": "application/json", authorization: `Bearer ${hub!.token}` },
+    });
+    const created = await (await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "hi" }) })).json() as any;
+    const runId = created.run.id as string;
+    ws.send(JSON.stringify({ type: "run.ack", runId, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId, conversationId: "cid-1", transcriptPath: "/tmp/t.jsonl", promptMatch: true }));
+    await new Promise((r) => setTimeout(r, 80));
+
+    const insert = hub.db.query(
+      `INSERT INTO run_events (run_id, seq, machine_id, ext_seq, source, hook_event_name, payload, ts, post_terminal)
+       VALUES (?1,?2,'m-1',?3,'hook',?4,?5,?6,0)`,
+    );
+    for (let seq = 1; seq <= 520; seq++) {
+      insert.run(runId, seq, seq, "preToolUse", JSON.stringify({ text: "t" }), Date.now());
+    }
+
+    const tail = await (await api(`/api/runs/${runId}/events?fromEnd=1&limit=500`)).json() as any[];
+    expect(tail).toHaveLength(500);
+    expect(tail[0].seq).toBe(21);
+    expect(tail.at(-1).seq).toBe(520);
+
+    const older = await (await api(`/api/runs/${runId}/events?beforeSeq=21&limit=500`)).json() as any[];
+    expect(older.map((e) => e.seq)).toEqual(Array.from({ length: 20 }, (_, i) => i + 1));
+    ws.close();
+  });
 });

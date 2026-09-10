@@ -12,8 +12,6 @@
     "afterFileEdit": [{ "command": "__SCRIPT__ afterFileEdit", "timeout": 5 }],
     "afterAgentResponse": [{ "command": "__SCRIPT__ afterAgentResponse", "timeout": 5 }],
     "afterAgentThought": [{ "command": "__SCRIPT__ afterAgentThought", "timeout": 5 }],
-    "subagentStart": [{ "command": "__SCRIPT__ subagentStart", "timeout": 5 }],
-    "subagentStop": [{ "command": "__SCRIPT__ subagentStop", "timeout": 5 }],
     "preCompact": [{ "command": "__SCRIPT__ preCompact", "timeout": 5 }],
     "stop": [{ "command": "__SCRIPT__ stop", "timeout": 5 }]
   }

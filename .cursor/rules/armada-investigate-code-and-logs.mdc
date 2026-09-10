@@ -1,0 +1,37 @@
+---
+description: Diagnose Armada from code and logs first; do not default to user-error
+alwaysApply: true
+---
+
+# Armada: investigate code and logs first
+
+派发 / 注入 / CDP / 停跑 / subagent / 看板异常：**先查代码路径和本机日志，不要先把原因定成用户操作。**
+
+## 顺序（禁止跳过）
+
+1. 点名共享边界（扩展注入、`CancelWatcher`、ingest、`decideStop`、桌面打开工作区）。
+2. 读该路径代码（调用顺序、命令名、判据）。
+3. 查**同期**日志与库，用原文引用，再下结论。
+4. 用户操作（焦点、Cmd+Q、是否从图标打开）只能作为补充，不能当默认根因。
+
+## 日志从哪查
+
+| 现象 | 先看 |
+| --- | --- |
+| 派发被拒 / 粘贴不对 / 芯片 | 当次 Cursor 窗口 `exthost/output_logging_*/N-Armada.log`（`cdp submit failed`、`run.ack`） |
+| 终态 / prompt 是否被改 | `~/.armada/hub.db`：`runs.prompt`、`status`、`end_reason`；`audit` |
+| hook / BSP | `~/.cursor/armada/spool/` 与 `cursor.hooks.*.log` |
+| 调试口 / 打开工作区 | 桌面壳文案对应 `desktop-core/src/cdp.ts`；本机 `lsof -nP -iTCP:9222` **加上** Cursor 主进程 argv |
+
+## 禁止
+
+```text
+❌ 没打开 Armada.log / hub.db 就写「请先把焦点挪开」「请完全退出再试」
+❌ 把看板卡片文案和输入框芯片当成同一条数据（卡片=hub.prompt；芯片=Cursor 挂文件）
+❌ 用「应该是用户没按说明书」代替 end_reason / 日志行
+```
+
+```text
+✅ 「Armada.log 15:17:09 NON_EMPTY_INPUT:windows-packaging-self-hosted-；startRun 调了 composer.newAgentChat」
+✅ 用户步骤只解释日志为何仍复现（例如代码里又 focus 回编辑器）
+```

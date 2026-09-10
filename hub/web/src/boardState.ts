@@ -5,6 +5,12 @@ export interface RunRow {
   created_at: number; started_at: number | null; ended_at: number | null; end_reason: string | null;
   archived_at?: number | null;
   attachments?: string | null;
+  pending_ask?: {
+    request_id: string;
+    questions: { id: string; prompt: string; options: { id: string; label: string; text: string }[] }[];
+    detected_at?: number;
+    detect_via?: string;
+  } | null;
 }
 
 /** 卡片展示名：操作员改过的 title 优先，否则最近一次注入的 prompt。 */
@@ -48,6 +54,7 @@ export function cardView(run: RunRow, now: number): { title: string; elapsed: st
   const elapsed = secs > 60 ? `${Math.floor(secs / 60)}m${secs % 60}s` : `${secs}s`;
   const badge = run.status === "queued" ? "排队中"
     : run.status === "binding" ? "绑定中"
+    : run.status === "running" && run.pending_ask ? "待处理"
     : COLUMN_LABELS[COLUMN_MAP[run.status] ?? "error"];
   return { title, elapsed, badge };
 }
@@ -157,6 +164,12 @@ export function isUnreadMessage(run: RunRow, readAt: number | undefined): boolea
   return readAt == null || runActivityTs(run) > readAt;
 }
 
+export function isUnreadNeedInput(run: RunRow, readAt: number | undefined): boolean {
+  if (!run.pending_ask) return false;
+  const at = run.pending_ask.detected_at ?? 0;
+  return readAt == null || at > readAt;
+}
+
 export function isUnreadAlert(run: RunRow, readAt: number | undefined): boolean {
   if (!["completed", "error", "unknown", "aborted"].includes(run.status)) return false;
   return readAt == null || runActivityTs(run) > readAt;
@@ -169,7 +182,9 @@ export function isUnreadCompleted(run: RunRow, readAt: number | undefined): bool
 /** 侧栏未读数：终态未读（完成/失败/异常/中止）。进行中不计入。 */
 export function workspaceUnreadCount(runs: RunRow[], readMap: Record<string, number>): number {
   let n = 0;
-  for (const r of runs) if (isUnreadAlert(r, readMap[r.id])) n++;
+  for (const r of runs) {
+    if (isUnreadAlert(r, readMap[r.id]) || isUnreadNeedInput(r, readMap[r.id])) n++;
+  }
   return n;
 }
 

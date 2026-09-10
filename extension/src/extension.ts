@@ -10,7 +10,7 @@ import { SpoolForwarder } from "./spool";
 import { matchHookToPending, claimConversation, eventBelongsToWindow, transcriptPathBelongsToCid, runIdForHook, rememberSubagent, isAmbiguousMatch, dropPendingRuns, type PendingRun, type BindingMatch } from "./binding";
 import { TranscriptTailer, shouldUnfollowOnHookStop } from "./transcript";
 import { Executor, CancelWatcher } from "./executor";
-import { createCdpSubmitter, createImagePaster } from "./cdpInject";
+import { createCdpSubmitter, createImagePaster, createAskQuestionDriver } from "./cdpInject";
 import { writeOsImageClipboard } from "./osClipboard";
 import { mergeHooks, hooksDriftHash, spoolScriptName, shouldInstallArmadaHooks } from "./hooksInstall";
 import { collectTranscriptViews, matchTranscriptToPending, stopPayloadFromTranscriptLine, stopFromTranscriptFileContent, transcriptsDirForWorkspace, isWithinTranscriptBindWindow, FollowupStopGuard, listSubagentTranscripts, childCidFromSubagentPath } from "./transcriptBind";
@@ -18,6 +18,7 @@ import { TranscriptDirWatcher, debounceLeading, watchTranscriptDir, watchFileSiz
 import { createExtSeq } from "./extSeq";
 import { hubRunsNeedingTranscriptFollow } from "./adoptRuns";
 import { noteOwnerBsp, clearGeneration, synthesizedStopPayload, noteHubGeneration, onFollowupBindGeneration, shouldSynthesizeTranscriptStop } from "./generationStamp";
+import { nextAskAction, parseAskInspect } from "./askDetect";
 
 let client: { dispose: () => void } | null = null;
 
@@ -72,9 +73,11 @@ export function activate(context: vscode.ExtensionContext): void {
   const sizeWatches = new Map<string, () => void>();
   const cancelWatcher = new CancelWatcher();
   const followupStopGuard = new FollowupStopGuard();
+  const askLastByRun = new Map<string, string>();
 
   const cdpSubmit = config.autoSubmit ? createCdpSubmitter({ port: config.cdpPort, log }) : null;
   const imagePaster = createImagePaster({ port: config.cdpPort, log });
+  const askDriver = createAskQuestionDriver({ port: config.cdpPort, log });
   log(`autoSubmit=${config.autoSubmit} imagePaste=${config.imagePaste} cdpPort=${config.cdpPort}`);
 
   // transcript 事件走独立高段,避免与 spool seq 冲突。
@@ -268,9 +271,9 @@ export function activate(context: vscode.ExtensionContext): void {
     autoSubmit: cdpSubmit
       ? async (workspaceRoot, prompt) => {
           const r = await cdpSubmit(workspaceRoot, prompt);
-          if (!r.ok) log(`cdp submit failed: ${r.reason}; fallback to clipboard`);
+          if (!r.ok) log(`cdp submit failed: ${r.reason}`);
           else log("cdp submit ok");
-          return r.ok;
+          return r;
         }
       : undefined,
     imagePaste: config.imagePaste,
@@ -290,6 +293,12 @@ export function activate(context: vscode.ExtensionContext): void {
       if (!r.ok) log(`image paste failed: ${r.reason}`);
       else log("image paste ok");
       return r.ok;
+    },
+    answerAskCdp: async ({ workspaceRoot, action, letter }) => {
+      const r = await askDriver.submit(workspaceRoot, action, letter);
+      if (!r.ok) log(`ask submit failed: ${r.reason}`);
+      else log(`ask submit ok action=${action}`);
+      return r;
     },
   });
 
@@ -387,6 +396,39 @@ export function activate(context: vscode.ExtensionContext): void {
       maybeCompleteFromDisk(id);
     }
   }, TRANSCRIPT_WATCHDOG_MS);
+
+  const pollAskQuestions = async (): Promise<void> => {
+    if (boundRuns.size === 0) return;
+    const roots = workspaces();
+    if (roots.length === 0) return;
+    let inspectRaw: unknown = { present: false };
+    for (const root of roots) {
+      const hit = await askDriver.inspect(root);
+      if (hit.present) { inspectRaw = hit; break; }
+    }
+    const inspect = parseAskInspect(inspectRaw);
+    const runId = [...boundRuns.keys()].at(-1);
+    if (!runId) return;
+    const prev = askLastByRun.get(runId) ?? null;
+    const act = nextAskAction(prev, inspect, () => `ask-${runId}-${nextExtSeq()}`);
+    if (!act) return;
+    if (act.type === "askQuestion") {
+      askLastByRun.set(runId, act.payload.request_id);
+      core.enqueue({
+        type: "run.event", runId, source: "cdp", hookEventName: "askQuestion",
+        payload: act.payload, ts: Date.now(), seq: nextExtSeq(),
+      });
+      log(`askQuestion ${runId} ${act.payload.request_id}`);
+      return;
+    }
+    askLastByRun.delete(runId);
+    core.enqueue({
+      type: "run.event", runId, source: "cdp", hookEventName: "askQuestionResolved",
+      payload: { request_id: act.request_id, via: "cdp" }, ts: Date.now(), seq: nextExtSeq(),
+    });
+    log(`askQuestionResolved ${runId} ${act.request_id}`);
+  };
+  const askPoll = setInterval(() => { void pollAskQuestions(); }, 2000);
   context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(() => sendHeartbeat()));
 
   const adoptFromHub = async (): Promise<void> => {
@@ -478,6 +520,9 @@ export function activate(context: vscode.ExtensionContext): void {
           noteHubGeneration(lastGenerationId, msg.runId, msg.generation_id);
           void executor.followup(msg);
           break;
+        case "run.answerAsk":
+          void executor.answerAsk(msg).catch((e) => log(`answerAsk error: ${String(e)}`));
+          break;
         case "event.ack":
           forwarder.ack(msg.lastSeq);
           break;
@@ -504,6 +549,7 @@ export function activate(context: vscode.ExtensionContext): void {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       clearInterval(spoolPoll);
       clearInterval(transcriptPoll);
+      clearInterval(askPoll);
       dirWatch.dispose();
       for (const stop of sizeWatches.values()) stop();
       sizeWatches.clear();

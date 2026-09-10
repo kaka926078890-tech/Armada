@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { RunRow } from "../src/boardState";
 import {
   BASE_TITLE, completionHeadline, shouldAlert, seedRunStatus, takeNewlyAlertable,
+  seedAskStatus, takeNewlyNeedInput, NEED_INPUT_TITLE, needInputBody,
 } from "../src/completionNotify";
 
 const base: RunRow = {
@@ -61,5 +62,26 @@ describe("completionHeadline / shouldAlert", () => {
     expect(shouldAlert(base, { watchingId: "r-1" })).toBe(false);
     expect(shouldAlert(base, { watchingId: "other" })).toBe(true);
     expect(shouldAlert(base, { watchingId: null })).toBe(true);
+  });
+});
+
+describe("takeNewlyNeedInput", () => {
+  const pending = {
+    request_id: "ask-1",
+    questions: [{ id: "q0", prompt: "这是本机验证用的 Questions 框", options: [{ id: "a", label: "A", text: "甲" }] }],
+    detected_at: 9,
+  };
+
+  test("fires once when pending_ask appears; clearing does not fire completed", () => {
+    const prev = seedAskStatus([base]);
+    const withAsk = { ...base, pending_ask: pending };
+    expect(takeNewlyNeedInput(prev, [withAsk]).map((r) => r.id)).toEqual(["r-1"]);
+    expect(takeNewlyNeedInput(prev, [withAsk])).toEqual([]);
+    expect(takeNewlyNeedInput(prev, [base])).toEqual([]);
+  });
+
+  test("fifth title and body are the need-input sentence and prompt slice", () => {
+    expect(NEED_INPUT_TITLE).toBe("Armada 需要你处理");
+    expect(needInputBody({ ...base, pending_ask: pending })).toContain("Questions 框");
   });
 });

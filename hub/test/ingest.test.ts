@@ -638,4 +638,61 @@ describe("event ingest", () => {
     expect(((await (await api(`/api/runs/${runId}`)).json()) as any).status).toBe("running");
     ws.close();
   });
+
+  test("cdp askQuestion sets pending_ask while status stays running", async () => {
+    const { ws, api, runId } = await startBoundRun();
+    const payload = {
+      request_id: "ask-1",
+      questions: [{
+        id: "q0",
+        prompt: "选一个",
+        options: [
+          { id: "a", label: "A", text: "甲" },
+          { id: "b", label: "B", text: "乙" },
+        ],
+      }],
+      detected_at: 1_700_000_000_000,
+      detect_via: "cdp",
+    };
+    ws.send(JSON.stringify({
+      type: "run.event", runId, source: "cdp", hookEventName: "askQuestion", payload, ts: Date.now(), seq: 1,
+    }));
+    await new Promise((r) => setTimeout(r, 150));
+    const run = (await (await api(`/api/runs/${runId}`)).json()) as any;
+    expect(run.status).toBe("running");
+    expect(run.pending_ask).toMatchObject({ request_id: "ask-1", detect_via: "cdp" });
+    expect(run.pending_ask.questions[0].prompt).toBe("选一个");
+    expect(run.pending_ask.questions[0].options).toHaveLength(2);
+    ws.close();
+  });
+
+  test("askQuestionResolved clears pending_ask; followup still busy", async () => {
+    const { ws, api, runId } = await startBoundRun();
+    ws.send(JSON.stringify({
+      type: "run.event", runId, source: "cdp", hookEventName: "askQuestion", seq: 1, ts: Date.now(),
+      payload: {
+        request_id: "ask-1",
+        questions: [{ id: "q0", prompt: "q", options: [{ id: "a", label: "A", text: "甲" }] }],
+        detected_at: 1, detect_via: "cdp",
+      },
+    }));
+    await new Promise((r) => setTimeout(r, 120));
+    const busy = await api(`/api/runs/${runId}/followup`, { method: "POST", body: JSON.stringify({ prompt: "续" }) });
+    expect(busy.status).toBe(409);
+    expect(((await busy.json()) as any).error).toBe("CONVERSATION_BUSY");
+    const ans = await api(`/api/runs/${runId}/answer-ask`, {
+      method: "POST",
+      body: JSON.stringify({ request_id: "ask-1", action: "continue", answers: [{ question_id: "q0", option_ids: ["a"] }] }),
+    });
+    expect(ans.status).toBe(202);
+    const body = await ans.json() as any;
+    expect(body.run.pending_ask.request_id).toBe("ask-1");
+    ws.send(JSON.stringify({
+      type: "run.event", runId, source: "cdp", hookEventName: "askQuestionResolved", seq: 2, ts: Date.now(),
+      payload: { request_id: "ask-1", via: "cdp" },
+    }));
+    await new Promise((r) => setTimeout(r, 120));
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).pending_ask).toBeNull();
+    ws.close();
+  });
 });

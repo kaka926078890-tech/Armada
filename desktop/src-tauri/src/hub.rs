@@ -18,6 +18,7 @@ const DENY_IFACE: &[&str] = &[
 #[derive(Default)]
 pub struct HubState {
     owned: Mutex<Option<Child>>,
+    pub discovery: Mutex<crate::discovery::DiscoveryState>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,6 +66,8 @@ pub struct CreateFleetResult {
     pub owned_hub_pid: Option<u32>,
     pub webview_origin: String,
     pub attach: Option<crate::attach::LocalAttachResult>,
+    pub advertised: bool,
+    pub advertise_error: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -611,14 +614,16 @@ fn finish_create(
         owned_hub_pid: pid,
         webview_origin: "127.0.0.1:7380".into(),
         attach,
+        advertised: false,
+        advertise_error: None,
     })
 }
 
 #[tauri::command]
-pub fn create_fleet(app: tauri::AppHandle, state: tauri::State<'_, HubState>) -> Result<CreateFleetResult, String> {
+pub fn create_fleet(app: tauri::AppHandle, state: tauri::State<'_, HubState>, discoverable: bool) -> Result<CreateFleetResult, String> {
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (&app, &state);
+        let _ = (&app, &state, discoverable);
         return Err("create-macos-only".into());
     }
     require_macos_create(host_os()).map_err(|e| e.to_string())?;
@@ -637,7 +642,7 @@ pub fn create_fleet(app: tauri::AppHandle, state: tauri::State<'_, HubState>) ->
     };
     let action = decide_occupancy(alive, port_open, probe.health_name.as_deref(), probe.auth);
     let kind = apply_decision(true, action)?;
-    match kind {
+    let result = match kind {
         ApplyKind::Spawn => {
             let child = spawn_hub(resource.as_deref())?;
             *owned = Some(child);
@@ -646,19 +651,52 @@ pub fn create_fleet(app: tauri::AppHandle, state: tauri::State<'_, HubState>) ->
                 "spawn-timeout".to_string()
             })?;
             let pid = owned.as_ref().map(|c| c.id());
-            finish_create(resource.as_deref(), token, kind, pid)
+            finish_create(resource.as_deref(), token, kind, pid)?
         }
         ApplyKind::Attach => {
             *owned = None;
             let token = load_token_from_home().ok_or_else(|| "token-missing".to_string())?;
-            finish_create(resource.as_deref(), token, kind, None)
+            finish_create(resource.as_deref(), token, kind, None)?
         }
         ApplyKind::ReuseOwned => {
             let token = load_token_from_home().ok_or_else(|| "token-missing".to_string())?;
             let pid = owned.as_ref().map(|c| c.id());
-            finish_create(resource.as_deref(), token, kind, pid)
+            finish_create(resource.as_deref(), token, kind, pid)?
         }
+    };
+    drop(owned);
+    maybe_advertise(result, discoverable, &state)
+}
+
+fn maybe_advertise(
+    mut result: CreateFleetResult,
+    discoverable: bool,
+    state: &HubState,
+) -> Result<CreateFleetResult, String> {
+    if !discoverable {
+        return Ok(result);
     }
+    let Some(ip) = result.share_candidates.first().map(|c| c.ipv4.clone()) else {
+        result.advertise_error = Some("advertise-failed".into());
+        return Ok(result);
+    };
+    match crate::discovery::start_advertise(state, &ip, &result.token) {
+        Ok(()) => result.advertised = true,
+        Err(_) => result.advertise_error = Some("advertise-failed".into()),
+    }
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn start_fleet_browse(app: tauri::AppHandle, state: tauri::State<'_, HubState>) -> Result<(), String> {
+    let ips: Vec<String> = pick_share_candidates(&list_ifaces()).into_iter().map(|s| s.ipv4).collect();
+    crate::discovery::start_browse(app, &state, ips)
+}
+
+#[tauri::command]
+pub fn stop_fleet_browse(state: tauri::State<'_, HubState>) -> Result<(), String> {
+    crate::discovery::stop_browse(&state);
+    Ok(())
 }
 
 #[tauri::command]
@@ -713,6 +751,7 @@ pub fn quit_owned_hub(state: tauri::State<'_, HubState>) -> Result<(), String> {
 }
 
 pub fn quit_owned_inner(state: &HubState) {
+    crate::discovery::shutdown(state);
     if let Ok(mut owned) = state.owned.lock() {
         quit_child(&mut owned);
     }
@@ -835,6 +874,8 @@ mod tests {
             owned_hub_pid: None,
             webview_origin: "127.0.0.1:7380".into(),
             attach: Some(attach),
+            advertised: false,
+            advertise_error: None,
         };
         let v = serde_json::to_value(&created).unwrap();
         assert_eq!(v["webviewOrigin"], "127.0.0.1:7380");

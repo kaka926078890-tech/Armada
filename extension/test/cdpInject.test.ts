@@ -2,11 +2,14 @@ import { describe, expect, test } from "bun:test";
 import {
   createCdpSubmitter,
   createImagePaster,
+  createAskQuestionDriver,
   COMPOSER_FOCUS_JS,
   COMPOSER_FOCUS_IMAGE_JS,
   COMPOSER_CHIP_COUNT_JS,
   COMPOSER_VERIFY_JS,
   COMPOSER_ENTER_JS,
+  ASK_INSPECT_JS,
+  ASK_CLICK_LETTER_JS,
   type CdpSession,
 } from "../src/cdpInject";
 
@@ -15,7 +18,7 @@ const PAGE = { type: "page", title: "hello.txt — armada-test-ws", webSocketDeb
 type CallLog = { method: string; params?: Record<string, unknown> };
 
 /** 用脚本化的 Runtime.evaluate 返回值构造 mock session;insertText/Enter 默认成功 */
-function mockSession(evalResults: string[], log: CallLog[] = []): CdpSession {
+function mockSession(evalResults: unknown[], log: CallLog[] = []): CdpSession {
   let i = 0;
   return {
     async call(method, params) {
@@ -326,5 +329,95 @@ describe("createImagePaster", () => {
     expect(log.filter((c) => c.method === "Input.dispatchKeyEvent")).toHaveLength(2);
     const insert = log.find((c) => c.method === "Input.insertText");
     expect(insert?.params?.text).toBe("看图");
+  });
+});
+
+const FIXTURE_TEXT = "Questions 1 of 1 1. 这是本机验证用的 Questions 框。请任选一项并点 Continue；后台正在用 CDP 抓 DOM。 A 选项 A（验证单选） B 选项 B C Skip 也行，只要框出现过 D Skip Esc Continue ⏎";
+
+function mockAskDoc(letters: string[], selected?: string, innerText = FIXTURE_TEXT) {
+  const btns = letters.map((L) => ({
+    innerText: L,
+    className: L === selected
+      ? "composer-questionnaire-toolbar-option-letter composer-questionnaire-toolbar-option-letter-selected"
+      : "composer-questionnaire-toolbar-option-letter",
+    focused: false,
+    clicked: false,
+    focus() { this.focused = true; },
+    click() { this.clicked = true; },
+  }));
+  const bar = {
+    className: "composer-questionnaire-toolbar",
+    innerText,
+    querySelectorAll(sel: string) {
+      if (sel === "button.composer-questionnaire-toolbar-option-letter") return btns;
+      return [];
+    },
+    scrollIntoView() {},
+  };
+  return {
+    btns,
+    querySelector(sel: string) {
+      if (sel === ".composer-questionnaire-toolbar") return bar;
+      return null;
+    },
+    querySelectorAll() { return []; },
+  };
+}
+
+function runAskInspect(letters: string[]) {
+  const document = mockAskDoc(letters, "A");
+  const fn = new Function("document", `return (${ASK_INSPECT_JS});`)(document);
+  return { result: fn() as { present: boolean; prompt: string; options: { id: string; label: string; text: string }[] }, btns: document.btns };
+}
+
+function runAskClick(letters: string[], letter: string) {
+  const document = mockAskDoc(letters);
+  const fn = new Function("document", `return (${ASK_CLICK_LETTER_JS});`)(document);
+  return { result: String(fn(letter)), btns: document.btns };
+}
+
+describe("AskQuestion toolbar JS", () => {
+  test("inspect drops the Skip letter and keeps A/B/C from the CDP fixture", () => {
+    const { result } = runAskInspect(["A", "B", "C", "D"]);
+    expect(result.present).toBe(true);
+    expect(result.options.map((o) => o.id)).toEqual(["a", "b", "c"]);
+    expect(result.prompt).toContain("这是本机验证用的 Questions 框");
+    expect(result.options[0]?.text).toContain("选项 A");
+  });
+
+  test("click B hits B; D is Skip and must not be clicked", () => {
+    const b = runAskClick(["A", "B", "C", "D"], "B");
+    expect(b.result).toBe("OK");
+    expect(b.btns[1]?.clicked).toBe(true);
+    const d = runAskClick(["A", "B", "C", "D"], "D");
+    expect(d.result).toBe("NO_LETTER");
+    expect(d.btns[3]?.clicked).toBe(false);
+  });
+});
+
+describe("AskQuestion CDP driver", () => {
+  test("continue clicks letter then CDP Enter, never composer insertText/ENTER JS", async () => {
+    const log: CallLog[] = [];
+    const driver = createAskQuestionDriver(deps({
+      connect: async () => mockSession(["OK", { present: false }], log),
+    }));
+    const r = await driver.submit("/Users/x/armada-test-ws", "continue", "b");
+    expect(r.ok).toBe(true);
+    expect(log.some((c) => c.method === "Input.insertText")).toBe(false);
+    expect(log.some((c) => c.method === "Input.dispatchKeyEvent" && c.params?.key === "Enter")).toBe(true);
+    const evals = log.filter((c) => c.method === "Runtime.evaluate").map((c) => String(c.params?.expression ?? ""));
+    expect(evals.some((e) => e.includes("composer-questionnaire-toolbar-option-letter"))).toBe(true);
+    expect(evals.some((e) => e.includes("aislash-editor-input"))).toBe(false);
+  });
+
+  test("skip sends Escape not Enter", async () => {
+    const log: CallLog[] = [];
+    const driver = createAskQuestionDriver(deps({
+      connect: async () => mockSession([{ present: false }], log),
+    }));
+    const r = await driver.submit("/Users/x/armada-test-ws", "skip");
+    expect(r.ok).toBe(true);
+    expect(log.some((c) => c.method === "Input.dispatchKeyEvent" && c.params?.key === "Escape")).toBe(true);
+    expect(log.some((c) => c.method === "Input.dispatchKeyEvent" && c.params?.key === "Enter")).toBe(false);
   });
 });
