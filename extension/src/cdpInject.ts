@@ -196,6 +196,160 @@ function defaultConnect(wsUrl: string, timeoutMs: number): Promise<CdpSession> {
   });
 }
 
+const ASK_ESC = /[.*+?^${}()|[\\]\\\\]/g;
+
+/** Questions 探测。最后一个 letter 是 Skip 控件，不得算作选项。 */
+export const ASK_INSPECT_JS = `function () {
+  var bar = document.querySelector(".composer-questionnaire-toolbar");
+  if (!bar) return { present: false };
+  var btns = Array.prototype.slice.call(bar.querySelectorAll("button.composer-questionnaire-toolbar-option-letter"));
+  var real = btns.length >= 2 ? btns.slice(0, -1) : [];
+  var skip = btns.length ? btns[btns.length - 1] : null;
+  var letters = real.map(function (b) { return String(b.innerText || "").trim(); });
+  function esc(s) { return String(s || "").replace(${ASK_ESC}, "\\\\$&"); }
+  var raw = String(bar.innerText || "").replace(/\\s+/g, " ").trim();
+  var prompt = raw.replace(/^Questions\\s+\\d+\\s+of\\s+\\d+\\s+/i, "").replace(/^\\d+\\.\\s*/, "");
+  if (letters[0]) {
+    var cut = prompt.search(new RegExp("\\\\s+" + esc(letters[0]) + "\\\\s"));
+    if (cut > 0) prompt = prompt.slice(0, cut);
+  }
+  prompt = prompt.replace(/\\s+Skip\\s+Esc\\s+Continue[\\s\\S]*$/i, "").trim();
+  var options = [];
+  for (var i = 0; i < letters.length; i++) {
+    var L = letters[i];
+    var next = i + 1 < letters.length ? letters[i + 1] : (skip ? String(skip.innerText || "").trim() : "");
+    var text = L;
+    if (L && next) {
+      var m = raw.match(new RegExp("(?:^|\\\\s)" + esc(L) + "\\\\s+([\\\\s\\\\S]*?)(?=\\\\s+" + esc(next) + "(?:\\\\s|$)|$)"));
+      if (m && m[1]) text = m[1].replace(/\\s+Skip\\s+Esc\\s+Continue[\\s\\S]*$/i, "").trim() || L;
+    }
+    options.push({ id: L.toLowerCase(), label: L, text: text });
+  }
+  return { present: true, prompt: prompt || "Questions", options: options };
+}`;
+
+/** 点目标字母；禁止点最后一个 Skip letter。 */
+export const ASK_CLICK_LETTER_JS = `function (letter) {
+  var bar = document.querySelector(".composer-questionnaire-toolbar");
+  if (!bar) return "GONE";
+  var btns = Array.prototype.slice.call(bar.querySelectorAll("button.composer-questionnaire-toolbar-option-letter"));
+  var real = btns.length >= 2 ? btns.slice(0, -1) : [];
+  var want = String(letter || "").trim().toUpperCase();
+  var btn = null;
+  for (var i = 0; i < real.length; i++) {
+    if (String(real[i].innerText || "").trim().toUpperCase() === want) { btn = real[i]; break; }
+  }
+  if (!btn) return "NO_LETTER";
+  if (typeof bar.scrollIntoView === "function") bar.scrollIntoView({ block: "center" });
+  if (typeof btn.focus === "function") btn.focus();
+  if (typeof btn.click === "function") btn.click();
+  return "OK";
+}`;
+
+export type AskCdpInspect = { present: false } | { present: true; prompt: string; options: { id: string; label: string; text: string }[] };
+
+async function connectWorkspacePage(
+  deps: Required<Pick<CdpSubmitterDeps, "port">> & CdpSubmitterDeps,
+  workspaceRoot: string,
+): Promise<{ ok: true; session: CdpSession } | { ok: false; reason: string }> {
+  const fetchJson = deps.fetchJson ?? defaultFetchJson;
+  const connect = deps.connect ?? defaultConnect;
+  const log = deps.log ?? (() => {});
+  let targets: any[];
+  try {
+    targets = await fetchJson(`http://127.0.0.1:${deps.port}/json`, 1500);
+  } catch {
+    return { ok: false, reason: "CDP_UNREACHABLE" };
+  }
+  const base = workspaceRoot.split(/[\\/]/).filter(Boolean).pop() ?? workspaceRoot;
+  const pages = targets.filter(
+    (t) => t.type === "page" && typeof t.title === "string" && t.title.includes(base),
+  );
+  if (pages.length === 0) return { ok: false, reason: "WINDOW_TARGET_NOT_FOUND" };
+  if (pages.length > 1) log(`cdp ask: ${pages.length} page targets match "${base}", using first`);
+  const wsUrl = pages[0].webSocketDebuggerUrl;
+  if (typeof wsUrl !== "string" || !wsUrl) return { ok: false, reason: "NO_WS_URL" };
+  try {
+    const session = await connect(wsUrl, 2000);
+    return { ok: true, session };
+  } catch (e) {
+    return { ok: false, reason: `CDP_CONNECT_FAIL:${String(e)}` };
+  }
+}
+
+async function dispatchKey(session: CdpSession, key: "Enter" | "Escape"): Promise<void> {
+  const code = key === "Enter" ? "Enter" : "Escape";
+  const vk = key === "Enter" ? 13 : 27;
+  await session.call("Input.dispatchKeyEvent", {
+    type: "keyDown", key, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk,
+  });
+  await session.call("Input.dispatchKeyEvent", {
+    type: "keyUp", key, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk,
+  });
+}
+
+export function createAskQuestionDriver(deps: CdpSubmitterDeps) {
+  const sleep = deps.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
+
+  async function inspect(workspaceRoot: string): Promise<AskCdpInspect> {
+    const hit = await connectWorkspacePage(deps, workspaceRoot);
+    if (!hit.ok) return { present: false };
+    try {
+      const v = await hit.session.call("Runtime.evaluate", {
+        expression: `(${ASK_INSPECT_JS})()`, returnByValue: true,
+      }).then((x) => x?.result?.value);
+      if (!v || v.present !== true) return { present: false };
+      const options = Array.isArray(v.options) ? v.options : [];
+      return {
+        present: true,
+        prompt: typeof v.prompt === "string" && v.prompt.trim() ? v.prompt.trim() : "Questions",
+        options: options.filter((o: any) => o && typeof o.id === "string").map((o: any) => ({
+          id: String(o.id), label: String(o.label ?? o.id), text: String(o.text ?? o.label ?? o.id),
+        })),
+      };
+    } catch {
+      return { present: false };
+    } finally {
+      hit.session.close();
+    }
+  }
+
+  async function submit(
+    workspaceRoot: string,
+    action: "continue" | "skip",
+    letter?: string,
+  ): Promise<CdpSubmitResult> {
+    const hit = await connectWorkspacePage(deps, workspaceRoot);
+    if (!hit.ok) return { ok: false, reason: hit.reason };
+    try {
+      if (action === "continue") {
+        const clicked = String(await hit.session.call("Runtime.evaluate", {
+          expression: `(${ASK_CLICK_LETTER_JS})(${JSON.stringify(String(letter || "").toUpperCase())})`,
+          returnByValue: true,
+        }).then((x) => x?.result?.value));
+        if (clicked !== "OK") return { ok: false, reason: clicked === "GONE" ? "ASK_WIDGET_NOT_FOUND" : "ASK_INVALID_OPTION" };
+        await dispatchKey(hit.session, "Enter");
+      } else {
+        await dispatchKey(hit.session, "Escape");
+      }
+      for (let i = 0; i < 8; i++) {
+        const v = await hit.session.call("Runtime.evaluate", {
+          expression: `(${ASK_INSPECT_JS})()`, returnByValue: true,
+        }).then((x) => x?.result?.value);
+        if (!v || v.present !== true) return { ok: true };
+        await sleep(400);
+      }
+      return { ok: false, reason: "ASK_SUBMIT_FAILED" };
+    } catch (e) {
+      return { ok: false, reason: `CDP_EVAL_FAIL:${String(e)}` };
+    } finally {
+      hit.session.close();
+    }
+  }
+
+  return { inspect, submit };
+}
+
 export function createCdpSubmitter(deps: CdpSubmitterDeps) {
   const fetchJson = deps.fetchJson ?? defaultFetchJson;
   const connect = deps.connect ?? defaultConnect;

@@ -36,10 +36,18 @@
 
         <div id="create-pane" class="pane" hidden>
           <p class="pane-copy">在本机启动或接入中台，随后进入看板派发任务。</p>
+          <label class="check" for="discoverable">
+            <input type="checkbox" id="discoverable" checked />
+            <span>开放到局域网</span>
+          </label>
+          <p class="pane-copy discover-help">同一 Wi-Fi 上的 Armada 会看到这支舰队，点一下即可加入。不勾选则不广播，仍可复制分享链接。</p>
           <button type="button" class="btn btn-primary" id="create">创建舰队</button>
         </div>
 
         <div id="join-pane" class="pane" hidden>
+          <p class="field-label">局域网开放舰队</p>
+          <p id="discovered-empty" class="pane-copy"></p>
+          <div id="discovered-list" class="fleet-list"></div>
           <label class="field-label" for="join-uri">邀请链接</label>
           <form id="join-form" class="join-form">
             <input

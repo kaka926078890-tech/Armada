@@ -1,0 +1,25 @@
+---
+description: Live JSONL/CDP proof before writing the solution; partial feasibility is not a green light
+alwaysApply: true
+---
+
+# Feasibility before writing the solution
+
+IDE 控件、CDP 点击、hook/jsonl 形状、未知弹窗：**真机验证完成之前，不得写方案落地**（实施计划、生产探测/点击/注入、新 REST/WS）。
+
+「看见了」≠「过了」。历史完成后的 jsonl 不能当「框还在」的实时闸。
+
+| 路径 | 过关证据 | 未过时禁止 |
+| --- | --- | --- |
+| 读（探测） | 控件 **在屏期间** 的 DOM 夹具，或同期 jsonl 增量 | 用完成后的 `tool_use` 当主源 |
+| 写（提交/注入） | 选择器 **加上** 真机关掉控件的动作（按钮或 Enter/Esc） | 只记下 class 就开始写 click |
+| 测试 | 夹具入仓后必红；测不红不准改生产 | 先写生产再补夹具 |
+
+```text
+❌ Questions class 已抓、Continue 未 CDP 点通 → 写 answer-ask / 点击脚本 / 实施计划
+❌ 正文 includes("Questions") 当探测闸
+❌ 规格里「主源待可行性二选一」未写死就开写 ingest
+✅ 探测夹具 + 提交真机点通（框关、生成继续）→ 再冻结选择器并写生产
+```
+
+对端 OS（本功能=Windows 被控机）未用同一选择器点通 Continue/Esc 前，不得宣称完成。Mac 夹具不能代替 Windows 真机。

@@ -117,9 +117,26 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
 
   app.get("/api/runs/:id/events", (c) => {
     const afterSeq = Number(c.req.query("afterSeq") ?? 0);
-    const limit = Math.min(Number(c.req.query("limit") ?? 500), 2000);
+    const beforeRaw = c.req.query("beforeSeq");
+    const beforeSeq = beforeRaw != null && beforeRaw !== "" ? Number(beforeRaw) : NaN;
+    const fromEnd = c.req.query("fromEnd") === "1";
+    const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 500) || 500, 1), 2000);
+    const runId = c.req.param("id");
+    const afterOk = Number.isFinite(afterSeq) ? afterSeq : 0;
+    if (Number.isFinite(beforeSeq) && beforeSeq > 0) {
+      const rows = db.query(
+        "SELECT * FROM run_events WHERE run_id=?1 AND seq<?2 ORDER BY seq DESC LIMIT ?3",
+      ).all(runId, beforeSeq, limit) as any[];
+      return c.json(rows.reverse());
+    }
+    if (fromEnd && afterOk <= 0) {
+      const rows = db.query(
+        "SELECT * FROM run_events WHERE run_id=?1 ORDER BY seq DESC LIMIT ?2",
+      ).all(runId, limit) as any[];
+      return c.json(rows.reverse());
+    }
     const rows = db.query("SELECT * FROM run_events WHERE run_id=?1 AND seq>?2 ORDER BY seq LIMIT ?3")
-      .all(c.req.param("id"), afterSeq, limit);
+      .all(runId, afterOk, limit);
     return c.json(rows);
   });
   app.get("/api/runs/:id/stream", (c) => {
@@ -194,6 +211,13 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
     const { run, error } = runs.followup(parent.id, typeof prompt === "string" ? prompt : "", attachmentIds);
     if (error) return c.json({ error }, httpStatusForRunError(error));
     return c.json({ run }, 200);
+  });
+  app.post("/api/runs/:id/answer-ask", async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const { run, error, already } = runs.answerAsk(c.req.param("id"), body);
+    if (already) return c.json({ ok: true, already: true }, 200);
+    if (error) return c.json({ error }, httpStatusForRunError(error));
+    return c.json({ run }, 202);
   });
   app.post("/api/runs/:id/close", (c) => {
     const { error } = runs.close(c.req.param("id"));

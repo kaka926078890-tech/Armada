@@ -459,6 +459,34 @@ describe("event ingest", () => {
     ws.close();
   });
 
+  // Intel 2026-09-07 r-47657619: MACHINE_OFFLINE unlocked followup while Grok gen
+  // 7bdd3717 was still live. followup retired it; Cursor never sent BSP for 「继续」;
+  // 14:28 stops 7bdd3717 / 836ee87e were STOP_GEN_RETIRED / STOP_UNARMED; card stuck 运行中.
+  test("darwin followup after MACHINE_OFFLINE keeps in-flight gen so its stop still completes", async () => {
+    const { ws, api, runId } = await startBoundRun();
+    const live = "7bdd3717-c359-4673-b3a2-593564232bf6";
+    ws.send(JSON.stringify(ev(runId, 1, "beforeSubmitPrompt", {
+      conversation_id: "cid-1", generation_id: live, prompt: "那就单独测试一遍Grok",
+    })));
+    await new Promise((r) => setTimeout(r, 80));
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).live_generation_id).toBe(live);
+    hub!.runs.onMachineOffline("m-1");
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).status).toBe("unknown");
+    const f = await api(`/api/runs/${runId}/followup`, { method: "POST", body: JSON.stringify({ prompt: "继续" }) });
+    expect(f.status).toBe(200);
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).live_generation_id).toBe(live);
+    ws.send(JSON.stringify({ type: "run.ack", runId, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId, conversationId: "cid-1", transcriptPath: "/tmp/t.jsonl", promptMatch: true }));
+    await new Promise((r) => setTimeout(r, 80));
+    ws.send(JSON.stringify(ev(runId, 10, "stop", { status: "completed", conversation_id: "cid-1", generation_id: live })));
+    ws.send(JSON.stringify(ev(runId, 11, "stop", {
+      status: "completed", conversation_id: "cid-1", generation_id: "836ee87e-798d-45db-a766-c6dac22b0382",
+    })));
+    await new Promise((r) => setTimeout(r, 120));
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).status).toBe("completed");
+    ws.close();
+  });
+
   test("dirty session-id generation does not arm or complete; child stop stays running", async () => {
     const { ws, api, runId } = await startBoundRun();
     ws.send(JSON.stringify(ev(runId, 1, "beforeSubmitPrompt", {
@@ -608,6 +636,63 @@ describe("event ingest", () => {
     })));
     await new Promise((r) => setTimeout(r, 120));
     expect(((await (await api(`/api/runs/${runId}`)).json()) as any).status).toBe("running");
+    ws.close();
+  });
+
+  test("cdp askQuestion sets pending_ask while status stays running", async () => {
+    const { ws, api, runId } = await startBoundRun();
+    const payload = {
+      request_id: "ask-1",
+      questions: [{
+        id: "q0",
+        prompt: "选一个",
+        options: [
+          { id: "a", label: "A", text: "甲" },
+          { id: "b", label: "B", text: "乙" },
+        ],
+      }],
+      detected_at: 1_700_000_000_000,
+      detect_via: "cdp",
+    };
+    ws.send(JSON.stringify({
+      type: "run.event", runId, source: "cdp", hookEventName: "askQuestion", payload, ts: Date.now(), seq: 1,
+    }));
+    await new Promise((r) => setTimeout(r, 150));
+    const run = (await (await api(`/api/runs/${runId}`)).json()) as any;
+    expect(run.status).toBe("running");
+    expect(run.pending_ask).toMatchObject({ request_id: "ask-1", detect_via: "cdp" });
+    expect(run.pending_ask.questions[0].prompt).toBe("选一个");
+    expect(run.pending_ask.questions[0].options).toHaveLength(2);
+    ws.close();
+  });
+
+  test("askQuestionResolved clears pending_ask; followup still busy", async () => {
+    const { ws, api, runId } = await startBoundRun();
+    ws.send(JSON.stringify({
+      type: "run.event", runId, source: "cdp", hookEventName: "askQuestion", seq: 1, ts: Date.now(),
+      payload: {
+        request_id: "ask-1",
+        questions: [{ id: "q0", prompt: "q", options: [{ id: "a", label: "A", text: "甲" }] }],
+        detected_at: 1, detect_via: "cdp",
+      },
+    }));
+    await new Promise((r) => setTimeout(r, 120));
+    const busy = await api(`/api/runs/${runId}/followup`, { method: "POST", body: JSON.stringify({ prompt: "续" }) });
+    expect(busy.status).toBe(409);
+    expect(((await busy.json()) as any).error).toBe("CONVERSATION_BUSY");
+    const ans = await api(`/api/runs/${runId}/answer-ask`, {
+      method: "POST",
+      body: JSON.stringify({ request_id: "ask-1", action: "continue", answers: [{ question_id: "q0", option_ids: ["a"] }] }),
+    });
+    expect(ans.status).toBe(202);
+    const body = await ans.json() as any;
+    expect(body.run.pending_ask.request_id).toBe("ask-1");
+    ws.send(JSON.stringify({
+      type: "run.event", runId, source: "cdp", hookEventName: "askQuestionResolved", seq: 2, ts: Date.now(),
+      payload: { request_id: "ask-1", via: "cdp" },
+    }));
+    await new Promise((r) => setTimeout(r, 120));
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).pending_ask).toBeNull();
     ws.close();
   });
 });

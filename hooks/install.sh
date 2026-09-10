@@ -19,11 +19,24 @@ try:
 except Exception:
     existing = {"version": 1, "hooks": {}}
 hooks = existing.setdefault("hooks", {})
+def is_ours(cmd):
+    return isinstance(cmd, str) and "armada-spool.sh" in cmd
 for event, entries in tpl["hooks"].items():
     lst = hooks.setdefault(event, [])
-    if not any("armada-spool.sh" in (e.get("command") or "") for e in lst):
+    if not any(is_ours(e.get("command") or "") for e in lst):
         for e in entries:
             lst.append({**e, "command": e["command"].replace("__SCRIPT__", script)})
+for event in list(hooks.keys()):
+    if event in tpl["hooks"]:
+        continue
+    lst = hooks.get(event) or []
+    rest = [e for e in lst if not is_ours(e.get("command") or "")]
+    if len(rest) == len(lst):
+        continue
+    if rest:
+        hooks[event] = rest
+    else:
+        del hooks[event]
 json.dump(existing, open(target, "w"), ensure_ascii=False, indent=2)
 print("installed: hooks.json merged, script at", script)
 PY

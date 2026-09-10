@@ -13,12 +13,23 @@ export const api = {
   runs: (opts?: { archived?: boolean }) =>
     req(`/api/runs${opts?.archived ? "?archived=1" : ""}`).then((r) => r.json()),
   run: (id: string) => req(`/api/runs/${id}`).then((r) => r.json()),
-  events: (id: string, afterSeq = 0, limit = 500) =>
-    req(`/api/runs/${id}/events?afterSeq=${afterSeq}&limit=${limit}`).then((r) => r.json()),
+  events: (id: string, opts?: { afterSeq?: number; beforeSeq?: number; fromEnd?: boolean; limit?: number }) => {
+    const p = new URLSearchParams();
+    p.set("limit", String(opts?.limit ?? 500));
+    if (opts?.fromEnd) p.set("fromEnd", "1");
+    if (opts?.beforeSeq != null) p.set("beforeSeq", String(opts.beforeSeq));
+    else if (opts?.afterSeq != null) p.set("afterSeq", String(opts.afterSeq));
+    return req(`/api/runs/${id}/events?${p}`).then((r) => r.json());
+  },
   dispatch: (machineId: string, workspaceRoot: string, prompt: string, attachmentIds: string[] = []) =>
     req("/api/runs", { method: "POST", body: JSON.stringify({ machineId, workspaceRoot, prompt, attachmentIds }) }).then((r) => r.json()),
   followup: (id: string, prompt: string, attachmentIds: string[] = []) =>
     req(`/api/runs/${id}/followup`, { method: "POST", body: JSON.stringify({ prompt, attachmentIds }) }).then((r) => r.json()),
+  answerAsk: (id: string, body: { request_id: string; action: "continue" | "skip"; answers?: { question_id: string; option_ids: string[] }[] }) =>
+    req(`/api/runs/${id}/answer-ask`, { method: "POST", body: JSON.stringify(body) }).then(async (r) => {
+      const j = await r.json();
+      return { ...j, httpStatus: r.status };
+    }),
   renameRun: (id: string, title: string) =>
     req(`/api/runs/${id}`, { method: "PATCH", body: JSON.stringify({ title }) }).then((r) => r.json()),
   uploadBlob: async (file: File) => {

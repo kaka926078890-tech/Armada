@@ -84,6 +84,12 @@ export function ingestEvent(db: Database, runs: RunService, sse: SseHub, machine
     set.add(cid);
     subagentCids.set(runId, set);
   }
+  if (msg.hookEventName === "askQuestion") {
+    runs.applyAskQuestion(runId, msg.payload);
+  }
+  if (msg.hookEventName === "askQuestionResolved") {
+    runs.resolveAskQuestion(runId, msg.payload?.request_id);
+  }
   if (msg.hookEventName === "stop") {
     runs.onStopEvent(runId, msg.payload);
     if (run.conversation_id && cid === run.conversation_id) subagentCids.delete(runId);

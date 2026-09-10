@@ -1,0 +1,29 @@
+---
+description: Develop and push on trunk (master); do not open long-lived feature branches
+alwaysApply: true
+---
+
+# Armada trunk
+
+本仓远程默认分支是 **`master`**（`origin/HEAD`），没有 `main`。用户说「主干 / main」时按 `master` 处理。
+
+## 必须
+
+- 检出 `master` 后直接改、提交、`git push origin master`。
+- 已有 `feat/*` / `fix/*` 上的未合入改动：**立刻合进 `master` 并推送**，不要继续在该分支上叠功能。
+
+## 禁止
+
+```text
+❌ git checkout -b feat/… 再开发
+❌ 为一次修复或功能开独立长期分支
+❌ 把该合主干的提交只推到 origin/feat/…
+```
+
+```text
+✅ git checkout master && 改代码 && commit && git push origin master
+```
+
+## 例外（须开发者点名）
+
+短期 PR / 紧急 hotfix 分支。合进 `master` 后删除远程分支，本地切回 `master`。

@@ -13,7 +13,7 @@ import Sidebar from "./components/Sidebar";
 import Board from "./components/Board";
 import RunDetail from "./components/RunDetail";
 import { DispatchModal } from "./components/Modals";
-import { alertCompletions, ensureNotifyPermission, seedRunStatus, stopTitleMarquee, takeNewlyAlertable } from "./completionNotify";
+import { alertCompletions, alertNeedInput, ensureNotifyPermission, seedAskStatus, seedRunStatus, stopTitleMarquee, takeNewlyAlertable, takeNewlyNeedInput } from "./completionNotify";
 import { applyTheme, loadTheme, saveTheme, type ThemeName } from "./theme";
 import {
   WS_KEY, READ_KEY, READ_SEEDED,
@@ -222,6 +222,7 @@ export default function App() {
   }, [selectedRun, selectedEnded, persistRead]);
 
   const seenStatus = useRef<Map<string, string> | null>(null);
+  const seenAsk = useRef<Map<string, string | null> | null>(null);
   useEffect(() => {
     if (runs.length === 0) return;
     if (!seenStatus.current) {
@@ -231,6 +232,22 @@ export default function App() {
     const fresh = takeNewlyAlertable(seenStatus.current, runs);
     if (fresh.length === 0) return;
     alertCompletions(fresh, {
+      watchingId: selectedRun,
+      tabVisible: document.visibilityState === "visible",
+      desktop: isDesktopShell(window.location.search),
+      onOpen: openRun,
+    });
+  }, [runs, selectedRun, openRun]);
+
+  useEffect(() => {
+    if (runs.length === 0) return;
+    if (!seenAsk.current) {
+      seenAsk.current = seedAskStatus(runs);
+      return;
+    }
+    const fresh = takeNewlyNeedInput(seenAsk.current, runs);
+    if (fresh.length === 0) return;
+    alertNeedInput(fresh, {
       watchingId: selectedRun,
       tabVisible: document.visibilityState === "visible",
       desktop: isDesktopShell(window.location.search),

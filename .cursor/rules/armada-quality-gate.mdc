@@ -1,0 +1,28 @@
+---
+description: Run Armada bun tests for the touched area before claiming a fix
+globs: hub/**/*.ts,extension/**/*.ts,hub/web/**/*.{ts,tsx},desktop-core/**/*.ts,hooks/**
+alwaysApply: false
+---
+
+# Armada quality gate
+
+在本仓根目录跑。不要因为有包装壳或 CI 就跳过。
+
+```bash
+cd /path/to/armada
+bun test hub/test extension/test hooks/test hub/web/test desktop-core/test
+```
+
+行为变更时至少跑触及的套件，例如：
+
+| 改了 | 最少跑 |
+| --- | --- |
+| `hub/src/runs.ts` / `ingest.ts` / `generationOwnership.ts` | `bun test hub/test` |
+| `hub/web/src/chatView.ts` | `bun test hub/web/test` |
+| `extension/src/**` | `bun test extension/test` |
+| `desktop-core/**` | `bun test desktop-core/test` |
+| `desktop/src-tauri` | `cargo test`（在 `desktop/src-tauri`） |
+
+停跑/ingest 补丁：**先红后绿**，夹具必须是真实 hook/jsonl 形状（空 AAR、sidecar gen、`turn_ended` status=success、无 BSP 的「继续」）。IDE/CDP 写路径另遵 `armada-feasibility-before-solution`：真机点通前不写生产。
+
+桌面壳改动另遵 `armada-desktop-packaged-verify`。未 overlay 安装不得声称桌面验收通过。

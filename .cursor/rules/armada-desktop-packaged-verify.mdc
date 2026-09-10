@@ -1,0 +1,20 @@
+---
+description: Desktop acceptance is overlay-installed Armada.app, never a source hub on 7380
+globs: desktop/**,desktop-core/**,scripts/**
+alwaysApply: false
+---
+
+# Armada desktop packaged verify
+
+验收 = 覆盖安装 **`/Applications/Armada.app`** 后「创建舰队」。不是 `tauri dev`，不是「源码 hub dist + 打包壳」。
+
+1. 退出 Armada.app。
+2. **停源码 hub**：`launchctl unload ~/Library/LaunchAgents/com.armada.hub.plist`。7380 被占时创建舰队会 **attach**，iframe 仍加载工作区 `hub/web/dist`，测的不是安装包。
+3. `cd desktop && bun run tauri build`（会跑 `bundle-hub.sh`）。
+4. 用产物覆盖 `/Applications/Armada.app`。
+5. 打开已装 app → 创建舰队必须 **spawn sidecar**，再点一次改动路径。
+
+```text
+❌ bun run --cwd hub/web build → 退出中台再进（附着旧 bun hub）
+✅ 停源码 hub → tauri build → 覆盖安装 → 创建舰队（自带 sidecar）→ 真机点一次
+```

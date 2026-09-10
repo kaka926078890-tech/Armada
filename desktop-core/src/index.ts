@@ -1,4 +1,5 @@
 export * from "./cdp";
+export * from "./discovery";
 export * from "./hubUrl";
 export * from "./joinUri";
 export * from "./openRunUri";

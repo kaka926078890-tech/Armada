@@ -1,29 +1,46 @@
 ---
-description: Armada — three keys, no heuristic gates, failing test on real event shape before a fix
+description: Three keys, no heuristic stop/chat gates, real-shape test before a fix
 alwaysApply: true
 ---
 
-# Armada durable design
+# Armada durable boundaries
 
 ## Three keys (do not substitute)
 
 | Key | Owns |
 | --- | --- |
-| window + workspace | dispatch / inject routing |
-| `conversation_id` | which events belong on a run |
-| `generation_id` | busy vs idle |
+| window + workspace | 派发 / 注入路由 |
+| `conversation_id` | 事件进哪张卡（ingest + tail） |
+| `generation_id` | 忙 vs 闲（`decideStop` / `onStopEvent`） |
 
-Completed-turn **assistant body** comes from cid-owned transcript. Hooks are in-flight only. Do not drop jsonl because hooks contain `run.prompt`. `afterAgentResponse.text` may be empty.
+完成轮助手正文 = **cid 绑定 jsonl**。Hook 只填 in-flight。`afterAgentResponse.text` 可为空。
+
+Prompt 字符串只用于 **尚未 bind 的首次挂靠**。一旦有 cid，prompt 不得再参与 stop 或重建。
+
+## Followup / arm
+
+- Mac：`followup()` **不得**立刻 `retireLiveGeneration`。新主会话 BSP 才 `rearm`。
+- Windows：仅 `attachHubGenerationIfWindows` 签发并替换 hub gen。
+- 禁止再往 `decideStop` 加第 N 个出口码，除非同时改 `generationOwnership.ts` 决策表 + 规格 + 真形状测试。
 
 ## Forbidden
 
-Prompt string / `includes` as stop or reconstruction gates. Dual-track latches. Thought text as fake body. Per-incident special cases.
+```text
+❌ prompt === / includes / 字数 当 stop 或重建闸
+❌ hook 含 run.prompt → 丢 transcript
+❌ 详情有正文 / thought / AAR 文本 → 推断已完成
+❌ 新钥匙 + 旧字符串闩双轨；28 vs 59 字特判
+❌ Intel 单独代码路径（darwin 共用）
+```
 
 ```text
-❌ BAD: hookHasPrompt(fromHooks, prompt) → discard transcript
-✅ GOOD: ingest enforces cid; eventsToChat keeps cid-owned jsonl; stop matches generation_id
+✅ ingest 按 cid 丢外卡；eventsToChat 保留 cid jsonl；stop 对 live generation_id
 ```
 
 ## Feasibility then full fix
 
-Failing test on the real event shape first. Then one shared-boundary change. Adjacent gaps: tell the developer, do not silently expand.
+先过 `armada-feasibility-before-solution`（真机形状 + 写路径点通），再写方案/生产。
+
+1. 命名不变量与 **一个** 共享边界。
+2. 夹具入仓后必红测试。测不红则不准改生产。
+3. 最小生产改动 + 留下该测试。相邻问题列出询问。

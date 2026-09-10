@@ -3,8 +3,8 @@ import { api, getToken } from "../api";
 import type { RunEvent } from "../types";
 import { workspaceFolderName, runDisplayName, type RunRow } from "../boardState";
 import ChatThread from "./ChatThread";
-import { eventsToChat } from "../chatView";
-import { collectEventPages, mergeEvents, EVENT_PAGE_SIZE } from "../loadEvents";
+import { eventsToChat, mergePendingAsk, INITIAL_VISIBLE_TURNS, initialHiddenPrefixTurns, recentTurnsWindow } from "../chatView";
+import { collectEventPages, mergeEvents, EVENT_PAGE_SIZE, hasOlderEvents, olderEventsQuery, shouldLoadOlder, prependPreserveScroll } from "../loadEvents";
 import { mergeImageFiles } from "../attachments";
 import { endFollowupSend, isFollowupSendEnter, tryBeginFollowupSend } from "../followupSend";
 import { WIDTH_KEY } from "../uiPrefs";
@@ -89,12 +89,22 @@ export default function RunDetail({ runId, onClose, onChanged }: {
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
   const [titleError, setTitleError] = useState("");
+  const [askError, setAskError] = useState("");
+  const [hiddenPrefixTurns, setHiddenPrefixTurns] = useState(0);
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
   const jumpedRef = useRef<string | null>(null);
   const sendingRef = useRef(false);
   const [sending, setSending] = useState(false);
   const sendEpoch = useRef(0);
+  const seqRef = useRef(0);
+  const tailReady = useRef(false);
+  const windowInited = useRef<string | null>(null);
+  const loadingOlderRef = useRef(false);
+  const preserveRef = useRef<{ scrollTop: number; scrollHeight: number } | null>(null);
+  const eventsRef = useRef<RunEvent[]>([]);
+  const hiddenPrefixRef = useRef(0);
 
   useEffect(() => {
     jumpedRef.current = null;
@@ -108,9 +118,18 @@ export default function RunDetail({ runId, onClose, onChanged }: {
     setMissing(false);
     setEditingTitle(false);
     setTitleError("");
+    setHiddenPrefixTurns(0);
+    setLoadingOlder(false);
     sendingRef.current = false;
     setSending(false);
     sendEpoch.current += 1;
+    seqRef.current = 0;
+    tailReady.current = false;
+    windowInited.current = null;
+    loadingOlderRef.current = false;
+    preserveRef.current = null;
+    eventsRef.current = [];
+    hiddenPrefixRef.current = 0;
 
     api.run(runId).then((r) => {
       if (aborted) return;
@@ -118,27 +137,59 @@ export default function RunDetail({ runId, onClose, onChanged }: {
       setRun(r);
     }).catch(() => { if (!aborted) setLoadError("任务详情加载失败（hub 不可达）"); });
 
-    const seqRef = { current: 0 };
-    const reloadEvents = (afterSeq = 0) => {
-      collectEventPages((after) => api.events(runId, after, EVENT_PAGE_SIZE) as Promise<RunEvent[]>, afterSeq, EVENT_PAGE_SIZE)
+    const applyEvents = (incoming: RunEvent[], mode: "replace" | "merge") => {
+      if (mode === "replace") {
+        seqRef.current = incoming.at(-1)?.seq ?? 0;
+        eventsRef.current = incoming;
+        setEvents(incoming);
+        return;
+      }
+      setEvents((prev) => {
+        const next = mergeEvents(prev, incoming);
+        seqRef.current = next.at(-1)?.seq ?? 0;
+        eventsRef.current = next;
+        return next;
+      });
+    };
+
+    const fetchForward = (afterSeq: number) => {
+      collectEventPages(
+        (after) => api.events(runId, { afterSeq: after, limit: EVENT_PAGE_SIZE }) as Promise<RunEvent[]>,
+        afterSeq,
+        EVENT_PAGE_SIZE,
+      )
         .then((evs) => {
-          if (aborted) return;
-          setEvents((prev) => {
-            const next = afterSeq === 0 ? evs : mergeEvents(prev, evs);
-            seqRef.current = next.at(-1)?.seq ?? 0;
-            return next;
-          });
+          if (aborted || !Array.isArray(evs) || evs.length === 0) return;
+          applyEvents(evs, "merge");
         })
         .catch(() => { if (!aborted) setLoadError("事件加载失败（hub 不可达）"); });
     };
-    reloadEvents(0);
+
+    api.events(runId, { fromEnd: true, limit: EVENT_PAGE_SIZE })
+      .then((evs) => {
+        if (aborted) return;
+        const list = Array.isArray(evs) ? evs as RunEvent[] : [];
+        applyEvents(list, "replace");
+        if (windowInited.current !== runId) {
+          const hidden = initialHiddenPrefixTurns(eventsToChat(list));
+          windowInited.current = runId;
+          hiddenPrefixRef.current = hidden;
+          setHiddenPrefixTurns(hidden);
+        }
+        tailReady.current = true;
+        if (seqRef.current > 0) fetchForward(seqRef.current);
+      })
+      .catch(() => { if (!aborted) setLoadError("事件加载失败（hub 不可达）"); });
 
     const es = new EventSource(api.streamUrl(runId));
     es.onmessage = (e) => {
       if (aborted) return;
       let data: { type?: string };
       try { data = JSON.parse(e.data); } catch { return; }
-      if (data.type === "run.event") reloadEvents(seqRef.current);
+      if (data.type === "run.event") {
+        if (!tailReady.current) return;
+        fetchForward(seqRef.current);
+      }
       if (data.type === "run.status" || data.type === "run.archived") {
         api.run(runId).then((r) => {
           if (aborted) return;
@@ -151,16 +202,50 @@ export default function RunDetail({ runId, onClose, onChanged }: {
     return () => { aborted = true; es.close(); };
   }, [runId, onChanged]);
 
+  const loadOlder = useCallback(() => {
+    const el = scrollRef.current;
+    if (el) preserveRef.current = { scrollTop: el.scrollTop, scrollHeight: el.scrollHeight };
+    if (hiddenPrefixRef.current > 0) {
+      const next = Math.max(0, hiddenPrefixRef.current - INITIAL_VISIBLE_TURNS);
+      hiddenPrefixRef.current = next;
+      setHiddenPrefixTurns(next);
+      return;
+    }
+    const q = olderEventsQuery(eventsRef.current);
+    if (!q || loadingOlderRef.current) return;
+    loadingOlderRef.current = true;
+    setLoadingOlder(true);
+    void api.events(runId, { beforeSeq: q.beforeSeq, limit: EVENT_PAGE_SIZE })
+      .then((evs) => {
+        if (!Array.isArray(evs) || evs.length === 0) return;
+        const next = mergeEvents(eventsRef.current, evs as RunEvent[]);
+        eventsRef.current = next;
+        seqRef.current = next.at(-1)?.seq ?? seqRef.current;
+        setEvents(next);
+      })
+      .catch(() => setLoadError("事件加载失败（hub 不可达）"))
+      .finally(() => {
+        loadingOlderRef.current = false;
+        setLoadingOlder(false);
+      });
+  }, [runId]);
+
   useLayoutEffect(() => {
     const el = scrollRef.current;
-    if (!el || events.length === 0) return;
+    if (!el) return;
+    if (preserveRef.current) {
+      el.scrollTop = prependPreserveScroll(preserveRef.current, el.scrollHeight);
+      preserveRef.current = null;
+      return;
+    }
+    if (events.length === 0) return;
     if (jumpedRef.current !== runId) {
       jumpedRef.current = runId;
       el.scrollTop = el.scrollHeight;
       return;
     }
     if (stickRef.current) el.scrollTop = el.scrollHeight;
-  }, [events, runId]);
+  }, [events, runId, hiddenPrefixTurns]);
 
   const sendFollowup = useCallback((e?: FormEvent) => {
     e?.preventDefault();
@@ -182,7 +267,7 @@ export default function RunDetail({ runId, onClose, onChanged }: {
           setFollowupError(r.error === "INJECT_SLOT_BUSY"
             ? "正在把另一条任务打进 Composer，几秒后再发即可；对方跑着不影响续聊。"
             : r.error === "CONVERSATION_BUSY"
-              ? "这张卡自己还在跑，等它停再续。"
+              ? (run.pending_ask ? "请先回答上方选择题，续聊暂不可用。" : "这张卡自己还在跑，等它停再续。")
               : r.error);
           return;
         }
@@ -235,7 +320,9 @@ export default function RunDetail({ runId, onClose, onChanged }: {
     dispatched: "已派发", binding: "绑定中", running: "运行中",
     completed: "已完成", cancelled: "已取消", aborted: "已中止", error: "异常", unknown: "未知",
   };
-  const chat = eventsToChat(events);
+  const chatAll = mergePendingAsk(eventsToChat(events), run.pending_ask);
+  const chat = recentTurnsWindow(chatAll, hiddenPrefixTurns);
+  const hasOlder = hiddenPrefixTurns > 0 || hasOlderEvents(events);
   const titleText = runDisplayName(run) || "图片";
   const commitTitle = () => {
     const next = titleDraft.trim();
@@ -301,6 +388,7 @@ export default function RunDetail({ runId, onClose, onChanged }: {
             className="px-2 py-1 rounded-md bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300">导出审计</a>
         </div>
         {cancelError && <div className="mt-2 text-red-400 text-sm">{cancelError}</div>}
+        {askError && <div className="mt-2 text-red-400 text-sm">{askError}</div>}
       </div>
       <div
         ref={scrollRef}
@@ -308,10 +396,39 @@ export default function RunDetail({ runId, onClose, onChanged }: {
           const el = scrollRef.current;
           if (!el) return;
           stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 72;
+          if (shouldLoadOlder({
+            scrollTop: el.scrollTop,
+            hasOlder: hiddenPrefixRef.current > 0 || hasOlderEvents(eventsRef.current),
+            loading: loadingOlderRef.current,
+          })) loadOlder();
         }}
         className="flex-1 overflow-y-auto px-4 py-4"
       >
-        <ChatThread blocks={chat} />
+        {hasOlder && (
+          <button
+            type="button"
+            disabled={loadingOlder}
+            onClick={loadOlder}
+            className="w-full mb-3 py-1.5 text-[12px] text-zinc-500 hover:text-zinc-300 disabled:opacity-40"
+          >
+            {loadingOlder ? "加载更早对话…" : "加载更早对话"}
+          </button>
+        )}
+        <ChatThread
+          blocks={chat}
+          onAnswerAsk={run.pending_ask ? async (body) => {
+            setAskError("");
+            const r = await api.answerAsk(run.id, body);
+            if (r?.error) {
+              setAskError(r.error === "ASK_IN_FLIGHT" ? "正在提交，请稍候"
+                : r.error === "ASK_INVALID_OPTION" ? "选项无效，请改选或 Skip"
+                : "提交失败，请到本机点 Continue / Skip");
+              return;
+            }
+            if (r?.run) setRun(r.run);
+            onChanged();
+          } : undefined}
+        />
       </div>
       {run.conversation_id && (
         <form className="p-3 border-t border-zinc-800/80 flex flex-col gap-2" onSubmit={sendFollowup}>
@@ -334,7 +451,7 @@ export default function RunDetail({ runId, onClose, onChanged }: {
                 sendFollowup();
               }}
               rows={3}
-              placeholder="续聊同一对话…（Enter 发送，Shift+Enter 换行；可粘贴截图）"
+              placeholder={run.pending_ask ? "请先回答上方选择题…" : "续聊同一对话…（Enter 发送，Shift+Enter 换行；可粘贴截图）"}
               className="flex-1 min-h-[4.5rem] max-h-48 resize-y px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-[13px] placeholder:text-zinc-600 leading-relaxed"
             />
             <button type="submit" disabled={sending || (!followup.trim() && followupFiles.length === 0)} className="px-3 py-2 rounded-lg bg-sky-700 hover:bg-sky-600 text-[13px] shrink-0 disabled:opacity-40">发送</button>

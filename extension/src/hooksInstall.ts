@@ -6,9 +6,12 @@ import { spawnSync } from "child_process";
 export const HOOK_EVENTS = [
   "sessionStart", "sessionEnd", "beforeSubmitPrompt", "preToolUse", "postToolUse",
   "postToolUseFailure", "beforeShellExecution", "afterShellExecution", "afterFileEdit",
-  "afterAgentResponse", "afterAgentThought", "subagentStart", "subagentStop",
+  "afterAgentResponse", "afterAgentThought",
   "preCompact", "stop",
 ] as const;
+
+/** Cursor UI shows Stopped while these fire; do not reinstall. Strip leftovers. */
+export const DROPPED_HOOK_EVENTS = ["subagentStart", "subagentStop"] as const;
 
 export function spoolScriptName(platform: string = process.platform): string {
   return platform === "win32" ? "armada-spool.exe" : "armada-spool.sh";
@@ -96,6 +99,15 @@ export function mergeHooks(existing: any, scriptPath: string): { merged: any; ch
       merged.hooks[event] = [...rest, expected];
       changed = true;
     }
+  }
+  for (const event of DROPPED_HOOK_EVENTS) {
+    if (!Array.isArray(merged.hooks[event])) continue;
+    const lst = merged.hooks[event] as any[];
+    const rest = lst.filter((e) => !(typeof e?.command === "string" && isArmadaSpoolCommand(e.command)));
+    if (rest.length === lst.length) continue;
+    if (rest.length === 0) delete merged.hooks[event];
+    else merged.hooks[event] = rest;
+    changed = true;
   }
   return { merged, changed };
 }

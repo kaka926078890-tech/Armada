@@ -4,8 +4,26 @@ import type { PendingRun } from "./binding";
 import { acquireCdpLock } from "./cdpLock";
 import { workspacePathIn } from "./workspacePath";
 
+const CANCEL_RECORD_WINDOW_MS = 20_000;
+
+/**
+ * 一次 `beforeSubmitPrompt` 归属于 Armada 自身注入的时间宽限。
+ * spool → forwarder 轮询为 1s（`extension.ts` 的 `spoolPoll`）；5s 给积压留 5 倍余量。
+ */
+const INJECT_ATTRIBUTION_MS = 5_000;
+
 export class CancelWatcher {
   private records = new Map<string, { cid: string; prompt: string; at: number; count: number }>();
+  /** Armada 自己最后一次把 prompt 提交进 composer 的时刻，按 runId。 */
+  private lastInjectAt = new Map<string, number>();
+
+  /** Called by Executor right after our own submit lands (CDP enter or clipboard paste). */
+  noteInjection(runId: string, nowMs: number): void {
+    for (const [id, at] of this.lastInjectAt) {
+      if (nowMs - at > CANCEL_RECORD_WINDOW_MS) this.lastInjectAt.delete(id);
+    }
+    this.lastInjectAt.set(runId, nowMs);
+  }
 
   record(runId: string, conversationId: string, prompt: string, nowMs: number): void {
     this.records.set(runId, { cid: conversationId, prompt, at: nowMs, count: 0 });
@@ -16,7 +34,11 @@ export class CancelWatcher {
     for (const [runId, r] of this.records) {
       if (ev.raw?.conversation_id !== r.cid) continue;
       if (ev.raw?.prompt !== r.prompt) continue;
-      if (nowMs - r.at > 20_000) { this.records.delete(runId); continue; }
+      if (nowMs - r.at > CANCEL_RECORD_WINDOW_MS) { this.records.delete(runId); continue; }
+      // 只有 Armada 自己迟到的注入才归我们收拾。人手动重发同一段文字形状一致
+      // （同 cid、同 prompt、全新 generation_id），取消它会打断用户自己的轮次。
+      const injectedAt = this.lastInjectAt.get(runId);
+      if (injectedAt === undefined || nowMs - injectedAt > INJECT_ATTRIBUTION_MS) continue;
       if (r.count >= 2) return null;
       r.count += 1;
       return r.cid;
@@ -36,11 +58,14 @@ export interface ExecutorDeps {
   addPending?: (run: PendingRun) => void;
   /** Drop a pending entry on INJECT_FAILED after it was already added. */
   removePending?: (runId: string) => void;
+  /** Our own submit landed. Only such submits may be re-cancelled after run.cancel. */
+  onInjected?: (runId: string) => void;
   /**
-   * 全自动提交(CDP DOM 注入)。返回 true 表示提示词已写入并提交;
-   * 返回 false 或抛错时降级为剪贴板粘贴 + 人工回车。
+   * 全自动提交(CDP DOM 注入)。true / `{ ok:true }` 表示已写入并回车。
+   * `NON_EMPTY_INPUT*`：框里是别人的草稿/引用芯片，禁止剪贴板往里贴。
+   * 其它失败：降级剪贴板粘贴（无 CDP 时仍靠人工回车）。
    */
-  autoSubmit?: (workspaceRoot: string, prompt: string) => Promise<boolean>;
+  autoSubmit?: (workspaceRoot: string, prompt: string) => Promise<boolean | { ok: boolean; reason?: string }>;
   imagePaste?: boolean;
   fetchBlob?: (id: string) => Promise<{ bytes: Buffer; mime: string }>;
   writeClipboard?: (bytes: Buffer, mime: string) => void;
@@ -57,12 +82,26 @@ export interface ExecutorDeps {
   bindKnown?: (args: { runId: string; conversationId: string; prompt: string; workspaceRoot: string }) => void;
   /** Override path of the machine-wide CDP inject lock (tests / non-default home). */
   cdpLockPath?: string;
+  answerAskCdp?: (args: {
+    workspaceRoot: string;
+    action: "continue" | "skip";
+    letter?: string;
+  }) => Promise<{ ok: boolean; reason?: string }>;
 }
 
 /** Lazy-load vscode so CancelWatcher stays bun-testable without the vscode runtime. */
 function vs(): typeof import("vscode") {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   return require("vscode");
+}
+
+function autoSubmitOutcome(r: boolean | { ok: boolean; reason?: string }): { ok: boolean; reason?: string } {
+  if (typeof r === "boolean") return { ok: r };
+  return { ok: !!r.ok, reason: r.reason };
+}
+
+function isDirtyComposer(reason?: string): boolean {
+  return typeof reason === "string" && reason.startsWith("NON_EMPTY_INPUT");
 }
 
 export class Executor {
@@ -117,8 +156,9 @@ export class Executor {
     }
     let pendingAdded = false;
     try {
-      await vscode.commands.executeCommand("workbench.action.focusActiveEditorGroup");
-      await vscode.commands.executeCommand("composer.newAgentChat");
+      // createNew = 空对话。newAgentChat 会把活动编辑器做成引用芯片（真机
+      // NON_EMPTY_INPUT:windows-packaging-self-hosted-）；其前再 focus 编辑器组会把用户挪开的焦点抢回去。
+      await vscode.commands.executeCommand("composer.createNew");
       // Auth passed + chat created: binding window starts; WRONG_WINDOW/NOT_AUTHORIZED never reach here.
       this.deps.addPending?.({
         runId: msg.runId,
@@ -136,8 +176,14 @@ export class Executor {
           return;
         }
       } else {
-        await this.injectPrompt(msg.workspaceRoot, msg.prompt, 1500);
+        const inj = await this.injectPrompt(msg.workspaceRoot, msg.prompt, 1500);
+        if (!inj.submitted) {
+          this.deps.removePending?.(msg.runId);
+          this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: inj.reason ?? "INJECT_FAILED" });
+          return;
+        }
       }
+      this.deps.onInjected?.(msg.runId);
       this.deps.send({ type: "run.ack", runId: msg.runId, status: "accepted" });
     } catch (e) {
       if (pendingAdded) this.deps.removePending?.(msg.runId);
@@ -166,28 +212,34 @@ export class Executor {
       return false;
     }
   }
-  private async injectPrompt(workspaceRoot: string, prompt: string, pasteWaitMs: number): Promise<void> {
+  private async injectPrompt(
+    workspaceRoot: string,
+    prompt: string,
+    pasteWaitMs: number,
+  ): Promise<{ submitted: boolean; reason?: string }> {
     const vscode = vs();
-    let submitted = false;
     if (this.deps.autoSubmit) {
       try {
-        submitted = await this.deps.autoSubmit(workspaceRoot, prompt);
+        const first = autoSubmitOutcome(await this.deps.autoSubmit(workspaceRoot, prompt));
+        if (first.ok) return { submitted: true };
+        if (isDirtyComposer(first.reason)) return { submitted: false, reason: "NON_EMPTY_INPUT" };
       } catch {
-        submitted = false;
+        // CDP threw; clipboard fallback below
       }
     }
-    if (!submitted) {
-      await this.sleep(pasteWaitMs);
-      await vscode.env.clipboard.writeText(prompt);
-      await vscode.commands.executeCommand("editor.action.clipboardPasteAction");
-      if (this.deps.autoSubmit) {
-        try {
-          submitted = await this.deps.autoSubmit(workspaceRoot, prompt);
-        } catch {
-          submitted = false;
-        }
+    await this.sleep(pasteWaitMs);
+    await vscode.env.clipboard.writeText(prompt);
+    await vscode.commands.executeCommand("editor.action.clipboardPasteAction");
+    if (this.deps.autoSubmit) {
+      try {
+        const second = autoSubmitOutcome(await this.deps.autoSubmit(workspaceRoot, prompt));
+        if (second.ok) return { submitted: true };
+        if (isDirtyComposer(second.reason)) return { submitted: false, reason: "NON_EMPTY_INPUT" };
+      } catch {
+        return { submitted: false, reason: "INJECT_FAILED" };
       }
     }
+    return { submitted: true };
   }
 
   async cancel(conversationId: string): Promise<void> {
@@ -229,8 +281,13 @@ export class Executor {
           return;
         }
       } else {
-        await this.injectPrompt(msg.workspaceRoot, msg.prompt, 800);
+        const inj = await this.injectPrompt(msg.workspaceRoot, msg.prompt, 800);
+        if (!inj.submitted) {
+          this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: inj.reason ?? "INJECT_FAILED" });
+          return;
+        }
       }
+      this.deps.onInjected?.(msg.runId);
       this.deps.addPending?.({
         runId: msg.runId,
         workspaceRoot: msg.workspaceRoot,
@@ -247,6 +304,52 @@ export class Executor {
       this.deps.send({ type: "run.ack", runId: msg.runId, status: "accepted" });
     } catch (e) {
       this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: `FOLLOWUP_FAILED:${String(e)}` });
+    } finally {
+      lock.release();
+    }
+  }
+
+  async answerAsk(msg: {
+    runId: string;
+    conversationId: string;
+    workspaceRoot: string;
+    request_id: string;
+    action: "continue" | "skip";
+    answers?: { question_id: string; option_ids: string[] }[];
+  }): Promise<void> {
+    const vscode = vs();
+    const lock = await acquireCdpLock({
+      lockPath: this.deps.cdpLockPath ?? join(homedir(), ".cursor", "armada", "cdp.lock"),
+      timeoutMs: 25_000,
+      sleep: this.sleep,
+    });
+    if (!lock.ok) {
+      this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: "CDP_LOCK_TIMEOUT" });
+      return;
+    }
+    try {
+      await vscode.commands.executeCommand("composer.openComposer", msg.conversationId);
+      const letter = msg.action === "continue" ? msg.answers?.[0]?.option_ids?.[0] : undefined;
+      if (msg.action === "continue" && !letter) {
+        this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: "ASK_INVALID_OPTION" });
+        return;
+      }
+      if (!this.deps.answerAskCdp) {
+        this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: "ASK_WIDGET_NOT_FOUND" });
+        return;
+      }
+      const r = await this.deps.answerAskCdp({
+        workspaceRoot: msg.workspaceRoot,
+        action: msg.action,
+        letter,
+      });
+      if (!r.ok) {
+        this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: r.reason ?? "ASK_SUBMIT_FAILED" });
+        return;
+      }
+      this.deps.send({ type: "run.ack", runId: msg.runId, status: "accepted" });
+    } catch (e) {
+      this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: `ASK_SUBMIT_FAILED:${String(e)}` });
     } finally {
       lock.release();
     }

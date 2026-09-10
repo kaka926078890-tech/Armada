@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { groupRuns, cardView, COLUMN_LABELS, canArchiveRun, isUnreadAlert, machineLabel, workspaceFolderName, runDisplayName, type ColumnKey, type RunRow } from "../boardState";
+import { groupRuns, cardView, COLUMN_LABELS, canArchiveRun, isUnreadAlert, isUnreadNeedInput, machineLabel, workspaceFolderName, runDisplayName, type ColumnKey, type RunRow } from "../boardState";
 import type { Machine } from "../types";
 
 const COL_ACCENT: Record<ColumnKey, string> = {
@@ -58,7 +58,7 @@ export default function Board({ runs, machines, selected, onSelect, showArchived
             )}
             {g[col].map((r) => {
               const v = cardView(r, now);
-              const unread = isUnreadAlert(r, readMap[r.id]);
+              const unread = isUnreadAlert(r, readMap[r.id]) || isUnreadNeedInput(r, readMap[r.id]);
               const editing = editingId === r.id;
               return (
                 <div key={r.id} className={`group relative min-w-0 text-left rounded-md border ${selected === r.id ? "border-sky-600/80 bg-zinc-900" : "border-transparent bg-zinc-900/50 hover:border-zinc-700"}`}>

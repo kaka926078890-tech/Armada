@@ -1,0 +1,30 @@
+---
+description: Armada repo map, write policy, and doc router — read before improvising
+alwaysApply: true
+---
+
+# Armada workspace anchor
+
+**Mission:** LAN Cursor 舰队指挥台。任务在被控机真实 IDE 里跑；全网 **一套 hub**（中台建议 macOS）。
+
+## Layout
+
+| Path | Owns |
+| --- | --- |
+| `hub/` | 状态机、ingest、鉴权、SQLite |
+| `hub/web/` | 看板 / 详情 / SSE |
+| `extension/` | WS、CDP 注入、jsonl bind/tail、合成 stop |
+| `hooks/` | Cursor hook → spool（macOS `.sh` / Windows `.exe`） |
+| `desktop/` + `desktop-core/` | Tauri 壳；可测逻辑在 `desktop-core` |
+
+## Write policy
+
+- 开发、提交、推送都打在 **`master`**。见 `armada-trunk.mdc`。不要切 `feat/*` 独立开发。
+- 只改本仓。Findesk / chatkit 只读，除非开发者点名。
+- 停跑/详情契约规格：`docs/superpowers/specs/`（若无，则父仓 `desk/docs/superpowers/specs/`）。**代码与规格冲突时先改规格或停手**，禁止再加第三套口说例外。
+- IDE/CDP/未知弹窗：真机可行性过关前 **不写实施计划或生产代码**。见 `armada-feasibility-before-solution`。
+- 不要把 LAN discovery 与 generation/stop 补丁打进同一个提交。
+
+## Desk 工作区
+
+父仓 `desk/.cursor/rules/long-term-minimal-fixes.mdc` 仍适用：共享边界一处修 + 回归测试；相邻洞列出询问，不默默扩大范围。

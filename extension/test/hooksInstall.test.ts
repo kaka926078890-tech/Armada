@@ -2,12 +2,30 @@ import { describe, expect, test } from "bun:test";
 import { mergeHooks, hooksDriftHash, HOOK_EVENTS, spoolScriptName, hookCommand, shouldInstallArmadaHooks } from "../src/hooksInstall";
 
 describe("mergeHooks", () => {
-  test("creates hooks object from scratch with all 15 events", () => {
+  test("creates hooks object from scratch with all 13 events", () => {
     const { merged, changed } = mergeHooks(null, "/home/u/.cursor/hooks/armada-spool.sh");
     expect(changed).toBe(true);
     expect(Object.keys(merged.hooks).sort()).toEqual([...HOOK_EVENTS].sort());
+    expect(HOOK_EVENTS).not.toContain("subagentStart");
+    expect(HOOK_EVENTS).not.toContain("subagentStop");
+    expect(merged.hooks.subagentStart).toBeUndefined();
+    expect(merged.hooks.subagentStop).toBeUndefined();
     expect(merged.hooks.stop[0].command).toBe("/home/u/.cursor/hooks/armada-spool.sh stop");
     expect(merged.hooks.stop[0].timeout).toBe(5);
+  });
+
+  test("strips leftover Armada subagentStart/subagentStop and keeps third-party", () => {
+    const scriptPath = "/s/armada-spool.sh";
+    const existing = mergeHooks(null, scriptPath).merged;
+    existing.hooks.subagentStart = [
+      { command: `${scriptPath} subagentStart`, timeout: 5 },
+      { command: "/other/tool.sh subagentStart", timeout: 5 },
+    ];
+    existing.hooks.subagentStop = [{ command: `${scriptPath} subagentStop`, timeout: 5 }];
+    const { merged, changed } = mergeHooks(existing, scriptPath);
+    expect(changed).toBe(true);
+    expect(merged.hooks.subagentStart).toEqual([{ command: "/other/tool.sh subagentStart", timeout: 5 }]);
+    expect(merged.hooks.subagentStop).toBeUndefined();
   });
 
   test("preserves existing third-party entries", () => {

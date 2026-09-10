@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { assistantBodyText, eventsToChat, extractUserText, segmentChat } from "../src/chatView";
+import { assistantBodyText, eventsToChat, extractUserText, segmentChat, INITIAL_VISIBLE_TURNS, initialHiddenPrefixTurns, recentTurnsWindow } from "../src/chatView";
 import type { ChatBlock } from "../src/chatView";
 import type { RunEvent } from "../src/types";
 
@@ -457,5 +457,93 @@ describe("segmentChat", () => {
       user(1, "hi"), thought(2, "想"), asst(3, "先改。"), asst(4, "好了。"),
     ])).toBe("先改。\n\n好了。");
     expect(assistantBodyText([user(1, "hi")])).toBe("");
+  });
+});
+
+describe("AskQuestion chat blocks", () => {
+  test("jsonl AskQuestion is kind=ask not tool, and is not a user bubble", () => {
+    const blocks = eventsToChat([
+      ev({ seq: 1, source: "transcript", payload: JSON.stringify({
+        role: "assistant",
+        message: {
+          content: [{
+            type: "tool_use",
+            name: "AskQuestion",
+            id: "tool-ask-1",
+            input: {
+              questions: [{
+                id: "q0",
+                prompt: "选一个",
+                options: [
+                  { id: "theme", label: "主题" },
+                  { id: "workspace", label: "工作区" },
+                ],
+              }],
+            },
+          }],
+        },
+      }) }),
+    ]);
+    expect(blocks.some((b) => b.kind === "user")).toBe(false);
+    expect(blocks.filter((b) => b.kind === "tool")).toEqual([]);
+    expect(blocks).toMatchObject([{
+      kind: "ask", request_id: "tool-ask-1", prompt: "选一个", action: "resolved",
+    }]);
+    expect(blocks[0].kind === "ask" && blocks[0].options).toHaveLength(2);
+    const segs = segmentChat(blocks);
+    expect(segs.some((s) => s.kind === "process")).toBe(false);
+    expect(segs[0]).toMatchObject({ kind: "ask" });
+  });
+
+  test("cdp askQuestion event is pending; resolved does not emitUser", () => {
+    const blocks = eventsToChat([
+      ev({
+        seq: 1, source: "cdp", hook_event_name: "askQuestion",
+        payload: JSON.stringify({
+          request_id: "ask-1",
+          questions: [{ id: "q0", prompt: "选一个", options: [{ id: "a", label: "A", text: "甲" }] }],
+        }),
+      }),
+      ev({
+        seq: 2, source: "cdp", hook_event_name: "askQuestionResolved",
+        payload: JSON.stringify({ request_id: "ask-1", via: "cdp" }),
+      }),
+    ]);
+    expect(blocks.some((b) => b.kind === "user")).toBe(false);
+    expect(blocks).toMatchObject([{ kind: "ask", request_id: "ask-1", prompt: "选一个", action: "resolved" }]);
+  });
+});
+
+describe("recentTurnsWindow", () => {
+  const turns = (n: number): ChatBlock[] => {
+    const out: ChatBlock[] = [];
+    for (let i = 1; i <= n; i++) {
+      out.push({ kind: "user", text: `u${i}`, seq: i * 2 - 1 });
+      out.push({ kind: "assistant", text: `a${i}`, seq: i * 2 });
+    }
+    return out;
+  };
+
+  test("first paint keeps the last 3 turns and hides the prefix", () => {
+    expect(INITIAL_VISIBLE_TURNS).toBe(3);
+    const blocks = turns(5);
+    expect(initialHiddenPrefixTurns(blocks)).toBe(2);
+    const visible = recentTurnsWindow(blocks, 2);
+    expect(visible.map((b) => b.kind === "user" || b.kind === "assistant" ? b.text : "")).toEqual([
+      "u3", "a3", "u4", "a4", "u5", "a5",
+    ]);
+  });
+
+  test("hiddenPrefix 0 shows the full window after scrolling up", () => {
+    const blocks = turns(4);
+    expect(recentTurnsWindow(blocks, 0).map((b) => b.kind === "user" ? b.text : "").filter(Boolean)).toEqual([
+      "u1", "u2", "u3", "u4",
+    ]);
+  });
+
+  test("fewer than 3 turns shows everything", () => {
+    const blocks = turns(2);
+    expect(initialHiddenPrefixTurns(blocks)).toBe(0);
+    expect(recentTurnsWindow(blocks, 0)).toEqual(blocks);
   });
 });

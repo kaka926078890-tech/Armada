@@ -41,6 +41,7 @@ export function httpStatusForRunError(error: string): 400 | 404 | 409 | 413 | 42
   if ([
     "PROMPT_COLLISION", "CONVERSATION_BUSY", "INJECT_SLOT_BUSY", "WINDOW_BUSY",
     "ALREADY_ACTIVE", "RUN_BUSY", "NO_CONVERSATION", "INVALID_STATE", "ALREADY_TERMINAL",
+    "NO_PENDING_ASK", "ASK_MISMATCH", "ASK_IN_FLIGHT",
   ].includes(error)) return 409;
   return 400;
 }
