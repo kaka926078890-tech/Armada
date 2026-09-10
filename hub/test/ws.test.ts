@@ -89,6 +89,7 @@ describe("WS registry", () => {
     h.db.query("UPDATE machines SET last_seen_at=?1 WHERE id='m-1'").run(Date.now() - 60_000);
     h.registry.sweep();
     expect(h.registry.getMachine("m-1")!.status).toBe("offline");
+    expect(JSON.parse(h.registry.getMachine("m-1")!.open_workspaces)).toEqual([]);
     ws.close();
   });
 

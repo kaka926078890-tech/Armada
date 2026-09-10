@@ -31,7 +31,11 @@ export class Registry {
   public onMachineOffline: (machineId: string) => void = () => {};
   public onMachinesChanged: () => void = () => {};
 
-  constructor(private db: Database) {}
+  constructor(private db: Database) {
+    this.db.query(
+      "UPDATE machines SET open_workspaces='[]' WHERE status='offline' AND open_workspaces != '[]'",
+    ).run();
+  }
 
   upsertMachine(m: MachineInfo): void {
     this.db.query(`
@@ -62,7 +66,11 @@ export class Registry {
   }
 
   markOffline(id: string): void {
-    this.db.query("UPDATE machines SET status='offline' WHERE id=?1").run(id);
+    const row = this.getMachine(id);
+    if (!row) return;
+    const already = row.status === "offline" && row.open_workspaces === "[]";
+    this.db.query("UPDATE machines SET status='offline', open_workspaces='[]' WHERE id=?1").run(id);
+    if (!already) this.onMachinesChanged();
   }
 
   // ---- WS 连接管理 ----
@@ -127,7 +135,6 @@ export class Registry {
       if (c.machineId !== machineId) continue;
       for (const w of c.openWorkspaces) union.add(w);
     }
-    if (union.size === 0) return false; // 无在线连接时保留最后已知值
     const next = [...union];
     const prev = this.storedWorkspaces(machineId);
     if (!workspaceListChanged(prev, next)) return false;
