@@ -6,7 +6,7 @@ import type { Machine } from "./types";
 import type { RunRow } from "./boardState";
 import {
   decodeWorkspaceKey, encodeWorkspaceKey, filterRunsByWorkspace, listWorkspaceSlots, sortConversations,
-  workspaceFolderName,
+  workspaceFolderName, resolveSelectedWorkspace,
 } from "./boardState";
 import { applyAlertOpen } from "./alertOpen";
 import Sidebar from "./components/Sidebar";
@@ -61,11 +61,14 @@ export default function App() {
   const readPatchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const slots = useMemo(() => listWorkspaceSlots(machines), [machines]);
-  const resolvedWs = useMemo(() => {
-    if (selectedWs && slots.some((s) => encodeWorkspaceKey(s.machineId, s.root) === selectedWs)) return selectedWs;
-    const first = slots.find((s) => s.online) ?? slots[0];
-    return first ? encodeWorkspaceKey(first.machineId, first.root) : null;
-  }, [slots, selectedWs]);
+  const selectedRunRow = useMemo(() => {
+    if (!selectedRun) return null;
+    return runs.find((r) => r.id === selectedRun) ?? hiddenRuns.find((r) => r.id === selectedRun) ?? null;
+  }, [selectedRun, runs, hiddenRuns]);
+  const resolvedWs = useMemo(
+    () => resolveSelectedWorkspace(slots, selectedWs, selectedRunRow),
+    [slots, selectedWs, selectedRunRow],
+  );
   const selected = decodeWorkspaceKey(resolvedWs);
   const boardSource = showArchived ? hiddenRuns : runs;
   const conversations = useMemo(() => {

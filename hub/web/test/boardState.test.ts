@@ -3,7 +3,7 @@ import {
   groupRuns, cardView, listWorkspaceSlots, encodeWorkspaceKey, decodeWorkspaceKey,
   filterRunsByWorkspace, sortConversations, groupSlotsByMachine, isUnreadCompleted, isUnreadMessage,
   workspaceHasUnread, workspaceUnreadCount, formatUnreadCount, canArchiveRun, isHubArchived,
-  workspaceFolderName, workspaceHasLiveRun, type RunRow,
+  workspaceFolderName, workspaceHasLiveRun, resolveSelectedWorkspace, type RunRow,
 } from "../src/boardState";
 
 const base: RunRow = {
@@ -187,5 +187,44 @@ describe("workspaceHasLiveRun", () => {
     expect(workspaceHasLiveRun([{ ...base, status: "completed" }])).toBe(false);
     expect(workspaceHasLiveRun([{ ...base, status: "error" }, { ...base, id: "r-2", status: "running" }])).toBe(true);
     expect(workspaceHasLiveRun([])).toBe(false);
+  });
+});
+
+describe("resolveSelectedWorkspace", () => {
+  const onlineA = {
+    machineId: "m-1", machineName: "A", os: "darwin", root: "/ws/a", online: true,
+  };
+  const onlineB = {
+    machineId: "m-2", machineName: "B", os: "darwin", root: "/ws/b", online: true,
+  };
+  const keyA = encodeWorkspaceKey("m-1", "/ws/a");
+  const keyB = encodeWorkspaceKey("m-2", "/ws/b");
+
+  test("keeps selected when the slot is still listed", () => {
+    expect(resolveSelectedWorkspace([onlineA, onlineB], keyA, null)).toBe(keyA);
+  });
+
+  test("snaps to first online slot when selected vanished and no run is open", () => {
+    expect(resolveSelectedWorkspace([onlineB], keyA, null)).toBe(keyB);
+  });
+
+  test("keeps vanished workspace when the open card belongs to it", () => {
+    expect(resolveSelectedWorkspace(
+      [onlineB],
+      keyA,
+      { machine_id: "m-1", workspace_root: "/ws/a" },
+    )).toBe(keyA);
+  });
+
+  test("does not ghost when the open card is a different workspace", () => {
+    expect(resolveSelectedWorkspace(
+      [onlineB],
+      keyA,
+      { machine_id: "m-2", workspace_root: "/ws/b" },
+    )).toBe(keyB);
+  });
+
+  test("returns null when nothing is listed and there is no ghost", () => {
+    expect(resolveSelectedWorkspace([], keyA, null)).toBeNull();
   });
 });

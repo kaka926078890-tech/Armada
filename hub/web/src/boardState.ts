@@ -121,6 +121,25 @@ export function groupSlotsByMachine(slots: WorkspaceSlot[]): MachineGroup[] {
   return order.map((id) => map.get(id)!);
 }
 
+export function resolveSelectedWorkspace(
+  slots: WorkspaceSlot[],
+  selectedWs: string | null,
+  selectedRun: { machine_id: string; workspace_root: string } | null,
+): string | null {
+  if (selectedWs && slots.some((s) => encodeWorkspaceKey(s.machineId, s.root) === selectedWs)) {
+    return selectedWs;
+  }
+  if (
+    selectedWs &&
+    selectedRun &&
+    encodeWorkspaceKey(selectedRun.machine_id, selectedRun.workspace_root) === selectedWs
+  ) {
+    return selectedWs;
+  }
+  const first = slots.find((s) => s.online) ?? slots[0];
+  return first ? encodeWorkspaceKey(first.machineId, first.root) : null;
+}
+
 export function filterRunsByWorkspace(runs: RunRow[], machineId: string, root: string): RunRow[] {
   return runs.filter((r) => r.machine_id === machineId && r.workspace_root === root);
 }
