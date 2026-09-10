@@ -1,7 +1,7 @@
 # Armada：离线工作区从侧栏消失
 
 - 日期：2026-09-10
-- 状态：设计草案 v1.0（产品确认方案 2；**未实施**；未达实施基准）
+- 状态：v1 已按计划落地；验收见 A1–A5 / W1–W4 单测。**未做**打包 Armada.app overlay。
 - 父文档：
   - [2026-08-28-lan-cursor-workbench-design.md](../../../../docs/superpowers/specs/2026-08-28-lan-cursor-workbench-design.md)（下称《主设计》；若本仓无此副本则以 desk 父仓为准）
   - [2026-09-02-armada-desktop-run-alerts-design.md](../../../../docs/superpowers/specs/2026-09-02-armada-desktop-run-alerts-design.md)（下称《通知》：slot 消失仍须开卡）
@@ -244,3 +244,4 @@ sequenceDiagram
 | 日期 | 版本 | 变更 |
 | --- | --- | --- |
 | 2026-09-10 | v1.0 | 初稿。产品确认：消失=A；实现=Registry 不变量 + 通知幽灵选中。 |
+| 2026-09-10 | v1.1 | 按计划落地：`Registry` 空并集/`markOffline`/启动归一；`resolveSelectedWorkspace`。单测 A1–A5 / W1–W4。未 overlay 打包壳。 |
