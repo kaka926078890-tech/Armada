@@ -6,6 +6,7 @@
 
 | 文件 | 何时 |
 | --- | --- |
+| `.cursor/rules/armada-trunk.mdc` | 总是：直接在 `master` 开发并推送，不开 feat 长期分支 |
 | `.cursor/rules/armada-workspace-anchor.mdc` | 总是：目录职责、规格位置、提交切分 |
 | `.cursor/rules/armada-durable-boundaries.mdc` | 总是：三把钥匙、followup 不退役 Mac live gen |
 | `.cursor/rules/armada-feasibility-before-solution.mdc` | 总是：真机 jsonl/CDP 验证完成前不写方案落地 |
@@ -28,3 +29,4 @@ bun test hub/test extension/test hooks/test hub/web/test desktop-core/test
 - 为 Intel 单独开停跑分支
 - 源码 hub 占 7380 时宣布桌面已验
 - 停跑补丁与 LAN discovery 同一提交
+- 为功能切 `feat/*` 再开发（主干是 `master`）

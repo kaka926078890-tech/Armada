@@ -19,6 +19,7 @@ alwaysApply: true
 
 ## Write policy
 
+- 开发、提交、推送都打在 **`master`**。见 `armada-trunk.mdc`。不要切 `feat/*` 独立开发。
 - 只改本仓。Findesk / chatkit 只读，除非开发者点名。
 - 停跑/详情契约规格：`docs/superpowers/specs/`（若无，则父仓 `desk/docs/superpowers/specs/`）。**代码与规格冲突时先改规格或停手**，禁止再加第三套口说例外。
 - IDE/CDP/未知弹窗：真机可行性过关前 **不写实施计划或生产代码**。见 `armada-feasibility-before-solution`。
