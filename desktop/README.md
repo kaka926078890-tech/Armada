@@ -1,5 +1,7 @@
 # Armada desktop (Tauri 2)
 
+产品说明、创建/加入舰队、看板功能见仓库根目录 [README.md](../README.md)。
+
 两种入口，同一份看板：
 
 | 怎么开 | 命令 | 用途 |
