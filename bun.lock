@@ -7,7 +7,7 @@
     },
     "extension": {
       "name": "armada-agent",
-      "version": "0.3.7",
+      "version": "0.4.19",
       "dependencies": {
         "ws": "^8.18.0",
       },
@@ -42,9 +42,17 @@
         "vite": "^6.0.0",
       },
     },
+    "relay": {
+      "name": "@armada/relay",
+      "dependencies": {
+        "hono": "^4.6.0",
+      },
+    },
   },
   "packages": {
     "@armada/hub": ["@armada/hub@workspace:hub"],
+
+    "@armada/relay": ["@armada/relay@workspace:relay"],
 
     "@armada/web": ["@armada/web@workspace:hub/web"],
 

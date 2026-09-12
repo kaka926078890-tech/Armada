@@ -1,11 +1,29 @@
 # Armada 远程：中转 serve + 简易 iOS App
 
-- 日期：2026-09-12
-- 状态：可执行设计（产品确认：公网中转 + 开源 iOS App + 邀请绑定；TestFlight 内测；不裸映射 7380）
+- 日期：2026-09-12（修订 2026-09-13）
+- 状态：**草稿代码已入库，App 交互与启动尚未产品确认**（协议主体已拍板；UI/启动流程见下方「下一步」）
 - 父文档：
   - [README.md](../../../README.md)（局域网舰队；hub `:7380`）
   - [2026-09-07-armada-lan-fleet-discovery-design.md](./2026-09-07-armada-lan-fleet-discovery-design.md)（局域网发现；**不改** 本 spec 的公网路径）
 - 修订范围：新增 **中转 serve** 与 **手机 App**；中台 hub 增加 **出站绑定**。不改受控扩展 `armada.hubUrl` 局域网语义、不改 run 状态机、不把 `7380` 暴露到公网。
+
+---
+
+## 下一步（换到中台电脑前请先读）
+
+**当前不要把 iOS 五屏实现当成已定稿。** 仓库里有一份可编译的草稿（`mobile/ios/`），是按未确认的默认交互写的，等人审完再改。
+
+| # | 待你确认 | 为什么卡住 | 默认草稿（可推翻） |
+| --- | --- | --- | --- |
+| N1 | **App 交互** | 五屏信息架构、派发后去哪、Ask 怎么点、如何解绑，都没走完产品确认 | 绑定粘贴 op → Tab「工作区 / 任务」→ 选仓进派发页 → 详情看全文/Ask |
+| N2 | **启动路径** | 中转怎么起、pair 怎么进中台、Simulator 怎么跑，还没有你认可的操作说明 | CLI `--create-fleet`；中台读 `~/.armada/relay.json`；Xcode 打开 `mobile/ios/ArmadaRemote.xcodeproj` |
+| N3 | 中台「贴 pair」的界面 | 现在没有网页粘贴框 | 只认 `relay.json` 三个字段 `{ relay, fleet, secret }` |
+
+确认完成前：**可以在中台电脑继续中转/hub 联调与测试**；不要把草稿 UI 当发布基准，不要按这份 UI 写 README 教程。
+
+代码位置（均在本仓 `Armada`）：`relay/`、`hub/src/relayClient.ts`、`mobile/ios/`。单测：`bun test relay/test hub/test/relayClient.test.ts`。
+
+---
 
 ---
 
@@ -15,8 +33,8 @@
 | --- | --- |
 | 问题 | 人不在局域网时无法选仓派发、看完整终态正文、回答 Ask；裸 frp 映射 7380 等于把共享 token 挂公网。 |
 | 核心方案 | 自建 **中转 serve**（公网 HTTPS）。中台出站连中转；开源 iOS App 只打中转。受控 Cursor 仍只连中台。绑定方式对齐受控机： **一条邀请 URI（含中转地址 + fleet 凭证）**，不是只填 URL。 |
-| 关键约束 | ① 权威状态在中台 hub（`hub/src/runs.ts`）。② 中转只存快照 + 完整 `finalText`。③ App 不实时推思考流。④ 终态正文 = `assistantBodyText`（`hub/web/src/chatView.ts`），产品层不截断。⑤ 分发走 TestFlight；苹果开发者账号过期则不能传新包。 |
-| 明确不做 | 公网裸 frp/Funnel 映射 7380；微信小程序 v1；飞书卡片当主界面；Bark 当操作面；把 OpenClaw/CursorRemote 换掉执行层；v1 上架 App Store。 |
+| 关键约束 | ① 权威状态在中台 hub（`hub/src/runs.ts`）。② 中转只存快照 + 完整 `finalText`。③ App 不推思考/工具流。④ 终态正文 = `assistantBodyText`（`hub/web/src/chatView.ts`），产品层不截断。⑤ 分发走 TestFlight；苹果开发者账号过期则不能传新包。⑥ **App 通道分阶段**：v1 前台轮询；v1.5 前台 SSE；锁屏/被杀用 APNs（不带头正文）。 |
+| 明确不做 | 公网裸 frp/Funnel 映射 7380；微信小程序 v1；飞书卡片当主界面；Bark 当操作面；把 OpenClaw/CursorRemote 换掉执行层；v1 上架 App Store；用 VoIP Push / 后台常驻 WS 假装推送；APNs 载荷带 `finalText`。 |
 
 ---
 
@@ -28,7 +46,7 @@
 | R2 | 选任意 **已打开** 工作区并下发 | `GET /mobile/workspaces` ← 中台 `GET /api/machines[].open_workspaces` |
 | R3 | 超长 prompt（含粘贴 review） | 中转与 hub **不截断** prompt；飞书/APNs 体积限制只影响投递，不砍存储 |
 | R4 | 终态必须是完整助手正文 | `finalText` = `assistantBodyText`；空正文不得标 `completed` |
-| R5 | 状态订阅，不要手机刷进度 | 中台变更推中转；App 用 APNs/轮询打开详情；不推工具日志 |
+| R5 | 状态要及时，不要人肉刷进度 | 中台→中转已是 WS 推快照。App：**v1 前台 10s 轮询**；**v1.5 前台 SSE**；**锁屏只有 APNs**（见 4.9）。不推工具日志 |
 | R6 | 问答 Ask | 快照 `pendingAsk`；App 按钮 → `POST /mobile/runs/:id/answer` → hub `POST /api/runs/:id/answer-ask` |
 | R7 | Armada 与 App 均开源、可自建 | 中转可自部署；绑定 URI 里带 `relay` 主机，不写死某一云厂商 |
 | R8 | 绑定像受控机邀请链接 | `armada-relay://pair?…` / `armada-relay://op?…` |
@@ -75,7 +93,7 @@
 2. **邀请即绑定，地址不是绑定。** 公网 URL 必要但不充分；必须有 `fleet` + secret。
 3. **出站优于入站。** 中台防火墙不开放 7380 到公网。
 4. **App 是遥控器，不是指挥台。** 五件事：仓、派发、状态、完整正文、Ask。
-5. **产品不截断，通道可换载体。** 存全文；APNs 只推标题。
+5. **产品不截断，通道可换载体。** 存全文；推送通道只叫醒 App，正文永远 `GET`。
 6. **开源自建。** 任何人可部署中转；URI 里的 `relay` 可换主机。
 7. **失败可回局域网。** 中转挂了，中台网页与受控扩展行为与今天一致。
 
@@ -91,14 +109,17 @@
 | 微信小程序 v1 | 能装但审核/订阅消息弱；「一次成型」选原生 App |
 | Tailscale 当产品形态 | 每终端装 VPN，开源用户门槛高；可作个人应急，不当默认 |
 | CursorRemote / portal-oss | 抢 CDP，与 Armada 注入冲突 |
+| 手机后台常驻 WS/SSE | iOS 进后台会挂起/杀掉；不能当锁屏通道（见 4.9.3） |
+| VoIP PushKit 刷存在感 | 非电话 App 拒审/会被停；禁止 |
+| 仅靠静默 APNs（`content-available`）当 Ask/完成提醒 | 系统尽力而为、会节流，**不保证到达**；Ask 必须用可见通知 |
 
 ### 3.2 范围
 
 | 阶段 | 做 | 不做 | 触发 |
 | --- | --- | --- | --- |
-| **v1** | 中转 serve；hub 出站；邀请 URI；iOS 五屏；TestFlight Internal；完整 `finalText`；Ask | 上架；小程序；APNs 正文；远程开窗；followup 续聊 | 本 spec |
-| **v1.5** | APNs 状态/Ask 通知（点进详情拉全文）；`POST cancel`；中转管理页生成邀请 | 多中转集群 | 内测证明派发后需要锁屏提醒 |
-| **v2** | App Store；operator 与 hub secret 轮换；多操作者 | 把 7380 公网化 | 对外分发 |
+| **v1** | 中转 serve；hub 出站 WSS；邀请 URI；iOS 五屏；**前台 10s 轮询**；完整 `finalText`；Ask；Simulator 可测 | 上架；小程序；App SSE；APNs；远程开窗；followup | 本 spec；先求能跑通 |
+| **v1.5** | `GET /mobile/stream` 前台 SSE；轮询仅作断线降级；`POST cancel` 若 v1 未做齐 | 锁屏实时；多中转集群 | 开着 App 仍觉得 10s 钝 |
+| **v2** | **APNs 可见通知**（Ask / 终态）；点进详情强制 GET；中转管理页生成邀请；operator/hub secret 轮换与多操作者另开闸；App Store 再另开闸 | APNs 塞正文；静默推送当主通道；把 7380 公网化 | 开发者账号 Active + 真机；内测需要离开 App 仍能知道 Ask/完成 |
 
 ---
 
@@ -205,11 +226,11 @@ armada-relay://op?relay=https%3A%2F%2Frelay.example.com&fleet={fleetId}&token={o
 | 取消 | `POST /mobile/runs/:id/cancel` | 200 | v1 建议做 |
 
 限流：同一 `operatorToken` **20 次派发 / 5min**；超限 `429` 且写中转 audit。  
-`GET` 不额外限流；客户端打开详情或 10s 轮询。
+v1：`GET` 不额外限流；客户端打开详情强制 GET，列表 **10s 轮询**（见 4.9）。
 
 单 prompt / `finalText` 中转落盘不截断；单 HTTP 请求体 **20 MiB**，超则 `413 PAYLOAD_TOO_LARGE`（仍不是「产品摘要」）。
 
-**不做的中转路由：** `/api/runs/:id/events` 全文、SSE 到手机、blobs 上传 v1、followup、ui-prefs、audit export。
+**v1 不做的中转路由：** `/api/runs/:id/events` 全文、**SSE 到手机**（改到 v1.5 `/mobile/stream`）、blobs 上传、followup、ui-prefs、audit export。
 
 ### 4.6 中台落地（不改语义）
 
@@ -227,7 +248,7 @@ Ask → `POST /api/runs/:id/answer-ask`。
 4. 任务列表：状态色点  
 5. 详情：`finalText` 可滚动 + 复制；Ask 按钮  
 
-推送 v1 可省略；v1.5 APNs **不携带** `finalText`。
+推送：**v1 只轮询，不做 APNs/SSE。** 后续见 4.9。APNs **永不携带** `finalText`。
 
 TestFlight：Bundle ID 建议 `app.armada.remote`（实现时可改，须写进发布说明）。Internal 组即可。
 
@@ -240,6 +261,93 @@ TestFlight：Bundle ID 建议 `app.armada.remote`（实现时可改，须写进�
 | 已上架后过期 | 下架新下载；已装仍运行 | **不能** 维护商店版本直到续费 | 无关 |
 
 验收文档：README 写明年费是发版许可，不是运行时依赖。
+
+### 4.9 App 通道：轮询、SSE、APNs、后台
+
+三条通道职责不同。**下发任务不依赖 App 长连接**（仍是 `POST /mobile/runs` → 中台出站 WSS）。App 侧通道只解决「看见结果」。
+
+```text
+中台 --WSS--> 中转 --v1 GET 轮询--> 前台 App
+                 --v1.5 SSE------> 前台 App（秒级）
+                 --v2 APNs-------> 锁屏/被杀（系统叫醒后 GET 全文）
+```
+
+#### 4.9.1 APNs 是什么
+
+**APNs** = **Apple Push Notification service**（苹果推送通知服务）。
+
+它是苹果的云端投递网关，不是 Armada 中转，也不是 WebSocket：
+
+| 项 | 说明 |
+| --- | --- |
+| 谁提供 | 苹果。中转（或以后的推送适配器）用 HTTP/2 把一条小 JSON 交给 `api.push.apple.com` |
+| 谁投到手机 | iOS 系统，不经过我们的中转长连接 |
+| 典型用途 | 锁屏横幅、角标、声音；或「静默唤醒」让 App 后台跑几十秒 |
+| 载荷上限 | 普通远程通知 **4 KB（4096 字节）** 未压缩 JSON；超了 APNs 返回 413 |
+| 前置条件 | Apple Developer **Active**；App 有 push 证书或 APNs Auth Key；**真机**（模拟器不能当验收环境） |
+| 和 TestFlight | 同一套 APNs；账号过期后通常不能继续维护证书/新包 |
+
+因此：APNs 只适合「有 Ask / 任务完成了」这类短消息。`finalText` 必须继续走中转 `GET /mobile/runs/:id`。
+
+#### 4.9.2 分阶段契约
+
+| 阶段 | App 行为 | 中转 | 验收 |
+| --- | --- | --- | --- |
+| **v1** | 前台每 **10s** `GET /mobile/workspaces` + `GET /mobile/runs`；进入详情强制 GET。后台定时器会被系统挂起，**不承诺锁屏更新** | 无 stream 路由 | 模拟器：派发后 ≤15s 内前台能看到状态变化 |
+| **v1.5** | 前台 `GET /mobile/stream`（SSE，`Authorization: Bearer`，禁止 `?token=`）；事件形状与 GET JSON 相同（`workspaces` / `run`）。SSE 失败或后台 → 退回 10s 轮询 | 有 snap 则写 SSE 客户端；断线不丢 run（快照仍在 SQLite） | 前台：hub `snap.run` 后 **p95 < 1s** 列表/详情刷新；拔 SSE 后自动轮询，派发仍成功 |
+| **v2** | 注册 device token 到中转（`POST /mobile/push-token`）。Ask 出现或进入终态 → 中转发 **可见** APNs：`alert` + 自定义 `runId` + `kind=ask\|completed\|error\|cancelled`。点通知打开对应详情并 **强制 GET** | 不把 `finalText` / prompt 放入 APNs。投递失败只写 audit，不改变中台 run | 真机锁屏：Ask 与完成能出通知；点进正文与中台「复制正文」逐字节相同 |
+
+**备选不选 v1 就上 SSE：** 模拟器/联调要最短路径；轮询已够证明派发与全文。  
+**备选不选 v1 就上 APNs：** 账号 pending、模拟器无 APNs，会把「能不能控仓」和「苹果证书」绑死。  
+**备选不选手机 WS 代替 SSE：** 前台能力接近，还要自管心跳；iOS 后台同样死。
+
+v1.5 接口（先写进文档，**本阶段不实现**）：
+
+```
+GET /mobile/stream
+→ text/event-stream
+data: {"type":"workspaces","hubOffline":false,"workspaces":[...]}
+data: {"type":"run","run":{...}}   // 同 GET /mobile/runs/:id
+```
+
+空闲心跳：注释行 `: ping` 每 25s，避免反代掐连接。
+
+#### 4.9.3 后台到底有没有解？（验证结论）
+
+结论：**有解，而且只有一条产品级通道 = 可见 APNs。** 其它 iOS 后台能力都不能替代。
+
+| 方案 | 锁屏 / App 被杀 | 延迟 | 本产品 | 为什么 |
+| --- | --- | --- | --- | --- |
+| 前台轮询 | 无效（定时器挂起） | 开着时 ≤10s | **v1 采用** | 实现最快；Simulator 可测 |
+| 前台 SSE | 进后台后连接被系统停 | 开着时亚秒 | **v1.5** | 不解决锁屏 |
+| 后台保持 SSE/WS | **不可行** | — | 否决 | 进程挂起/被杀，系统不保证长连接 |
+| Background App Refresh | 系统择机，可能数小时一次 | 不可控 | 否决 | 不能当 Ask 到达 |
+| `BGTaskScheduler` | 同上 | 不可控 | 否决 | 给批处理用，不是即时消息 |
+| Background `URLSession` | 只能续传 **App 自己发起的** 下载 | 不能收中转主动事件 | 否决 | 方向反了 |
+| 本地通知 | 必须当时进程还在才能 `schedule` | 不知道远端何时完成 | 否决 | 没有服务器时钟事件 |
+| 静默 APNs（`content-available: 1`，无 alert） | 不保证；低电量/低功耗模式常丢；唤醒 ≤30s | 尽力而为 | **不当主通道** | Apple 文档写明 background 是 best-effort 且会节流 |
+| **可见 APNs**（有 alert） | **系统会展示横幅**，不依赖我们的进程还活着 | 通常数秒（APNs 排队不计中转 SLA） | **v2 采用** | 唯一合法、可向用户承诺的锁屏方案 |
+| VoIP Push | 表面及时 | — | **禁止** | 非 VoIP App 拒审 |
+
+**模拟器无法验证锁屏推送。** 后台验收必须：Apple Developer Active + 真机 + 签名含 Push。v1 验收写明「前台轮询即可」，避免用模拟器进后台当失败。
+
+指标：
+
+| 通道 | 指标 |
+| --- | --- |
+| v1 轮询 | 前台列表新鲜度 ≤ 10s + 1 次 RTT；不把后台新鲜度写入 SLA |
+| v1.5 SSE | 前台 p95 < 1s（同区域，从中转收到 `snap.run` 到 SSE 写出） |
+| v2 APNs | 中转在 snap 终态/Ask 后 **5s 内** 向 APNs 发出请求（HTTP/2 200）；**不**把苹果侧到达时间算进中转 p95。失败重试最多 3 次、退避至 30s |
+
+#### 4.9.4 失败与降级
+
+| 情况 | 行为 |
+| --- | --- |
+| 仅有轮询（v1） | 离开 App 就看不到新 Ask，直到下次打开；可接受 |
+| SSE 断 | 自动 10s 轮询；用户无感失败 |
+| 无 APNs 证书 / 账号过期 | 不发推送；前台 SSE/轮询照常；中转不因此判 run 失败 |
+| 用户关了系统通知权限 | 同「无 APNs」；前台不受影响 |
+| APNs 4KB 超限 | 不可能：载荷只有 `runId`+`kind`+短 alert；超则视为实现 bug |
 
 ---
 
@@ -273,9 +381,10 @@ sequenceDiagram
 | 中台休眠 | `hubOffline` | 派发 `503 HUB_OFFLINE` |
 | 邀请泄露 | 中转 CLI `rotate-op` / `rotate-hub`（v1.5）；v1 删 fleet 重建 | 文档要求重置 |
 | 请求体 > 20 MiB | 413 | 用户拆文件；产品仍不「摘要存储」 |
-| APNs 未接 | App 前台轮询 10s | 可接受 v1 |
+| APNs 未接 / 未实现 | App **前台** 10s 轮询；后台无推送 | **v1 明确接受** |
+| SSE 未接 | 同轮询 | v1.5 前才存在 |
 
-缓存：中转快照以最后一次 `snap.run` 为准；App 详情 **每次打开强制 GET**（避免旧 `finalText`）。TTL 无；列表 10s。
+缓存：中转快照以最后一次 `snap.run` 为准；App 详情 **每次打开强制 GET**（避免旧 `finalText`）。v1 列表 TTL = 轮询间隔 10s；v1.5 前台以 SSE 为准。
 
 p95（同区域 VPS，排除 DERP）：`GET /mobile/workspaces` < 400ms；`POST /mobile/runs` 到中台 ack < 1s。
 
@@ -324,9 +433,11 @@ p95（同区域 VPS，排除 DERP）：`GET /mobile/workspaces` < 400ms；`POST 
 | A4 | v1 | `completed` 的 `finalText` 与中台详情「复制正文」逐字节相同（同一次 run） |
 | A5 | v1 | 超长 prompt（>100KB）往返不截断（低于 20 MiB） |
 | A6 | v1 | 中台离线：App 不假装 running |
-| A7 | v1.5 | 通知点击打开对应 run，正文仍走 GET |
+| A7 | v1 | 前台轮询：派发后 15s 内能读到非 queued 的快照（含 Simulator） |
+| A8 | v1.5 | 前台 SSE：`snap.run` 后 1s 内 UI 更新；SSE 断开后回退轮询 |
+| A9 | v2 | 真机锁屏可见 APNs；点击打开对应 run，正文仍走 GET；载荷无 `finalText` |
 
-上线 gate：A1–A6 全过才标「可 TestFlight」；禁止带「把 7380 映射出去」的示例进 README。
+上线 gate：A1–A7 全过才标「可 Simulator / 可 TestFlight 无推送」；A8 不挡 v1；A9 不挡 v1，且必须真机。禁止带「把 7380 映射出去」的示例进 README。
 
 ---
 
@@ -338,10 +449,14 @@ p95（同区域 VPS，排除 DERP）：`GET /mobile/workspaces` < 400ms；`POST 
 | TestFlight 90 天 | 内测包过期 | 升 build 重传；账号须有效 | 已知 |
 | 开发者账号过期 | 不能维护商店/TF 版本 | 年费续期；已装可暂用 | 已知 |
 | iOS 工程是否同仓 | 体积/签名 | v1 可 `mobile/ios/`；独立仓须 submodule 或文档指向本 spec | 实现时定，**不阻塞协议** |
-| APNs 证书 | v1 无推送 | 轮询 | 非阻塞 |
+| APNs 证书 / 账号未 Active | v1 无锁屏推送 | 文档写明；用轮询；不阻塞 Simulator | **已验证：可接受** |
+| 误以为后台 SSE 能推 | 锁屏无更新被当成 bug | 4.9.3 写死不可行；v1 验收不含后台 | 已关闭 |
 | 中转单副本 | 宕机则远程失明 | 可接受；局域网降级 | 已知 |
 
-阻塞项：无（协议已拍板）。实现前需准备：VPS + HTTPS 域名、Apple Developer（TestFlight）。
+| App 交互未确认 | 草稿五屏可能整页推翻 | 先人审 N1，再改 `mobile/ios/` | **阻塞 UI 定稿** |
+| App/中台启动路径未确认 | 换机器后不知道怎么跑 | 先人审 N2/N3 | **阻塞 README 教程** |
+
+阻塞项：**N1 App 交互、N2 启动路径、N3 中台如何消化 pair**（见文首「下一步」）。协议（中转 + 出站 WSS + 轮询）可在中台电脑继续联调。实现/联调准备：本仓已有 `relay/` 与 `hub/src/relayClient.ts`；公网还要 VPS + HTTPS；TestFlight 仍要账号 Active。
 
 ---
 
@@ -351,10 +466,12 @@ p95（同区域 VPS，排除 DERP）：`GET /mobile/workspaces` < 400ms；`POST 
 - [x] MVP/v1/v1.5/v2  
 - [x] 非目标、风险、验收、回滚  
 - [x] 发布顺序：中转 → hub 出站 → App；受控扩展不改  
-- [x] 路径落到 `hub/src/index.ts`、`registry.ts`、`auth.ts`、`chatView.ts`、`joinUri.ts`  
+- [x] 路径落到 `hub/src/index.ts`、`registry.ts`、`auth.ts`、`chatView.ts`、`joinUri.ts`、`relay/`、`mobile/ios/`  
+- [x] App 通道分期 + 后台验证 + APNs 定义  
+- [ ] **App 交互与启动（N1–N3）产品确认**  
 - [x] 修订记录  
 
-**未勾：** 实现代码与 TestFlight 包（本文件只定协议）。
+**未勾：** N1–N3 人审；TestFlight 包。iOS 五屏仅为草稿。
 
 ---
 
@@ -363,5 +480,7 @@ p95（同区域 VPS，排除 DERP）：`GET /mobile/workspaces` < 400ms；`POST 
 | 日期 | 变更 |
 | --- | --- |
 | 2026-09-12 | 初稿。中转 serve + 开源 iOS App + 邀请 URI；否决裸 frp/仅 URL；终态全文；TestFlight；账号过期只影响发版。 |
+| 2026-09-13 | 产品确认 v1 用前台轮询。补充 App 通道长期方案：v1.5 SSE、v2 可见 APNs。写入 APNs 定义、4KB 限制、后台方案验证（仅可见 APNs 可行；静默推送/后台 WS/VoIP 否决）。验收 A7–A9。 |
+| 2026-09-13 | 草稿代码入库（`relay/`、hub 出站、`mobile/ios/`）。**状态改为：App 交互与启动待确认（N1–N3）**；五屏实现不作为发布基准。 |
 
 本文件为远程能力的 **实施基准**。变更绑定字段或完成门禁须改本 spec 并升 `protocolVersion`。

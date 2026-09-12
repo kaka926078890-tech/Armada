@@ -1,4 +1,5 @@
 export class SseHub {
+  onEvent?: (runId: string, event: object) => void;
   private clients = new Map<string, Set<ReadableStreamDefaultController>>();
 
   register(channel: string, controller: ReadableStreamDefaultController): () => void {
@@ -8,6 +9,7 @@ export class SseHub {
   }
 
   broadcast(runId: string, event: object): void {
+    this.onEvent?.(runId, event);
     const data = `data: ${JSON.stringify(event)}\n\n`;
     for (const ch of [runId, "*"]) {
       for (const c of this.clients.get(ch) ?? []) {

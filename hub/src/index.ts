@@ -11,6 +11,7 @@ import { handleWsMessage, type WsData } from "./ws";
 import { limitsFromEnv, httpStatusForRunError, type ConcurrencyLimits } from "./concurrency";
 import { BlobStore } from "./blobs";
 import { readUiPrefs, writeUiPrefs, mergeUiPrefs } from "./uiPrefs";
+import { startRelayClient } from "./relayClient";
 
 export interface HubServer {
   server: ReturnType<typeof Bun.serve>;
@@ -266,10 +267,18 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
     runs.sweepTimeouts();
     blobs.sweep();
   }, 15_000);
+  const port = server.port!;
+  const relay = startRelayClient({ home, hubPort: port, token, registry, runs, db, sse });
   return {
     server, db, registry, runs, token,
-    port: server.port!,
-    stop() { clearInterval(sweepTimer); sse.closeAll(); server.stop(true); db.close(); },
+    port,
+    stop() {
+      relay?.stop();
+      clearInterval(sweepTimer);
+      sse.closeAll();
+      server.stop(true);
+      db.close();
+    },
   };
 }
 

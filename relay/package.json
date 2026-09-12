@@ -1,0 +1,12 @@
+{
+  "name": "@armada/relay",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "test": "bun test test"
+  },
+  "dependencies": {
+    "hono": "^4.6.0"
+  }
+}
