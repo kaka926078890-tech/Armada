@@ -202,6 +202,13 @@ const ASK_ESC = /[.*+?^${}()|[\\]\\\\]/g;
 export const ASK_INSPECT_JS = `function () {
   var bar = document.querySelector(".composer-questionnaire-toolbar");
   if (!bar) return { present: false };
+  var n = bar;
+  var conversation_id = "";
+  for (var i = 0; i < 24 && n; i++) {
+    var id = n.getAttribute && n.getAttribute("data-composer-id");
+    if (id && String(id).trim()) { conversation_id = String(id).trim(); break; }
+    n = n.parentElement;
+  }
   var btns = Array.prototype.slice.call(bar.querySelectorAll("button.composer-questionnaire-toolbar-option-letter"));
   var real = btns.length >= 2 ? btns.slice(0, -1) : [];
   var skip = btns.length ? btns[btns.length - 1] : null;
@@ -225,7 +232,7 @@ export const ASK_INSPECT_JS = `function () {
     }
     options.push({ id: L.toLowerCase(), label: L, text: text });
   }
-  return { present: true, prompt: prompt || "Questions", options: options };
+  return { present: true, prompt: prompt || "Questions", options: options, conversation_id: conversation_id };
 }`;
 
 /** 点目标字母；禁止点最后一个 Skip letter。 */
@@ -246,7 +253,7 @@ export const ASK_CLICK_LETTER_JS = `function (letter) {
   return "OK";
 }`;
 
-export type AskCdpInspect = { present: false } | { present: true; prompt: string; options: { id: string; label: string; text: string }[] };
+export type AskCdpInspect = { present: false } | { present: true; prompt: string; conversation_id: string; options: { id: string; label: string; text: string }[] };
 
 async function connectWorkspacePage(
   deps: Required<Pick<CdpSubmitterDeps, "port">> & CdpSubmitterDeps,
@@ -303,6 +310,7 @@ export function createAskQuestionDriver(deps: CdpSubmitterDeps) {
       return {
         present: true,
         prompt: typeof v.prompt === "string" && v.prompt.trim() ? v.prompt.trim() : "Questions",
+        conversation_id: typeof v.conversation_id === "string" ? v.conversation_id.trim() : "",
         options: options.filter((o: any) => o && typeof o.id === "string").map((o: any) => ({
           id: String(o.id), label: String(o.label ?? o.id), text: String(o.text ?? o.label ?? o.id),
         })),

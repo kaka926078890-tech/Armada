@@ -334,7 +334,7 @@ describe("createImagePaster", () => {
 
 const FIXTURE_TEXT = "Questions 1 of 1 1. 这是本机验证用的 Questions 框。请任选一项并点 Continue；后台正在用 CDP 抓 DOM。 A 选项 A（验证单选） B 选项 B C Skip 也行，只要框出现过 D Skip Esc Continue ⏎";
 
-function mockAskDoc(letters: string[], selected?: string, innerText = FIXTURE_TEXT) {
+function mockAskDoc(letters: string[], selected?: string, innerText = FIXTURE_TEXT, composerId?: string) {
   const btns = letters.map((L) => ({
     innerText: L,
     className: L === selected
@@ -345,9 +345,21 @@ function mockAskDoc(letters: string[], selected?: string, innerText = FIXTURE_TE
     focus() { this.focused = true; },
     click() { this.clicked = true; },
   }));
-  const bar = {
+  const bar: {
+    className: string;
+    innerText: string;
+    parentElement: { getAttribute: (name: string) => string | null; parentElement: null } | null;
+    querySelectorAll: (sel: string) => typeof btns | [];
+    scrollIntoView: () => void;
+  } = {
     className: "composer-questionnaire-toolbar",
     innerText,
+    parentElement: composerId
+      ? {
+        getAttribute(name: string) { return name === "data-composer-id" ? composerId : null; },
+        parentElement: null,
+      }
+      : null,
     querySelectorAll(sel: string) {
       if (sel === "button.composer-questionnaire-toolbar-option-letter") return btns;
       return [];
@@ -364,10 +376,10 @@ function mockAskDoc(letters: string[], selected?: string, innerText = FIXTURE_TE
   };
 }
 
-function runAskInspect(letters: string[]) {
-  const document = mockAskDoc(letters, "A");
+function runAskInspect(letters: string[], composerId?: string) {
+  const document = mockAskDoc(letters, "A", FIXTURE_TEXT, composerId);
   const fn = new Function("document", `return (${ASK_INSPECT_JS});`)(document);
-  return { result: fn() as { present: boolean; prompt: string; options: { id: string; label: string; text: string }[] }, btns: document.btns };
+  return { result: fn() as { present: boolean; prompt: string; conversation_id?: string; options: { id: string; label: string; text: string }[] }, btns: document.btns };
 }
 
 function runAskClick(letters: string[], letter: string) {
@@ -383,6 +395,12 @@ describe("AskQuestion toolbar JS", () => {
     expect(result.options.map((o) => o.id)).toEqual(["a", "b", "c"]);
     expect(result.prompt).toContain("这是本机验证用的 Questions 框");
     expect(result.options[0]?.text).toContain("选项 A");
+  });
+
+  test("inspect returns data-composer-id from the owning composer-bar", () => {
+    const { result } = runAskInspect(["A", "B", "C", "D"], "15eba46c-1011-44b3-9535-f00596728279");
+    expect(result.present).toBe(true);
+    expect(result.conversation_id).toBe("15eba46c-1011-44b3-9535-f00596728279");
   });
 
   test("click B hits B; D is Skip and must not be clicked", () => {

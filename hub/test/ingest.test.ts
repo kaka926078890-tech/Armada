@@ -355,6 +355,32 @@ describe("event ingest", () => {
     ws.close();
   });
 
+  test("CDP askQuestion from another composer cid does not enter this run", async () => {
+    const { ws, api, runId } = await startBoundRun();
+    ws.send(JSON.stringify({
+      type: "run.event", runId, source: "cdp", hookEventName: "askQuestion",
+      conversationId: "15eba46c-1011-44b3-9535-f00596728279",
+      payload: {
+        request_id: "ask-foreign", detect_via: "cdp",
+        conversation_id: "15eba46c-1011-44b3-9535-f00596728279",
+        questions: [{ id: "q0", prompt: "三机全绿", options: [{ id: "a", label: "A", text: "同题" }] }],
+      },
+      ts: Date.now(), seq: 1,
+    }));
+    ws.send(JSON.stringify({
+      type: "run.event", runId, source: "cdp", hookEventName: "askQuestion",
+      seq: 2, ts: Date.now(),
+      payload: {
+        request_id: "ask-no-cid", detect_via: "cdp",
+        questions: [{ id: "q0", prompt: "三机全绿", options: [{ id: "a", label: "A", text: "同题" }] }],
+      },
+    }));
+    await new Promise((r) => setTimeout(r, 150));
+    const events = (await (await api(`/api/runs/${runId}/events`)).json()) as any[];
+    expect(events.filter((e) => e.hook_event_name === "askQuestion")).toHaveLength(0);
+    ws.close();
+  });
+
   test("completed run does not ingest another conversation via cid lookup", async () => {
     const { ws, api, runId } = await startBoundRun();
     ws.send(JSON.stringify(ev(runId, 1, "stop", { status: "completed", conversation_id: "cid-1" })));
@@ -643,6 +669,7 @@ describe("event ingest", () => {
     const { ws, api, runId } = await startBoundRun();
     const payload = {
       request_id: "ask-1",
+      conversation_id: "cid-1",
       questions: [{
         id: "q0",
         prompt: "选一个",
@@ -655,7 +682,7 @@ describe("event ingest", () => {
       detect_via: "cdp",
     };
     ws.send(JSON.stringify({
-      type: "run.event", runId, source: "cdp", hookEventName: "askQuestion", payload, ts: Date.now(), seq: 1,
+      type: "run.event", runId, conversationId: "cid-1", source: "cdp", hookEventName: "askQuestion", payload, ts: Date.now(), seq: 1,
     }));
     await new Promise((r) => setTimeout(r, 150));
     const run = (await (await api(`/api/runs/${runId}`)).json()) as any;
@@ -669,9 +696,10 @@ describe("event ingest", () => {
   test("askQuestionResolved clears pending_ask; followup still busy", async () => {
     const { ws, api, runId } = await startBoundRun();
     ws.send(JSON.stringify({
-      type: "run.event", runId, source: "cdp", hookEventName: "askQuestion", seq: 1, ts: Date.now(),
+      type: "run.event", runId, conversationId: "cid-1", source: "cdp", hookEventName: "askQuestion", seq: 1, ts: Date.now(),
       payload: {
         request_id: "ask-1",
+        conversation_id: "cid-1",
         questions: [{ id: "q0", prompt: "q", options: [{ id: "a", label: "A", text: "甲" }] }],
         detected_at: 1, detect_via: "cdp",
       },
@@ -688,8 +716,8 @@ describe("event ingest", () => {
     const body = await ans.json() as any;
     expect(body.run.pending_ask.request_id).toBe("ask-1");
     ws.send(JSON.stringify({
-      type: "run.event", runId, source: "cdp", hookEventName: "askQuestionResolved", seq: 2, ts: Date.now(),
-      payload: { request_id: "ask-1", via: "cdp" },
+      type: "run.event", runId, conversationId: "cid-1", source: "cdp", hookEventName: "askQuestionResolved", seq: 2, ts: Date.now(),
+      payload: { request_id: "ask-1", via: "cdp", conversation_id: "cid-1" },
     }));
     await new Promise((r) => setTimeout(r, 120));
     expect(((await (await api(`/api/runs/${runId}`)).json()) as any).pending_ask).toBeNull();

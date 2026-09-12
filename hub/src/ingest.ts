@@ -24,6 +24,13 @@ export function cidBelongsToRun(run: { id?: string; conversation_id?: string | n
   return false;
 }
 
+function cdpAskOwnsConversation(run: { conversation_id?: string | null }, msg: any, cid: unknown): boolean {
+  if (msg.source !== "cdp") return true;
+  if (msg.hookEventName !== "askQuestion" && msg.hookEventName !== "askQuestionResolved") return true;
+  if (typeof cid !== "string" || !cid) return false;
+  return cidBelongsToRun(run, cid, msg.payload);
+}
+
 export function ingestEvent(db: Database, runs: RunService, sse: SseHub, machineId: string, msg: any): void {
   const extSeq = msg.seq;
   if (typeof extSeq !== "number") return;
@@ -48,6 +55,7 @@ export function ingestEvent(db: Database, runs: RunService, sse: SseHub, machine
   if (!runId) { (msg as any).__ack = ack(); return; }
   if (!run) { (msg as any).__ack = ack(); return; }
   if (!cidBelongsToRun(run, cid, msg.payload)) { (msg as any).__ack = ack(); return; }
+  if (!cdpAskOwnsConversation(run, msg, cid)) { (msg as any).__ack = ack(); return; }
   if (submitHook && !run.conversation_id) {
     const p = typeof msg.payload?.prompt === "string" ? msg.payload.prompt : "";
     if (!runs.submitPromptMatches(run, p)) { (msg as any).__ack = ack(); return; }

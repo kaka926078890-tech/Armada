@@ -18,7 +18,7 @@ import { TranscriptDirWatcher, debounceLeading, watchTranscriptDir, watchFileSiz
 import { createExtSeq } from "./extSeq";
 import { hubRunsNeedingTranscriptFollow } from "./adoptRuns";
 import { noteOwnerBsp, clearGeneration, synthesizedStopPayload, noteHubGeneration, onFollowupBindGeneration, shouldSynthesizeTranscriptStop } from "./generationStamp";
-import { nextAskAction, parseAskInspect } from "./askDetect";
+import { parseAskInspect, askPollActions } from "./askDetect";
 
 let client: { dispose: () => void } | null = null;
 
@@ -407,26 +407,28 @@ export function activate(context: vscode.ExtensionContext): void {
       if (hit.present) { inspectRaw = hit; break; }
     }
     const inspect = parseAskInspect(inspectRaw);
-    const runId = [...boundRuns.keys()].at(-1);
-    if (!runId) return;
-    const prev = askLastByRun.get(runId) ?? null;
-    const act = nextAskAction(prev, inspect, () => `ask-${runId}-${nextExtSeq()}`);
-    if (!act) return;
-    if (act.type === "askQuestion") {
-      askLastByRun.set(runId, act.payload.request_id);
+    const acts = askPollActions(boundRuns, askLastByRun, inspect, (runId) => `ask-${runId}-${nextExtSeq()}`);
+    for (const act of acts) {
+      if (act.type === "askQuestion") {
+        askLastByRun.set(act.runId, act.payload.request_id);
+        const owner = boundRuns.get(act.runId);
+        core.enqueue({
+          type: "run.event", runId: act.runId, conversationId: owner?.conversationId ?? act.payload.conversation_id,
+          source: "cdp", hookEventName: "askQuestion",
+          payload: act.payload, ts: Date.now(), seq: nextExtSeq(),
+        });
+        log(`askQuestion ${act.runId} ${act.payload.request_id} cid=${act.payload.conversation_id}`);
+        continue;
+      }
+      askLastByRun.delete(act.runId);
+      const owner = boundRuns.get(act.runId);
       core.enqueue({
-        type: "run.event", runId, source: "cdp", hookEventName: "askQuestion",
-        payload: act.payload, ts: Date.now(), seq: nextExtSeq(),
+        type: "run.event", runId: act.runId, conversationId: owner?.conversationId,
+        source: "cdp", hookEventName: "askQuestionResolved",
+        payload: { request_id: act.request_id, via: "cdp", conversation_id: owner?.conversationId }, ts: Date.now(), seq: nextExtSeq(),
       });
-      log(`askQuestion ${runId} ${act.payload.request_id}`);
-      return;
+      log(`askQuestionResolved ${act.runId} ${act.request_id}`);
     }
-    askLastByRun.delete(runId);
-    core.enqueue({
-      type: "run.event", runId, source: "cdp", hookEventName: "askQuestionResolved",
-      payload: { request_id: act.request_id, via: "cdp" }, ts: Date.now(), seq: nextExtSeq(),
-    });
-    log(`askQuestionResolved ${runId} ${act.request_id}`);
   };
   const askPoll = setInterval(() => { void pollAskQuestions(); }, 2000);
   context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(() => sendHeartbeat()));
