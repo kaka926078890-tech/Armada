@@ -67,6 +67,30 @@ describe("runToSnap", () => {
     expect(snap.status).toBe("completed");
     expect(snap.finalText).toBe("全文正文");
   });
+
+  test("completed finalText is the matching turn, not the whole thread", () => {
+    const run = {
+      id: "r-1", machine_id: "m-1", workspace_root: "/ws/a",
+      prompt: "那时还没修好？", status: "completed", created_at: 1,
+    };
+    const events = [
+      ev({ seq: 1, source: "transcript", payload: JSON.stringify({
+        role: "user", message: { content: [{ type: "text", text: "<user_query>\n更早的任务\n</user_query>" }] },
+      }) }),
+      ev({ seq: 2, source: "transcript", payload: JSON.stringify({
+        role: "assistant", message: { content: [{ type: "text", text: "那是旧回复，很长……" }] },
+      }) }),
+      ev({ seq: 3, source: "transcript", payload: JSON.stringify({
+        role: "user", message: { content: [{ type: "text", text: "<user_query>\n那时还没修好？\n</user_query>" }] },
+      }) }),
+      ev({ seq: 4, source: "transcript", payload: JSON.stringify({
+        role: "assistant", message: { content: [{ type: "text", text: "现在修好了。" }] },
+      }) }),
+    ];
+    const snap = runToSnap(run, events);
+    expect(snap.status).toBe("completed");
+    expect(snap.finalText).toBe("现在修好了。");
+  });
 });
 
 describe("hub outbound to relay", () => {

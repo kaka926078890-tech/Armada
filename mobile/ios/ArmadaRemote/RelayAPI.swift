@@ -5,7 +5,35 @@ struct WorkspaceDTO: Decodable, Identifiable, Hashable {
     var machineId: String
     var workspaceRoot: String
     var label: String
+    var machineName: String
+    var os: String
+    var online: Bool
     var id: String { workspaceId }
+
+    init(workspaceId: String, machineId: String, workspaceRoot: String, label: String, machineName: String = "", os: String = "", online: Bool = true) {
+        self.workspaceId = workspaceId
+        self.machineId = machineId
+        self.workspaceRoot = workspaceRoot
+        self.label = label
+        self.machineName = machineName
+        self.os = os
+        self.online = online
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        workspaceId = try c.decode(String.self, forKey: .workspaceId)
+        machineId = try c.decode(String.self, forKey: .machineId)
+        workspaceRoot = try c.decode(String.self, forKey: .workspaceRoot)
+        label = try c.decode(String.self, forKey: .label)
+        machineName = try c.decodeIfPresent(String.self, forKey: .machineName) ?? ""
+        os = try c.decodeIfPresent(String.self, forKey: .os) ?? ""
+        online = try c.decodeIfPresent(Bool.self, forKey: .online) ?? true
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case workspaceId, machineId, workspaceRoot, label, machineName, os, online
+    }
 }
 
 struct WorkspacesResponse: Decodable {
@@ -42,6 +70,54 @@ struct RunDTO: Decodable, Identifiable, Hashable {
     var pendingAsk: PendingAskDTO?
     var updatedAt: Int?
     var id: String { runId }
+
+    var isLive: Bool {
+        ["created", "queued", "dispatched", "binding", "running"].contains(status)
+    }
+
+    var displayError: String? {
+        guard let error, !error.isEmpty, error != status, error != "completed" else { return nil }
+        return error
+    }
+
+    var activityTs: Int { updatedAt ?? 0 }
+
+    var column: BoardColumn {
+        BoardColumn.column(for: status)
+    }
+
+    func workspace(from slots: [WorkspaceDTO]) -> WorkspaceDTO {
+        slots.first { $0.machineId == machineId && $0.workspaceRoot == workspaceRoot }
+            ?? WorkspaceDTO(
+                workspaceId: "\(machineId)|\(workspaceRoot)",
+                machineId: machineId,
+                workspaceRoot: workspaceRoot,
+                label: workspaceRoot.split { $0 == "/" || $0 == "\\" }.map(String.init).last ?? workspaceRoot
+            )
+    }
+}
+
+enum BoardColumn: String, CaseIterable, Identifiable {
+    case waiting, running, completed, cancelled, error
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .waiting: return "待回车"
+        case .running: return "运行中"
+        case .completed: return "已完成"
+        case .cancelled: return "已取消"
+        case .error: return "异常"
+        }
+    }
+    static func column(for status: String) -> BoardColumn {
+        switch status {
+        case "created", "queued", "dispatched", "binding": return .waiting
+        case "running": return .running
+        case "completed": return .completed
+        case "cancelled", "aborted": return .cancelled
+        default: return .error
+        }
+    }
 }
 
 struct DispatchResponse: Decodable {
@@ -61,9 +137,22 @@ enum RelayAPIError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .http(_, let msg): return msg
+        case .http(_, let msg): return Self.operatorMessage(msg)
         case .pairInvite: return "这是中台链接，请粘贴 App 邀请（armada-relay://op）"
         case .transport(let msg): return msg
+        }
+    }
+
+    static func operatorMessage(_ code: String) -> String {
+        switch code {
+        case "CONVERSATION_BUSY": return "这条对话还在跑，结束后才能续聊"
+        case "NO_CONVERSATION": return "还没有绑上 Cursor 对话，不能续聊"
+        case "INJECT_SLOT_BUSY": return "这台机器正在注入另一条任务，稍后再试"
+        case "WORKSPACE_NOT_OPEN": return "工作区没有打开"
+        case "CLOSED": return "这条对话已关闭"
+        case "PROMPT_COLLISION": return "同一工作区已有相同内容的任务"
+        case "HUB_OFFLINE": return "中台离线"
+        default: return code
         }
     }
 }
@@ -94,6 +183,12 @@ actor RelayAPI {
     func dispatch(workspaceId: String, prompt: String) async throws -> RunDTO {
         let body = try JSONSerialization.data(withJSONObject: ["workspaceId": workspaceId, "prompt": prompt])
         let wrap: DispatchResponse = try await send("/mobile/runs", method: "POST", body: body, ok: [201])
+        return wrap.run
+    }
+
+    func followup(runId: String, prompt: String) async throws -> RunDTO {
+        let body = try JSONSerialization.data(withJSONObject: ["prompt": prompt])
+        let wrap: DispatchResponse = try await send("/mobile/runs/\(runId)/followup", method: "POST", body: body, ok: [200])
         return wrap.run
     }
 

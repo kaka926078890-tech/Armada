@@ -15,7 +15,17 @@ export type WorkspaceSnap = {
   machineId: string;
   workspaceRoot: string;
   label?: string;
+  machineName?: string;
+  os?: string;
+  online?: boolean;
 };
+
+function machineLabel(m: any): string {
+  const d = typeof m.display_name === "string" ? m.display_name.trim() : "";
+  if (d) return d;
+  if (typeof m.name === "string" && m.name.trim()) return m.name.trim();
+  return String(m.id ?? m.machineId ?? "");
+}
 
 export type RunSnap = {
   runId: string;
@@ -71,7 +81,7 @@ export function createRelayServer(opts: {
   const adminToken = opts.adminToken ?? hex64();
   const publicBase = opts.publicBase.replace(/\/+$/, "");
   const pending = new Map<string, Pending>();
-  const hubSockets = new Map<string, { send: (s: string) => void }>();
+  const hubSockets = new Map<string, { send: (s: string) => void; ws: unknown }>();
   const rate = new Map<string, number[]>();
   let reqSeq = 0;
 
@@ -169,6 +179,20 @@ export function createRelayServer(opts: {
     });
   }
 
+  function hubCmdStatus(err: string): 400 | 404 | 409 | 429 | 502 | 503 {
+    if (err === "HUB_OFFLINE") return 503;
+    if (err === "RUN_LIMIT" || err === "RATE_LIMIT") return 429;
+    if (err === "NOT_FOUND") return 404;
+    if ([
+      "PROMPT_COLLISION", "CONVERSATION_BUSY", "INJECT_SLOT_BUSY", "WINDOW_BUSY",
+      "NO_CONVERSATION",
+    ].includes(err)) return 409;
+    if (err === "WORKSPACE_NOT_OPEN" || err === "MACHINE_OFFLINE" || err === "CLOSED" || err === "EMPTY_PROMPT" || err === "INVALID") {
+      return 400;
+    }
+    return 502;
+  }
+
   function checkRate(token: string): boolean {
     const now = Date.now();
     const arr = (rate.get(token) ?? []).filter((t) => now - t < RATE_WINDOW_MS);
@@ -208,6 +232,9 @@ export function createRelayServer(opts: {
       machineId: w.machineId,
       workspaceRoot: w.workspaceRoot,
       label: w.label || labelOf(w.workspaceRoot),
+      machineName: w.machineName || "",
+      os: w.os || "",
+      online: w.online !== false,
     }));
     return c.json({ hubOffline, workspaces });
   });
@@ -239,11 +266,7 @@ export function createRelayServer(opts: {
     const result = await waitHub(requestId);
     if (!result.ok) {
       const err = result.error ?? "HUB_TIMEOUT";
-      const status = err === "WORKSPACE_NOT_OPEN" || err === "MACHINE_OFFLINE" ? 400
-        : err === "PROMPT_COLLISION" ? 409
-        : err === "RUN_LIMIT" ? 429
-        : err === "HUB_OFFLINE" ? 503
-        : 502;
+      const status = hubCmdStatus(err);
       return c.json({ error: err }, status as 400);
     }
     const run = result.run!;
@@ -264,6 +287,33 @@ export function createRelayServer(opts: {
     const row = db.query("SELECT * FROM runs WHERE id=?1 AND fleet_id=?2").get(c.req.param("id"), fleet.id);
     if (!row) return c.json({ error: "NOT_FOUND" }, 404);
     return c.json(runToJson(row));
+  });
+
+  app.post("/mobile/runs/:id/followup", async (c) => {
+    const tok = (c as any).get("opToken") as string;
+    const fleet = (c as any).get("fleet") as { id: string; hub_online: number };
+    if (!checkRate(tok)) {
+      audit("operator", "run.rate_limit", fleet.id);
+      return c.json({ error: "RATE_LIMIT" }, 429);
+    }
+    if (fleet.hub_online !== 1) return c.json({ error: "HUB_OFFLINE" }, 503);
+    const body = await c.req.json().catch(() => null);
+    if (!body || typeof body.prompt !== "string") return c.json({ error: "INVALID" }, 400);
+    const runId = c.req.param("id");
+    const row = db.query("SELECT id FROM runs WHERE id=?1 AND fleet_id=?2").get(runId, fleet.id);
+    if (!row) return c.json({ error: "NOT_FOUND" }, 404);
+    const requestId = `r${++reqSeq}`;
+    const sent = sendHub(fleet.id, { type: "cmd.followup", requestId, runId, prompt: body.prompt });
+    if (!sent) return c.json({ error: "HUB_OFFLINE" }, 503);
+    const result = await waitHub(requestId);
+    if (!result.ok) {
+      const err = result.error ?? "HUB_TIMEOUT";
+      return c.json({ error: err }, hubCmdStatus(err) as 400);
+    }
+    if (result.run) applyRunSnap(fleet.id, result.run);
+    audit("operator", "run.followup", runId, { fleet: fleet.id });
+    const next = db.query("SELECT * FROM runs WHERE id=?1 AND fleet_id=?2").get(runId, fleet.id);
+    return c.json({ run: runToJson(next) }, 200);
   });
 
   app.post("/mobile/runs/:id/answer", async (c) => {
@@ -312,7 +362,7 @@ export function createRelayServer(opts: {
     websocket: {
       open(ws) {
         const id = ws.data.fleetId!;
-        hubSockets.set(id, { send: (s) => ws.send(s) });
+        hubSockets.set(id, { send: (s) => ws.send(s), ws });
         db.query("UPDATE fleets SET hub_online=1 WHERE id=?1").run(id);
       },
       message(ws, data) {
@@ -324,9 +374,18 @@ export function createRelayServer(opts: {
           const slots: WorkspaceSnap[] = [];
           for (const m of machines) {
             const roots = typeof m.open_workspaces === "string" ? JSON.parse(m.open_workspaces) : (m.openWorkspaces ?? m.open_workspaces ?? []);
-            for (const root of roots) {
-              if (typeof root === "string") slots.push({ machineId: m.id ?? m.machineId, workspaceRoot: root, label: labelOf(root) });
+          for (const root of roots) {
+            if (typeof root === "string") {
+              slots.push({
+                machineId: m.id ?? m.machineId,
+                workspaceRoot: root,
+                label: labelOf(root),
+                machineName: machineLabel(m),
+                os: typeof m.os === "string" ? m.os : "",
+                online: m.status !== "offline",
+              });
             }
+          }
           }
           db.query("UPDATE fleets SET workspaces=?1 WHERE id=?2").run(JSON.stringify(slots), fleetId);
         } else if (msg.type === "snap.run" && msg.run) {
@@ -342,6 +401,8 @@ export function createRelayServer(opts: {
       close(ws) {
         const id = ws.data.fleetId;
         if (!id) return;
+        const cur = hubSockets.get(id);
+        if (cur?.ws !== ws) return;
         hubSockets.delete(id);
         db.query("UPDATE fleets SET hub_online=0 WHERE id=?1").run(id);
       },

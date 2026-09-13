@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { assistantBodyText, eventsToChat, extractUserText, segmentChat, INITIAL_VISIBLE_TURNS, initialHiddenPrefixTurns, recentTurnsWindow } from "../src/chatView";
+import { assistantBodyForPrompt, assistantBodyText, eventsToChat, extractUserText, segmentChat, INITIAL_VISIBLE_TURNS, initialHiddenPrefixTurns, recentTurnsWindow } from "../src/chatView";
 import type { ChatBlock } from "../src/chatView";
 import type { RunEvent } from "../src/types";
 
@@ -457,6 +457,16 @@ describe("segmentChat", () => {
       user(1, "hi"), thought(2, "想"), asst(3, "先改。"), asst(4, "好了。"),
     ])).toBe("先改。\n\n好了。");
     expect(assistantBodyText([user(1, "hi")])).toBe("");
+  });
+
+  test("assistantBodyForPrompt keeps only the matching turn", () => {
+    const blocks = [
+      user(1, "更早的任务"), thought(2, "想"), asst(3, "那是旧回复。"),
+      user(4, "那时还没修好？"), asst(5, "现在修好了。"),
+    ];
+    expect(assistantBodyText(blocks)).toContain("旧回复");
+    expect(assistantBodyForPrompt(blocks, "那时还没修好？")).toBe("现在修好了。");
+    expect(assistantBodyForPrompt(blocks, "未知 prompt")).toBe("现在修好了。");
   });
 });
 

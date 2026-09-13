@@ -11,8 +11,11 @@ final class Session: ObservableObject {
     @Published var hubOffline = false
     @Published var runs: [RunDTO] = []
     @Published var lastError: String?
+    @Published var readAt: [String: Double] = [:]
+    @Published var focusColumn: BoardColumn?
 
     private var poll: Task<Void, Never>?
+    private let readKey = "armada.readAt"
 
     var bound: Bool { !relay.isEmpty && !token.isEmpty }
 
@@ -20,6 +23,10 @@ final class Session: ObservableObject {
         relay = UserDefaults.standard.string(forKey: "relay") ?? ""
         fleet = UserDefaults.standard.string(forKey: "fleet") ?? ""
         token = UserDefaults.standard.string(forKey: "token") ?? ""
+        if let data = UserDefaults.standard.data(forKey: readKey),
+           let map = try? JSONDecoder().decode([String: Double].self, from: data) {
+            readAt = map
+        }
         if bound { startPolling() }
     }
 
@@ -78,6 +85,60 @@ final class Session: ObservableObject {
             }
         }
     }
+
+    func runs(in workspace: WorkspaceDTO) -> [RunDTO] {
+        runs.filter { $0.machineId == workspace.machineId && $0.workspaceRoot == workspace.workspaceRoot }
+    }
+
+    func markOpened(_ runId: String) {
+        readAt[runId] = Date().timeIntervalSince1970 * 1000
+        persistRead()
+    }
+
+    func isUnread(_ run: RunDTO) -> Bool {
+        let seen = readAt[run.runId]
+        if run.pendingAsk != nil {
+            if seen == nil { return true }
+            if Double(run.activityTs) > seen! { return true }
+        }
+        if ["completed", "error", "unknown", "aborted"].contains(run.status) {
+            return seen == nil || Double(run.activityTs) > seen!
+        }
+        return false
+    }
+
+    func unreadCount(in workspace: WorkspaceDTO) -> Int {
+        runs(in: workspace).filter(isUnread).count
+    }
+
+    func hasLive(_ workspace: WorkspaceDTO) -> Bool {
+        runs(in: workspace).contains(where: \.isLive)
+    }
+
+    var machineGroups: [(id: String, name: String, slots: [WorkspaceDTO])] {
+        var order: [String] = []
+        var map: [String: (name: String, slots: [WorkspaceDTO])] = [:]
+        for w in workspaces {
+            if map[w.machineId] == nil {
+                order.append(w.machineId)
+                map[w.machineId] = (w.machineName.isEmpty ? w.machineId : w.machineName, [])
+            }
+            map[w.machineId]?.slots.append(w)
+            if !w.machineName.isEmpty {
+                map[w.machineId]?.name = w.machineName
+            }
+        }
+        return order.map { id in
+            let g = map[id]!
+            return (id, g.name, g.slots)
+        }
+    }
+
+    private func persistRead() {
+        if let data = try? JSONEncoder().encode(readAt) {
+            UserDefaults.standard.set(data, forKey: readKey)
+        }
+    }
 }
 
 @main
@@ -96,12 +157,7 @@ struct RootView: View {
     @EnvironmentObject var session: Session
     var body: some View {
         if session.bound {
-            TabView {
-                WorkspaceListView()
-                    .tabItem { Label("工作区", systemImage: "folder") }
-                RunListView()
-                    .tabItem { Label("任务", systemImage: "list.bullet") }
-            }
+            WorkspaceListView()
         } else {
             BindView()
         }

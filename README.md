@@ -2,7 +2,7 @@
 
 局域网 Cursor **舰队指挥台**：一台中台调度多台被控 Cursor 窗口的派发、监控与取消。任务在被控机真实 IDE 对话里跑，用该机自己的 Cursor 登录态，不是绕过 IDE 打模型 API。
 
-日常用法走 **桌面应用**（创建/加入舰队、代装扩展、CDP 打开工作区）。开发联调仍可用浏览器打开看板。
+日常用法走 **桌面应用**（创建/加入舰队、代装扩展、CDP 打开工作区）。开发联调仍可用浏览器打开看板。不在局域网时，可自建 **中转**，用 iOS App 遥控同一套中台（中台 `7380` 不暴露到公网）。
 
 发送默认 **CDP 全自动**。桌面「打开工作区」会用启动器带调试口拉起 Cursor；若窗口不是这样开的，派发会降级为剪贴板预填 + 本机回车。
 
@@ -15,7 +15,7 @@
 
 ## 它能做什么
 
-已具备：桌面创建/加入舰队、局域网发现、代装扩展、CDP 打开工作区、五列看板、图文派发、并行任务、中台续聊与答选择题、完成通知。
+已具备：桌面创建/加入舰队、局域网发现、代装扩展、CDP 打开工作区、五列看板、图文派发、并行任务、中台续聊与答选择题、完成通知；可选自建中转 + iOS App 远程选仓、派发、续聊、答选择题。
 
 ### 舰队看板
 
@@ -75,6 +75,13 @@
 │    hooks    │  ~/.cursor/hooks       │   hub/web    │
 │ .sh / .exe  │                       │  看板前端    │
 └─────────────┘                       └──────────────┘
+
+可选远程（不改受控机、不映射 7380）：
+
+┌─────────────┐  armada-relay://op     ┌──────────────┐  pair / 出站 WSS
+│  iOS App    │◄───────────────────────►│    relay     │◄──────────── hub
+│ ArmadaRemote│  HTTPS 轮询 / 派发     │  自建 HTTPS  │
+└─────────────┘                       └──────────────┘
 ```
 
 | 组件 | 路径 | 职责 |
@@ -82,6 +89,8 @@
 | **desktop** | `desktop/` | 创建/加入舰队、局域网 mDNS 发现、代装 vsix/hooks/设置、CDP 打开工作区、系统通知 |
 | **desktop-core** | `desktop-core/` | 加入 URI、发现解析、与壳共享的纯逻辑 |
 | **hub** | `hub/` | 鉴权、机器注册、run 状态机、事件 ingest、审计、静态托管看板 |
+| **relay** | `relay/` | 自建中转：签发 pair/op 邀请、缓存仓与 run 快照、把 App 命令转给已连接的中台 |
+| **mobile** | `mobile/ios/` | iOS 遥控器：绑 op、按机器选仓、派发/续聊/答 Ask（不直连 7380） |
 | **extension** | `extension/` | Cursor 侧 WS 客户端：注册/心跳、注入 prompt、绑定 conversation、上报事件 |
 | **hooks** | `hooks/` | 把 Cursor hook 事件落盘到 spool，供扩展轮询上报 |
 | **web** | `hub/web/` | 看板 UI：机器树、五列看板、详情抽屉、SSE 刷新 |
@@ -126,6 +135,69 @@ armada://join?hub=192.168.1.10:7380&token=<中台令牌>
 约束：只能派到 **已经打开且扩展已上报** 的窗口；路径用绝对路径（不要 `~/proj`）；推理走 Cursor 云，受控端要能上网。
 
 开发时：仓库根目录 `bun run dev:desktop`（会先按 `extension/package.json` 打 vsix）。Web 联调用 `bun run dev:web`，看板在 http://127.0.0.1:7380，**不**创建舰队、不起第二份 hub；7380 已被占用时只重建看板、复用现有 hub。细节见 [`desktop/README.md`](desktop/README.md)。
+
+## 远程：自建中转 + iOS App
+
+局域网舰队 **不依赖** 中转。不配中转，桌面创建/加入、看板派发、受控 Cursor 都与现在一样。中转只解决「人不在同一局域网时，手机不要直连 7380」。
+
+```text
+App  --HTTPS-->  中转  <--出站 WSS--  中台  <--局域网--  受控 Cursor
+```
+
+中转不签发中台身份，也不知道中台 IP。它只开一个远程槽（`fleet`），同时给出两条邀请：
+
+| 邀请 | 给谁 | 令牌 |
+| --- | --- | --- |
+| `armada-relay://pair?relay=…&fleet=…&secret=…` | 中台 | `secret`，出站连 `/hub` |
+| `armada-relay://op?relay=…&fleet=…&token=…` | iOS App | `token`，调 `/mobile/*` |
+
+两条令牌不能互换。App **只绑中转**，看不到中台局域网 token。谁拿着 pair 连上，中转就认谁是这支远程舰队的中台（同一 `fleet` 同时只留一条中台连接）。公网 `relay` 必须是 **https**（模拟器可用 `http://127.0.0.1`）。不要把 `7380` 用 frp/Funnel 映射到公网。
+
+### 起中转并签发邀请
+
+```bash
+bun run dev:relay
+# 另开终端，创建远程舰队（沿用已有 ~/.armada-relay 时不要再加 --create-fleet）
+bun run relay/src/index.ts --create-fleet
+```
+
+JSON 里的 `pairUri` / `opUri` 各给中台和手机。中转公网地址来自 `RELAY_PUBLIC_BASE`（默认 `http://127.0.0.1:8780`）；生产请换成 `https://你的域名`，前面用 Caddy 等终结 TLS。
+
+也可用管理接口（`X-Relay-Admin`）：`POST /admin/fleets`。
+
+### 中台贴 pair
+
+把 pair 落到中台机 `~/.armada/relay.json`（`0600`）：
+
+```json
+{ "relay": "https://relay.example.com", "fleet": "fleet-…", "secret": "<hub_secret>" }
+```
+
+源码启动的 hub 会读这份文件并出站。包装版 **Armada.app 0.1.0** 还不会自己拨中转：不要杀它占用的 `:7380`，另开：
+
+```bash
+bun run dev:relay-attach
+```
+
+对接脚本用局域网 `~/.armada/token` 轮询本机 hub，再推到中转。没有 `relay.json` 时中台照常跑，只是手机显示「中台离线」。
+
+看板里暂时 **没有**「配置中转」粘贴框。
+
+### 手机绑 op
+
+1. Xcode 打开 `mobile/ios/ArmadaRemote.xcodeproj`，模拟器或真机跑 **ArmadaRemote**（Bundle ID `app.armada.remote`）。
+2. 粘贴 **op** 邀请（不要贴 pair）。
+3. 舰队页按 **机器 → 工作区**；点仓看五列任务；仓顶栏 **派发** 新开对话，详情 **续聊** 同一对话。
+4. Agent 选择题在详情里 Continue / Skip。终态正文是这一轮助手回复，不是整段 Cursor 会话。
+
+一部手机目前只绑一条 op（一台在线中台）。多台受控机只要登记在这台中台上，选不同仓即可分别派。多部手机可贴同一条 op，共用操作者令牌。
+
+### 不要做
+
+- 不配中转却指望 App 连上局域网看板
+- 用 `http://公网IP` 当 `relay`（明文会被拒绝）
+- 在受控机另起一份 hub 给中转对接
+- `--create-fleet` 反复执行导致 pair/op 和已写入的 `relay.json` 对不上
 
 ## 中台端 vs 受控端
 
@@ -338,6 +410,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\armada-cursor.ps1 C:
 | 详情串了别的对话 | **受控**：扩展 ≥ 0.4.3，不要用旧 vsix |
 | 贴图后变异常 `IMAGE_PASTE_FAILED` | **受控**：必须 CDP；不要指望剪贴板降级。查 `armada.imagePaste` |
 | Windows 启动器报「正在运行」 | **受控**：托盘 `^` 里 Cursor 右键退出，不是只关窗口 |
+| App「中台离线或没有打开的仓」 | **中台**：是否写入 `~/.armada/relay.json` 且中转在线；包装版是否另跑了 `bun run dev:relay-attach` |
+| App 提示「这是中台链接」 | 贴的是 pair，应贴 `armada-relay://op` |
+| 邀请「中转必须是 https」 | 公网必须 `https://`；仅模拟器允许 `http://127.0.0.1` |
 
 ## 发送通道
 
@@ -365,6 +440,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\armada-cursor.ps1 C:
 | `ARMADA_MAX_RUNS_PER_MACHINE` | 环境变量 | 每机占用中任务上限，默认 8（含 queued） |
 | `ARMADA_MAX_RUNS_PER_WORKSPACE` | 环境变量 | 每工作区上限，默认 4 |
 | `ARMADA_MULTI_RUN_PER_WINDOW` | 环境变量 | `0` 关闭同窗并行（U1 探针失败时用） |
+| `~/.armada/relay.json` | 中台数据目录 | 可选；`{ relay, fleet, secret }`。没有则不拨中转 |
+| `RELAY_HOME` | 环境变量 | 中转数据目录，默认 `~/.armada-relay` |
+| `RELAY_HOST` / `RELAY_PORT` | 环境变量 | 中转监听，默认 `127.0.0.1:8780` |
+| `RELAY_PUBLIC_BASE` | 环境变量 | 写进邀请的 origin；生产用 `https://域名` |
+| `RELAY_ADMIN_TOKEN` | 环境变量 | `POST /admin/fleets`；未设时进程启动会打印临时值 |
 
 看板主题、选中工作区、已读、详情宽度存在 hub 的 UI prefs，同一令牌下多端会同步。
 
@@ -412,7 +492,20 @@ Token **仅** query 鉴权；消息体不再带 token。连上后 10s 内必须 
 | GET / PUT | `/api/ui-prefs` | 看板偏好 |
 | GET | `/api/audit/export` | 审计 JSONL |
 
-常见错误码：`MACHINE_OFFLINE`、`WORKSPACE_NOT_OPEN`、`RUN_LIMIT`、`PROMPT_COLLISION`、`CONVERSATION_BUSY`、`INJECT_SLOT_BUSY`、`WINDOW_BUSY`、`NOT_FOUND`、`INVALID_STATE`、`NO_CONVERSATION`、`IMAGE_PASTE_FAILED`、`ATTACHMENT_TOO_LARGE`、`ASK_IN_FLIGHT`。
+中转（App 用 **operator token**，不要用 hub `secret`）：
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/health` | 中转健康检查（无需令牌） |
+| GET | `/mobile/workspaces` | 已打开的仓；`hubOffline` 时列表为空 |
+| GET | `/mobile/runs` | 快照列表 |
+| GET | `/mobile/runs/:id` | 含 `finalText`、`pendingAsk` |
+| POST | `/mobile/runs` | 新派发 |
+| POST | `/mobile/runs/:id/followup` | 续聊同一对话 |
+| POST | `/mobile/runs/:id/answer` | 回答 Ask |
+| POST | `/mobile/runs/:id/cancel` | 取消 |
+
+常见错误码：`MACHINE_OFFLINE`、`WORKSPACE_NOT_OPEN`、`RUN_LIMIT`、`PROMPT_COLLISION`、`CONVERSATION_BUSY`、`INJECT_SLOT_BUSY`、`WINDOW_BUSY`、`NOT_FOUND`、`INVALID_STATE`、`NO_CONVERSATION`、`IMAGE_PASTE_FAILED`、`ATTACHMENT_TOO_LARGE`、`ASK_IN_FLIGHT`、`HUB_OFFLINE`、`OPERATOR_REQUIRED`、`HUB_REQUIRED`。
 
 ## 开发指南
 
@@ -432,20 +525,28 @@ cd hub/web && bun run build
 
 # 桌面开发（先打包 vsix）
 bun run dev:desktop
+
+# 中转（可选）
+bun run dev:relay
+bun run relay/src/index.ts --create-fleet   # 仅新建远程舰队时
+bun run dev:relay-attach                   # 包装版 hub 不会出站时
 ```
 
-工作区：`hub`、`extension`、`hub/web`（见根 `package.json`）。  
+工作区：`hub`、`extension`、`hub/web`、`relay`（见根 `package.json`）。  
 hub 静态托管路径相对 `hub/src`，**请从仓库根**执行 `bun run dev:hub`。
 
 ## 后续计划
 
 | 项 | 打算做 |
 | --- | --- |
-| **移动端监控** | 手机上看舰队看板：任务进度、完成/异常通知、续聊与答选择题，出门也能盯着跑 |
+| **中转管理页 / 中台贴 pair** | 现在只有 CLI 与 `relay.json`；看板里还没有粘贴框 |
+| **App 通道** | 前台仍是轮询；锁屏 Ask/完成通知要 APNs；TestFlight 另开 |
+| **多操作者 / 一部手机多中台** | v1 一条 op 对应一台在线中台；令牌轮换另开闸 |
 | **多机互联 · 团队协作** | 多台机器组成协作网，不只局域网点对点加入：团队共享舰队、一起派发和盯进度 |
 
 ## 设计文档
 
+- 中转 + iOS：[docs/superpowers/specs/2026-09-12-armada-relay-mobile-design.md](docs/superpowers/specs/2026-09-12-armada-relay-mobile-design.md)
 - 局域网发现：[docs/superpowers/specs/2026-09-07-armada-lan-fleet-discovery-design.md](docs/superpowers/specs/2026-09-07-armada-lan-fleet-discovery-design.md)
 - 图文派发：[docs/superpowers/specs/2026-09-02-armada-composer-image-chip-design.md](docs/superpowers/specs/2026-09-02-armada-composer-image-chip-design.md)
 - 离线工作区从侧栏消失：[docs/superpowers/specs/2026-09-10-armada-offline-workspace-slots-design.md](docs/superpowers/specs/2026-09-10-armada-offline-workspace-slots-design.md)

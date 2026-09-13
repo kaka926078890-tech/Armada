@@ -478,6 +478,37 @@ export function assistantBodyText(blocks: ChatBlock[]): string {
   return blocks.filter((b) => b.kind === "assistant").map((b) => b.text).join("\n\n").trim();
 }
 
+function normPrompt(s: string): string {
+  return s.replace(/\s+/g, " ").trim();
+}
+
+/** 中转详情只取本轮（匹配 prompt 的那一折）助手正文，不含同一对话更早的任务。 */
+export function assistantBodyForPrompt(blocks: ChatBlock[], prompt: string): string {
+  const turns = splitChatTurns(blocks);
+  const p = normPrompt(extractUserText(prompt));
+  const pick = (pred: (u: string) => boolean): string => {
+    for (let i = turns.length - 1; i >= 0; i--) {
+      const user = turns[i].find((b) => b.kind === "user");
+      if (user?.kind !== "user") continue;
+      if (!pred(normPrompt(user.text))) continue;
+      const body = assistantBodyText(turns[i]);
+      if (body) return body;
+    }
+    return "";
+  };
+  if (p) {
+    const exact = pick((u) => u === p);
+    if (exact) return exact;
+    const loose = pick((u) => u.startsWith(p) || p.startsWith(u));
+    if (loose) return loose;
+  }
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const body = assistantBodyText(turns[i]);
+    if (body) return body;
+  }
+  return assistantBodyText(blocks);
+}
+
 /** 有正文后把该轮思考/工具收成一段；尚未出正文时保持一条条列出。 */
 export function segmentChat(blocks: ChatBlock[]): ChatSegment[] {
   const turns = splitChatTurns(blocks);

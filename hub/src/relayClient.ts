@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import type { Database } from "bun:sqlite";
 import { decodeWorkspaceId, originOf } from "../../relay/src/uri";
-import { assistantBodyText, eventsToChat } from "../web/src/chatView";
+import { assistantBodyForPrompt, eventsToChat } from "../web/src/chatView";
 import type { RunEvent } from "../web/src/types";
 import type { Registry } from "./registry";
 import type { RunService } from "./runs";
@@ -51,7 +51,7 @@ export function hubWsUrl(cfg: RelayConfig): string {
 }
 
 export function runToSnap(run: any, events: RunEvent[]): RunSnap {
-  const body = assistantBodyText(eventsToChat(events));
+  const body = assistantBodyForPrompt(eventsToChat(events), run.prompt ?? "");
   let status = String(run.status ?? "unknown");
   let error = (run.end_reason as string | null) ?? null;
   let finalText: string | null = null;
@@ -153,6 +153,19 @@ export function startRelayClient(opts: {
         const body = await r.json().catch(() => ({})) as any;
         if (!r.ok) return fail(body.error ?? "HUB_ERROR");
         const run = snapOf(body.run.id);
+        send({ type: "cmd.result", requestId, ok: true, run });
+        if (run) send({ type: "snap.run", run });
+        return;
+      }
+      if (msg.type === "cmd.followup") {
+        if (typeof msg.runId !== "string" || !msg.runId) return fail("INVALID");
+        const r = await hubFetch(`/api/runs/${encodeURIComponent(msg.runId)}/followup`, {
+          method: "POST",
+          body: JSON.stringify({ prompt: msg.prompt ?? "" }),
+        });
+        const body = await r.json().catch(() => ({})) as any;
+        if (!r.ok) return fail(body.error ?? "HUB_ERROR");
+        const run = snapOf(msg.runId);
         send({ type: "cmd.result", requestId, ok: true, run });
         if (run) send({ type: "snap.run", run });
         return;

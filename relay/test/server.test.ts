@@ -56,6 +56,21 @@ function autoHub(ws: WebSocket, onDispatch?: (msg: any) => object | void) {
     if (msg.type === "cmd.answer" || msg.type === "cmd.cancel") {
       ws.send(JSON.stringify({ type: "cmd.result", requestId: msg.requestId, ok: true }));
     }
+    if (msg.type === "cmd.followup") {
+      ws.send(JSON.stringify({
+        type: "cmd.result",
+        requestId: msg.requestId,
+        ok: true,
+        run: {
+          runId: msg.runId,
+          machineId: "m-1",
+          workspaceRoot: "/Users/me/proj",
+          prompt: msg.prompt,
+          status: "dispatched",
+          updatedAt: Date.now(),
+        },
+      }));
+    }
   });
 }
 
@@ -139,7 +154,7 @@ describe("relay serve", () => {
     autoHub(ws);
     ws.send(JSON.stringify({
       type: "snap.workspaces",
-      machines: [{ id: "m-1", open_workspaces: JSON.stringify(["/Users/me/proj"]) }],
+      machines: [{ id: "m-1", name: "MacBook-Pro.local", display_name: "Mac Intel", os: "darwin-arm64", status: "online", open_workspaces: JSON.stringify(["/Users/me/proj"]) }],
     }));
     await Bun.sleep(50);
     const headers = { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" };
@@ -148,6 +163,7 @@ describe("relay serve", () => {
     expect(list.workspaces[0]).toMatchObject({
       workspaceId: encodeWorkspaceId("m-1", "/Users/me/proj"),
       label: "proj",
+      machineName: "Mac Intel",
     });
     const d = await fetch(url(s, "/mobile/runs"), {
       method: "POST",
@@ -160,6 +176,56 @@ describe("relay serve", () => {
     expect(body.run.prompt).toBe("hello fleet");
     expect(body.run.status).toBe("dispatched");
     ws.close();
+  });
+
+  test("followup reopens the same run", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    autoHub(ws);
+    ws.send(JSON.stringify({
+      type: "snap.run",
+      run: {
+        runId: "r-1",
+        machineId: "m-1",
+        workspaceRoot: "/Users/me/proj",
+        prompt: "hello fleet",
+        status: "completed",
+        finalText: "好了",
+        updatedAt: Date.now(),
+      },
+    }));
+    await Bun.sleep(40);
+    const headers = { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" };
+    const f = await fetch(url(s, "/mobile/runs/r-1/followup"), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ prompt: "继续" }),
+    });
+    expect(f.status).toBe(200);
+    const body = await f.json() as any;
+    expect(body.run.runId).toBe("r-1");
+    expect(body.run.prompt).toBe("继续");
+    expect(body.run.status).toBe("dispatched");
+    ws.close();
+  });
+
+  test("stale hub socket close does not mark a newer connection offline", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const headers = { authorization: `Bearer ${fleet.operatorToken}` };
+    const oldWs = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    const newWs = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    newWs.send(JSON.stringify({
+      type: "snap.workspaces",
+      machines: [{ id: "m-1", name: "A", status: "online", openWorkspaces: ["/ws/a"] }],
+    }));
+    oldWs.close();
+    await Bun.sleep(80);
+    const list = await (await fetch(url(s, "/mobile/workspaces"), { headers })).json() as any;
+    expect(list.hubOffline).toBe(false);
+    expect(list.workspaces[0]?.workspaceRoot).toBe("/ws/a");
+    newWs.close();
   });
 
   test("admin fleets requires token", async () => {

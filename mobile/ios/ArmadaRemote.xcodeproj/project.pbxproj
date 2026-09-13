@@ -11,6 +11,7 @@
 		A10000000000000000000002 /* Invite.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000012 /* Invite.swift */; };
 		A10000000000000000000003 /* RelayAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000013 /* RelayAPI.swift */; };
 		A10000000000000000000004 /* Screens.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000014 /* Screens.swift */; };
+		A10000000000000000000005 /* MarkdownView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000016 /* MarkdownView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -20,6 +21,7 @@
 		A10000000000000000000013 /* RelayAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelayAPI.swift; sourceTree = "<group>"; };
 		A10000000000000000000014 /* Screens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Screens.swift; sourceTree = "<group>"; };
 		A10000000000000000000015 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A10000000000000000000016 /* MarkdownView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -48,6 +50,7 @@
 				A10000000000000000000012 /* Invite.swift */,
 				A10000000000000000000013 /* RelayAPI.swift */,
 				A10000000000000000000014 /* Screens.swift */,
+				A10000000000000000000016 /* MarkdownView.swift */,
 				A10000000000000000000015 /* Info.plist */,
 			);
 			path = ArmadaRemote;
@@ -118,6 +121,7 @@
 				A10000000000000000000002 /* Invite.swift in Sources */,
 				A10000000000000000000003 /* RelayAPI.swift in Sources */,
 				A10000000000000000000004 /* Screens.swift in Sources */,
+				A10000000000000000000005 /* MarkdownView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
