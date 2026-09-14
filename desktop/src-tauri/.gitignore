@@ -8,6 +8,7 @@
 
 # Pack-time sidecar from desktop/scripts/bundle-hub.sh (do not commit bun/node_modules)
 /resources/hub/
+/resources/relay/
 /resources/bun
 /resources/scripts/
 /resources/hooks/
