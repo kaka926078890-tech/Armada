@@ -14,6 +14,9 @@ import { collisionKey, hasImageMarkers, stripImageMarkers } from "../../extensio
 import { BlobStore, parseAttachmentIds, type BlobMeta } from "./blobs";
 import { appendRetired, decideArm, decideStop, parseRetiredIds, isWindowsMachineOs, genOf } from "./generationOwnership";
 import { parsePendingAsk, continueAllowed, optionInAsk, type PendingAsk } from "./pendingAsk";
+import {
+  OUTBOUND_LIMIT, QUEUE_DRAIN_MS, queueModeOf,
+} from "./outboundClaim";
 
 const ACTIVE = ["created", "dispatched", "binding", "running"];
 const DISPATCH_TIMEOUT_MS = 30_000;
@@ -86,9 +89,142 @@ export class RunService {
   }
 
   private injectSlotCount(machineId: string): number {
-    return (this.db.query(
+    const injectingRuns = (this.db.query(
       `SELECT COUNT(*) AS n FROM runs WHERE machine_id=?1 AND status IN ('dispatched','binding')`,
     ).get(machineId) as { n: number }).n;
+    const injectingOutbound = (this.db.query(
+      `SELECT COUNT(*) AS n FROM run_outbound o JOIN runs r ON r.id=o.run_id
+       WHERE r.machine_id=?1 AND o.state='injecting'`,
+    ).get(machineId) as { n: number }).n;
+    return injectingRuns + injectingOutbound;
+  }
+
+  private hasOutstandingOutbound(runId: string): boolean {
+    return !!(this.db.query(
+      `SELECT 1 AS n FROM run_outbound WHERE run_id=?1 AND state='queued' LIMIT 1`,
+    ).get(runId) as { n: number } | null);
+  }
+
+  private unconsumedOutboundCount(runId: string): number {
+    return (this.db.query(
+      `SELECT COUNT(*) AS n FROM run_outbound WHERE run_id=?1 AND state IN ('injecting','queued','steered')`,
+    ).get(runId) as { n: number }).n;
+  }
+
+  private hasOutboundCollision(runId: string, prompt: string): boolean {
+    const key = normalizePrompt(prompt);
+    if (!key) return false;
+    const rows = this.db.query(
+      `SELECT prompt FROM run_outbound WHERE run_id=?1 AND state IN ('injecting','queued','steered')`,
+    ).all(runId) as { prompt: string }[];
+    return rows.some((r) => normalizePrompt(r.prompt) === key);
+  }
+
+  private listVisibleOutbound(runId: string): {
+    id: string; prompt: string; expected_mode: string; state: string; created_at: number;
+  }[] {
+    return this.db.query(
+      `SELECT id, prompt, expected_mode, state, created_at FROM run_outbound
+       WHERE run_id=?1 AND state IN ('injecting','queued','steered') ORDER BY id ASC`,
+    ).all(runId) as { id: string; prompt: string; expected_mode: string; state: string; created_at: number }[];
+  }
+
+  private injectingOutbound(runId: string): {
+    id: string; expected_mode: string; state: string;
+  } | null {
+    return (this.db.query(
+      `SELECT id, expected_mode, state FROM run_outbound WHERE run_id=?1 AND state='injecting' ORDER BY id DESC LIMIT 1`,
+    ).get(runId) as { id: string; expected_mode: string; state: string } | null) ?? null;
+  }
+
+  private broadcastOutbound(runId: string, row: { id: string; state: string; expected_mode: string; prompt: string }) {
+    this.sse.broadcast(runId, {
+      type: "run.outbound", runId, outboundId: row.id, state: row.state, expected_mode: row.expected_mode, prompt: row.prompt,
+    });
+  }
+
+  private setOutboundState(id: string, state: string): void {
+    const row = this.db.query(
+      `SELECT id, run_id, prompt, expected_mode FROM run_outbound WHERE id=?1`,
+    ).get(id) as { id: string; run_id: string; prompt: string; expected_mode: string } | null;
+    if (!row) return;
+    this.db.query("UPDATE run_outbound SET state=?1 WHERE id=?2").run(state, id);
+    this.broadcastOutbound(row.run_id, { id: row.id, state, expected_mode: row.expected_mode, prompt: row.prompt });
+  }
+
+  private failUnconsumedOutbound(runId: string): void {
+    const rows = this.db.query(
+      `SELECT id FROM run_outbound WHERE run_id=?1 AND state IN ('injecting','queued','steered')`,
+    ).all(runId) as { id: string }[];
+    for (const r of rows) this.setOutboundState(r.id, "failed");
+  }
+
+  private failQueuedOutbound(runId: string): void {
+    const rows = this.db.query(
+      `SELECT id FROM run_outbound WHERE run_id=?1 AND state='queued'`,
+    ).all(runId) as { id: string }[];
+    for (const r of rows) this.setOutboundState(r.id, "failed");
+  }
+
+  private clearDeferredStop(runId: string): void {
+    this.db.query("UPDATE runs SET deferred_stop=NULL WHERE id=?1").run(runId);
+  }
+
+  private writeDeferredStop(runId: string, payload: any, live: string | null): void {
+    const row = this.db.query("SELECT deferred_stop FROM runs WHERE id=?1").get(runId) as { deferred_stop: string | null } | null;
+    let drainedAt = Date.now();
+    if (row?.deferred_stop) {
+      try {
+        const prev = JSON.parse(row.deferred_stop);
+        if (genOf(prev?.live_generation_id) === genOf(live) && typeof prev?.drained_at === "number") {
+          drainedAt = prev.drained_at;
+        }
+      } catch { /* keep now */ }
+    }
+    this.db.query("UPDATE runs SET deferred_stop=?1 WHERE id=?2").run(JSON.stringify({
+      payload, live_generation_id: live, drained_at: drainedAt,
+    }), runId);
+  }
+
+  private maybeReplayDeferredStop(runId: string): void {
+    if (this.hasOutstandingOutbound(runId)) return;
+    const row = this.db.query("SELECT deferred_stop, live_generation_id FROM runs WHERE id=?1").get(runId) as {
+      deferred_stop: string | null; live_generation_id: string | null;
+    } | null;
+    if (!row?.deferred_stop) return;
+    let snap: { payload: any; live_generation_id?: string | null };
+    try { snap = JSON.parse(row.deferred_stop); } catch {
+      this.clearDeferredStop(runId);
+      return;
+    }
+    if (genOf(row.live_generation_id) !== genOf(snap.live_generation_id)) {
+      this.clearDeferredStop(runId);
+      return;
+    }
+    this.clearDeferredStop(runId);
+    this.onStopEvent(runId, snap.payload);
+  }
+
+  claimOutbound(runId: string, promptNorm: string, eventTs: number): void {
+    if (!promptNorm) return;
+    const rows = this.db.query(
+      `SELECT id, prompt, state, created_at FROM run_outbound
+       WHERE run_id=?1 AND state IN ('queued','steered') ORDER BY id ASC`,
+    ).all(runId) as { id: string; prompt: string; state: string; created_at: number }[];
+    const hit = rows.find((r) => r.created_at <= eventTs && normalizePrompt(r.prompt) === promptNorm);
+    if (!hit) return;
+    const wasQueued = hit.state === "queued";
+    this.setOutboundState(hit.id, "consumed");
+    if (!wasQueued) return;
+    this.clearDeferredStop(runId);
+    const run = this.get(runId);
+    if (!run || run.status !== "running") return;
+    if (!isWindowsMachineOs(this.registry.getMachine(run.machine_id)?.os)) return;
+    const gen = this.attachHubGeneration(runId, "hub_windows");
+    const windowId = this.liveWindowId(run);
+    if (gen && windowId) {
+      this.registry.sendTo(run.machine_id, windowId, { type: "run.generation", runId, generation_id: gen });
+    }
   }
 
   private hasPromptCollision(machineId: string, workspaceRoot: string, prompt: string, attachmentIds: string[], exceptId?: string): boolean {
@@ -301,6 +437,21 @@ export class RunService {
       this.onAnswerAskAck(run.id, msg);
       return;
     }
+    const injecting = this.injectingOutbound(run.id);
+    if (injecting) {
+      if (this.terminal(run.status) || run.status === "running") {
+        if (this.terminal(run.status) || msg.status !== "accepted") {
+          this.setOutboundState(injecting.id, "failed");
+          if (run.status === "running") this.promoteNextQueued(machineId);
+          return;
+        }
+        const next = injecting.expected_mode === "queue" ? "queued" : "steered";
+        this.setOutboundState(injecting.id, next);
+        if (next === "steered") this.maybeReplayDeferredStop(run.id);
+        this.promoteNextQueued(machineId);
+        return;
+      }
+    }
     const recoverable = this.isFalseDispatchTimeout(run);
     if (run.status !== "dispatched" && !recoverable) return;
     if (recoverable && this.denyReviveIfSlotBusy(machineId, run.id)) return;
@@ -359,6 +510,8 @@ export class RunService {
     }
     if (!ACTIVE.includes(run.status)) return { error: "ALREADY_TERMINAL" };
     this.cancelRequested.add(runId);
+    this.failUnconsumedOutbound(runId);
+    this.clearDeferredStop(runId);
     this.retireLiveGeneration(runId);
     const windowId = this.liveWindowId(run);
     let sent = false;
@@ -386,6 +539,8 @@ export class RunService {
   }
 
   private persistGeneration(runId: string, live: string | null, retired: string[]) {
+    const prev = this.db.query("SELECT live_generation_id FROM runs WHERE id=?1").get(runId) as { live_generation_id: string | null } | null;
+    if (prev && genOf(prev.live_generation_id) !== genOf(live)) this.clearDeferredStop(runId);
     this.db.query("UPDATE runs SET live_generation_id=?1, retired_generation_ids=?2 WHERE id=?3")
       .run(live, JSON.stringify(retired), runId);
   }
@@ -455,14 +610,22 @@ export class RunService {
       hasHubFollowup: this.hasHubFollowup(runId),
       retired,
       liveTurnSettled: this.liveTurnSettled(runId, live),
+      hasOutstandingOutbound: this.hasOutstandingOutbound(runId),
+      stopStatus: payload?.status,
     });
     if (d.action === "ignore") {
+      if (d.audit === "QUEUE_DRAIN") this.writeDeferredStop(runId, payload, live);
       this.audit("hub", d.audit, runId, { live: run.live_generation_id ?? null, stop: payload?.generation_id ?? null });
       return;
     }
     if (d.audit === "STOP_NO_GEN_INITIAL") this.audit("hub", "STOP_NO_GEN_INITIAL", runId, {});
     if (d.audit === "STOP_SESSION_GEN") this.audit("hub", "STOP_SESSION_GEN", runId, { live, stop: payload?.generation_id ?? null });
     const s = payload?.status;
+    const abortive = s === "aborted" || s === "error" || this.cancelRequested.has(runId);
+    if (abortive) {
+      this.failUnconsumedOutbound(runId);
+      this.clearDeferredStop(runId);
+    }
     if (s === "completed" || s === "success") this.setStatus(runId, "completed", { end_reason: "completed" }, "extension");
     else if (s === "aborted") {
       const wasCancel = this.cancelRequested.has(runId);
@@ -498,6 +661,24 @@ export class RunService {
       this.setStatus(r.id, "unknown", { end_reason: "BIND_TIMEOUT" });
       machines.add(r.machine_id);
     }
+    const inj = this.db.query(
+      `SELECT o.id, r.machine_id FROM run_outbound o JOIN runs r ON r.id=o.run_id
+       WHERE o.state='injecting' AND o.created_at < ?1`,
+    ).all(now - DISPATCH_TIMEOUT_MS) as { id: string; machine_id: string }[];
+    for (const r of inj) {
+      this.setOutboundState(r.id, "failed");
+      machines.add(r.machine_id);
+    }
+    const drained = this.db.query(
+      `SELECT id, deferred_stop FROM runs WHERE deferred_stop IS NOT NULL`,
+    ).all() as { id: string; deferred_stop: string }[];
+    for (const r of drained) {
+      let snap: { drained_at?: number };
+      try { snap = JSON.parse(r.deferred_stop); } catch { continue; }
+      if (typeof snap.drained_at !== "number" || now - snap.drained_at < QUEUE_DRAIN_MS) continue;
+      this.failQueuedOutbound(r.id);
+      this.maybeReplayDeferredStop(r.id);
+    }
     for (const machineId of machines) this.promoteNextQueued(machineId);
   }
 
@@ -506,6 +687,8 @@ export class RunService {
       `SELECT id, status FROM runs WHERE machine_id=?1 AND status IN ('queued','dispatched','binding','running')`
     ).all(machineId) as any[];
     for (const r of rows) {
+      this.failUnconsumedOutbound(r.id);
+      this.clearDeferredStop(r.id);
       if (r.status === "queued") this.setStatus(r.id, "cancelled", { end_reason: "MACHINE_OFFLINE" });
       else this.setStatus(r.id, "unknown", { end_reason: "MACHINE_OFFLINE" });
     }
@@ -514,7 +697,14 @@ export class RunService {
 
   private hydrateRun(row: any): any {
     if (!row) return row;
-    return { ...row, pending_ask: parsePendingAsk(row.pending_ask) };
+    const { deferred_stop: _deferred, ...rest } = row;
+    const mode = this.registry.getMachine(row.machine_id)?.queue_message_default_behavior ?? null;
+    return {
+      ...rest,
+      pending_ask: parsePendingAsk(row.pending_ask),
+      outbound: this.listVisibleOutbound(row.id),
+      queue_message_default_behavior: mode,
+    };
   }
 
   list(status?: string, machineId?: string, archived?: string) {
@@ -681,6 +871,7 @@ export class RunService {
     if (!run) return { error: "NOT_FOUND" };
     if (!run.conversation_id) return { error: "NO_CONVERSATION" };
     if (run.end_reason === "OPERATOR_CLOSED") return { error: "CLOSED" };
+    if (run.status === "running") return this.followupWhileRunning(run, prompt, attachmentIds);
     if ((OCCUPYING_STATUSES as readonly string[]).includes(run.status)) return { error: "CONVERSATION_BUSY" };
     if (this.injectSlotCount(run.machine_id) > 0) return { error: "INJECT_SLOT_BUSY" };
     const win = this.registry.findWindowForWorkspace(run.machine_id, run.workspace_root);
@@ -722,6 +913,39 @@ export class RunService {
     });
     this.audit("hub", "run.followup", runId, { prompt: prompt.slice(0, 80) });
     return { run: this.get(runId) };
+  }
+
+  private followupWhileRunning(run: any, prompt: string, attachmentIds: string[]): { error?: string; run?: any } {
+    if (parsePendingAsk(run.pending_ask)) return { error: "CONVERSATION_BUSY" };
+    if (attachmentIds.length > 0) return { error: "OUTBOUND_TEXT_ONLY" };
+    if (!normalizePrompt(prompt)) return { error: "EMPTY_PROMPT" };
+    if (this.injectSlotCount(run.machine_id) > 0) return { error: "INJECT_SLOT_BUSY" };
+    if (this.hasPromptCollision(run.machine_id, run.workspace_root, prompt, attachmentIds, run.id)) {
+      return { error: "PROMPT_COLLISION" };
+    }
+    if (this.hasOutboundCollision(run.id, prompt)) return { error: "PROMPT_COLLISION" };
+    if (this.unconsumedOutboundCount(run.id) >= OUTBOUND_LIMIT) return { error: "OUTBOUND_LIMIT" };
+    const win = this.registry.findWindowForWorkspace(run.machine_id, run.workspace_root);
+    if (!win) return { error: "WORKSPACE_NOT_OPEN" };
+
+    const expected_mode = queueModeOf(this.registry.getMachine(run.machine_id)?.queue_message_default_behavior);
+    const id = `o-${randomUUID()}`;
+    const now = Date.now();
+    this.db.query(
+      `INSERT INTO run_outbound (id, run_id, prompt, attachments, expected_mode, state, created_at)
+       VALUES (?1,?2,?3,'[]',?4,'injecting',?5)`,
+    ).run(id, run.id, prompt, expected_mode, now);
+    this.broadcastOutbound(run.id, { id, state: "injecting", expected_mode, prompt });
+    this.registry.sendTo(run.machine_id, win.windowId, {
+      type: "run.followup",
+      runId: run.id,
+      conversationId: run.conversation_id,
+      workspaceRoot: run.workspace_root,
+      prompt,
+      live: true,
+    });
+    this.audit("hub", "run.followup.live", run.id, { outboundId: id, expected_mode, prompt: prompt.slice(0, 80) });
+    return { run: this.get(run.id) };
   }
 
   /** 操作员改卡片展示标题。只写 runs.title，不改 prompt / cid，不派发。 */

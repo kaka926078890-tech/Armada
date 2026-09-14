@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { assistantBodyForPrompt, assistantBodyText, eventsToChat, extractUserText, segmentChat, INITIAL_VISIBLE_TURNS, initialHiddenPrefixTurns, recentTurnsWindow } from "../src/chatView";
+import { assistantBodyForPrompt, assistantBodyText, eventsToChat, extractUserText, segmentChat, INITIAL_VISIBLE_TURNS, initialHiddenPrefixTurns, recentTurnsWindow, mergeOutboundChat, queuedOutbound } from "../src/chatView";
 import type { ChatBlock } from "../src/chatView";
 import type { RunEvent } from "../src/types";
 
@@ -577,5 +577,27 @@ describe("recentTurnsWindow", () => {
     const blocks = turns(2);
     expect(initialHiddenPrefixTurns(blocks)).toBe(0);
     expect(recentTurnsWindow(blocks, 0)).toEqual(blocks);
+  });
+});
+
+describe("mergeOutboundChat / queuedOutbound", () => {
+  test("queue injecting and queued go to tray; steered becomes optimistic user", () => {
+    const blocks: ChatBlock[] = [{ kind: "user", text: "旧问题", seq: 1 }];
+    const outbound = [
+      { id: "o1", prompt: "排队", expected_mode: "queue", state: "queued", created_at: 1 },
+      { id: "o2", prompt: "直发", expected_mode: "steer", state: "steered", created_at: 2 },
+    ];
+    expect(queuedOutbound(outbound).map((o) => o.prompt)).toEqual(["排队"]);
+    expect(mergeOutboundChat(blocks, outbound).map((b) => `${b.kind}:${"text" in b ? b.text : ""}`)).toEqual([
+      "user:旧问题",
+      "user:直发",
+    ]);
+  });
+  test("same text already in transcript is not duplicated", () => {
+    const blocks: ChatBlock[] = [{ kind: "user", text: "直发", seq: 1 }];
+    const outbound = [
+      { id: "o2", prompt: "直发", expected_mode: "steer", state: "steered", created_at: 2 },
+    ];
+    expect(mergeOutboundChat(blocks, outbound)).toEqual(blocks);
   });
 });

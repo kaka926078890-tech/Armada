@@ -175,6 +175,23 @@ describe("Executor dirty composer", () => {
     });
   });
 
+  test("live followup does not bindKnown or addPending (E1)", async () => {
+    let bound = 0;
+    let added = 0;
+    const { ex, acks } = makeExec({
+      autoSubmit: async () => ({ ok: true }),
+      bindKnown: () => { bound += 1; },
+      addPending: () => { added += 1; },
+    });
+    await ex.followup({
+      runId: "r1", conversationId: "c1", prompt: "hello", workspaceRoot: "/ws/a", live: true,
+    });
+    expect(bound).toBe(0);
+    expect(added).toBe(0);
+    expect(commands).toContain("composer.openComposer");
+    expect(acks[acks.length - 1]).toEqual({ type: "run.ack", runId: "r1", status: "accepted" });
+  });
+
   test("other CDP failure still clipboard-falls back", async () => {
     let n = 0;
     const { ex, acks } = makeExec({

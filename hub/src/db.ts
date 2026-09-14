@@ -66,6 +66,18 @@ export function openDb(home: string): Database {
   ensureColumn(db, "runs", "retired_generation_ids", "retired_generation_ids TEXT NOT NULL DEFAULT '[]'");
   ensureColumn(db, "runs", "title", "title TEXT");
   ensureColumn(db, "runs", "pending_ask", "pending_ask TEXT");
+  ensureColumn(db, "runs", "deferred_stop", "deferred_stop TEXT");
+  ensureColumn(db, "machines", "queue_message_default_behavior", "queue_message_default_behavior TEXT");
+  db.exec(`CREATE TABLE IF NOT EXISTS run_outbound (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES runs(id),
+    prompt TEXT NOT NULL,
+    attachments TEXT NOT NULL DEFAULT '[]',
+    expected_mode TEXT NOT NULL,
+    state TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  )`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_run_outbound_run_state ON run_outbound(run_id, state)`);
   db.exec(`CREATE TABLE IF NOT EXISTS blobs (
     sha256 TEXT PRIMARY KEY,
     mime TEXT NOT NULL,

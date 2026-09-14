@@ -401,8 +401,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\armada-cursor.ps1 C:
 | `WORKSPACE_NOT_OPEN` | **受控**：桌面「打开工作区」或启动器打开该路径；等心跳约 15s |
 | `RUN_LIMIT` | **中台**：该机或该工作区已达并行上限，等一条结束或取消排队 |
 | `PROMPT_COLLISION` | **中台**：同工作区已有相同 prompt 在跑或排队，改文案后再派 |
-| `CONVERSATION_BUSY` | **中台**：该对话仍在运行（含未回答的选择题），结束后才能续聊 |
+| `CONVERSATION_BUSY` | **中台**：该对话仍在排队/绑定，或有未回答的选择题。运行中可对同一张卡续发 |
 | `INJECT_SLOT_BUSY` | **中台**：正在向该机注入另一条任务，稍后再续聊 |
+| `OUTBOUND_LIMIT` | **中台**：该卡待消化续发已达 8 条 |
+| `OUTBOUND_TEXT_ONLY` | **中台**：运行中续发暂只支持纯文本 |
 | `WINDOW_BUSY` | **中台**：扩展 < 0.4.0 或关了同窗并行时，该窗口已有占用项；等它结束或升级扩展。同区另有 running **不拦**旧卡续聊 |
 | 一直「待本机回车」但黄字是「绑定中」，约 1 分钟后进异常 | **受控**：须装 **armada-agent ≥ 0.4.19** 并 Reload。0.4.10 扫描窗 20s 会 BIND_TIMEOUT |
 | 本机对话已结束，看板仍「运行中」 | **受控**：须 ≥ 0.4.18。日志：`stop synthesized` / `adopt r-…`。Hub 须把 `status: success` 收成 completed |
@@ -505,7 +507,7 @@ Token **仅** query 鉴权；消息体不再带 token。连上后 10s 内必须 
 | POST | `/mobile/runs/:id/answer` | 回答 Ask |
 | POST | `/mobile/runs/:id/cancel` | 取消 |
 
-常见错误码：`MACHINE_OFFLINE`、`WORKSPACE_NOT_OPEN`、`RUN_LIMIT`、`PROMPT_COLLISION`、`CONVERSATION_BUSY`、`INJECT_SLOT_BUSY`、`WINDOW_BUSY`、`NOT_FOUND`、`INVALID_STATE`、`NO_CONVERSATION`、`IMAGE_PASTE_FAILED`、`ATTACHMENT_TOO_LARGE`、`ASK_IN_FLIGHT`、`HUB_OFFLINE`、`OPERATOR_REQUIRED`、`HUB_REQUIRED`。
+常见错误码：`MACHINE_OFFLINE`、`WORKSPACE_NOT_OPEN`、`RUN_LIMIT`、`PROMPT_COLLISION`、`CONVERSATION_BUSY`、`INJECT_SLOT_BUSY`、`OUTBOUND_LIMIT`、`OUTBOUND_TEXT_ONLY`、`WINDOW_BUSY`、`NOT_FOUND`、`INVALID_STATE`、`NO_CONVERSATION`、`IMAGE_PASTE_FAILED`、`ATTACHMENT_TOO_LARGE`、`ASK_IN_FLIGHT`、`HUB_OFFLINE`、`OPERATOR_REQUIRED`、`HUB_REQUIRED`。
 
 ## 开发指南
 

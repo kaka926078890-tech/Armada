@@ -181,11 +181,11 @@ export function createRelayServer(opts: {
 
   function hubCmdStatus(err: string): 400 | 404 | 409 | 429 | 502 | 503 {
     if (err === "HUB_OFFLINE") return 503;
-    if (err === "RUN_LIMIT" || err === "RATE_LIMIT") return 429;
+    if (err === "RUN_LIMIT" || err === "RATE_LIMIT" || err === "OUTBOUND_LIMIT") return 429;
     if (err === "NOT_FOUND") return 404;
     if ([
       "PROMPT_COLLISION", "CONVERSATION_BUSY", "INJECT_SLOT_BUSY", "WINDOW_BUSY",
-      "NO_CONVERSATION",
+      "NO_CONVERSATION", "OUTBOUND_TEXT_ONLY",
     ].includes(err)) return 409;
     if (err === "WORKSPACE_NOT_OPEN" || err === "MACHINE_OFFLINE" || err === "CLOSED" || err === "EMPTY_PROMPT" || err === "INVALID") {
       return 400;

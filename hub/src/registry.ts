@@ -12,6 +12,7 @@ export interface MachineRow {
   cursor_version: string | null; extension_version: string | null;
   open_workspaces: string; status: string; last_seen_at: number | null;
   display_name: string | null;
+  queue_message_default_behavior?: string | null;
 }
 
 type Conn = { ws: ArmadaSocket; machineId: string; windowId: string; openWorkspaces: string[]; extensionVersion: string | null };
@@ -114,6 +115,10 @@ export class Registry {
     this.db.query(
       "UPDATE machines SET last_seen_at=?1, status='online' WHERE id=?2"
     ).run(Date.now(), id);
+    if (typeof msg.queueMessageDefaultBehavior === "string") {
+      this.db.query("UPDATE machines SET queue_message_default_behavior=?1 WHERE id=?2")
+        .run(msg.queueMessageDefaultBehavior, id);
+    }
   }
 
   /** 机器级 open_workspaces = 该机器所有在线连接工作区的并集(仅用于展示;路由按连接级匹配)。 */

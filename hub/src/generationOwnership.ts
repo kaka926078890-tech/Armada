@@ -66,6 +66,10 @@ export type StopInput = {
   retired: string[];
   /** Live composer already has afterAgentResponse; Cursor may then stop a sidecar gen. */
   liveTurnSettled?: boolean;
+  /** Cursor queue still has unconsumed follow-ups (`run_outbound.state=queued`). */
+  hasOutstandingOutbound?: boolean;
+  /** `completed`/`success` may drain; abort/error still apply. */
+  stopStatus?: unknown;
 };
 
 export type StopDecision =
@@ -79,13 +83,20 @@ export function decideStop(input: StopInput): StopDecision {
   const gen = genOf(input.stopGenerationId);
   if (gen && input.retired.includes(gen)) return { action: "ignore", audit: "STOP_GEN_RETIRED" };
   const live = genOf(input.liveGenerationId);
-  if (gen && live && gen === live) return { action: "apply" };
-  if (gen && live && gen !== live) {
-    if (input.liveTurnSettled) return { action: "apply", audit: "STOP_SESSION_GEN" };
-    return { action: "ignore", audit: "STOP_GEN_MISMATCH" };
+  let next: StopDecision;
+  if (gen && live && gen === live) next = { action: "apply" };
+  else if (gen && live && gen !== live) {
+    next = input.liveTurnSettled
+      ? { action: "apply", audit: "STOP_SESSION_GEN" }
+      : { action: "ignore", audit: "STOP_GEN_MISMATCH" };
+  } else if (gen && !live) next = { action: "ignore", audit: "STOP_UNARMED" };
+  else if (!gen && live) next = { action: "ignore", audit: "STOP_NO_GEN" };
+  else if (!gen && !live && input.hasHubFollowup) next = { action: "ignore", audit: "STOP_NO_GEN" };
+  else next = { action: "apply", audit: "STOP_NO_GEN_INITIAL" };
+  if (next.action === "apply" && input.hasOutstandingOutbound) {
+    const s = input.stopStatus;
+    if (s === "aborted" || s === "error") return next;
+    return { action: "ignore", audit: "QUEUE_DRAIN" };
   }
-  if (gen && !live) return { action: "ignore", audit: "STOP_UNARMED" };
-  if (!gen && live) return { action: "ignore", audit: "STOP_NO_GEN" };
-  if (!gen && !live && input.hasHubFollowup) return { action: "ignore", audit: "STOP_NO_GEN" };
-  return { action: "apply", audit: "STOP_NO_GEN_INITIAL" };
+  return next;
 }

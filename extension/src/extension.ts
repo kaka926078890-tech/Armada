@@ -386,8 +386,18 @@ export function activate(context: vscode.ExtensionContext): void {
   };
   ensureHooks();
 
-  const sendHeartbeat = () =>
-    core.enqueue({ type: "heartbeat", openWorkspaces: workspaces(), activeRunIds: [...boundRuns.keys()] });
+  const sendHeartbeat = () => {
+    let queueMessageDefaultBehavior: unknown;
+    try {
+      queueMessageDefaultBehavior = vscode.workspace.getConfiguration("cursor.composer").get("queueMessageDefaultBehavior");
+    } catch { /* tests / missing config */ }
+    core.enqueue({
+      type: "heartbeat",
+      openWorkspaces: workspaces(),
+      activeRunIds: [...boundRuns.keys()],
+      ...(typeof queueMessageDefaultBehavior === "string" ? { queueMessageDefaultBehavior } : {}),
+    });
+  };
 
   const spoolPoll = setInterval(() => {
     forwarder.poll();
@@ -526,6 +536,9 @@ export function activate(context: vscode.ExtensionContext): void {
         case "run.followup":
           noteHubGeneration(lastGenerationId, msg.runId, msg.generation_id);
           void executor.followup(msg);
+          break;
+        case "run.generation":
+          noteHubGeneration(lastGenerationId, msg.runId, msg.generation_id);
           break;
         case "run.answerAsk":
           void executor.answerAsk(msg).catch((e) => log(`answerAsk error: ${String(e)}`));

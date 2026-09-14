@@ -212,7 +212,7 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
     const attachmentIds = Array.isArray(rawIds) ? rawIds.filter((x: unknown) => typeof x === "string") : [];
     const { run, error } = runs.followup(parent.id, typeof prompt === "string" ? prompt : "", attachmentIds);
     if (error) return c.json({ error }, httpStatusForRunError(error));
-    return c.json({ run }, 200);
+    return c.json({ run }, run.status === "running" ? 201 : 200);
   });
   app.post("/api/runs/:id/answer-ask", async (c) => {
     const body = await c.req.json().catch(() => ({}));

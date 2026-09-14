@@ -564,3 +564,43 @@ export function recentTurnsWindow(blocks: ChatBlock[], hiddenPrefixTurns: number
   return turns.slice(start).flat();
 }
 
+export type OutboundRow = {
+  id: string;
+  prompt: string;
+  expected_mode: string;
+  state: string;
+  created_at: number;
+};
+
+function isQueueMode(mode: string): boolean {
+  return mode === "queue";
+}
+
+/** 托盘：queue 配置下 injecting/queued。steer/unknown 不进托盘。 */
+export function queuedOutbound(outbound: OutboundRow[] | null | undefined): OutboundRow[] {
+  return (outbound ?? []).filter((o) =>
+    o.state === "queued" || (o.state === "injecting" && isQueueMode(o.expected_mode)),
+  );
+}
+
+/** steered / injecting(非 queue) 乐观用户句；jsonl 同文到达后只留 transcript。 */
+export function mergeOutboundChat(blocks: ChatBlock[], outbound: OutboundRow[] | null | undefined): ChatBlock[] {
+  if (!outbound?.length) return blocks;
+  const seen = new Set(
+    blocks.filter((b): b is Extract<ChatBlock, { kind: "user" }> => b.kind === "user")
+      .map((b) => normPrompt(extractUserText(b.text))),
+  );
+  const extra: ChatBlock[] = [];
+  let seq = (blocks.at(-1)?.seq ?? 0) + 1;
+  for (const o of outbound) {
+    if (isQueueMode(o.expected_mode)) continue;
+    if (o.state !== "injecting" && o.state !== "steered") continue;
+    const n = normPrompt(extractUserText(o.prompt));
+    if (!n || seen.has(n)) continue;
+    extra.push({ kind: "user", text: o.prompt, seq: seq++ });
+    seen.add(n);
+  }
+  return extra.length ? [...blocks, ...extra] : blocks;
+}
+
+

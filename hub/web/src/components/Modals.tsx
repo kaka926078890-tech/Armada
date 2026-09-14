@@ -8,7 +8,7 @@ const ERR: Record<string, string> = {
   PROMPT_COLLISION: "相同提示词已在该工作区执行或排队",
   WINDOW_BUSY: "该窗口暂不支持并行（扩展需 ≥ 0.4.0 或已关闭同窗并行）",
   INJECT_SLOT_BUSY: "正在向该机注入另一条任务，请稍后再续聊",
-  CONVERSATION_BUSY: "该对话仍在运行，结束后才能续聊",
+  CONVERSATION_BUSY: "该对话仍在排队、绑定或等待回答选择题",
   WORKSPACE_NOT_OPEN: "工作区未打开",
   MACHINE_OFFLINE: "机器离线",
 };

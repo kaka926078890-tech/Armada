@@ -11,6 +11,10 @@ export interface RunRow {
     detected_at?: number;
     detect_via?: string;
   } | null;
+  outbound?: {
+    id: string; prompt: string; expected_mode: string; state: string; created_at: number;
+  }[];
+  queue_message_default_behavior?: string | null;
 }
 
 /** 卡片展示名：操作员改过的 title 优先，否则最近一次注入的 prompt。 */

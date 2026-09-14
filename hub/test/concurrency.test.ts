@@ -43,6 +43,7 @@ describe("httpStatusForRunError", () => {
     expect(httpStatusForRunError("MACHINE_OFFLINE")).toBe(400);
     expect(httpStatusForRunError("NOT_FOUND")).toBe(404);
     expect(httpStatusForRunError("ATTACHMENT_TOTAL_TOO_LARGE")).toBe(413);
-    expect(httpStatusForRunError("EMPTY_PROMPT")).toBe(400);
+    expect(httpStatusForRunError("OUTBOUND_LIMIT")).toBe(429);
+    expect(httpStatusForRunError("OUTBOUND_TEXT_ONLY")).toBe(409);
   });
 });

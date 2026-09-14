@@ -261,6 +261,7 @@ export class Executor {
     prompt: string;
     workspaceRoot: string;
     attachments?: { id?: string; sha256?: string; mime?: string }[];
+    live?: boolean;
   }): Promise<void> {
     const vscode = vs();
     const attachments = Array.isArray(msg.attachments) ? msg.attachments : [];
@@ -294,19 +295,21 @@ export class Executor {
         }
       }
       this.deps.onInjected?.(msg.runId);
-      this.deps.addPending?.({
-        runId: msg.runId,
-        workspaceRoot: msg.workspaceRoot,
-        prompt: msg.prompt,
-        dispatchedAt: Date.now(),
-        attachmentIds: attachments.map((a) => a.sha256 || a.id).filter((x): x is string => !!x),
-      });
-      this.deps.bindKnown?.({
-        runId: msg.runId,
-        conversationId: msg.conversationId,
-        prompt: msg.prompt,
-        workspaceRoot: msg.workspaceRoot,
-      });
+      if (!msg.live) {
+        this.deps.addPending?.({
+          runId: msg.runId,
+          workspaceRoot: msg.workspaceRoot,
+          prompt: msg.prompt,
+          dispatchedAt: Date.now(),
+          attachmentIds: attachments.map((a) => a.sha256 || a.id).filter((x): x is string => !!x),
+        });
+        this.deps.bindKnown?.({
+          runId: msg.runId,
+          conversationId: msg.conversationId,
+          prompt: msg.prompt,
+          workspaceRoot: msg.workspaceRoot,
+        });
+      }
       this.deps.send({ type: "run.ack", runId: msg.runId, status: "accepted" });
     } catch (e) {
       this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: `FOLLOWUP_FAILED:${String(e)}` });

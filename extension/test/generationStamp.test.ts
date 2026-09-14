@@ -38,6 +38,12 @@ describe("generationStamp", () => {
     const r = synthesizedStopPayload({ status: "completed" }, m.get("r1"), "c1");
     expect(r).toEqual({ ok: true, payload: { status: "completed", generation_id: "hub-g1", conversation_id: "c1" } });
   });
+  test("run.generation uses the same stamp; missing lastGenerationId still refuses synth (E2)", () => {
+    const m = new Map<string, string>();
+    noteHubGeneration(m, "r1", "g2-from-ws");
+    expect(m.get("r1")).toBe("g2-from-ws");
+    expect(synthesizedStopPayload({ status: "completed" }, undefined, "c1").ok).toBe(false);
+  });
   test("stamps generation_id and conversation_id", () => {
     const r = synthesizedStopPayload({ status: "completed" }, "g1", "c1");
     expect(r).toEqual({ ok: true, payload: { status: "completed", generation_id: "g1", conversation_id: "c1" } });

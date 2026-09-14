@@ -98,4 +98,23 @@ describe("decideStop", () => {
     expect(decideStop({ ...sidecar, liveTurnSettled: true, retired: ["6ff69bf9-237c-45c6-a7fb-a77b554fb0cb"] }))
       .toEqual({ action: "ignore", audit: "STOP_GEN_RETIRED" });
   });
+  test("queued outstanding turns matching completed into QUEUE_DRAIN, including STOP_SESSION_GEN", () => {
+    expect(decideStop({ ...base, hasOutstandingOutbound: true }))
+      .toEqual({ action: "ignore", audit: "QUEUE_DRAIN" });
+    const sidecar = { ...base, stopGenerationId: "6ff69bf9-237c-45c6-a7fb-a77b554fb0cb", liveGenerationId: G };
+    expect(decideStop({ ...sidecar, liveTurnSettled: true, hasOutstandingOutbound: true }))
+      .toEqual({ action: "ignore", audit: "QUEUE_DRAIN" });
+  });
+  test("outstanding does not rewrite ignores; missing flag keeps apply", () => {
+    expect(decideStop({ ...base, liveGenerationId: GOLD, hasOutstandingOutbound: true }))
+      .toEqual({ action: "ignore", audit: "STOP_GEN_MISMATCH" });
+    expect(decideStop({ ...base, hasOutstandingOutbound: false })).toEqual({ action: "apply" });
+    expect(decideStop(base)).toEqual({ action: "apply" });
+  });
+  test("queued outstanding does not block aborted or error", () => {
+    expect(decideStop({ ...base, hasOutstandingOutbound: true, stopStatus: "aborted" })).toEqual({ action: "apply" });
+    expect(decideStop({ ...base, hasOutstandingOutbound: true, stopStatus: "error" })).toEqual({ action: "apply" });
+    expect(decideStop({ ...base, hasOutstandingOutbound: true, stopStatus: "completed" }))
+      .toEqual({ action: "ignore", audit: "QUEUE_DRAIN" });
+  });
 });

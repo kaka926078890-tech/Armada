@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import type { RunService } from "./runs";
 import type { SseHub } from "./sse";
+import { hookSubmitPrompt, transcriptUserPrompt } from "./outboundClaim";
 
 /** runId → 该任务派出的子代理 conversation_id */
 const subagentCids = new Map<string, Set<string>>();
@@ -88,6 +89,12 @@ export function ingestEvent(db: Database, runs: RunService, sse: SseHub, machine
   run = runs.get(runId) ?? run;
   if (msg.hookEventName === "beforeSubmitPrompt") {
     runs.tryArmLiveGeneration(runId, msg.hookEventName, msg.payload, cid);
+    const bsp = hookSubmitPrompt(msg.payload);
+    if (bsp) runs.claimOutbound(runId, bsp, msg.ts ?? Date.now());
+  }
+  if (msg.source === "transcript") {
+    const user = transcriptUserPrompt(msg.payload);
+    if (user) runs.claimOutbound(runId, user, msg.ts ?? Date.now());
   }
   if (msg.hookEventName === "subagentStart" && typeof cid === "string" && run.conversation_id && cid !== run.conversation_id) {
     const set = subagentCids.get(runId) ?? new Set<string>();

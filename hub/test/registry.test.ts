@@ -61,7 +61,7 @@ describe("Registry", () => {
     expect(names).toContain("machines");
     expect(names).toContain("runs");
     expect(names).toContain("run_events");
-    expect(names).toContain("audit");
+    expect(names).toContain("run_outbound");
   });
 
   test("workspaceListChanged is order-insensitive", () => {
@@ -96,6 +96,16 @@ describe("Registry", () => {
     reg.onHeartbeat(ws, { openWorkspaces: ["/ws/a", "/ws/b"] });
     expect(n).toBe(1);
     expect(JSON.parse(reg.getMachine("m-1")!.open_workspaces)).toEqual(["/ws/a", "/ws/b"]);
+  });
+
+  test("heartbeat stores queueMessageDefaultBehavior", () => {
+    const { reg } = setup();
+    const ws = fakeWs();
+    register(reg, ws);
+    reg.onHeartbeat(ws, { openWorkspaces: ["/ws/a"], queueMessageDefaultBehavior: "queue" });
+    expect(reg.getMachine("m-1")!.queue_message_default_behavior).toBe("queue");
+    reg.onHeartbeat(ws, { openWorkspaces: ["/ws/a"] });
+    expect(reg.getMachine("m-1")!.queue_message_default_behavior).toBe("queue");
   });
 
   test("last window close persists empty open_workspaces and notifies", () => {

@@ -3,7 +3,7 @@ import { api, getToken } from "../api";
 import type { RunEvent } from "../types";
 import { workspaceFolderName, runDisplayName, type RunRow } from "../boardState";
 import ChatThread from "./ChatThread";
-import { eventsToChat, mergePendingAsk, INITIAL_VISIBLE_TURNS, initialHiddenPrefixTurns, recentTurnsWindow } from "../chatView";
+import { eventsToChat, mergePendingAsk, mergeOutboundChat, queuedOutbound, INITIAL_VISIBLE_TURNS, initialHiddenPrefixTurns, recentTurnsWindow } from "../chatView";
 import { collectEventPages, mergeEvents, EVENT_PAGE_SIZE, hasOlderEvents, olderEventsQuery, shouldLoadOlder, prependPreserveScroll } from "../loadEvents";
 import { mergeImageFiles } from "../attachments";
 import { endFollowupSend, isFollowupSendEnter, tryBeginFollowupSend } from "../followupSend";
@@ -190,7 +190,7 @@ export default function RunDetail({ runId, onClose, onChanged }: {
         if (!tailReady.current) return;
         fetchForward(seqRef.current);
       }
-      if (data.type === "run.status" || data.type === "run.archived") {
+      if (data.type === "run.status" || data.type === "run.archived" || data.type === "run.outbound") {
         api.run(runId).then((r) => {
           if (aborted) return;
           if (r?.error) { setMissing(true); setRun(null); return; }
@@ -257,6 +257,10 @@ export default function RunDetail({ runId, onClose, onChanged }: {
     void (async () => {
       try {
         const ids: string[] = [];
+        if (run.status === "running" && followupFiles.length > 0) {
+          setFollowupError("运行中续发暂只支持纯文本。");
+          return;
+        }
         for (const f of followupFiles) {
           const r = await api.uploadBlob(f);
           if (r.error || !r.blob) { setFollowupError(r.error ?? "上传失败"); return; }
@@ -267,10 +271,15 @@ export default function RunDetail({ runId, onClose, onChanged }: {
           setFollowupError(r.error === "INJECT_SLOT_BUSY"
             ? "正在把另一条任务打进 Composer，几秒后再发即可；对方跑着不影响续聊。"
             : r.error === "CONVERSATION_BUSY"
-              ? (run.pending_ask ? "请先回答上方选择题，续聊暂不可用。" : "这张卡自己还在跑，等它停再续。")
-              : r.error);
+              ? (run.pending_ask ? "请先回答上方选择题，续聊暂不可用。" : "该对话仍在排队或绑定，结束后才能续聊。")
+              : r.error === "OUTBOUND_TEXT_ONLY"
+                ? "运行中续发暂只支持纯文本。"
+                : r.error === "OUTBOUND_LIMIT"
+                  ? "待消化续发已达上限，等 Cursor 消化后再发。"
+                  : r.error);
           return;
         }
+        if (r?.run) setRun(r.run);
         setFollowup("");
         setFollowupFiles([]);
         onChanged();
@@ -320,7 +329,8 @@ export default function RunDetail({ runId, onClose, onChanged }: {
     dispatched: "已派发", binding: "绑定中", running: "运行中",
     completed: "已完成", cancelled: "已取消", aborted: "已中止", error: "异常", unknown: "未知",
   };
-  const chatAll = mergePendingAsk(eventsToChat(events), run.pending_ask);
+  const chatAll = mergePendingAsk(mergeOutboundChat(eventsToChat(events), run.outbound), run.pending_ask);
+  const queued = queuedOutbound(run.outbound);
   const chat = recentTurnsWindow(chatAll, hiddenPrefixTurns);
   const hasOlder = hiddenPrefixTurns > 0 || hasOlderEvents(events);
   const titleText = runDisplayName(run) || "图片";
@@ -429,6 +439,18 @@ export default function RunDetail({ runId, onClose, onChanged }: {
             onChanged();
           } : undefined}
         />
+        {queued.length > 0 && (
+          <div className="mt-3 rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2" aria-label="Queued messages">
+            <div className="text-[11px] text-zinc-500 mb-1">
+              {queued.length} Queued Message{queued.length > 1 ? "s" : ""}
+            </div>
+            <div className="flex flex-col gap-1.5">
+              {queued.map((q) => (
+                <div key={q.id} className="text-[13px] text-zinc-200 leading-relaxed">{q.prompt}</div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
       {run.conversation_id && (
         <form className="p-3 border-t border-zinc-800/80 flex flex-col gap-2" onSubmit={sendFollowup}>
@@ -451,7 +473,7 @@ export default function RunDetail({ runId, onClose, onChanged }: {
                 sendFollowup();
               }}
               rows={3}
-              placeholder={run.pending_ask ? "请先回答上方选择题…" : "续聊同一对话…（Enter 发送，Shift+Enter 换行；可粘贴截图）"}
+              placeholder={run.pending_ask ? "请先回答上方选择题…" : run.status === "running" ? "Add a follow-up…" : "续聊同一对话…（Enter 发送，Shift+Enter 换行；可粘贴截图）"}
               className="flex-1 min-h-[4.5rem] max-h-48 resize-y px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-[13px] placeholder:text-zinc-600 leading-relaxed"
             />
             <button type="submit" disabled={sending || (!followup.trim() && followupFiles.length === 0)} className="px-3 py-2 rounded-lg bg-sky-700 hover:bg-sky-600 text-[13px] shrink-0 disabled:opacity-40">发送</button>
