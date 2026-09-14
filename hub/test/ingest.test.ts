@@ -467,6 +467,37 @@ describe("event ingest", () => {
     ws.close();
   });
 
+  // Intel 2026-09-14 r-4510dd36: followup「怎么还有团队的事？」injected while Cursor
+  // was in a protocol turn (Perform any necessary follow-up…). Composer never sent
+  // BSP. Synth stop stamped retired e1c10295 → STOP_GEN_RETIRED; card stuck 运行中.
+  test("darwin followup after complete arms hub gen so synth stop completes without composer BSP", async () => {
+    const { ws, inbound, api, runId } = await startBoundRun();
+    const retired = "e1c10295-b88f-4580-ae6a-320f2b7e70a5";
+    ws.send(JSON.stringify(ev(runId, 1, "beforeSubmitPrompt", {
+      conversation_id: "cid-1", generation_id: retired, prompt: "hi",
+    })));
+    ws.send(JSON.stringify(ev(runId, 2, "stop", { status: "completed", conversation_id: "cid-1", generation_id: retired })));
+    await new Promise((r) => setTimeout(r, 80));
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).status).toBe("completed");
+    inbound.length = 0;
+    const f = await api(`/api/runs/${runId}/followup`, { method: "POST", body: JSON.stringify({ prompt: "怎么还有团队的事？" }) });
+    expect(f.status).toBe(200);
+    ws.send(JSON.stringify({ type: "run.ack", runId, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId, conversationId: "cid-1", transcriptPath: "/tmp/t.jsonl", promptMatch: true }));
+    await new Promise((r) => setTimeout(r, 80));
+    const follow = inbound.find((m) => m.type === "run.followup");
+    expect(typeof follow?.generation_id).toBe("string");
+    const live = ((await (await api(`/api/runs/${runId}`)).json()) as any).live_generation_id;
+    expect(live).toBe(follow.generation_id);
+    ws.send(JSON.stringify(ev(runId, 10, "stop", { status: "completed", conversation_id: "cid-1", generation_id: retired })));
+    await new Promise((r) => setTimeout(r, 80));
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).status).toBe("running");
+    ws.send(JSON.stringify(ev(runId, 11, "stop", { status: "completed", conversation_id: "cid-1", generation_id: live })));
+    await new Promise((r) => setTimeout(r, 80));
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).status).toBe("completed");
+    ws.close();
+  });
+
   test("retired generation stop after armed followup does not complete", async () => {
     const { ws, api, runId } = await startBoundRun();
     ws.send(JSON.stringify(ev(runId, 1, "beforeSubmitPrompt", {

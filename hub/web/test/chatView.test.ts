@@ -301,6 +301,28 @@ describe("eventsToChat", () => {
     ]);
   });
 
+  test("Cursor scope-done protocol user_query is not an operator bubble (r-4510dd36 seq 3685)", () => {
+    const blocks = eventsToChat([
+      ev({ seq: 3677, source: "transcript", payload: JSON.stringify({
+        role: "user", message: { content: [{ type: "text", text: "<user_query>\n怎么还有团队的事？\n</user_query>" }] },
+      }) }),
+      ev({ seq: 3679, source: "transcript", payload: JSON.stringify({
+        role: "assistant", message: { content: [{ type: "text", text: "FinDesk 没有团队产品面。" }] },
+      }) }),
+      ev({ seq: 3681, source: "transcript", payload: JSON.stringify({ type: "turn_ended", status: "success" }) }),
+      ev({ seq: 3685, source: "transcript", payload: JSON.stringify({
+        role: "user", message: { content: [{ type: "text", text: "<user_query>Briefly inform the user about the task result and perform any follow-up actions (if needed). If there's no follow-ups needed, don't explicitly say that.</user_query>" }] },
+      }) }),
+      ev({ seq: 3686, source: "transcript", payload: JSON.stringify({
+        role: "assistant", message: { content: [{ type: "text", text: "那次 aionui-sidebar 测试是 47 过、1 失败。" }] },
+      }) }),
+    ]);
+    expect(blocks.filter((b) => b.kind === "user")).toEqual([
+      { kind: "user", text: "怎么还有团队的事？", seq: 3677 },
+    ]);
+    expect(assistantBodyText(blocks)).toContain("47 过、1 失败");
+  });
+
   test("Cursor plan-mode protocol user_query is not a operator bubble (r-0f0eadc6 seq 2358)", () => {
     const blocks = eventsToChat([
       ev({ seq: 2300, source: "transcript", payload: JSON.stringify({

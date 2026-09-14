@@ -19,8 +19,9 @@ Prompt 字符串只用于 **尚未 bind 的首次挂靠**。一旦有 cid，prom
 
 ## Followup / arm
 
-- Mac：`followup()` **不得**立刻 `retireLiveGeneration`。新主会话 BSP 才 `rearm`。
-- Windows：仅 `attachHubGenerationIfWindows` 签发并替换 hub gen。
+- Mac：`followup()` **不得**立刻 `retireLiveGeneration`。live 非空时等新主会话 BSP 才 `rearm`。
+- Mac：`followup()` 时 **live 已空** 须签发 hub gen（`source: hub_unarmed`），否则协议续轮吞掉 BSP 后 synth stop 会盖已退役 gen → `STOP_GEN_RETIRED`。
+- Windows：`attachHubGenerationIfWindows` 在 dispatch/start/followup 签发并替换 hub gen。
 - 禁止再往 `decideStop` 加第 N 个出口码，除非同时改 `generationOwnership.ts` 决策表 + 规格 + 真形状测试。
 
 ## Forbidden

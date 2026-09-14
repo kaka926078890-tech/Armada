@@ -155,17 +155,22 @@ export class RunService {
     };
   }
 
-  /** Windows 无 BSP：hub 签发本轮 generation，扩展合成 stop 回显。Mac 仍只由 BSP 武装。 */
-  private attachHubGenerationIfWindows(runId: string, machineId: string): string | null {
-    const os = this.registry.getMachine(machineId)?.os;
-    if (!isWindowsMachineOs(os)) return null;
+  /** 签发本轮 hub generation，扩展合成 stop 回显。 */
+  private attachHubGeneration(runId: string, source: "hub_windows" | "hub_unarmed"): string | null {
     const run = this.get(runId);
     if (!run) return null;
     const gen = randomUUID();
     const retired = appendRetired(this.retiredState(run), run.live_generation_id);
     this.persistGeneration(runId, gen, retired);
-    this.audit("hub", "GEN_ARMED", runId, { generation_id: gen, source: "hub_windows" });
+    this.audit("hub", "GEN_ARMED", runId, { generation_id: gen, source });
     return gen;
+  }
+
+  /** Windows 无 BSP：dispatch/start 由 hub 签发。Mac 首轮仍只由 BSP 武装。 */
+  private attachHubGenerationIfWindows(runId: string, machineId: string): string | null {
+    const os = this.registry.getMachine(machineId)?.os;
+    if (!isWindowsMachineOs(os)) return null;
+    return this.attachHubGeneration(runId, "hub_windows");
   }
 
   create(machineId: string, workspaceRoot: string, prompt: string,
@@ -678,8 +683,12 @@ export class RunService {
       ended_at: null, end_reason: null, started_at: Date.now(), window_id: win.windowId,
       prompt, attachments: JSON.stringify(attachmentIds),
     });
-    // Mac: live gen stays until owner BSP rearms. Windows: attachHubGenerationIfWindows replaces it.
-    this.attachHubGenerationIfWindows(runId, run.machine_id);
+    // Mac live 非空不得退役，等 owner BSP rearm。live 已空（含完成后续聊）签发 hub gen：
+    // 协议续轮若吞掉 composer BSP，synth stop 会盖上已退役 gen → STOP_GEN_RETIRED 卡死运行中。
+    const os = this.registry.getMachine(run.machine_id)?.os;
+    if (isWindowsMachineOs(os) || !genOf(run.live_generation_id)) {
+      this.attachHubGeneration(runId, isWindowsMachineOs(os) ? "hub_windows" : "hub_unarmed");
+    }
     this.cancelRequested.delete(runId);
     if (attachmentIds.length === 0) this.recordFollowupPrompt({ id: runId, machine_id: run.machine_id }, prompt);
     else this.pendingFollowupPrompt.set(runId, { prompt, attachmentIds });

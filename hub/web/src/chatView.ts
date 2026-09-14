@@ -129,7 +129,8 @@ function isCursorProtocolUser(text: string): boolean {
   const t = text.trim();
   return (
     t.startsWith("Perform any necessary follow-up actions") ||
-    t.startsWith("Implement the plan as specified")
+    t.startsWith("Implement the plan as specified") ||
+    t.startsWith("Briefly inform the user about the task result")
   );
 }
 
