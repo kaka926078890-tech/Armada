@@ -27,7 +27,9 @@ export function cidBelongsToRun(run: { id?: string; conversation_id?: string | n
 function cdpAskOwnsConversation(run: { conversation_id?: string | null }, msg: any, cid: unknown): boolean {
   if (msg.source !== "cdp") return true;
   if (msg.hookEventName !== "askQuestion" && msg.hookEventName !== "askQuestionResolved") return true;
-  if (typeof cid !== "string" || !cid) return false;
+  // Windows 旧扩展只带 runId、不带 cid；run 已由 runId 钉死。空 cid 不得再丢。
+  // 外卡仍靠下面 cidBelongsToRun（cid 有值且不等于主人 → 丢）。
+  if (typeof cid !== "string" || !cid) return true;
   return cidBelongsToRun(run, cid, msg.payload);
 }
 

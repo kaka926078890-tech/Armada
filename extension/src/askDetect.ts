@@ -62,7 +62,26 @@ export function nextAskAction(
   };
 }
 
-/** Questions 只挂拥有该 composer cid 的 run；无 cid / 无主人则不发。禁止 last-key。 */
+function boundConversationId(
+  bound: Iterable<[string, { conversationId: string }]>,
+  runId: string,
+): string | undefined {
+  for (const [id, v] of bound) {
+    if (id === runId) return v.conversationId;
+  }
+  return undefined;
+}
+
+function uniqueBoundRunId(bound: Iterable<[string, { conversationId: string }]>): string | undefined {
+  let only: string | undefined;
+  for (const [runId] of bound) {
+    if (only) return undefined;
+    only = runId;
+  }
+  return only;
+}
+
+/** Questions 只挂拥有该 composer cid 的 run。无 cid 时仅唯一 bound run 可挂；多主人禁止 last-key。 */
 export function askPollActions(
   bound: Iterable<[string, { conversationId: string }]>,
   prevByRun: Iterable<[string, string]>,
@@ -71,7 +90,8 @@ export function askPollActions(
   now = Date.now(),
 ): AskPollAct[] {
   const widgetCid = inspect.present ? inspect.conversation_id : undefined;
-  const owner = latestRunIdForConversation(bound, widgetCid);
+  const owner = latestRunIdForConversation(bound, widgetCid)
+    ?? (inspect.present && !widgetCid ? uniqueBoundRunId(bound) : undefined);
   const prev = new Map(prevByRun);
   const out: AskPollAct[] = [];
   for (const [runId, requestId] of prev) {
@@ -80,6 +100,9 @@ export function askPollActions(
   }
   if (!inspect.present || !owner) return out;
   const act = nextAskAction(prev.get(owner) ?? null, inspect, () => makeId(owner), now);
-  if (act?.type === "askQuestion") out.push({ type: "askQuestion", runId: owner, payload: act.payload });
+  if (act?.type === "askQuestion") {
+    const conversation_id = act.payload.conversation_id || boundConversationId(bound, owner) || "";
+    out.push({ type: "askQuestion", runId: owner, payload: { ...act.payload, conversation_id } });
+  }
   return out;
 }

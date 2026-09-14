@@ -367,17 +367,41 @@ describe("event ingest", () => {
       },
       ts: Date.now(), seq: 1,
     }));
+    await new Promise((r) => setTimeout(r, 150));
+    const events = (await (await api(`/api/runs/${runId}/events`)).json()) as any[];
+    expect(events.filter((e) => e.hook_event_name === "askQuestion")).toHaveLength(0);
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).pending_ask).toBeNull();
+    ws.close();
+  });
+
+  test("Windows-shape CDP askQuestion with runId and no cid still sets pending_ask", async () => {
+    const { ws, api, runId } = await startBoundRun();
     ws.send(JSON.stringify({
       type: "run.event", runId, source: "cdp", hookEventName: "askQuestion",
-      seq: 2, ts: Date.now(),
+      seq: 1, ts: Date.now(),
       payload: {
-        request_id: "ask-no-cid", detect_via: "cdp",
-        questions: [{ id: "q0", prompt: "三机全绿", options: [{ id: "a", label: "A", text: "同题" }] }],
+        request_id: "ask-r-2001848f-11dc-41ce-a1e9-754c44a9e88a-1789348617882",
+        detect_via: "cdp",
+        questions: [{
+          id: "q0",
+          prompt: "南银法巴 POC 测试数据集组织方式",
+          options: [
+            { id: "hybrid", label: "A", text: "按场景分目录 + 总索引" },
+            { id: "per_scene", label: "B", text: "仅按场景" },
+          ],
+        }],
       },
     }));
     await new Promise((r) => setTimeout(r, 150));
     const events = (await (await api(`/api/runs/${runId}/events`)).json()) as any[];
-    expect(events.filter((e) => e.hook_event_name === "askQuestion")).toHaveLength(0);
+    expect(events.filter((e) => e.hook_event_name === "askQuestion")).toHaveLength(1);
+    const run = (await (await api(`/api/runs/${runId}`)).json()) as any;
+    expect(run.status).toBe("running");
+    expect(run.pending_ask).toMatchObject({
+      request_id: "ask-r-2001848f-11dc-41ce-a1e9-754c44a9e88a-1789348617882",
+      detect_via: "cdp",
+    });
+    expect(run.pending_ask.questions[0].prompt).toContain("南银法巴");
     ws.close();
   });
 

@@ -69,8 +69,23 @@ describe("askPollActions", () => {
     ]);
   });
 
-  test("missing composer id is fail-closed", () => {
+  test("missing composer id with one bound run stamps that run cid", () => {
     const bound = new Map([["r-1", { conversationId: "cid-1" }]]);
+    const acts = askPollActions(bound, new Map(), { ...inspect, conversation_id: "" }, () => "ask-1");
+    expect(acts).toEqual([
+      expect.objectContaining({
+        type: "askQuestion",
+        runId: "r-1",
+        payload: expect.objectContaining({ request_id: "ask-1", conversation_id: "cid-1" }),
+      }),
+    ]);
+  });
+
+  test("missing composer id with two bound runs is fail-closed", () => {
+    const bound = new Map<string, { conversationId: string }>([
+      ["r-1", { conversationId: "cid-1" }],
+      ["r-2", { conversationId: "cid-2" }],
+    ]);
     const acts = askPollActions(bound, new Map(), { ...inspect, conversation_id: "" }, () => "ask-1");
     expect(acts).toEqual([]);
   });
