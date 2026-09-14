@@ -47,13 +47,13 @@
 - 取消、隐藏/取消隐藏、异常卡「人工关闭」、导出审计
 - 标题可改；抽屉可拖宽度；往上滚可「加载更早对话」
 
-派发/续聊最多 **4** 张 PNG/JPEG（每张 ≤ 8 MiB，合计 ≤ 24 MiB；文件多选或往输入框粘贴截图）。扩展把原图写入系统剪贴板，在 Composer 里贴出图片芯片；失败**不会**改成 `@路径`。贴图必须走 CDP（启动器或桌面「打开工作区」）。可用 `armada.imagePaste`（默认 true）关掉图路径。
+派发/续聊最多 **4** 个附件（PNG/JPEG 走图片芯片；pdf/txt/md/json/csv 等白名单文件落到工作区 `.armada/inbox/<runId>/` 再 `@` 引用。每件 ≤ 8 MiB，合计 ≤ 24 MiB）。图片失败**不会**改成 `@路径`。贴图必须走 CDP。可用 `armada.imagePaste`（默认 true）关掉**图片**路径；纯文件不受该开关影响。
 
 ### 真实 IDE 会话
 
 被控侧看到的就是普通 Cursor 窗口：文件树、Agent 对话、该机自己的账号与模型选择。派发沿用该窗口当前选中的模型。
 
-同一机器可并行多条任务（默认每机 8、每工作区 4）；整机同时只有 1 条处于派发/绑定（CDP 注入串行）。超出限额 → `429 RUN_LIMIT`。同工作区相同 prompt → `409 PROMPT_COLLISION`。关着的工作区不能派（`400 WORKSPACE_NOT_OPEN`）。扩展需 ≥ 0.4.0 才能同一窗口并行第二条；收口与续聊请用 **armada-agent ≥ 0.4.19**。
+同一机器可并行多条任务（默认每机 8、每工作区 4）；整机同时只有 1 条处于派发/绑定（CDP 注入串行）。超出限额 → `429 RUN_LIMIT`。同工作区相同 prompt → `409 PROMPT_COLLISION`。关着的工作区不能派（`400 WORKSPACE_NOT_OPEN`）。扩展需 ≥ 0.4.0 才能同一窗口并行第二条；收口与续聊请用 **armada-agent ≥ 0.4.19**；**文件附件请用 ≥ 0.4.20**。
 
 完成、失败、需要处理选择题时，桌面会弹系统通知，浏览器会闪标题；点通知可回到那张卡。
 
@@ -476,7 +476,7 @@ Token **仅** query 鉴权；消息体不再带 token。连上后 10s 内必须 
 | GET | `/api/health` | 健康检查（无需令牌） |
 | GET | `/api/machines` | 机器列表 |
 | PATCH | `/api/machines/:id` | 改显示名 |
-| POST | `/api/blobs` | 上传 PNG/JPEG |
+| POST | `/api/blobs` | 上传 PNG/JPEG 或白名单文件（pdf/txt/md/json/csv 等） |
 | GET | `/api/blobs/:id` | 取附件字节 |
 | POST | `/api/runs` | 派发新 run（可带 `attachmentIds`） |
 | GET | `/api/runs` | 列表（`status` / `machineId` / `archived`） |
@@ -507,7 +507,7 @@ Token **仅** query 鉴权；消息体不再带 token。连上后 10s 内必须 
 | POST | `/mobile/runs/:id/answer` | 回答 Ask |
 | POST | `/mobile/runs/:id/cancel` | 取消 |
 
-常见错误码：`MACHINE_OFFLINE`、`WORKSPACE_NOT_OPEN`、`RUN_LIMIT`、`PROMPT_COLLISION`、`CONVERSATION_BUSY`、`INJECT_SLOT_BUSY`、`OUTBOUND_LIMIT`、`OUTBOUND_TEXT_ONLY`、`WINDOW_BUSY`、`NOT_FOUND`、`INVALID_STATE`、`NO_CONVERSATION`、`IMAGE_PASTE_FAILED`、`ATTACHMENT_TOO_LARGE`、`ASK_IN_FLIGHT`、`HUB_OFFLINE`、`OPERATOR_REQUIRED`、`HUB_REQUIRED`。
+常见错误码：`MACHINE_OFFLINE`、`WORKSPACE_NOT_OPEN`、`RUN_LIMIT`、`PROMPT_COLLISION`、`CONVERSATION_BUSY`、`INJECT_SLOT_BUSY`、`OUTBOUND_LIMIT`、`OUTBOUND_TEXT_ONLY`、`WINDOW_BUSY`、`NOT_FOUND`、`INVALID_STATE`、`NO_CONVERSATION`、`IMAGE_PASTE_FAILED`、`FILE_MENTION_FAILED`、`ATTACHMENT_TOO_LARGE`、`ASK_IN_FLIGHT`、`HUB_OFFLINE`、`OPERATOR_REQUIRED`、`HUB_REQUIRED`。
 
 ## 开发指南
 

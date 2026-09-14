@@ -44,6 +44,33 @@ describe("Executor image path", () => {
     expect(clipboardWrites).toEqual([]);
   });
 
+  const txtAtt = [{ sha256: "def", mime: "text/plain", id: "def", name: "notes.txt" }];
+
+  test("imagePaste=false with only files still injects", async () => {
+    const { ex, acks } = makeExec({
+      imagePaste: false,
+      fetchBlob: async () => ({ bytes: Buffer.from("hi"), mime: "text/plain" }),
+      autoSubmitFileMentions: async () => true,
+      finishComposer: async () => true,
+      materializeFile: () => ({ needle: "def-notes.txt" }),
+    });
+    await ex.startRun({ runId: "r1", workspaceRoot: "/ws/a", prompt: "see", attachments: txtAtt });
+    expect(acks[acks.length - 1]).toEqual({ type: "run.ack", runId: "r1", status: "accepted" });
+    expect(commands).toContain("composer.createNew");
+  });
+
+  test("file mention failure rejects FILE_MENTION_FAILED", async () => {
+    const { ex, acks } = makeExec({
+      imagePaste: true,
+      fetchBlob: async () => ({ bytes: Buffer.from("hi"), mime: "text/plain" }),
+      autoSubmitFileMentions: async () => false,
+      finishComposer: async () => true,
+      materializeFile: () => ({ needle: "def-notes.txt" }),
+    });
+    await ex.startRun({ runId: "r1", workspaceRoot: "/ws/a", prompt: "see", attachments: txtAtt });
+    expect(acks[acks.length - 1]).toEqual({ type: "run.ack", runId: "r1", status: "rejected", reason: "FILE_MENTION_FAILED" });
+  });
+
   test("injectImages failure does not writeText and does not accepted", async () => {
     const { ex, acks } = makeExec({
       imagePaste: true,

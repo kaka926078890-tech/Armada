@@ -86,6 +86,7 @@ export function openDb(home: string): Database {
     created_at INTEGER NOT NULL
   )`);
   ensureColumn(db, "blobs", "unref_at", "unref_at INTEGER");
+  ensureColumn(db, "blobs", "name", "name TEXT NOT NULL DEFAULT ''");
   db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_runs_cid_active ON runs(conversation_id) WHERE conversation_id IS NOT NULL AND status IN ('dispatched','binding','running')`);
   return db;
 }

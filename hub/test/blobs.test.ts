@@ -134,6 +134,43 @@ describe("blobs + image runs", () => {
     ws.close();
   });
 
+  test("accepts txt blob and returns original name", async () => {
+    const { api, ws } = await start();
+    const fd = new FormData();
+    fd.append("file", new File(["hello marker"], "notes.txt", { type: "text/plain" }));
+    const up = await api("/api/blobs", { method: "POST", body: fd });
+    expect(up.status).toBe(201);
+    const { blob } = await up.json() as any;
+    expect(blob.mime).toBe("text/plain");
+    expect(blob.name).toBe("notes.txt");
+    const got = await api(`/api/blobs/${blob.id}`);
+    expect(got.status).toBe(200);
+    expect(await got.text()).toBe("hello marker");
+    const created = await api("/api/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "see", attachmentIds: [blob.id] }),
+    });
+    expect(created.status).toBe(201);
+    ws.close();
+  });
+
+  test("accepts pdf by magic and rejects exe", async () => {
+    const { api, ws } = await start();
+    const pdfFd = new FormData();
+    pdfFd.append("file", new File(["%PDF-1.1 spec"], "a.pdf", { type: "application/pdf" }));
+    const pdfUp = await api("/api/blobs", { method: "POST", body: pdfFd });
+    expect(pdfUp.status).toBe(201);
+    expect(((await pdfUp.json()) as any).blob.mime).toBe("application/pdf");
+
+    const exeFd = new FormData();
+    exeFd.append("file", new File(["MZ"], "a.exe", { type: "application/x-msdownload" }));
+    const exeUp = await api("/api/blobs", { method: "POST", body: exeFd });
+    expect(exeUp.status).toBe(400);
+    expect(((await exeUp.json()) as any).error).toBe("ATTACHMENT_INVALID_MIME");
+    ws.close();
+  });
+
   test("create with 5 attachment ids is 400 ATTACHMENT_COUNT", async () => {
     const { api, ws } = await start();
     const r = await api("/api/runs", {

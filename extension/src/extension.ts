@@ -10,7 +10,7 @@ import { SpoolForwarder } from "./spool";
 import { matchHookToPending, claimConversation, eventBelongsToWindow, transcriptPathBelongsToCid, runIdForHook, rememberSubagent, isAmbiguousMatch, dropPendingRuns, type PendingRun, type BindingMatch } from "./binding";
 import { TranscriptTailer, shouldUnfollowOnHookStop } from "./transcript";
 import { Executor, CancelWatcher } from "./executor";
-import { createCdpSubmitter, createImagePaster, createAskQuestionDriver } from "./cdpInject";
+import { createCdpSubmitter, createImagePaster, createFileMentionPaster, createComposerFinisher, createAskQuestionDriver } from "./cdpInject";
 import { createOsClipboardWriter, writeOsImageClipboard } from "./osClipboard";
 import { mergeHooks, hooksDriftHash, spoolScriptName, shouldInstallArmadaHooks } from "./hooksInstall";
 import { collectTranscriptViews, matchTranscriptToPending, stopPayloadFromTranscriptLine, stopFromTranscriptFileContent, transcriptsDirForWorkspace, isWithinTranscriptBindWindow, FollowupStopGuard, listSubagentTranscripts, childCidFromSubagentPath } from "./transcriptBind";
@@ -77,6 +77,8 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const cdpSubmit = config.autoSubmit ? createCdpSubmitter({ port: config.cdpPort, log }) : null;
   const imagePaster = createImagePaster({ port: config.cdpPort, log });
+  const filePaster = createFileMentionPaster({ port: config.cdpPort, log });
+  const composerFinisher = createComposerFinisher({ port: config.cdpPort, log });
   const askDriver = createAskQuestionDriver({ port: config.cdpPort, log });
   log(`autoSubmit=${config.autoSubmit} imagePaste=${config.imagePaste} cdpPort=${config.cdpPort}`);
 
@@ -298,6 +300,18 @@ export function activate(context: vscode.ExtensionContext): void {
       } finally {
         await writer.close();
       }
+    },
+    autoSubmitFileMentions: async (workspaceRoot, needles) => {
+      const r = await filePaster(workspaceRoot, needles);
+      if (!r.ok) log(`file mention failed: ${r.reason}`);
+      else log("file mention ok");
+      return r.ok;
+    },
+    finishComposer: async (workspaceRoot, prompt, autoSubmit) => {
+      const r = await composerFinisher(workspaceRoot, prompt, autoSubmit);
+      if (!r.ok) log(`composer finish failed: ${r.reason}`);
+      else log("composer finish ok");
+      return r.ok;
     },
     answerAskCdp: async ({ workspaceRoot, action, letter }) => {
       const r = await askDriver.submit(workspaceRoot, action, letter);

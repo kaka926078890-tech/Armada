@@ -59,6 +59,13 @@ const CHIP_HELPERS = `function armadaChipRoot(el) {
 function armadaChipCount(el) {
   var root = armadaChipRoot(el);
   return root.querySelectorAll ? root.querySelectorAll(".context-pill-image").length : 0;
+}
+function armadaFileMentionCount(el) {
+  var root = armadaChipRoot(el);
+  return root.querySelectorAll ? root.querySelectorAll('span.mention[data-typeahead-type="file"]').length : 0;
+}
+function armadaHasAttach(el) {
+  return armadaChipCount(el) > 0 || armadaFileMentionCount(el) > 0;
 }`;
 
 /** 导出供单测直接 eval(注入 mock document) */
@@ -105,6 +112,37 @@ export const COMPOSER_CHIP_COUNT_JS = `function () {
   return armadaChipCount(el);
 }`;
 
+export const COMPOSER_FILE_MENTION_COUNT_JS = `function () {
+  ${CHIP_HELPERS}
+  var els = ${VISIBLE_ELS};
+  if (!els.length) return 0;
+  var empty = null, withAtt = null;
+  for (var i = 0; i < els.length; i++) {
+    var t = els[i].innerText.trim();
+    var attach = armadaHasAttach(els[i]);
+    if (attach && !withAtt) withAtt = els[i];
+    if (!t && !attach && !empty) empty = els[i];
+  }
+  var el = empty || withAtt || els[0];
+  return armadaFileMentionCount(el);
+}`;
+
+export const COMPOSER_CLICK_FILE_MENTION_JS = `function (needle) {
+  var menu = document.querySelector(".mentions-menu");
+  if (!menu) return "NO_MENU";
+  var items = Array.prototype.slice.call(menu.querySelectorAll("[class*='menu-item'], [role='option']"));
+  var want = String(needle || "");
+  for (var i = 0; i < items.length; i++) {
+    if (String(items[i].innerText || "").indexOf(want) >= 0) {
+      items[i].dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      items[i].dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      items[i].click();
+      return "OK";
+    }
+  }
+  return items.length ? "NO_MATCH" : "NO_ITEM";
+}`;
+
 export const COMPOSER_FOCUS_IMAGE_JS = `function () {
   ${CHIP_HELPERS}
   var els = ${VISIBLE_ELS};
@@ -112,9 +150,9 @@ export const COMPOSER_FOCUS_IMAGE_JS = `function () {
   var empty = null, withImg = null;
   for (var i = 0; i < els.length; i++) {
     var t = els[i].innerText.trim();
-    var imgs = armadaChipCount(els[i]);
-    if (imgs && !withImg) withImg = els[i];
-    if (!t && !imgs && !empty) empty = els[i];
+    var attach = armadaHasAttach(els[i]);
+    if (attach && !withImg) withImg = els[i];
+    if (!t && !attach && !empty) empty = els[i];
   }
   var el = empty || withImg || els[0];
   el.focus();
@@ -138,7 +176,7 @@ export const COMPOSER_ENTER_JS = `function (prompt) {
   }
   if (!el) {
     for (var k = 0; k < els.length; k++) {
-      if (armadaChipCount(els[k])) { el = els[k]; break; }
+      if (armadaHasAttach(els[k])) { el = els[k]; break; }
     }
   }
   if (!el) return "NO_TARGET";
@@ -535,6 +573,134 @@ export function createImagePaster(deps: CdpSubmitterDeps) {
       return { ok: true };
     } catch (e) {
       log(`image paste fail: ${String(e)}`);
+      return { ok: false, reason: `CDP_EVAL_FAIL:${String(e)}` };
+    } finally {
+      session.close();
+    }
+  };
+}
+
+export function createFileMentionPaster(deps: CdpSubmitterDeps) {
+  const fetchJson = deps.fetchJson ?? defaultFetchJson;
+  const connect = deps.connect ?? defaultConnect;
+  const sleep = deps.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
+  const log = deps.log ?? (() => {});
+
+  return async function paste(
+    workspaceRoot: string,
+    needles: string[],
+  ): Promise<CdpSubmitResult> {
+    let targets: any[];
+    try {
+      targets = await fetchJson(`http://127.0.0.1:${deps.port}/json`, 1500);
+    } catch {
+      return { ok: false, reason: "CDP_UNREACHABLE" };
+    }
+    const base = workspaceRoot.split(/[\\/]/).filter(Boolean).pop() ?? workspaceRoot;
+    const pages = targets.filter(
+      (t) => t.type === "page" && typeof t.title === "string" && t.title.includes(base),
+    );
+    if (pages.length === 0) return { ok: false, reason: "WINDOW_TARGET_NOT_FOUND" };
+    const wsUrl = pages[0].webSocketDebuggerUrl;
+    if (typeof wsUrl !== "string" || !wsUrl) return { ok: false, reason: "NO_WS_URL" };
+
+    let session: CdpSession;
+    try {
+      session = await connect(wsUrl, 2000);
+    } catch (e) {
+      return { ok: false, reason: `CDP_CONNECT_FAIL:${String(e)}` };
+    }
+
+    try {
+      let focused = false;
+      for (let attempt = 0; attempt < 6 && !focused; attempt++) {
+        const r = String(await session.call("Runtime.evaluate", {
+          expression: `(${COMPOSER_FOCUS_IMAGE_JS})()`, returnByValue: true,
+        }).then((x) => x?.result?.value));
+        if (r === "OK") focused = true;
+        else await sleep(800);
+      }
+      if (!focused) return { ok: false, reason: "NO_INPUT_AFTER_RETRY" };
+
+      for (let i = 0; i < needles.length; i++) {
+        const needle = needles[i]!;
+        await session.call("Input.insertText", { text: "@" });
+        await sleep(400);
+        await session.call("Input.insertText", { text: needle });
+        await sleep(700);
+        const clicked = String(await session.call("Runtime.evaluate", {
+          expression: `(${COMPOSER_CLICK_FILE_MENTION_JS})(${JSON.stringify(needle)})`, returnByValue: true,
+        }).then((x) => x?.result?.value));
+        if (clicked !== "OK") return { ok: false, reason: `MENTION_CLICK:${clicked}` };
+        let okChip = false;
+        for (let retry = 0; retry < 5 && !okChip; retry++) {
+          const n = Number(await session.call("Runtime.evaluate", {
+            expression: `(${COMPOSER_FILE_MENTION_COUNT_JS})()`, returnByValue: true,
+          }).then((x) => x?.result?.value));
+          if (n >= i + 1) { okChip = true; break; }
+          await sleep(300);
+        }
+        if (!okChip) return { ok: false, reason: `FILE_MENTION_COUNT:${i + 1}` };
+      }
+      return { ok: true };
+    } catch (e) {
+      log(`file mention fail: ${String(e)}`);
+      return { ok: false, reason: `CDP_EVAL_FAIL:${String(e)}` };
+    } finally {
+      session.close();
+    }
+  };
+}
+
+export function createComposerFinisher(deps: CdpSubmitterDeps) {
+  const fetchJson = deps.fetchJson ?? defaultFetchJson;
+  const connect = deps.connect ?? defaultConnect;
+  const sleep = deps.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
+
+  return async function finish(
+    workspaceRoot: string,
+    prompt: string,
+    autoSubmit: boolean,
+  ): Promise<CdpSubmitResult> {
+    let targets: any[];
+    try {
+      targets = await fetchJson(`http://127.0.0.1:${deps.port}/json`, 1500);
+    } catch {
+      return { ok: false, reason: "CDP_UNREACHABLE" };
+    }
+    const base = workspaceRoot.split(/[\\/]/).filter(Boolean).pop() ?? workspaceRoot;
+    const pages = targets.filter(
+      (t) => t.type === "page" && typeof t.title === "string" && t.title.includes(base),
+    );
+    if (pages.length === 0) return { ok: false, reason: "WINDOW_TARGET_NOT_FOUND" };
+    const wsUrl = pages[0].webSocketDebuggerUrl;
+    if (typeof wsUrl !== "string" || !wsUrl) return { ok: false, reason: "NO_WS_URL" };
+    let session: CdpSession;
+    try {
+      session = await connect(wsUrl, 2000);
+    } catch (e) {
+      return { ok: false, reason: `CDP_CONNECT_FAIL:${String(e)}` };
+    }
+    try {
+      await session.call("Runtime.evaluate", {
+        expression: `(${COMPOSER_FOCUS_IMAGE_JS})()`, returnByValue: true,
+      });
+      if (prompt.trim()) {
+        await session.call("Input.insertText", { text: prompt });
+        await sleep(200);
+        const v = String(await session.call("Runtime.evaluate", {
+          expression: `(${COMPOSER_VERIFY_JS})(${JSON.stringify(prompt)})`, returnByValue: true,
+        }).then((x) => x?.result?.value));
+        if (v !== "OK") return { ok: false, reason: `VERIFY_FAIL:${v}` };
+      }
+      if (autoSubmit) {
+        const e = String(await session.call("Runtime.evaluate", {
+          expression: `(${COMPOSER_ENTER_JS})(${JSON.stringify(prompt)})`, returnByValue: true,
+        }).then((x) => x?.result?.value));
+        if (e !== "OK") return { ok: false, reason: `ENTER_FAIL:${e}` };
+      }
+      return { ok: true };
+    } catch (e) {
       return { ok: false, reason: `CDP_EVAL_FAIL:${String(e)}` };
     } finally {
       session.close();

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { api } from "../api";
-import { mergeImageFiles } from "../attachments";
+import { mergeAttachmentFiles, isConsoleAttachment, CONSOLE_ACCEPT } from "../attachments";
 import type { Machine } from "../types";
 
 const ERR: Record<string, string> = {
@@ -76,17 +76,17 @@ export function DispatchModal({ machines, preset, presetLabel, activeOnWorkspace
           onPaste={(e) => {
             const items = [...e.clipboardData.files];
             if (!items.length) return;
-            const { files: next, rejected } = mergeImageFiles(files, items);
-            if (next.length === files.length && rejected === 0 && !items.some((f) => f.type === "image/png" || f.type === "image/jpeg")) return;
+            const { files: next, rejected } = mergeAttachmentFiles(files, items);
+            if (next.length === files.length && rejected === 0 && !items.some(isConsoleAttachment)) return;
             e.preventDefault();
             setFiles(next);
-            if (rejected) setError("最多 4 张图片，已忽略多余文件");
+            if (rejected) setError("最多 4 个附件，已忽略多余文件");
           }} />
-        <input type="file" accept="image/png,image/jpeg" multiple onChange={(e) => {
+        <input type="file" accept={CONSOLE_ACCEPT} multiple onChange={(e) => {
           const picked = [...(e.target.files ?? [])];
-          const { files: next, rejected } = mergeImageFiles(files, picked);
+          const { files: next, rejected } = mergeAttachmentFiles(files, picked);
           setFiles(next);
-          if (rejected) setError("最多 4 张图片，已忽略多余文件");
+          if (rejected) setError("最多 4 个附件，已忽略多余文件");
           e.target.value = "";
         }} />
         {files.length > 0 && (

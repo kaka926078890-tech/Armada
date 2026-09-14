@@ -7,6 +7,7 @@ hooks/armada-spool.exe
 _spool_exe_test/
 _spool_exe_test2/
 .DS_Store
+.armada/
 desktop/src-tauri/resources/hub/
 desktop/src-tauri/resources/bun
 desktop/src-tauri/resources/scripts/

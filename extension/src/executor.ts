@@ -3,6 +3,7 @@ import { join } from "path";
 import type { PendingRun } from "./binding";
 import { acquireCdpLock } from "./cdpLock";
 import { workspacePathIn } from "./workspacePath";
+import { materializeInboxFile, uniqueInboxFilename } from "./workspaceInbox";
 
 const CANCEL_RECORD_WINDOW_MS = 20_000;
 
@@ -75,6 +76,9 @@ export interface ExecutorDeps {
     steps: { bytes: Buffer; mime: string }[],
     autoSubmit: boolean,
   ) => Promise<boolean>;
+  autoSubmitFileMentions?: (workspaceRoot: string, needles: string[]) => Promise<boolean>;
+  finishComposer?: (workspaceRoot: string, prompt: string, autoSubmit: boolean) => Promise<boolean>;
+  materializeFile?: (workspaceRoot: string, runId: string, name: string, bytes: Buffer) => { needle: string };
   autoEnter?: boolean;
   /**
    * Called when conversation_id is already known (followup) so we do not wait for hooks.
@@ -126,7 +130,7 @@ export class Executor {
       return;
     }
     const attachments = Array.isArray(msg.attachments) ? msg.attachments : [];
-    if (attachments.length && this.deps.imagePaste === false) {
+    if (attachments.some(isImageAtt) && this.deps.imagePaste === false) {
       this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: "IMAGE_PASTE_DISABLED" });
       return;
     }
@@ -161,9 +165,9 @@ export class Executor {
       await vscode.commands.executeCommand("composer.createNew");
       this.noteProgress(msg.runId, "inject");
       if (attachments.length) {
-        const ok = await this.injectImages(msg.runId, msg.workspaceRoot, msg.prompt, attachments);
-        if (!ok) {
-          this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: "IMAGE_PASTE_FAILED" });
+        const inj = await this.injectAttachments(msg.runId, msg.workspaceRoot, msg.prompt, attachments);
+        if (!inj.ok) {
+          this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: inj.reason ?? "IMAGE_PASTE_FAILED" });
           return;
         }
       } else {
@@ -196,27 +200,70 @@ export class Executor {
     this.deps.send({ type: "run.progress", runId, phase });
   }
 
-  private async injectImages(
+  private async injectAttachments(
     runId: string,
     workspaceRoot: string,
     prompt: string,
-    attachments: { id?: string; sha256?: string; mime?: string }[],
-  ): Promise<boolean> {
-    if (!this.deps.fetchBlob || !this.deps.autoSubmitImages || !this.deps.writeClipboard) return false;
-    this.noteProgress(runId, "blobs");
+    attachments: { id?: string; sha256?: string; mime?: string; name?: string }[],
+  ): Promise<{ ok: boolean; reason?: string }> {
+    const images = attachments.filter(isImageAtt);
+    const files = attachments.filter((a) => !isImageAtt(a));
     try {
-      const steps = await Promise.all(attachments.map(async (a) => {
-        const id = a.sha256 || a.id;
-        if (!id) throw new Error("ATTACHMENT_ID");
-        const blob = await this.deps.fetchBlob!(id);
-        return { bytes: blob.bytes, mime: blob.mime || a.mime || "image/png" };
-      }));
-      this.noteProgress(runId, "paste");
-      return await this.deps.autoSubmitImages(workspaceRoot, prompt, steps, this.deps.autoEnter !== false);
+      if (images.length) {
+        if (!this.deps.fetchBlob || !this.deps.autoSubmitImages || !this.deps.writeClipboard) {
+          return { ok: false, reason: "IMAGE_PASTE_FAILED" };
+        }
+        this.noteProgress(runId, "blobs");
+        const steps = await Promise.all(images.map(async (a) => {
+          const id = a.sha256 || a.id;
+          if (!id) throw new Error("ATTACHMENT_ID");
+          const blob = await this.deps.fetchBlob!(id);
+          return { bytes: blob.bytes, mime: blob.mime || a.mime || "image/png" };
+        }));
+        const skipFinish = files.length > 0;
+        this.noteProgress(runId, "paste");
+        const imgOk = await this.deps.autoSubmitImages(
+          workspaceRoot,
+          skipFinish ? "" : prompt,
+          steps,
+          skipFinish ? false : this.deps.autoEnter !== false,
+        );
+        if (!imgOk) return { ok: false, reason: "IMAGE_PASTE_FAILED" };
+      }
+      if (files.length) {
+        if (!this.deps.fetchBlob || !this.deps.autoSubmitFileMentions) {
+          return { ok: false, reason: "FILE_MENTION_FAILED" };
+        }
+        this.noteProgress(runId, "blobs");
+        const fetched = await Promise.all(files.map(async (a) => {
+          const id = a.sha256 || a.id;
+          if (!id) throw new Error("ATTACHMENT_ID");
+          const blob = await this.deps.fetchBlob!(id);
+          return { id, blob, name: a.name };
+        }));
+        const needles: string[] = [];
+        const write = this.deps.materializeFile
+          ?? ((ws: string, rid: string, filename: string, bytes: Buffer) => {
+            materializeInboxFile(ws, rid, filename, bytes);
+            return { needle: filename };
+          });
+        for (const item of fetched) {
+          const name = uniqueInboxFilename(item.id, item.name || "file");
+          needles.push(write(workspaceRoot, runId, name, item.blob.bytes).needle);
+        }
+        this.noteProgress(runId, "paste");
+        const fileOk = await this.deps.autoSubmitFileMentions(workspaceRoot, needles);
+        if (!fileOk) return { ok: false, reason: "FILE_MENTION_FAILED" };
+        if (!this.deps.finishComposer) return { ok: false, reason: "FILE_MENTION_FAILED" };
+        const fin = await this.deps.finishComposer(workspaceRoot, prompt, this.deps.autoEnter !== false);
+        if (!fin) return { ok: false, reason: "FILE_MENTION_FAILED" };
+      }
+      return { ok: true };
     } catch {
-      return false;
+      return { ok: false, reason: files.length ? "FILE_MENTION_FAILED" : "IMAGE_PASTE_FAILED" };
     }
   }
+
   private async injectPrompt(
     workspaceRoot: string,
     prompt: string,
@@ -265,7 +312,7 @@ export class Executor {
   }): Promise<void> {
     const vscode = vs();
     const attachments = Array.isArray(msg.attachments) ? msg.attachments : [];
-    if (attachments.length && this.deps.imagePaste === false) {
+    if (attachments.some(isImageAtt) && this.deps.imagePaste === false) {
       this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: "IMAGE_PASTE_DISABLED" });
       return;
     }
@@ -282,9 +329,9 @@ export class Executor {
       this.noteProgress(msg.runId, "inject");
       await vscode.commands.executeCommand("composer.openComposer", msg.conversationId);
       if (attachments.length) {
-        const ok = await this.injectImages(msg.runId, msg.workspaceRoot, msg.prompt, attachments);
-        if (!ok) {
-          this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: "IMAGE_PASTE_FAILED" });
+        const inj = await this.injectAttachments(msg.runId, msg.workspaceRoot, msg.prompt, attachments);
+        if (!inj.ok) {
+          this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: inj.reason ?? "IMAGE_PASTE_FAILED" });
           return;
         }
       } else {
@@ -363,4 +410,8 @@ export class Executor {
       lock.release();
     }
   }
+}
+
+function isImageAtt(a: { mime?: string }): boolean {
+  return a.mime === "image/png" || a.mime === "image/jpeg";
 }

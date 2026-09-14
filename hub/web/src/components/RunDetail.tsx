@@ -5,7 +5,7 @@ import { workspaceFolderName, runDisplayName, type RunRow } from "../boardState"
 import ChatThread from "./ChatThread";
 import { eventsToChat, mergePendingAsk, mergeOutboundChat, queuedOutbound, INITIAL_VISIBLE_TURNS, initialHiddenPrefixTurns, recentTurnsWindow } from "../chatView";
 import { collectEventPages, mergeEvents, EVENT_PAGE_SIZE, hasOlderEvents, olderEventsQuery, shouldLoadOlder, prependPreserveScroll } from "../loadEvents";
-import { mergeImageFiles } from "../attachments";
+import { mergeAttachmentFiles, isConsoleAttachment, CONSOLE_ACCEPT } from "../attachments";
 import { endFollowupSend, isFollowupSendEnter, tryBeginFollowupSend } from "../followupSend";
 import { WIDTH_KEY } from "../uiPrefs";
 
@@ -461,11 +461,11 @@ export default function RunDetail({ runId, onClose, onChanged }: {
               onPaste={(e) => {
                 const items = [...e.clipboardData.files];
                 if (!items.length) return;
-                const { files: next, rejected } = mergeImageFiles(followupFiles, items);
-                if (next.length === followupFiles.length && rejected === 0 && !items.some((f) => f.type === "image/png" || f.type === "image/jpeg")) return;
+                const { files: next, rejected } = mergeAttachmentFiles(followupFiles, items);
+                if (next.length === followupFiles.length && rejected === 0 && !items.some(isConsoleAttachment)) return;
                 e.preventDefault();
                 setFollowupFiles(next);
-                if (rejected) setFollowupError("最多 4 张图片，已忽略多余文件");
+                if (rejected) setFollowupError("最多 4 个附件，已忽略多余文件");
               }}
               onKeyDown={(e) => {
                 if (!isFollowupSendEnter(e)) return;
@@ -478,11 +478,11 @@ export default function RunDetail({ runId, onClose, onChanged }: {
             />
             <button type="submit" disabled={sending || (!followup.trim() && followupFiles.length === 0)} className="px-3 py-2 rounded-lg bg-sky-700 hover:bg-sky-600 text-[13px] shrink-0 disabled:opacity-40">发送</button>
           </div>
-          <input type="file" accept="image/png,image/jpeg" multiple onChange={(e) => {
+          <input type="file" accept={CONSOLE_ACCEPT} multiple onChange={(e) => {
             const picked = [...(e.target.files ?? [])];
-            const { files: next, rejected } = mergeImageFiles(followupFiles, picked);
+            const { files: next, rejected } = mergeAttachmentFiles(followupFiles, picked);
             setFollowupFiles(next);
-            if (rejected) setFollowupError("最多 4 张图片，已忽略多余文件");
+            if (rejected) setFollowupError("最多 4 个附件，已忽略多余文件");
             e.target.value = "";
           }} />
           {followupFiles.length > 0 && (
