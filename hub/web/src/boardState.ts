@@ -202,6 +202,15 @@ export function isUnreadCompleted(run: RunRow, readAt: number | undefined): bool
   return run.status === "completed" && isUnreadAlert(run, readAt);
 }
 
+/** 看板卡片外框：未读红点太小，未读完成/待处理用红边+红光圈。 */
+export function cardChromeClass(unread: boolean, selected: boolean): string {
+  if (unread) {
+    return "border-red-500/90 bg-zinc-900 shadow-[0_0_0_1px_rgba(248,113,113,0.55),0_0_16px_rgba(239,68,68,0.5)]";
+  }
+  if (selected) return "border-sky-600/80 bg-zinc-900";
+  return "border-transparent bg-zinc-900/50 hover:border-zinc-700";
+}
+
 /** 侧栏未读数：终态未读（完成/失败/异常/中止）。进行中不计入。 */
 export function workspaceUnreadCount(runs: RunRow[], readMap: Record<string, number>): number {
   let n = 0;

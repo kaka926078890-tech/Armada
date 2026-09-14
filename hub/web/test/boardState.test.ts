@@ -3,7 +3,7 @@ import {
   groupRuns, cardView, listWorkspaceSlots, encodeWorkspaceKey, decodeWorkspaceKey,
   filterRunsByWorkspace, sortConversations, groupSlotsByMachine, isUnreadCompleted, isUnreadMessage,
   workspaceHasUnread, workspaceUnreadCount, formatUnreadCount, canArchiveRun, isHubArchived,
-  workspaceFolderName, workspaceHasLiveRun, resolveSelectedWorkspace, isUnreadNeedInput, type RunRow,
+  workspaceFolderName, workspaceHasLiveRun, resolveSelectedWorkspace, isUnreadNeedInput, cardChromeClass, type RunRow,
 } from "../src/boardState";
 
 const base: RunRow = {
@@ -154,6 +154,14 @@ describe("unread dots", () => {
     const run = { ...base, status: "cancelled", ended_at: 9 };
     expect(isUnreadMessage(run, undefined)).toBe(false);
     expect(workspaceHasUnread([run], {})).toBe(false);
+  });
+
+  test("unread cards get a red ring; selected without unread stays sky", () => {
+    expect(cardChromeClass(true, false)).toContain("border-red-500");
+    expect(cardChromeClass(true, false)).toContain("shadow-[");
+    expect(cardChromeClass(true, true)).toContain("border-red-500");
+    expect(cardChromeClass(false, true)).toContain("border-sky-600");
+    expect(cardChromeClass(false, false)).toContain("border-transparent");
   });
 
   test("pending_ask unread adds to workspace count with terminal unread", () => {
