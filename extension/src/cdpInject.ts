@@ -454,7 +454,7 @@ export function createImagePaster(deps: CdpSubmitterDeps) {
     workspaceRoot: string,
     prompt: string,
     steps: ImagePasteStep[],
-    writeClipboard: (bytes: Buffer, mime: string) => void,
+    writeClipboard: (bytes: Buffer, mime: string) => void | Promise<void>,
     autoSubmit: boolean,
   ): Promise<CdpSubmitResult> {
     let targets: any[];
@@ -491,7 +491,7 @@ export function createImagePaster(deps: CdpSubmitterDeps) {
 
       for (let i = 0; i < steps.length; i++) {
         const step = steps[i]!;
-        writeClipboard(step.bytes, step.mime);
+        await writeClipboard(step.bytes, step.mime);
         let okChip = false;
         // 先数芯片：已经贴上的不得再 Cmd+V（探测失败也不连贴三张）。
         for (let retry = 0; retry < 3 && !okChip; retry++) {

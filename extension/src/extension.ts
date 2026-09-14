@@ -11,7 +11,7 @@ import { matchHookToPending, claimConversation, eventBelongsToWindow, transcript
 import { TranscriptTailer, shouldUnfollowOnHookStop } from "./transcript";
 import { Executor, CancelWatcher } from "./executor";
 import { createCdpSubmitter, createImagePaster, createAskQuestionDriver } from "./cdpInject";
-import { writeOsImageClipboard } from "./osClipboard";
+import { createOsClipboardWriter, writeOsImageClipboard } from "./osClipboard";
 import { mergeHooks, hooksDriftHash, spoolScriptName, shouldInstallArmadaHooks } from "./hooksInstall";
 import { collectTranscriptViews, matchTranscriptToPending, stopPayloadFromTranscriptLine, stopFromTranscriptFileContent, transcriptsDirForWorkspace, isWithinTranscriptBindWindow, FollowupStopGuard, listSubagentTranscripts, childCidFromSubagentPath } from "./transcriptBind";
 import { TranscriptDirWatcher, debounceLeading, watchTranscriptDir, watchFileSize, TRANSCRIPT_WATCHDOG_MS, TRANSCRIPT_WATCH_DEBOUNCE_MS } from "./transcriptWatch";
@@ -289,10 +289,15 @@ export function activate(context: vscode.ExtensionContext): void {
       return { bytes, mime };
     },
     autoSubmitImages: async (workspaceRoot, prompt, steps, autoSubmit) => {
-      const r = await imagePaster(workspaceRoot, prompt, steps, writeOsImageClipboard, autoSubmit);
-      if (!r.ok) log(`image paste failed: ${r.reason}`);
-      else log("image paste ok");
-      return r.ok;
+      const writer = createOsClipboardWriter();
+      try {
+        const r = await imagePaster(workspaceRoot, prompt, steps, (b, m) => writer.write(b, m), autoSubmit);
+        if (!r.ok) log(`image paste failed: ${r.reason}`);
+        else log("image paste ok");
+        return r.ok;
+      } finally {
+        await writer.close();
+      }
     },
     answerAskCdp: async ({ workspaceRoot, action, letter }) => {
       const r = await askDriver.submit(workspaceRoot, action, letter);

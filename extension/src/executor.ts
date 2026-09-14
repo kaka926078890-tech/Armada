@@ -54,7 +54,7 @@ export interface ExecutorDeps {
   };
   send: (msg: object) => void;
   sleep?: (ms: number) => Promise<void>;
-  /** Called after auth passes and newAgentChat succeeds — binding window starts here. */
+  /** Called after inject succeeds — binding window starts here. */
   addPending?: (run: PendingRun) => void;
   /** Drop a pending entry on INJECT_FAILED after it was already added. */
   removePending?: (runId: string) => void;
@@ -159,7 +159,21 @@ export class Executor {
       // createNew = 空对话。newAgentChat 会把活动编辑器做成引用芯片（真机
       // NON_EMPTY_INPUT:windows-packaging-self-hosted-）；其前再 focus 编辑器组会把用户挪开的焦点抢回去。
       await vscode.commands.executeCommand("composer.createNew");
-      // Auth passed + chat created: binding window starts; WRONG_WINDOW/NOT_AUTHORIZED never reach here.
+      this.noteProgress(msg.runId, "inject");
+      if (attachments.length) {
+        const ok = await this.injectImages(msg.runId, msg.workspaceRoot, msg.prompt, attachments);
+        if (!ok) {
+          this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: "IMAGE_PASTE_FAILED" });
+          return;
+        }
+      } else {
+        const inj = await this.injectPrompt(msg.workspaceRoot, msg.prompt, 1500);
+        if (!inj.submitted) {
+          this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: inj.reason ?? "INJECT_FAILED" });
+          return;
+        }
+      }
+      // Binding window starts after inject so multi-image paste cannot expire the 70s scan.
       this.deps.addPending?.({
         runId: msg.runId,
         workspaceRoot: msg.workspaceRoot,
@@ -168,21 +182,6 @@ export class Executor {
         attachmentIds: attachments.map((a) => a.sha256 || a.id).filter((x): x is string => !!x),
       });
       pendingAdded = true;
-      if (attachments.length) {
-        const ok = await this.injectImages(msg.workspaceRoot, msg.prompt, attachments);
-        if (!ok) {
-          this.deps.removePending?.(msg.runId);
-          this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: "IMAGE_PASTE_FAILED" });
-          return;
-        }
-      } else {
-        const inj = await this.injectPrompt(msg.workspaceRoot, msg.prompt, 1500);
-        if (!inj.submitted) {
-          this.deps.removePending?.(msg.runId);
-          this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: inj.reason ?? "INJECT_FAILED" });
-          return;
-        }
-      }
       this.deps.onInjected?.(msg.runId);
       this.deps.send({ type: "run.ack", runId: msg.runId, status: "accepted" });
     } catch (e) {
@@ -193,20 +192,26 @@ export class Executor {
     }
   }
 
+  private noteProgress(runId: string, phase: string): void {
+    this.deps.send({ type: "run.progress", runId, phase });
+  }
+
   private async injectImages(
+    runId: string,
     workspaceRoot: string,
     prompt: string,
     attachments: { id?: string; sha256?: string; mime?: string }[],
   ): Promise<boolean> {
     if (!this.deps.fetchBlob || !this.deps.autoSubmitImages || !this.deps.writeClipboard) return false;
-    const steps: { bytes: Buffer; mime: string }[] = [];
-    for (const a of attachments) {
-      const id = a.sha256 || a.id;
-      if (!id) return false;
-      const blob = await this.deps.fetchBlob(id);
-      steps.push({ bytes: blob.bytes, mime: blob.mime || a.mime || "image/png" });
-    }
+    this.noteProgress(runId, "blobs");
     try {
+      const steps = await Promise.all(attachments.map(async (a) => {
+        const id = a.sha256 || a.id;
+        if (!id) throw new Error("ATTACHMENT_ID");
+        const blob = await this.deps.fetchBlob!(id);
+        return { bytes: blob.bytes, mime: blob.mime || a.mime || "image/png" };
+      }));
+      this.noteProgress(runId, "paste");
       return await this.deps.autoSubmitImages(workspaceRoot, prompt, steps, this.deps.autoEnter !== false);
     } catch {
       return false;
@@ -273,9 +278,10 @@ export class Executor {
       return;
     }
     try {
+      this.noteProgress(msg.runId, "inject");
       await vscode.commands.executeCommand("composer.openComposer", msg.conversationId);
       if (attachments.length) {
-        const ok = await this.injectImages(msg.workspaceRoot, msg.prompt, attachments);
+        const ok = await this.injectImages(msg.runId, msg.workspaceRoot, msg.prompt, attachments);
         if (!ok) {
           this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: "IMAGE_PASTE_FAILED" });
           return;

@@ -275,6 +275,25 @@ export class RunService {
     return hits.length === 1 ? hits[0] : null;
   }
 
+  /**
+   * 扩展贴图/注入未完成时续命 dispatched 时钟。
+   * 30s 只杀「上次 progress 之后再无消息」；贴图中途不得 DISPATCH_TIMEOUT。
+   */
+  onRunProgress(machineId: string, msg: any) {
+    const run = this.get(msg.runId);
+    if (!run) return;
+    const now = Date.now();
+    if (run.status === "dispatched") {
+      this.db.query("UPDATE runs SET started_at=?1 WHERE id=?2").run(now, run.id);
+      this.audit("extension", "run.progress", run.id, { phase: msg.phase ?? null });
+      return;
+    }
+    if (!this.isFalseDispatchTimeout(run)) return;
+    if (this.denyReviveIfSlotBusy(machineId, run.id)) return;
+    this.setStatus(run.id, "dispatched", { ended_at: null, end_reason: null, started_at: now }, "extension");
+    this.audit("extension", "run.progress", run.id, { phase: msg.phase ?? null, revived: true });
+  }
+
   onRunAck(machineId: string, msg: any) {
     const run = this.get(msg.runId);
     if (!run) return;

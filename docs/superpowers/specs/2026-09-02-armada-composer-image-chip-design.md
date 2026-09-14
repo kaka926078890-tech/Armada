@@ -368,6 +368,7 @@ sequenceDiagram
 | 2026-09-01 | 讨论 v0 | 必须芯片；系统剪贴板 PNG；否决 `@`；§4–§6 待补充 |
 | 2026-09-02 | 需求 v1 | 多图最多 4；8+24 MiB；禁止压缩；只附图；续聊失败打卡；控制台粘贴；不做旧扩展门；CDP 失败立即失败；超时维持 30s/25s；失败码走 reject |
 | 2026-09-02 | 落地 v1.1 | hub blob/runs/绑定/控制台选图、扩展 `injectImages` 骨架落地。CDP 芯片选择器与 Windows 剪贴板格式仍待 P1–P5。 |
+| 2026-09-14 | 落地 v1.2 | Windows 贴图：同一次注入复用一个 PowerShell STA 会话（不再每张冷启动）。扩展在贴图中发 `run.progress`，hub 用其续命 `started_at`；30s 只杀「上次 progress 后再无消息」。新任务 `addPending` 移到贴完之后。**仍不为图文把 `DISPATCH_TIMEOUT` 改成 90s，也仍不先 ack 再贴。** |
 
 ---
 

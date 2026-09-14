@@ -262,6 +262,66 @@ describe("Run dispatch", () => {
     expect(after.end_reason).toBe("DISPATCH_TIMEOUT");
   });
 
+  test("run.progress keeps dispatched past 30s so in-flight paste is not DISPATCH_TIMEOUT", async () => {
+    const { ws, api } = await startWithExt();
+    const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "x" }) });
+    const { run } = await r.json() as any;
+    hub!.db.query("UPDATE runs SET created_at=?1 WHERE id=?2").run(Date.now() - 35_000, run.id);
+    ws.send(JSON.stringify({ type: "run.progress", runId: run.id, phase: "paste" }));
+    await new Promise((r2) => setTimeout(r2, 100));
+    hub!.runs.sweepTimeouts();
+    const after = (await (await api(`/api/runs/${run.id}`)).json()) as any;
+    expect(after.status).toBe("dispatched");
+    expect(after.end_reason).toBeNull();
+    ws.close();
+  });
+
+  test("DISPATCH_TIMEOUT still fires 30s after last run.progress", async () => {
+    const { ws, api } = await startWithExt();
+    const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "x" }) });
+    const { run } = await r.json() as any;
+    ws.send(JSON.stringify({ type: "run.progress", runId: run.id, phase: "paste" }));
+    await new Promise((r2) => setTimeout(r2, 100));
+    hub!.db.query("UPDATE runs SET started_at=?1 WHERE id=?2").run(Date.now() - 35_000, run.id);
+    hub!.runs.sweepTimeouts();
+    const after = (await (await api(`/api/runs/${run.id}`)).json()) as any;
+    expect(after.status).toBe("error");
+    expect(after.end_reason).toBe("DISPATCH_TIMEOUT");
+    ws.close();
+  });
+
+  test("run.progress after DISPATCH_TIMEOUT revives dispatched when inject slot is free", async () => {
+    const { ws, api } = await startWithExt();
+    const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "x" }) });
+    const { run } = await r.json() as any;
+    hub!.db.query("UPDATE runs SET created_at=?1 WHERE id=?2").run(Date.now() - 35_000, run.id);
+    hub!.runs.sweepTimeouts();
+    expect(((await (await api(`/api/runs/${run.id}`)).json()) as any).end_reason).toBe("DISPATCH_TIMEOUT");
+    ws.send(JSON.stringify({ type: "run.progress", runId: run.id, phase: "paste" }));
+    await new Promise((r2) => setTimeout(r2, 100));
+    const after = (await (await api(`/api/runs/${run.id}`)).json()) as any;
+    expect(after.status).toBe("dispatched");
+    expect(after.end_reason).toBeNull();
+    ws.close();
+  });
+
+  test("run.progress after DISPATCH_TIMEOUT does not revive when inject slot is taken", async () => {
+    const { ws, api } = await startWithExt({ extensionVersion: "0.4.0" });
+    const r1 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "a" }) });
+    const { run: a } = await r1.json() as any;
+    const r2 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "b" }) });
+    const body2 = await r2.json() as any;
+    expect(body2.run.status).toBe("queued");
+    hub!.db.query("UPDATE runs SET created_at=?1 WHERE id=?2").run(Date.now() - 35_000, a.id);
+    hub!.runs.sweepTimeouts();
+    expect(((await (await api(`/api/runs/${body2.run.id}`)).json()) as any).status).toBe("dispatched");
+    ws.send(JSON.stringify({ type: "run.progress", runId: a.id, phase: "paste" }));
+    await new Promise((r) => setTimeout(r, 100));
+    expect(((await (await api(`/api/runs/${a.id}`)).json()) as any).status).toBe("error");
+    expect(((await (await api(`/api/runs/${body2.run.id}`)).json()) as any).status).toBe("dispatched");
+    ws.close();
+  });
+
   test("迟到的 accepted ack 从 DISPATCH_TIMEOUT 收回为 binding", async () => {
     const { ws, api } = await startWithExt();
     const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "x" }) });

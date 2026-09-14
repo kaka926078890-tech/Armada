@@ -89,19 +89,71 @@ describe("Executor image path", () => {
     expect(commands).not.toContain("composer.newAgentChat");
     expect(commands).not.toContain("workbench.action.focusActiveEditorGroup");
   });
+
+  test("image startRun sends run.progress before paste finishes and addPending after paste", async () => {
+    const order: string[] = [];
+    let finishPaste: (ok: boolean) => void = () => {};
+    const { ex, acks } = makeExec({
+      imagePaste: true,
+      fetchBlob: async () => ({ bytes: Buffer.from("x"), mime: "image/png" }),
+      writeClipboard: () => {},
+      addPending: () => { order.push("pending"); },
+      autoSubmitImages: () => new Promise<boolean>((resolve) => {
+        order.push("paste");
+        finishPaste = resolve;
+      }),
+    });
+    const done = ex.startRun({ runId: "r1", workspaceRoot: "/ws/a", prompt: "see", attachments: pngAtt });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(acks.some((m) => m.type === "run.progress" && m.runId === "r1")).toBe(true);
+    expect(acks.some((m) => m.type === "run.ack")).toBe(false);
+    expect(order).toEqual(["paste"]);
+    finishPaste(true);
+    await done;
+    expect(order).toEqual(["paste", "pending"]);
+    expect(acks[acks.length - 1]).toEqual({ type: "run.ack", runId: "r1", status: "accepted" });
+  });
+
+  test("two attachment blobs start fetching before either finishes", async () => {
+    let started = 0;
+    const gates: Array<() => void> = [];
+    const { ex, acks } = makeExec({
+      imagePaste: true,
+      fetchBlob: () => new Promise<{ bytes: Buffer; mime: string }>((resolve) => {
+        started += 1;
+        gates.push(() => resolve({ bytes: Buffer.from("x"), mime: "image/png" }));
+      }),
+      writeClipboard: () => {},
+      autoSubmitImages: async () => true,
+    });
+    const done = ex.startRun({
+      runId: "r1", workspaceRoot: "/ws/a", prompt: "see",
+      attachments: [
+        { sha256: "a", mime: "image/png", id: "a" },
+        { sha256: "b", mime: "image/png", id: "b" },
+      ],
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(started).toBe(2);
+    for (const g of gates) g();
+    await done;
+    expect(acks[acks.length - 1]).toEqual({ type: "run.ack", runId: "r1", status: "accepted" });
+  });
 });
 
 describe("Executor dirty composer", () => {
   test("NON_EMPTY_INPUT does not clipboard-paste and rejects startRun", async () => {
+    let added = 0;
     let removed = 0;
     const { ex, acks } = makeExec({
       autoSubmit: async () => ({ ok: false, reason: "NON_EMPTY_INPUT:bun (986-1016)" }),
-      addPending: () => {},
+      addPending: () => { added += 1; },
       removePending: () => { removed += 1; },
     });
     await ex.startRun({ runId: "r1", workspaceRoot: "/ws/a", prompt: "hello" });
     expect(clipboardWrites).toEqual([]);
-    expect(removed).toBe(1);
+    expect(added).toBe(0);
+    expect(removed).toBe(0);
     expect(acks[acks.length - 1]).toEqual({
       type: "run.ack", runId: "r1", status: "rejected", reason: "NON_EMPTY_INPUT",
     });

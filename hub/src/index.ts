@@ -38,6 +38,7 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
     const machineId = ws.data.machineId!;
     switch (msg.type) {
       case "run.ack": runs.onRunAck(machineId, msg); break;
+      case "run.progress": runs.onRunProgress(machineId, msg); break;
       case "run.bound": runs.onRunBound(machineId, msg); break;
       case "run.event": {
         ingestEvent(db, runs, sse, machineId, msg);
