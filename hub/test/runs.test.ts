@@ -833,7 +833,7 @@ describe("running followup outbound", () => {
     ws.close();
   });
 
-  test("A4/A8/A7 QUEUE_DRAIN only for queued; injecting and steer do not block completed", async () => {
+  test("A7 injecting does not block matching completed", async () => {
     const { ws, inbound, api, run } = await bindRunning({ os: "win32-x64", mode: "queue" });
     await new Promise((x) => setTimeout(x, 40));
     const g1 = inbound.find((m) => m.type === "run.start")?.generation_id as string;
@@ -874,7 +874,67 @@ describe("running followup outbound", () => {
     ws.close();
   });
 
-  test("A9/A11/E3 Win claim issues run.generation then G2 completes; history user is not claimed", async () => {
+  test("A8 steer ack does not count as outstanding: matching completed applies", async () => {
+    const { ws, inbound, api, run } = await bindRunning({ os: "win32-x64", mode: "steer" });
+    const g1 = inbound.find((m) => m.type === "run.start")?.generation_id as string;
+    await api(`/api/runs/${run.id}/followup`, { method: "POST", body: JSON.stringify({ prompt: "直发句" }) });
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    await new Promise((x) => setTimeout(x, 50));
+    expect(((await (await api(`/api/runs/${run.id}`)).json()) as any).outbound[0].state).toBe("steered");
+    ws.send(JSON.stringify({
+      type: "run.event", runId: run.id, source: "hook", hookEventName: "stop",
+      payload: { status: "completed", conversation_id: "cid-1", generation_id: g1 },
+      ts: Date.now(), seq: 21,
+    }));
+    await new Promise((x) => setTimeout(x, 50));
+    expect(((await (await api(`/api/runs/${run.id}`)).json()) as any).status).toBe("completed");
+    ws.close();
+  });
+
+  test("transcript user during injecting is claimed (not waiting for ack)", async () => {
+    const { ws, inbound, api, run } = await bindRunning({ os: "win32-x64", mode: "queue" });
+    const g1 = inbound.find((m) => m.type === "run.start")?.generation_id as string;
+    inbound.length = 0;
+    await api(`/api/runs/${run.id}/followup`, { method: "POST", body: JSON.stringify({ prompt: "排队句" }) });
+    const created = (hub!.db.query("SELECT created_at FROM run_outbound WHERE run_id=?1").get(run.id) as { created_at: number }).created_at;
+    ws.send(JSON.stringify({
+      type: "run.event", runId: run.id, source: "transcript", seq: 31, ts: created + 10,
+      payload: { role: "user", conversation_id: "cid-1", message: { content: [{ type: "text", text: "<user_query>\n排队句\n</user_query>" }] } },
+    }));
+    await new Promise((x) => setTimeout(x, 60));
+    const after = (await (await api(`/api/runs/${run.id}`)).json()) as any;
+    expect(after.status).toBe("running");
+    expect(after.outbound).toEqual([]);
+    expect(typeof inbound.find((m) => m.type === "run.generation")?.generation_id).toBe("string");
+    expect(inbound.find((m) => m.type === "run.generation").generation_id).not.toBe(g1);
+    ws.close();
+  });
+
+  test("Win claim does not attach hub gen when sendTo cannot reach the window", async () => {
+    const { ws, inbound, api, run } = await bindRunning({ os: "win32-x64", mode: "queue" });
+    const g1 = inbound.find((m) => m.type === "run.start")?.generation_id as string;
+    await api(`/api/runs/${run.id}/followup`, { method: "POST", body: JSON.stringify({ prompt: "排队句" }) });
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    await new Promise((x) => setTimeout(x, 50));
+    ws.send(JSON.stringify({
+      type: "run.event", runId: run.id, source: "hook", hookEventName: "stop",
+      payload: { status: "completed", conversation_id: "cid-1", generation_id: g1 },
+      ts: Date.now(), seq: 21,
+    }));
+    await new Promise((x) => setTimeout(x, 50));
+    ws.close();
+    await new Promise((x) => setTimeout(x, 40));
+    const created = (hub!.db.query("SELECT created_at FROM run_outbound WHERE run_id=?1").get(run.id) as { created_at: number }).created_at;
+    hub!.runs.claimOutbound(run.id, "排队句", created + 10);
+    const row = hub!.db.query("SELECT live_generation_id, deferred_stop FROM runs WHERE id=?1").get(run.id) as {
+      live_generation_id: string | null; deferred_stop: string | null;
+    };
+    expect(row.live_generation_id).toBe(g1);
+    expect(row.deferred_stop).toBeTruthy();
+    expect(((await (await api(`/api/runs/${run.id}`)).json()) as any).outbound[0].state).toBe("queued");
+  });
+
+  test("A9/A11 Win jsonl user claim issues run.generation then G2 stop completes (hub contract)", async () => {
     const { ws, inbound, api, run } = await bindRunning({ os: "win32-x64", mode: "queue" });
     const g1 = inbound.find((m) => m.type === "run.start")?.generation_id as string;
     inbound.length = 0;

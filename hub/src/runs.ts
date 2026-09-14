@@ -208,23 +208,31 @@ export class RunService {
   claimOutbound(runId: string, promptNorm: string, eventTs: number): void {
     if (!promptNorm) return;
     const rows = this.db.query(
-      `SELECT id, prompt, state, created_at FROM run_outbound
-       WHERE run_id=?1 AND state IN ('queued','steered') ORDER BY id ASC`,
-    ).all(runId) as { id: string; prompt: string; state: string; created_at: number }[];
+      `SELECT id, prompt, state, expected_mode, created_at FROM run_outbound
+       WHERE run_id=?1 AND state IN ('injecting','queued','steered') ORDER BY id ASC`,
+    ).all(runId) as { id: string; prompt: string; state: string; expected_mode: string; created_at: number }[];
     const hit = rows.find((r) => r.created_at <= eventTs && normalizePrompt(r.prompt) === promptNorm);
     if (!hit) return;
-    const wasQueued = hit.state === "queued";
-    this.setOutboundState(hit.id, "consumed");
-    if (!wasQueued) return;
-    this.clearDeferredStop(runId);
+    const queueTurn = hit.state === "queued" || (hit.state === "injecting" && hit.expected_mode === "queue");
     const run = this.get(runId);
-    if (!run || run.status !== "running") return;
-    if (!isWindowsMachineOs(this.registry.getMachine(run.machine_id)?.os)) return;
-    const gen = this.attachHubGeneration(runId, "hub_windows");
-    const windowId = this.liveWindowId(run);
-    if (gen && windowId) {
-      this.registry.sendTo(run.machine_id, windowId, { type: "run.generation", runId, generation_id: gen });
+    if (queueTurn && run?.status === "running" && isWindowsMachineOs(this.registry.getMachine(run.machine_id)?.os)) {
+      const windowId = this.liveWindowId(run);
+      if (!windowId) return;
+      const prev = this.db.query(
+        "SELECT live_generation_id, retired_generation_ids, deferred_stop FROM runs WHERE id=?1",
+      ).get(runId) as { live_generation_id: string | null; retired_generation_ids: string; deferred_stop: string | null };
+      const gen = this.attachHubGeneration(runId, "hub_windows");
+      const sent = !!(gen && this.registry.sendTo(run.machine_id, windowId, {
+        type: "run.generation", runId, generation_id: gen,
+      }));
+      if (!sent) {
+        this.db.query("UPDATE runs SET live_generation_id=?1, retired_generation_ids=?2, deferred_stop=?3 WHERE id=?4")
+          .run(prev.live_generation_id, prev.retired_generation_ids, prev.deferred_stop, runId);
+        return;
+      }
     }
+    this.setOutboundState(hit.id, "consumed");
+    if (queueTurn) this.clearDeferredStop(runId);
   }
 
   private hasPromptCollision(machineId: string, workspaceRoot: string, prompt: string, attachmentIds: string[], exceptId?: string): boolean {
