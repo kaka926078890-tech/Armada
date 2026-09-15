@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import Markdown from "react-markdown";
+import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import { segmentChat, type ChatBlock } from "../chatView";
 
@@ -115,6 +116,14 @@ export function AssistantMarkdown({ text }: { text: string }) {
   return (
     <div className="break-words leading-[1.65] text-[13px] text-zinc-200">
       <Markdown remarkPlugins={[remarkGfm]} components={mdComponents}>{text}</Markdown>
+    </div>
+  );
+}
+
+function UserMarkdown({ text }: { text: string }) {
+  return (
+    <div className="break-words leading-[1.65] text-[13px] text-zinc-100">
+      <Markdown remarkPlugins={[remarkGfm, remarkBreaks]} components={mdComponents}>{text}</Markdown>
     </div>
   );
 }
@@ -267,8 +276,8 @@ export default function ChatThread({ blocks, onAnswerAsk }: {
         if (s.kind === "user") {
           return (
             <div key={key} className="flex justify-end">
-              <div className="max-w-[88%] rounded-xl bg-zinc-800/70 px-3.5 py-2 text-[13px] text-zinc-100 leading-relaxed whitespace-pre-wrap">
-                {s.text}
+              <div className="max-w-[88%] rounded-xl bg-zinc-800/70 px-3.5 py-2 text-[13px] text-zinc-100 leading-relaxed">
+                <UserMarkdown text={s.text} />
               </div>
             </div>
           );

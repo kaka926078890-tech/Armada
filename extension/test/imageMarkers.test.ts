@@ -29,6 +29,11 @@ describe("displayUserText", () => {
   test("image-only", () => {
     expect(displayUserText("[Image]\n<image_files>x.png</image_files>", 2)).toBe("[2 张图片]");
   });
+
+  test("preserves markdown newlines for the operator bubble", () => {
+    const md = "### 标题\n\n第一行\n第二行\n\n- a\n- b";
+    expect(displayUserText(md)).toBe(md);
+  });
 });
 
 describe("hasImageMarkers", () => {

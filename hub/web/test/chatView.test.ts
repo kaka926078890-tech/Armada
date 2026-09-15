@@ -17,6 +17,26 @@ describe("extractUserText", () => {
   });
 });
 
+describe("eventsToChat user markdown source", () => {
+  const md = "### 标题\n第一行\n第二行\n\n- a";
+
+  test("transcript user_query keeps newlines", () => {
+    const blocks = eventsToChat([
+      ev({ seq: 1, source: "transcript", payload: JSON.stringify({
+        role: "user", message: { content: [{ type: "text", text: `<user_query>\n${md}\n</user_query>` }] },
+      }) }),
+    ]);
+    expect(blocks).toEqual([{ kind: "user", text: md, seq: 1 }]);
+  });
+
+  test("beforeSubmitPrompt keeps newlines", () => {
+    const blocks = eventsToChat([
+      ev({ seq: 1, hook_event_name: "beforeSubmitPrompt", payload: JSON.stringify({ prompt: md }) }),
+    ]);
+    expect(blocks).toEqual([{ kind: "user", text: md, seq: 1 }]);
+  });
+});
+
 describe("eventsToChat", () => {
   test("renders transcript as user / assistant / tool, skips turn_ended and raw ids", () => {
     const blocks = eventsToChat([
@@ -263,8 +283,7 @@ describe("eventsToChat", () => {
       }) }),
     ]);
     expect(blocks.map((b) => b.kind)).toEqual(["user", "assistant", "user", "assistant"]);
-    expect(blocks[0]).toMatchObject({ kind: "user", seq: 1 });
-    if (blocks[0].kind === "user") expect(blocks[0].text.startsWith("不完全是重名。")).toBe(true);
+    expect(blocks[0]).toMatchObject({ kind: "user", seq: 1, text: prompt });
     expect(blocks[1]).toMatchObject({ kind: "assistant", text: "第一轮答复。" });
     expect(blocks[2]).toMatchObject({ kind: "user", text: "长期方案呢？" });
     expect(blocks[3]).toMatchObject({ kind: "assistant", text: "## 11. 修订记录\n完。" });

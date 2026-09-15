@@ -6,6 +6,11 @@ export function stripImageMarkers(s: string): string {
   return normalizePrompt(s.replace(IMAGE_MARKERS, " "));
 }
 
+/** Operator-visible body: drop image wrappers, keep markdown newlines. */
+function displayStrip(s: string): string {
+  return s.replace(IMAGE_MARKERS, "").replace(/\r/g, "").trim();
+}
+
 export function hasImageMarkers(s: string): boolean {
   return /<image_files>|<image_description>|\[Image\]/i.test(s);
 }
@@ -15,7 +20,7 @@ export function collisionKey(prompt: string, attachmentIds: string[] = []): stri
 }
 
 export function displayUserText(raw: string, imageCount = 0): string {
-  const stripped = stripImageMarkers(raw);
+  const stripped = displayStrip(raw);
   if (stripped) {
     return hasImageMarkers(raw) || imageCount > 0 ? `[图片] ${stripped}` : stripped;
   }

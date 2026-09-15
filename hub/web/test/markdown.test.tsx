@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { AssistantMarkdown } from "../src/components/ChatThread";
+import ChatThread, { AssistantMarkdown } from "../src/components/ChatThread";
+import type { ChatBlock } from "../src/chatView";
 
 describe("AssistantMarkdown", () => {
   test("renders bold, lists, and gfm tables", () => {
@@ -11,5 +12,21 @@ describe("AssistantMarkdown", () => {
     expect(html).toContain("<li");
     expect(html).toContain("<table");
     expect(html).toContain("findesk");
+  });
+});
+
+describe("user bubble markdown", () => {
+  test("renders headings, lists, and Shift+Enter line breaks", () => {
+    const blocks: ChatBlock[] = [{
+      kind: "user",
+      seq: 1,
+      text: "### 标题\n第一行\n第二行\n\n- a\n- b",
+    }];
+    const html = renderToStaticMarkup(<ChatThread blocks={blocks} />);
+    expect(html).toContain("<h3");
+    expect(html).toContain("标题");
+    expect(html).toContain("<li");
+    expect(html).toContain("<br");
+    expect(html).not.toContain("### 标题");
   });
 });
