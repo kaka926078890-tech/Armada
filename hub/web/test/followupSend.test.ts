@@ -14,8 +14,14 @@ describe("isFollowupSendEnter", () => {
       key: "Enter", shiftKey: false, nativeEvent: { isComposing: true },
     })).toBe(false);
     expect(isFollowupSendEnter({
-      key: "Enter", shiftKey: false, nativeEvent: { keyCode: 229 },
+      key: "Enter", shiftKey: false, isComposing: true, nativeEvent: { keyCode: 229 },
     })).toBe(false);
+  });
+
+  test("WKWebView Enter after CJK still sends even if keyCode stays 229", () => {
+    expect(isFollowupSendEnter({
+      key: "Enter", shiftKey: false, nativeEvent: { keyCode: 229 },
+    })).toBe(true);
   });
 });
 

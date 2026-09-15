@@ -6,9 +6,12 @@ export type FollowupSendKey = {
 };
 
 export function isFollowupSendEnter(e: FollowupSendKey): boolean {
-  if (e.key !== "Enter" || e.shiftKey) return false;
+  if (e.key !== "Enter" && e.key !== "NumpadEnter") return false;
+  if (e.shiftKey) return false;
+  // Only block while the IME candidate window is open. WKWebView often keeps
+  // keyCode 229 after 中文上屏; treating that as composition made Enter insert
+  // a newline in the new-task modal instead of dispatching.
   if (e.isComposing || e.nativeEvent?.isComposing) return false;
-  if (e.nativeEvent?.keyCode === 229) return false;
   return true;
 }
 

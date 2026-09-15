@@ -104,6 +104,7 @@ export function DispatchModal({ machines, preset, presetLabel, activeOnWorkspace
           onKeyDown={(e) => {
             if (!isFollowupSendEnter(e)) return;
             e.preventDefault();
+            e.nativeEvent.preventDefault();
             submitDispatch();
           }}
           onPaste={(e) => {
