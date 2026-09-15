@@ -1,0 +1,21 @@
+---
+description: After a finished Armada change, commit and push origin/master immediately
+alwaysApply: true
+---
+
+# Commit and push when the change is done
+
+Canonical for this repo. Desk workspace copy: `desk/.cursor/rules/commit-push-after-changes.mdc`.
+
+改完并验证后立刻 `git commit` 并 `git push origin master`，不要等开发者再说一次「提交 / 推送」。主干规则仍见 `armada-trunk.mdc`。
+
+```text
+❌ 功能已可用还把 diff 留着等下一句「帮我提交」
+❌ 把无关脏文件塞进这一笔
+❌ --no-verify；force push master
+```
+
+```text
+✅ 验证绿 → commit → git push origin master
+✅ 开发者点名「先别推」才停在本地
+```

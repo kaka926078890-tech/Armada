@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { api } from "../api";
 import { mergeAttachmentFiles, isConsoleAttachment, CONSOLE_ACCEPT } from "../attachments";
+import { endFollowupSend, isFollowupSendEnter, tryBeginFollowupSend } from "../followupSend";
 import type { Machine } from "../types";
 
 const ERR: Record<string, string> = {
@@ -40,9 +41,35 @@ export function DispatchModal({ machines, preset, presetLabel, activeOnWorkspace
   const [prompt, setPrompt] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [error, setError] = useState("");
+  const [sending, setSending] = useState(false);
+  const sendingLock = useRef(false);
   const raw = machineId ? online.find((m) => m.id === machineId)?.open_workspaces : undefined;
   const { workspaces, parseFailed } = machineId ? parseWorkspaces(raw) : { workspaces: [] as string[], parseFailed: false };
   const locked = !!preset;
+  const canDispatch = !!machineId && !!workspace && (!!prompt.trim() || files.length > 0) && !sending;
+
+  const submitDispatch = () => {
+    if (!machineId || !workspace || (!prompt.trim() && files.length === 0)) return;
+    if (!tryBeginFollowupSend(sendingLock)) return;
+    setSending(true);
+    setError("");
+    void (async () => {
+      try {
+        const ids: string[] = [];
+        for (const f of files) {
+          const r = await api.uploadBlob(f);
+          if (r.error || !r.blob) { setError(r.error ?? "上传失败"); return; }
+          ids.push(r.blob.id);
+        }
+        const r = await api.dispatch(machineId, workspace, prompt.trim(), ids);
+        if (r.error) setError(ERR[r.error] ?? r.error); else onDone();
+      } catch (err) { setError(String(err)); }
+      finally {
+        endFollowupSend(sendingLock);
+        setSending(false);
+      }
+    })();
+  };
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
@@ -71,8 +98,14 @@ export function DispatchModal({ machines, preset, presetLabel, activeOnWorkspace
             该工作区已有 {activeOnWorkspace} 个任务在跑或排队，并行可能争用同一批文件。
           </div>
         )}
-        <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={6}
-          placeholder="提示词…" className="px-2 py-1.5 rounded bg-zinc-950 border border-zinc-700"
+        <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={8}
+          placeholder="提示词（Markdown 原文；Enter 派发，Shift+Enter 换行）"
+          className="px-2 py-1.5 rounded bg-zinc-950 border border-zinc-700 font-mono text-[13px] leading-relaxed min-h-[8rem] resize-y"
+          onKeyDown={(e) => {
+            if (!isFollowupSendEnter(e)) return;
+            e.preventDefault();
+            submitDispatch();
+          }}
           onPaste={(e) => {
             const items = [...e.clipboardData.files];
             if (!items.length) return;
@@ -101,21 +134,11 @@ export function DispatchModal({ machines, preset, presetLabel, activeOnWorkspace
         )}
         {error && <div className="text-red-400 text-sm">{error}</div>}
         <div className="flex justify-end gap-2">
-          <button onClick={onClose} className="px-3 py-1.5 rounded bg-zinc-800">取消</button>
-          <button disabled={!machineId || !workspace || (!prompt.trim() && files.length === 0)} onClick={() => {
-            void (async () => {
-              try {
-                const ids: string[] = [];
-                for (const f of files) {
-                  const r = await api.uploadBlob(f);
-                  if (r.error || !r.blob) { setError(r.error ?? "上传失败"); return; }
-                  ids.push(r.blob.id);
-                }
-                const r = await api.dispatch(machineId, workspace, prompt.trim(), ids);
-                if (r.error) setError(ERR[r.error] ?? r.error); else onDone();
-              } catch (e) { setError(String(e)); }
-            })();
-          }} className="px-3 py-1.5 rounded bg-sky-600 hover:bg-sky-500 disabled:opacity-40">派发</button>
+          <button type="button" onClick={onClose} className="px-3 py-1.5 rounded bg-zinc-800">取消</button>
+          <button type="button" disabled={!canDispatch} onClick={() => submitDispatch()}
+            className="px-3 py-1.5 rounded bg-sky-600 hover:bg-sky-500 disabled:opacity-40">
+            {sending ? "派发中…" : "派发"}
+          </button>
         </div>
       </div>
     </div>
