@@ -35,9 +35,16 @@ CREATE TABLE IF NOT EXISTS audit (
 );
 `;
 
+function ensureColumn(db: Database, table: string, column: string, ddl: string): void {
+  const cols = db.query(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (!cols.some((c) => c.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+}
+
 export function openRelayDb(home: string): Database {
   mkdirSync(home, { recursive: true });
   const db = new Database(join(home, "relay.db"), { create: true });
   db.exec(SCHEMA);
+  ensureColumn(db, "runs", "outbound", "outbound TEXT");
+  ensureColumn(db, "runs", "queue_message_default_behavior", "queue_message_default_behavior TEXT");
   return db;
 }

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { askPollActions, nextAskAction, parseAskInspect } from "../src/askDetect";
+import { askPollActions, nextAskAction, parseAskInspect, parsePlanInspect, planInspectToAsk } from "../src/askDetect";
 
 describe("nextAskAction", () => {
   const inspect = {
@@ -94,5 +94,34 @@ describe("askPollActions", () => {
     const bound = new Map([["r-1", { conversationId: "cid-1" }]]);
     const acts = askPollActions(bound, new Map([["r-1", "ask-1"]]), { present: false }, () => "x");
     expect(acts).toEqual([{ type: "askQuestionResolved", runId: "r-1", request_id: "ask-1" }]);
+  });
+});
+
+describe("Created Plan inspect", () => {
+  test("planInspectToAsk is a single Build option owned by composer cid", () => {
+    const plan = parsePlanInspect({
+      present: true,
+      filename: "Markdown date line",
+      overview: "在任意一份现有 markdown 文件末尾追加一行日期",
+      conversation_id: "17ce6eee-b18a-4550-9548-b1b50040ca27",
+    });
+    expect(plan.present).toBe(true);
+    const ask = planInspectToAsk(plan);
+    expect(ask).toMatchObject({
+      present: true,
+      kind: "plan",
+      filename: "Markdown date line",
+      conversation_id: "17ce6eee-b18a-4550-9548-b1b50040ca27",
+      options: [{ id: "build", label: "Build" }],
+    });
+    const bound = new Map([["r-plan", { conversationId: "17ce6eee-b18a-4550-9548-b1b50040ca27" }]]);
+    const acts = askPollActions(bound, new Map(), ask, () => "ask-plan-1", 9);
+    expect(acts).toEqual([
+      expect.objectContaining({
+        type: "askQuestion",
+        runId: "r-plan",
+        payload: expect.objectContaining({ kind: "plan", request_id: "ask-plan-1" }),
+      }),
+    ]);
   });
 });

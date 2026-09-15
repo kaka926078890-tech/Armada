@@ -271,7 +271,7 @@ export default function RunDetail({ runId, onClose, onChanged }: {
           setFollowupError(r.error === "INJECT_SLOT_BUSY"
             ? "正在把另一条任务打进 Composer，几秒后再发即可；对方跑着不影响续聊。"
             : r.error === "CONVERSATION_BUSY"
-              ? (run.pending_ask ? "请先回答上方选择题，续聊暂不可用。" : "该对话仍在排队或绑定，结束后才能续聊。")
+              ? (run.pending_ask ? (run.pending_ask.kind === "plan" ? "请先点上方 Build。" : "请先回答上方选择题，续聊暂不可用。") : "该对话仍在排队或绑定，结束后才能续聊。")
               : r.error === "OUTBOUND_TEXT_ONLY"
                 ? "运行中续发暂只支持纯文本。"
                 : r.error === "OUTBOUND_LIMIT"
@@ -473,7 +473,7 @@ export default function RunDetail({ runId, onClose, onChanged }: {
                 sendFollowup();
               }}
               rows={3}
-              placeholder={run.pending_ask ? "请先回答上方选择题…" : run.status === "running" ? "Add a follow-up…" : "续聊同一对话…（Enter 发送，Shift+Enter 换行；可粘贴截图）"}
+              placeholder={run.pending_ask ? (run.pending_ask.kind === "plan" ? "请先点上方 Build…" : "请先回答上方选择题…") : run.status === "running" ? "Add a follow-up…" : "续聊同一对话…（Enter 发送，Shift+Enter 换行；可粘贴截图）"}
               className="flex-1 min-h-[4.5rem] max-h-48 resize-y px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-[13px] placeholder:text-zinc-600 leading-relaxed"
             />
             <button type="submit" disabled={sending || (!followup.trim() && followupFiles.length === 0)} className="px-3 py-2 rounded-lg bg-sky-700 hover:bg-sky-600 text-[13px] shrink-0 disabled:opacity-40">发送</button>

@@ -7,6 +7,7 @@ export interface RunRow {
   attachments?: string | null;
   pending_ask?: {
     request_id: string;
+    kind?: "plan";
     questions: { id: string; prompt: string; options: { id: string; label: string; text: string }[] }[];
     detected_at?: number;
     detect_via?: string;

@@ -13,7 +13,7 @@ import { workspacePathIn } from "../../extension/src/workspacePath";
 import { collisionKey, hasImageMarkers, stripImageMarkers } from "../../extension/src/imageMarkers";
 import { BlobStore, parseAttachmentIds, type BlobMeta } from "./blobs";
 import { appendRetired, decideArm, decideStop, parseRetiredIds, isWindowsMachineOs, genOf } from "./generationOwnership";
-import { parsePendingAsk, continueAllowed, optionInAsk, type PendingAsk } from "./pendingAsk";
+import { parsePendingAsk, continueAllowed, optionInAsk, isPlanAsk, type PendingAsk } from "./pendingAsk";
 import {
   OUTBOUND_LIMIT, QUEUE_DRAIN_MS, queueModeOf,
 } from "./outboundClaim";
@@ -756,10 +756,14 @@ export class RunService {
 
   applyAskQuestion(runId: string, payload: unknown): void {
     const run = this.get(runId);
-    if (!run || run.status !== "running") return;
+    if (!run) return;
     const incoming = parsePendingAsk(payload);
     if (!incoming) return;
-    const existing = parsePendingAsk(run.pending_ask);
+    if (run.status !== "running") {
+      if (!isPlanAsk(incoming) || run.status !== "completed") return;
+      this.setStatus(runId, "running", { ended_at: null, end_reason: null });
+    }
+    const existing = parsePendingAsk(this.get(runId)?.pending_ask);
     const next: PendingAsk = existing && existing.request_id === incoming.request_id
       ? {
           ...existing,
@@ -797,6 +801,7 @@ export class RunService {
     if (!request_id || request_id !== ask.request_id) return { error: "ASK_MISMATCH" };
     const action = body?.action === "skip" ? "skip" : body?.action === "continue" ? "continue" : "";
     if (!action) return { error: "ASK_INVALID_OPTION" };
+    if (action === "skip" && isPlanAsk(ask)) return { error: "ASK_INVALID_OPTION" };
     let answers: { question_id: string; option_ids: string[] }[] = [];
     if (action === "continue") {
       if (!continueAllowed(ask)) return { error: "ASK_INVALID_OPTION" };

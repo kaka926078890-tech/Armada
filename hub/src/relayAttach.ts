@@ -51,7 +51,7 @@ export function attachWithConfig(
   };
 
   const fpOf = (row: any) =>
-    `${row.status ?? ""}|${row.ended_at ?? ""}|${row.prompt ?? ""}|${JSON.stringify(row.pending_ask ?? null)}`;
+    `${row.status ?? ""}|${row.ended_at ?? ""}|${row.prompt ?? ""}|${JSON.stringify(row.pending_ask ?? null)}|${JSON.stringify(row.outbound ?? [])}`;
 
   const pushWorkspaces = async (machines?: any[]) => {
     const list = machines ?? await (await hubFetch("/api/machines")).json().catch(() => null);

@@ -12,7 +12,14 @@ export type PendingAsk = {
   questions: PendingAskQuestion[];
   detected_at: number;
   detect_via: "jsonl" | "cdp" | "hook";
+  kind?: "plan";
+  filename?: string;
+  conversation_id?: string;
 };
+
+export function isPlanAsk(ask: PendingAsk): boolean {
+  return ask.kind === "plan";
+}
 
 function asTrimmedString(v: unknown): string | null {
   if (typeof v !== "string") return null;
@@ -60,7 +67,13 @@ export function parsePendingAsk(raw: unknown): PendingAsk | null {
   const via = o.detect_via;
   const detect_via: PendingAsk["detect_via"] = via === "jsonl" || via === "hook" || via === "cdp" ? via : "cdp";
   const detected_at = typeof o.detected_at === "number" && Number.isFinite(o.detected_at) ? o.detected_at : Date.now();
-  return { request_id, questions, detected_at, detect_via };
+  const next: PendingAsk = { request_id, questions, detected_at, detect_via };
+  if (o.kind === "plan") next.kind = "plan";
+  const filename = asTrimmedString(o.filename);
+  if (filename) next.filename = filename;
+  const conversation_id = asTrimmedString(o.conversation_id);
+  if (conversation_id) next.conversation_id = conversation_id;
+  return next;
 }
 
 export function continueAllowed(ask: PendingAsk): boolean {

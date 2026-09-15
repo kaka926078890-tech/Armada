@@ -203,7 +203,9 @@ armada-relay://op?relay=https%3A%2F%2Frelay.example.com&fleet={fleetId}&token={o
 | `status` | 映射 hub：`queued` / `dispatched` / `binding` / `running` / `completed` / `aborted` / `error` / `cancelled` / `unknown`；另加展示 `hub_offline` |
 | `finalText` | 仅终态；`assistantBodyText` 全文；**禁止**摘要字段 |
 | `error` | hub 错误码字符串 |
-| `pendingAsk` | 无则 `null`；有则 `request_id` + questions[] |
+| `pendingAsk` | 无则 `null`；有则 `request_id` + questions[]。Created Plan 等待 Build 时 `kind: "plan"`，唯一选项 `id=build`。 |
+| `outbound` | 可见续发：`{ id, prompt, expectedMode, state, createdAt }[]`；无则 `[]` |
+| `queueMessageDefaultBehavior` | 被控机 `queue` / `steer` / `null` |
 | `updatedAt` | 中台变更 Unix ms |
 
 **完成门禁：** `status=completed` 当且仅当 `finalText.length > 0`。否则中转存 `error`/`unknown` 并文案 `NO_ASSISTANT_BODY`。
@@ -221,7 +223,8 @@ armada-relay://op?relay=https%3A%2F%2Frelay.example.com&fleet={fleetId}&token={o
 | 列仓 | `GET /mobile/workspaces` | `{ hubOffline, workspaces: [{ workspaceId, machineId, workspaceRoot, label }] }` | 401 |
 | 派发 | `POST /mobile/runs` `{ workspaceId, prompt }` | `201 { run }` | `400 INVALID`；透传 `WORKSPACE_NOT_OPEN` / `MACHINE_OFFLINE` / `409 PROMPT_COLLISION` / `429 RUN_LIMIT` → HTTP 与 hub 同码 |
 | 列表 | `GET /mobile/runs?limit=50` | 最近 50，非 archive | |
-| 详情 | `GET /mobile/runs/:id` | 含 `finalText` 全文、`pendingAsk` | 404 |
+| 详情 | `GET /mobile/runs/:id` | 含 `finalText` 全文、`pendingAsk`、`outbound` | 404 |
+| 续聊 | `POST /mobile/runs/:id/followup` | running → **201**；终态重开 → **200**；body `{ run }` 含 outbound | 409 `CONVERSATION_BUSY` / `INJECT_SLOT_BUSY`；429 `OUTBOUND_LIMIT` |
 | 回答 | `POST /mobile/runs/:id/answer` | 202；body 同 hub `answer-ask` | 409 无 pending |
 | 取消 | `POST /mobile/runs/:id/cancel` | 200 | v1 建议做 |
 
@@ -482,5 +485,7 @@ p95（同区域 VPS，排除 DERP）：`GET /mobile/workspaces` < 400ms；`POST 
 | 2026-09-12 | 初稿。中转 serve + 开源 iOS App + 邀请 URI；否决裸 frp/仅 URL；终态全文；TestFlight；账号过期只影响发版。 |
 | 2026-09-13 | 产品确认 v1 用前台轮询。补充 App 通道长期方案：v1.5 SSE、v2 可见 APNs。写入 APNs 定义、4KB 限制、后台方案验证（仅可见 APNs 可行；静默推送/后台 WS/VoIP 否决）。验收 A7–A9。 |
 | 2026-09-13 | 草稿代码入库（`relay/`、hub 出站、`mobile/ios/`）。**状态改为：App 交互与启动待确认（N1–N3）**；五屏实现不作为发布基准。 |
+| 2026-09-15 | snap 增加 `outbound` + `queueMessageDefaultBehavior`；`POST /mobile/runs/:id/followup` running → 201；App 运行中可续聊并画队列托盘。不加 protocolVersion（字段向后兼容）。 |
+| 2026-09-15 | Created Plan / Build：CDP 探测 Mac `split-button[data-tone=plan]` 或 Windows `ui-split-button` 上文案 `Build`（不含 Building）+ `element.click()`；`pendingAsk.kind=plan`；plan-writing `stop` 后复开 `running`。App 详情 Build 按钮。Windows Win Destop 2026-09-15 已点通。 |
 
 本文件为远程能力的 **实施基准**。变更绑定字段或完成门禁须改本 spec 并升 `protocolVersion`。

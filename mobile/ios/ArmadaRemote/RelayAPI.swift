@@ -59,6 +59,14 @@ struct PendingAskDTO: Decodable, Hashable {
     var questions: [PendingAskQuestion]
 }
 
+struct OutboundDTO: Decodable, Hashable, Identifiable {
+    var id: String
+    var prompt: String
+    var expectedMode: String
+    var state: String
+    var createdAt: Int
+}
+
 struct RunDTO: Decodable, Identifiable, Hashable {
     var runId: String
     var machineId: String
@@ -68,11 +76,21 @@ struct RunDTO: Decodable, Identifiable, Hashable {
     var finalText: String?
     var error: String?
     var pendingAsk: PendingAskDTO?
+    var outbound: [OutboundDTO]?
+    var queueMessageDefaultBehavior: String?
     var updatedAt: Int?
     var id: String { runId }
 
     var isLive: Bool {
         ["created", "queued", "dispatched", "binding", "running"].contains(status)
+    }
+
+    var queuedOutbound: [OutboundDTO] {
+        (outbound ?? []).filter { $0.state == "queued" || ($0.state == "injecting" && $0.expectedMode == "queue") }
+    }
+
+    var canFollowup: Bool {
+        pendingAsk == nil
     }
 
     var displayError: String? {
@@ -145,13 +163,15 @@ enum RelayAPIError: LocalizedError {
 
     static func operatorMessage(_ code: String) -> String {
         switch code {
-        case "CONVERSATION_BUSY": return "这条对话还在跑，结束后才能续聊"
+        case "CONVERSATION_BUSY": return "该对话仍在排队或绑定，结束后才能续聊"
         case "NO_CONVERSATION": return "还没有绑上 Cursor 对话，不能续聊"
         case "INJECT_SLOT_BUSY": return "这台机器正在注入另一条任务，稍后再试"
         case "WORKSPACE_NOT_OPEN": return "工作区没有打开"
         case "CLOSED": return "这条对话已关闭"
         case "PROMPT_COLLISION": return "同一工作区已有相同内容的任务"
         case "HUB_OFFLINE": return "中台离线"
+        case "OUTBOUND_LIMIT": return "待消化续发已达上限，等 Cursor 消化后再发"
+        case "OUTBOUND_TEXT_ONLY": return "运行中续发暂只支持纯文本"
         default: return code
         }
     }
@@ -188,7 +208,7 @@ actor RelayAPI {
 
     func followup(runId: String, prompt: String) async throws -> RunDTO {
         let body = try JSONSerialization.data(withJSONObject: ["prompt": prompt])
-        let wrap: DispatchResponse = try await send("/mobile/runs/\(runId)/followup", method: "POST", body: body, ok: [200])
+        let wrap: DispatchResponse = try await send("/mobile/runs/\(runId)/followup", method: "POST", body: body, ok: [200, 201])
         return wrap.run
     }
 

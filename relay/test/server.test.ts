@@ -178,6 +178,34 @@ describe("relay serve", () => {
     ws.close();
   });
 
+  test("snap.run outbound is returned on GET", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    ws.send(JSON.stringify({
+      type: "snap.run",
+      run: {
+        runId: "r-1",
+        machineId: "m-1",
+        workspaceRoot: "/Users/me/proj",
+        prompt: "hello fleet",
+        status: "running",
+        outbound: [{ id: "o1", prompt: "排队", expectedMode: "queue", state: "queued", createdAt: 1 }],
+        queueMessageDefaultBehavior: "queue",
+        updatedAt: Date.now(),
+      },
+    }));
+    await Bun.sleep(40);
+    const headers = { authorization: `Bearer ${fleet.operatorToken}` };
+    const got = await (await fetch(url(s, "/mobile/runs/r-1"), { headers })).json() as any;
+    expect(got.status).toBe("running");
+    expect(got.outbound).toEqual([
+      { id: "o1", prompt: "排队", expectedMode: "queue", state: "queued", createdAt: 1 },
+    ]);
+    expect(got.queueMessageDefaultBehavior).toBe("queue");
+    ws.close();
+  });
+
   test("followup reopens the same run", async () => {
     const s = start();
     const fleet = s.createFleet();

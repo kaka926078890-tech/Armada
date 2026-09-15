@@ -10,6 +10,8 @@ import {
   COMPOSER_ENTER_JS,
   ASK_INSPECT_JS,
   ASK_CLICK_LETTER_JS,
+  PLAN_INSPECT_JS,
+  PLAN_CLICK_BUILD_JS,
   type CdpSession,
 } from "../src/cdpInject";
 
@@ -438,4 +440,189 @@ describe("AskQuestion CDP driver", () => {
     expect(log.some((c) => c.method === "Input.dispatchKeyEvent" && c.params?.key === "Escape")).toBe(true);
     expect(log.some((c) => c.method === "Input.dispatchKeyEvent" && c.params?.key === "Enter")).toBe(false);
   });
+
+  test("Build clicks plan split-button and does not dispatch Enter", async () => {
+    const log: CallLog[] = [];
+    const driver = createAskQuestionDriver(deps({
+      connect: async () => mockSession(["OK", { present: false }], log),
+    }));
+    const r = await driver.submit("/Users/x/armada-test-ws", "continue", "build");
+    expect(r.ok).toBe(true);
+    const evals = log.filter((c) => c.method === "Runtime.evaluate").map((c) => String(c.params?.expression ?? ""));
+    expect(evals.some((e) => e.includes("split-button") && e.includes("Build"))).toBe(true);
+    expect(evals.some((e) => e.includes("composer-questionnaire-toolbar-option-letter"))).toBe(false);
+    expect(log.some((c) => c.method === "Input.dispatchKeyEvent")).toBe(false);
+  });
 });
+
+function mockPlanDoc(opts: { filename: string; build: boolean; composerId?: string; overview?: string }) {
+  const buildBtn = {
+    innerText: "Build\n⌘⏎",
+    clicked: false,
+    focused: false,
+    focus() { this.focused = true; },
+    click() { this.clicked = true; },
+  };
+  const split = opts.build
+    ? {
+      getAttribute(name: string) {
+        if (name === "data-component") return "split-button";
+        if (name === "data-tone") return "plan";
+        return null;
+      },
+      querySelectorAll(sel: string) {
+        if (sel === "button") return [buildBtn];
+        return [];
+      },
+      scrollIntoView() {},
+    }
+    : null;
+  const bar = {
+    className: "composer-bar editor",
+    getAttribute(name: string) {
+      return name === "data-composer-id" ? (opts.composerId ?? null) : null;
+    },
+    parentElement: null as null,
+  };
+  const card = {
+    getAttribute(name: string) {
+      return name === "data-component" ? "transcript-card-root" : null;
+    },
+    innerText: `Created Plan\n${opts.filename}\n\n${opts.overview ?? "overview"}\n\nView Plan\nBuild\n⌘⏎`,
+    parentElement: bar,
+  };
+  const name = {
+    innerText: opts.filename,
+    getAttribute(name: string) {
+      return name === "data-testid" ? "composer-plan-filename" : null;
+    },
+    parentElement: card,
+  };
+  return {
+    buildBtn,
+    querySelector(sel: string) {
+      if (sel === "[data-testid=composer-plan-filename]") return name;
+      if (sel === "[data-component=split-button][data-tone=plan]") return split;
+      return null;
+    },
+  };
+}
+
+describe("Created Plan / Build JS", () => {
+  test("inspect is present only while the Build split-button is on screen", () => {
+    const live = mockPlanDoc({
+      filename: "Markdown date line",
+      build: true,
+      composerId: "17ce6eee-b18a-4550-9548-b1b50040ca27",
+      overview: "在任意一份现有 markdown 文件末尾追加一行日期",
+    });
+    const inspect = new Function("document", `return (${PLAN_INSPECT_JS});`)(live);
+    expect(inspect()).toMatchObject({
+      present: true,
+      filename: "Markdown date line",
+      conversation_id: "17ce6eee-b18a-4550-9548-b1b50040ca27",
+    });
+    const after = mockPlanDoc({ filename: "Markdown date line", build: false });
+    const gone = new Function("document", `return (${PLAN_INSPECT_JS});`)(after);
+    expect(gone()).toEqual({ present: false });
+  });
+
+  test("click Build hits the plan-tone primary button", () => {
+    const live = mockPlanDoc({ filename: "Markdown date line", build: true });
+    const click = new Function("document", `return (${PLAN_CLICK_BUILD_JS});`)(live);
+    expect(click()).toBe("OK");
+    expect(live.buildBtn.clicked).toBe(true);
+  });
+
+  test("Windows inspect is present on ui-split-button Build without data-tone=plan", () => {
+    const live = mockWinPlanDoc({
+      filename: "Empty Plan Card",
+      buildText: "Build\nCtrl+⏎",
+      composerId: "a1b3efe0-7e33-4d36-ab49-9f2040469a78",
+    });
+    const inspect = new Function("document", `return (${PLAN_INSPECT_JS});`)(live);
+    expect(inspect()).toMatchObject({
+      present: true,
+      filename: "Empty Plan Card",
+      conversation_id: "a1b3efe0-7e33-4d36-ab49-9f2040469a78",
+    });
+  });
+
+  test("Windows inspect is absent while the split shows Building", () => {
+    const live = mockWinPlanDoc({
+      filename: "Empty Plan Card",
+      buildText: "Building...\nCtrl+⏎",
+    });
+    const inspect = new Function("document", `return (${PLAN_INSPECT_JS});`)(live);
+    expect(inspect()).toEqual({ present: false });
+  });
+
+  test("click Build hits the Windows ui-split-button", () => {
+    const live = mockWinPlanDoc({ filename: "Empty Plan Card", buildText: "Build\nCtrl+⏎" });
+    const click = new Function("document", `return (${PLAN_CLICK_BUILD_JS});`)(live);
+    expect(click()).toBe("OK");
+    expect(live.buildBtn.clicked).toBe(true);
+  });
+});
+
+function mockWinPlanDoc(opts: { filename: string; buildText: string; composerId?: string }) {
+  const buildBtn = {
+    innerText: opts.buildText,
+    clicked: false,
+    focused: false,
+    parentElement: null as { className: string; scrollIntoView?: () => void } | null,
+    getAttribute(_name: string) { return null; },
+    focus() { this.focused = true; },
+    click() { this.clicked = true; },
+    scrollIntoView() {},
+  };
+  const viewBtn = {
+    innerText: "View Plan",
+    parentElement: null as null,
+    getAttribute(name: string) { return name === "data-variant" ? "text" : null; },
+  };
+  const menuBtn = {
+    innerText: "",
+    parentElement: null as { className: string } | null,
+    getAttribute(name: string) { return name === "aria-label" ? "Open menu" : null; },
+  };
+  const splitDiv = {
+    className: "ui-split-button ui-3nfvp2 ui-1qjc9v5",
+    scrollIntoView() {},
+  };
+  buildBtn.parentElement = splitDiv;
+  menuBtn.parentElement = splitDiv;
+  const bar = {
+    className: "composer-bar editor",
+    getAttribute(name: string) {
+      return name === "data-composer-id" ? (opts.composerId ?? null) : null;
+    },
+    parentElement: null as null,
+  };
+  const card = {
+    getAttribute(name: string) {
+      return name === "data-component" ? "transcript-card-root" : null;
+    },
+    innerText: `Created Plan\n${opts.filename}\n\nplaceholder\n\nView Plan\nBuild\nCtrl+⏎`,
+    parentElement: bar,
+    querySelectorAll(sel: string) {
+      if (sel === "button") return [viewBtn, buildBtn, menuBtn];
+      return [];
+    },
+  };
+  const name = {
+    innerText: opts.filename,
+    getAttribute(name: string) {
+      return name === "data-testid" ? "composer-plan-filename" : null;
+    },
+    parentElement: card,
+  };
+  return {
+    buildBtn,
+    querySelector(sel: string) {
+      if (sel === "[data-testid=composer-plan-filename]") return name;
+      if (sel === "[data-component=split-button][data-tone=plan]") return null;
+      return null;
+    },
+  };
+}

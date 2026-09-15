@@ -4,7 +4,18 @@ export type AskInspectOption = { id: string; label: string; text: string };
 
 export type AskInspect =
   | { present: false }
-  | { present: true; prompt: string; conversation_id: string; options: AskInspectOption[] };
+  | {
+    present: true;
+    prompt: string;
+    conversation_id: string;
+    options: AskInspectOption[];
+    kind?: "plan";
+    filename?: string;
+  };
+
+export type PlanInspect =
+  | { present: false }
+  | { present: true; filename: string; overview: string; conversation_id: string };
 
 export type PendingAskPayload = {
   request_id: string;
@@ -12,6 +23,8 @@ export type PendingAskPayload = {
   detected_at: number;
   detect_via: "cdp";
   conversation_id: string;
+  kind?: "plan";
+  filename?: string;
 };
 
 export type AskPollAct =
@@ -35,7 +48,37 @@ export function parseAskInspect(raw: unknown): AskInspect {
     if (!id) continue;
     options.push({ id, label, text });
   }
-  return { present: true, prompt, conversation_id, options };
+  return {
+    present: true,
+    prompt,
+    conversation_id,
+    options,
+    ...(o.kind === "plan" ? { kind: "plan" as const } : {}),
+    ...(typeof o.filename === "string" && o.filename.trim() ? { filename: o.filename.trim() } : {}),
+  };
+}
+
+export function parsePlanInspect(raw: unknown): PlanInspect {
+  if (!raw || typeof raw !== "object") return { present: false };
+  const o = raw as Record<string, unknown>;
+  if (o.present !== true) return { present: false };
+  const filename = typeof o.filename === "string" && o.filename.trim() ? o.filename.trim() : "";
+  if (!filename) return { present: false };
+  const overview = typeof o.overview === "string" ? o.overview.replace(/\s+/g, " ").trim() : "";
+  const conversation_id = typeof o.conversation_id === "string" ? o.conversation_id.trim() : "";
+  return { present: true, filename, overview, conversation_id };
+}
+
+export function planInspectToAsk(inspect: PlanInspect): AskInspect {
+  if (!inspect.present) return { present: false };
+  return {
+    present: true,
+    kind: "plan",
+    filename: inspect.filename,
+    prompt: `Created Plan: ${inspect.filename}`,
+    conversation_id: inspect.conversation_id,
+    options: [{ id: "build", label: "Build", text: inspect.overview || "Build" }],
+  };
 }
 
 export function nextAskAction(
@@ -58,6 +101,7 @@ export function nextAskAction(
       detected_at: now,
       detect_via: "cdp",
       conversation_id: inspect.conversation_id,
+      ...(inspect.kind === "plan" ? { kind: "plan" as const, filename: inspect.filename } : {}),
     },
   };
 }

@@ -1,0 +1,36 @@
+---
+description: Hub operator features must ship on App the same pass; do not leave mobile one version behind
+alwaysApply: true
+---
+
+# Hub ↔ App operator parity
+
+中台 `hub/web` 给操作员的能力，**同一轮**要问：App 能不能看见、能不能做完。权威在 hub；App 只消费 `runToSnap` + `/mobile/*`。缺字段 = 远程人没有这个功能。
+
+## Surfaces（每次对照）
+
+| 层 | 必须碰到 |
+| --- | --- |
+| 状态 / 契约 | `hub/src/runs.ts` 出站字段；`hub/src/relayClient.ts` `runToSnap` |
+| 中转 | `relay/src/server.ts` 快照列；`/mobile/runs*` HTTP 码（running 续发是 **201**） |
+| App | `mobile/ios/ArmadaRemote/{RelayAPI,Screens}.swift`：DTO、按钮、文案、轮询 |
+
+## 清单（新功能 / 改操作员动作时）
+
+- [ ] 看板或详情能做的事，App 详情也能做（或规格写明 v1 不做）
+- [ ] 新状态 / 待办（Ask、队列托盘、等 Build）进 `RunSnap`，不是只画在 `hub/web`
+- [ ] 错误码有 App 文案；成功码与 hub 一致（勿只收 `200`）
+- [ ] 运行中可操作 ≠ App 用 `isLive` 把入口关掉
+
+```text
+❌ 中台先上队列 / Ask / 附件，App 仍「结束后才能续聊」
+❌ 被控机出现 Created Plan / Build，卡片却 completed，App 无待办、无按钮
+❌ 改了 RunDetail 就宣称远程也能用
+```
+
+```text
+✅ 先扩 snap + mobile 路由，再画 web；App 入口与中台同一闭环
+✅ 明确不做的能力写进规格「App v1 不做」，不要 silently 缺 UI
+```
+
+校准：2026-09-14 运行中续发只在 `RunDetail`；2026-09-15 Plan/Build 闸只存在被控机 DOM。

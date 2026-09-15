@@ -15,6 +15,14 @@ const MAX_BACKOFF_MS = 30_000;
 
 export type RelayConfig = { relay: string; fleet: string; secret: string };
 
+export type OutboundSnap = {
+  id: string;
+  prompt: string;
+  expectedMode: string;
+  state: string;
+  createdAt: number;
+};
+
 export type RunSnap = {
   runId: string;
   machineId: string;
@@ -24,8 +32,29 @@ export type RunSnap = {
   finalText?: string | null;
   error?: string | null;
   pendingAsk?: unknown;
+  outbound?: OutboundSnap[];
+  queueMessageDefaultBehavior?: string | null;
   updatedAt: number;
 };
+
+function snapOutbound(raw: unknown): OutboundSnap[] {
+  if (!Array.isArray(raw)) return [];
+  const out: OutboundSnap[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const o = item as Record<string, unknown>;
+    const id = typeof o.id === "string" ? o.id : "";
+    const prompt = typeof o.prompt === "string" ? o.prompt : "";
+    if (!id || !prompt) continue;
+    const expectedMode = typeof o.expectedMode === "string" ? o.expectedMode
+      : typeof o.expected_mode === "string" ? o.expected_mode : "";
+    const state = typeof o.state === "string" ? o.state : "";
+    const createdAt = typeof o.createdAt === "number" ? o.createdAt
+      : typeof o.created_at === "number" ? o.created_at : 0;
+    out.push({ id, prompt, expectedMode, state, createdAt });
+  }
+  return out;
+}
 
 export function loadRelayConfig(home: string): RelayConfig | null {
   const p = join(home, "relay.json");
@@ -62,6 +91,9 @@ export function runToSnap(run: any, events: RunEvent[]): RunSnap {
       error = "NO_ASSISTANT_BODY";
     }
   }
+  const mode = typeof run.queue_message_default_behavior === "string" ? run.queue_message_default_behavior
+    : typeof run.queueMessageDefaultBehavior === "string" ? run.queueMessageDefaultBehavior
+    : null;
   return {
     runId: run.id,
     machineId: run.machine_id,
@@ -71,6 +103,8 @@ export function runToSnap(run: any, events: RunEvent[]): RunSnap {
     finalText,
     error,
     pendingAsk: run.pending_ask ?? null,
+    outbound: snapOutbound(run.outbound),
+    queueMessageDefaultBehavior: mode,
     updatedAt: Number(run.ended_at ?? run.started_at ?? run.created_at ?? Date.now()),
   };
 }
@@ -126,7 +160,7 @@ export function startRelayClient(opts: {
     prevEvent?.(runId, event);
     const t = (event as { type?: string }).type;
     if (t === "machine.updated") pushWorkspaces();
-    if (t === "run.status" || t === "run.ask") pushRun(runId);
+    if (t === "run.status" || t === "run.ask" || t === "run.outbound") pushRun(runId);
   };
 
   const hubFetch = (path: string, init?: RequestInit) =>

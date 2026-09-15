@@ -27,6 +27,14 @@ function machineLabel(m: any): string {
   return String(m.id ?? m.machineId ?? "");
 }
 
+export type OutboundSnap = {
+  id: string;
+  prompt: string;
+  expectedMode: string;
+  state: string;
+  createdAt: number;
+};
+
 export type RunSnap = {
   runId: string;
   machineId: string;
@@ -36,6 +44,8 @@ export type RunSnap = {
   finalText?: string | null;
   error?: string | null;
   pendingAsk?: unknown;
+  outbound?: OutboundSnap[];
+  queueMessageDefaultBehavior?: string | null;
   updatedAt?: number;
 };
 
@@ -133,15 +143,17 @@ export function createRelayServer(opts: {
     }
     const now = snap.updatedAt ?? Date.now();
     const pendingAsk = snap.pendingAsk == null ? null : JSON.stringify(snap.pendingAsk);
+    const outbound = Array.isArray(snap.outbound) ? JSON.stringify(snap.outbound) : null;
+    const queueMode = typeof snap.queueMessageDefaultBehavior === "string" ? snap.queueMessageDefaultBehavior : null;
     const existing = db.query("SELECT id FROM runs WHERE id=?1").get(snap.runId) as { id: string } | undefined;
     if (existing) {
       db.query(`UPDATE runs SET fleet_id=?2, machine_id=?3, workspace_root=?4, prompt=?5, status=?6,
-        final_text=?7, error=?8, pending_ask=?9, updated_at=?10 WHERE id=?1`)
-        .run(snap.runId, fleetId, snap.machineId, snap.workspaceRoot, snap.prompt, status, finalText, error, pendingAsk, now);
+        final_text=?7, error=?8, pending_ask=?9, outbound=?11, queue_message_default_behavior=?12, updated_at=?10 WHERE id=?1`)
+        .run(snap.runId, fleetId, snap.machineId, snap.workspaceRoot, snap.prompt, status, finalText, error, pendingAsk, now, outbound, queueMode);
     } else {
-      db.query(`INSERT INTO runs (id, fleet_id, machine_id, workspace_root, prompt, status, final_text, error, pending_ask, updated_at, created_at)
-        VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?10)`)
-        .run(snap.runId, fleetId, snap.machineId, snap.workspaceRoot, snap.prompt, status, finalText, error, pendingAsk, now);
+      db.query(`INSERT INTO runs (id, fleet_id, machine_id, workspace_root, prompt, status, final_text, error, pending_ask, outbound, queue_message_default_behavior, updated_at, created_at)
+        VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?11,?12,?10,?10)`)
+        .run(snap.runId, fleetId, snap.machineId, snap.workspaceRoot, snap.prompt, status, finalText, error, pendingAsk, now, outbound, queueMode);
     }
     return db.query("SELECT * FROM runs WHERE id=?1").get(snap.runId);
   }
@@ -156,6 +168,8 @@ export function createRelayServer(opts: {
       finalText: row.final_text,
       error: row.error,
       pendingAsk: row.pending_ask ? JSON.parse(row.pending_ask) : null,
+      outbound: row.outbound ? JSON.parse(row.outbound) : [],
+      queueMessageDefaultBehavior: row.queue_message_default_behavior ?? null,
       updatedAt: row.updated_at,
     };
   }
@@ -312,8 +326,8 @@ export function createRelayServer(opts: {
     }
     if (result.run) applyRunSnap(fleet.id, result.run);
     audit("operator", "run.followup", runId, { fleet: fleet.id });
-    const next = db.query("SELECT * FROM runs WHERE id=?1 AND fleet_id=?2").get(runId, fleet.id);
-    return c.json({ run: runToJson(next) }, 200);
+    const next = db.query("SELECT * FROM runs WHERE id=?1 AND fleet_id=?2").get(runId, fleet.id) as { status?: string } | undefined;
+    return c.json({ run: runToJson(next) }, next?.status === "running" ? 201 : 200);
   });
 
   app.post("/mobile/runs/:id/answer", async (c) => {

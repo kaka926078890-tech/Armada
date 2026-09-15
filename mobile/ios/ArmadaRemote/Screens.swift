@@ -52,7 +52,9 @@ struct RunRow: View {
             Circle().fill(statusColor(run.status)).frame(width: 10, height: 10).padding(.top, 6)
             VStack(alignment: .leading, spacing: 4) {
                 Text(run.prompt).lineLimit(2)
-                Text(run.pendingAsk != nil && run.status == "running" ? "待处理" : statusLabel(run.status))
+                Text(run.pendingAsk != nil && run.status == "running" ? "待处理"
+                     : !run.queuedOutbound.isEmpty ? "队列 \(run.queuedOutbound.count)"
+                     : statusLabel(run.status))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -289,7 +291,6 @@ struct DispatchSheet: View {
 
 struct RunDetailView: View {
     @EnvironmentObject var session: Session
-    @Environment(\.dismiss) private var dismiss
     let runId: String
     @State private var run: RunDTO?
     @State private var err: String?
@@ -326,6 +327,14 @@ struct RunDetailView: View {
                     if let ask = run.pendingAsk {
                         AskView(runId: runId, ask: ask) { await reload() }
                     }
+                    if !run.queuedOutbound.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("\(run.queuedOutbound.count) 条排队消息").font(.caption).foregroundStyle(.secondary)
+                            ForEach(run.queuedOutbound) { q in
+                                Text(q.prompt).font(.subheadline)
+                            }
+                        }
+                    }
                     Button("复制正文") {
                         UIPasteboard.general.string = run.finalText ?? ""
                     }
@@ -350,16 +359,16 @@ struct RunDetailView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("续聊") { showDispatch = true }
-                    .disabled(slot == nil || (run?.isLive ?? true))
+                    .disabled(slot == nil || !(run?.canFollowup ?? false))
             }
         }
         .sheet(isPresented: $showDispatch) {
             if let slot {
-                DispatchSheet(workspace: slot, followupRunId: runId) { col in
+                DispatchSheet(workspace: slot, followupRunId: runId) { _ in
                     showDispatch = false
-                    session.focusColumn = col
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                        dismiss()
+                    Task {
+                        await reload()
+                        await session.refresh()
                     }
                 }
             }
@@ -396,23 +405,51 @@ struct AskView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("需要选择").font(.headline)
-            ForEach(ask.questions) { q in
-                Text(q.prompt).font(.subheadline)
-                ForEach(q.options) { o in
-                    Button(o.label.isEmpty ? o.text : o.label) { optionId = o.id }
-                        .buttonStyle(.bordered)
-                        .tint(optionId == o.id ? .accentColor : .secondary)
+            if isPlan {
+                Text("Created Plan").font(.headline)
+                Text(ask.questions.first?.prompt ?? "").font(.subheadline)
+                if let err { Text(err).foregroundStyle(.red) }
+                Button("Build") { Task { await submitBuild() } }
+            } else {
+                Text("需要选择").font(.headline)
+                ForEach(ask.questions) { q in
+                    Text(q.prompt).font(.subheadline)
+                    ForEach(q.options) { o in
+                        Button(o.label.isEmpty ? o.text : o.label) { optionId = o.id }
+                            .buttonStyle(.bordered)
+                            .tint(optionId == o.id ? .accentColor : .secondary)
+                    }
                 }
-            }
-            if let err { Text(err).foregroundStyle(.red) }
-            HStack {
-                Button("继续") { Task { await submit(action: "continue") } }
-                    .disabled(optionId == nil)
-                Button("跳过") { Task { await submit(action: "skip") } }
+                if let err { Text(err).foregroundStyle(.red) }
+                HStack {
+                    Button("继续") { Task { await submit(action: "continue") } }
+                        .disabled(optionId == nil)
+                    Button("跳过") { Task { await submit(action: "skip") } }
+                }
             }
         }
         .padding(.vertical)
+    }
+
+    private var isPlan: Bool {
+        let opts = ask.questions.first?.options ?? []
+        return opts.count == 1 && opts.first?.id == "build"
+    }
+
+    private func submitBuild() async {
+        guard let q = ask.questions.first, let opt = q.options.first else { return }
+        optionId = opt.id
+        var body: [String: Any] = [
+            "request_id": ask.request_id,
+            "action": "continue",
+            "answers": [["question_id": q.id, "option_ids": [opt.id]]],
+        ]
+        do {
+            try await session.api().answer(runId: runId, body: body)
+            await onDone()
+        } catch {
+            err = error.localizedDescription
+        }
     }
 
     private func submit(action: String) async {

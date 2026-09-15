@@ -778,4 +778,55 @@ describe("event ingest", () => {
     expect(((await (await api(`/api/runs/${runId}`)).json()) as any).pending_ask).toBeNull();
     ws.close();
   });
+
+  test("plan askQuestion after plan-writing stop reopens running with pending Build", async () => {
+    const { ws, api, runId } = await startBoundRun();
+    ws.send(JSON.stringify(ev(runId, 1, "beforeSubmitPrompt", { conversation_id: "cid-1", generation_id: "g-plan", prompt: "hi" })));
+    await new Promise((r) => setTimeout(r, 80));
+    ws.send(JSON.stringify(ev(runId, 2, "stop", { status: "completed", conversation_id: "cid-1", generation_id: "g-plan" })));
+    await new Promise((r) => setTimeout(r, 120));
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).status).toBe("completed");
+    ws.send(JSON.stringify({
+      type: "run.event", runId, conversationId: "cid-1", source: "cdp", hookEventName: "askQuestion", seq: 3, ts: Date.now(),
+      payload: {
+        request_id: "ask-plan-1",
+        kind: "plan",
+        filename: "Markdown date line",
+        conversation_id: "cid-1",
+        questions: [{ id: "q0", prompt: "Created Plan: Markdown date line", options: [{ id: "build", label: "Build", text: "Build" }] }],
+        detected_at: 1, detect_via: "cdp",
+      },
+    }));
+    await new Promise((r) => setTimeout(r, 150));
+    const run = (await (await api(`/api/runs/${runId}`)).json()) as any;
+    expect(run.status).toBe("running");
+    expect(run.pending_ask).toMatchObject({ request_id: "ask-plan-1", kind: "plan" });
+    const skip = await api(`/api/runs/${runId}/answer-ask`, {
+      method: "POST",
+      body: JSON.stringify({ request_id: "ask-plan-1", action: "skip" }),
+    });
+    expect(skip.status).toBe(400);
+    expect(((await skip.json()) as any).error).toBe("ASK_INVALID_OPTION");
+    ws.close();
+  });
+
+  test("regular askQuestion on completed does not reopen", async () => {
+    const { ws, api, runId } = await startBoundRun();
+    ws.send(JSON.stringify(ev(runId, 1, "stop", { status: "completed", conversation_id: "cid-1" })));
+    await new Promise((r) => setTimeout(r, 100));
+    ws.send(JSON.stringify({
+      type: "run.event", runId, conversationId: "cid-1", source: "cdp", hookEventName: "askQuestion", seq: 2, ts: Date.now(),
+      payload: {
+        request_id: "ask-1",
+        conversation_id: "cid-1",
+        questions: [{ id: "q0", prompt: "选一个", options: [{ id: "a", label: "A", text: "甲" }] }],
+        detected_at: 1, detect_via: "cdp",
+      },
+    }));
+    await new Promise((r) => setTimeout(r, 120));
+    const run = (await (await api(`/api/runs/${runId}`)).json()) as any;
+    expect(run.status).toBe("completed");
+    expect(run.pending_ask).toBeNull();
+    ws.close();
+  });
 });

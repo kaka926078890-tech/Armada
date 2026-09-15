@@ -91,6 +91,20 @@ describe("runToSnap", () => {
     expect(snap.status).toBe("completed");
     expect(snap.finalText).toBe("现在修好了。");
   });
+
+  test("running snap carries visible outbound and queue mode", () => {
+    const run = {
+      id: "r-1", machine_id: "m-1", workspace_root: "/ws/a", prompt: "hi", status: "running",
+      outbound: [{ id: "o1", prompt: "排队", expected_mode: "queue", state: "queued", created_at: 1 }],
+      queue_message_default_behavior: "queue",
+    };
+    const snap = runToSnap(run, []);
+    expect(snap.status).toBe("running");
+    expect(snap.outbound).toEqual([
+      { id: "o1", prompt: "排队", expectedMode: "queue", state: "queued", createdAt: 1 },
+    ]);
+    expect(snap.queueMessageDefaultBehavior).toBe("queue");
+  });
 });
 
 describe("hub outbound to relay", () => {
@@ -133,6 +147,63 @@ describe("hub outbound to relay", () => {
     expect(["queued", "dispatched", "binding", "running"]).toContain(body.run.status);
     const local = hub.runs.get(body.run.runId);
     expect(local.prompt).toBe("from phone");
+    ext.close();
+  });
+
+  test("mobile followup on running run is 201 and snap shows outbound", async () => {
+    const relayHome = mkdtempSync(join(tmpdir(), "armada-relay-"));
+    const hubHome = mkdtempSync(join(tmpdir(), "armada-hub-"));
+    relay = createRelayServer({
+      port: 0, hostname: "127.0.0.1", home: relayHome,
+      publicBase: "http://127.0.0.1", adminToken: "adm",
+    });
+    const fleet = relay.createFleet();
+    writeFileSync(join(hubHome, "relay.json"), JSON.stringify({
+      relay: `http://127.0.0.1:${relay.port}`, fleet: fleet.fleet, secret: fleet.hubSecret,
+    }), { mode: 0o600 });
+
+    hub = createServer({ port: 0, home: hubHome });
+    const ext: WebSocket = await new Promise((res, rej) => {
+      const w = new WebSocket(`ws://127.0.0.1:${hub!.port}/ws?token=${hub!.token}`);
+      w.onopen = () => res(w);
+      w.onerror = rej;
+    });
+    ext.send(JSON.stringify({
+      type: "register", machineId: "m-1", windowId: "w-1", name: "A", os: "darwin",
+      extensionVersion: "0.4.0", openWorkspaces: ["/ws/a"],
+    }));
+
+    const headers = { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" };
+    await waitUntil(async () => {
+      const j = await (await fetch(`http://127.0.0.1:${relay!.port}/mobile/workspaces`, { headers })).json() as any;
+      return j.hubOffline === false && j.workspaces?.[0]?.workspaceRoot === "/ws/a";
+    });
+
+    const d = await fetch(`http://127.0.0.1:${relay.port}/mobile/runs`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ workspaceId: encodeWorkspaceId("m-1", "/ws/a"), prompt: "from phone" }),
+    });
+    const body = await d.json() as any;
+    const runId = body.run.runId as string;
+    ext.send(JSON.stringify({ type: "run.ack", runId, status: "accepted" }));
+    ext.send(JSON.stringify({
+      type: "run.bound", runId, conversationId: "cid-1", transcriptPath: null, promptMatch: true,
+    }));
+    await waitUntil(() => hub!.runs.get(runId)?.status === "running");
+
+    const f = await fetch(`http://127.0.0.1:${relay.port}/mobile/runs/${runId}/followup`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ prompt: "续" }),
+    });
+    expect(f.status).toBe(201);
+    const followed = await f.json() as any;
+    expect(followed.run.status).toBe("running");
+    expect(followed.run.outbound?.[0]).toMatchObject({ prompt: "续", state: "injecting" });
+
+    const got = await (await fetch(`http://127.0.0.1:${relay.port}/mobile/runs/${runId}`, { headers })).json() as any;
+    expect(got.outbound?.[0]).toMatchObject({ prompt: "续", state: "injecting" });
     ext.close();
   });
 });

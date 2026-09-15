@@ -180,6 +180,7 @@ function AskCard({ block, onAnswerAsk }: {
   const [busy, setBusy] = useState(false);
   const pending = block.action === "pending" || block.action === "submit_failed";
   const interactive = pending && !!onAnswerAsk;
+  const plan = block.options.length === 1 && block.options[0]?.id === "build";
   const submit = async (action: "continue" | "skip") => {
     if (!onAnswerAsk || busy) return;
     setBusy(true);
@@ -195,8 +196,9 @@ function AskCard({ block, onAnswerAsk }: {
   };
   return (
     <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2.5">
-      <div className="text-[11px] uppercase tracking-wide text-zinc-500 mb-1">Questions</div>
+      <div className="text-[11px] uppercase tracking-wide text-zinc-500 mb-1">{plan ? "Created Plan" : "Questions"}</div>
       <div className="text-[13px] text-zinc-200 whitespace-pre-wrap leading-relaxed">{block.prompt}</div>
+      {plan ? null : (
       <div className="mt-2 flex flex-col gap-1.5">
         {block.options.map((o) => (
           <label key={o.id} className="flex items-start gap-2 text-[13px] text-zinc-300">
@@ -212,6 +214,7 @@ function AskCard({ block, onAnswerAsk }: {
           </label>
         ))}
       </div>
+      )}
       {block.action === "resolved" ? (
         <div className="mt-2 text-[12px] text-zinc-500">已处理</div>
       ) : null}
@@ -226,8 +229,9 @@ function AskCard({ block, onAnswerAsk }: {
             onClick={() => void submit("continue")}
             className="px-2.5 py-1 rounded-md bg-sky-700 hover:bg-sky-600 text-[12px] disabled:opacity-40"
           >
-            Continue
+            {plan ? "Build" : "Continue"}
           </button>
+          {plan ? null : (
           <button
             type="button"
             disabled={busy}
@@ -236,6 +240,7 @@ function AskCard({ block, onAnswerAsk }: {
           >
             Skip
           </button>
+          )}
         </div>
       ) : null}
     </div>

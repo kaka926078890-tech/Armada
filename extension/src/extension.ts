@@ -347,6 +347,7 @@ export function activate(context: vscode.ExtensionContext): void {
         noteOwnerBsp(lastGenerationId, runId, ev.hook, ev.raw as any, boundRuns.get(runId)?.conversationId);
       }
       if (ev.hook === "stop" && runId) {
+        askLastByRun.delete(runId);
         const owner = boundRuns.get(runId);
         if (shouldUnfollowOnHookStop({
           hook: ev.hook,

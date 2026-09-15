@@ -291,7 +291,84 @@ export const ASK_CLICK_LETTER_JS = `function (letter) {
   return "OK";
 }`;
 
-export type AskCdpInspect = { present: false } | { present: true; prompt: string; conversation_id: string; options: { id: string; label: string; text: string }[] };
+/** Mac：`[data-component=split-button][data-tone=plan]`。Windows 真机 2026-09-15：无 data-tone，Build 在 class `ui-split-button` 的普通 BUTTON。闸是主按钮文案 `Build`，不含 `Building`。 */
+const PLAN_FIND_BUILD_JS = `function planIsBuildLabel(t) {
+  var s = String(t || "").replace(/\\s+/g, " ").trim();
+  return /^Build(\\s|$)/.test(s);
+}
+function planFindBuild(doc) {
+  var name = doc.querySelector("[data-testid=composer-plan-filename]");
+  if (!name) return null;
+  var split = doc.querySelector("[data-component=split-button][data-tone=plan]");
+  if (split && split.querySelectorAll) {
+    var macBtns = split.querySelectorAll("button");
+    for (var i = 0; i < macBtns.length; i++) {
+      if (planIsBuildLabel(macBtns[i].innerText)) return macBtns[i];
+    }
+  }
+  var card = name;
+  for (var c = 0; c < 40 && card; c++) {
+    if (card.getAttribute && card.getAttribute("data-component") === "transcript-card-root") break;
+    card = card.parentElement;
+  }
+  if (!card || !card.querySelectorAll) return null;
+  var winBtns = card.querySelectorAll("button");
+  for (var j = 0; j < winBtns.length; j++) {
+    if (!planIsBuildLabel(winBtns[j].innerText)) continue;
+    var p = winBtns[j].parentElement;
+    var cls = p && p.className != null ? String(p.className) : "";
+    if (/\\bui-split-button\\b/.test(cls)) return winBtns[j];
+  }
+  return null;
+}`;
+
+/** Created Plan 探测。闸是 Build 主按钮，不是 filename / View Plan（点过 Build 后卡片仍可能留着）。Mac middleware + Windows Win Destop 2026-09-15。 */
+export const PLAN_INSPECT_JS = `function () {
+  ${PLAN_FIND_BUILD_JS}
+  var name = document.querySelector("[data-testid=composer-plan-filename]");
+  var btn = planFindBuild(document);
+  if (!name || !btn) return { present: false };
+  var filename = String(name.innerText || "").replace(/\\s+/g, " ").trim() || "Plan";
+  var conversation_id = "";
+  var overview = "";
+  var n = name;
+  for (var i = 0; i < 40 && n; i++) {
+    var id = n.getAttribute && n.getAttribute("data-composer-id");
+    if (id && String(id).trim() && !conversation_id) conversation_id = String(id).trim();
+    var comp = n.getAttribute && n.getAttribute("data-component");
+    if (comp === "transcript-card-root" && !overview) {
+      overview = String(n.innerText || "").replace(/\\s+/g, " ").trim()
+        .replace(/^Created Plan\\s*/i, "")
+        .replace(filename, "")
+        .replace(/\\s*View Plan[\\s\\S]*$/i, "")
+        .trim();
+    }
+    n = n.parentElement;
+  }
+  return { present: true, filename: filename, overview: overview, conversation_id: conversation_id };
+}`;
+
+/** 点 Build。真机 2026-09-15 Mac/Windows：element.click() 会启动 Implement the plan。不要再派 Enter。 */
+export const PLAN_CLICK_BUILD_JS = `function () {
+  ${PLAN_FIND_BUILD_JS}
+  var btn = planFindBuild(document);
+  if (!btn) return "GONE";
+  var host = btn.parentElement || btn;
+  if (typeof host.scrollIntoView === "function") host.scrollIntoView({ block: "center" });
+  else if (typeof btn.scrollIntoView === "function") btn.scrollIntoView({ block: "center" });
+  if (typeof btn.focus === "function") btn.focus();
+  if (typeof btn.click === "function") btn.click();
+  return "OK";
+}`;
+
+export type AskCdpInspect = { present: false } | {
+  present: true;
+  prompt: string;
+  conversation_id: string;
+  options: { id: string; label: string; text: string }[];
+  kind?: "plan";
+  filename?: string;
+};
 
 async function connectWorkspacePage(
   deps: Required<Pick<CdpSubmitterDeps, "port">> & CdpSubmitterDeps,
@@ -343,15 +420,31 @@ export function createAskQuestionDriver(deps: CdpSubmitterDeps) {
       const v = await hit.session.call("Runtime.evaluate", {
         expression: `(${ASK_INSPECT_JS})()`, returnByValue: true,
       }).then((x) => x?.result?.value);
-      if (!v || v.present !== true) return { present: false };
-      const options = Array.isArray(v.options) ? v.options : [];
+      const options = v && v.present === true && Array.isArray(v.options) ? v.options : [];
+      const askOptions = options.filter((o: any) => o && typeof o.id === "string").map((o: any) => ({
+        id: String(o.id), label: String(o.label ?? o.id), text: String(o.text ?? o.label ?? o.id),
+      }));
+      if (v && v.present === true && askOptions.length > 0) {
+        return {
+          present: true,
+          prompt: typeof v.prompt === "string" && v.prompt.trim() ? v.prompt.trim() : "Questions",
+          conversation_id: typeof v.conversation_id === "string" ? v.conversation_id.trim() : "",
+          options: askOptions,
+        };
+      }
+      const plan = await hit.session.call("Runtime.evaluate", {
+        expression: `(${PLAN_INSPECT_JS})()`, returnByValue: true,
+      }).then((x) => x?.result?.value);
+      if (!plan || plan.present !== true) return { present: false };
+      const filename = typeof plan.filename === "string" && plan.filename.trim() ? plan.filename.trim() : "Plan";
+      const overview = typeof plan.overview === "string" ? String(plan.overview).replace(/\s+/g, " ").trim() : "";
       return {
         present: true,
-        prompt: typeof v.prompt === "string" && v.prompt.trim() ? v.prompt.trim() : "Questions",
-        conversation_id: typeof v.conversation_id === "string" ? v.conversation_id.trim() : "",
-        options: options.filter((o: any) => o && typeof o.id === "string").map((o: any) => ({
-          id: String(o.id), label: String(o.label ?? o.id), text: String(o.text ?? o.label ?? o.id),
-        })),
+        kind: "plan",
+        filename,
+        prompt: `Created Plan: ${filename}`,
+        conversation_id: typeof plan.conversation_id === "string" ? plan.conversation_id.trim() : "",
+        options: [{ id: "build", label: "Build", text: overview || "Build" }],
       };
     } catch {
       return { present: false };
@@ -368,6 +461,21 @@ export function createAskQuestionDriver(deps: CdpSubmitterDeps) {
     const hit = await connectWorkspacePage(deps, workspaceRoot);
     if (!hit.ok) return { ok: false, reason: hit.reason };
     try {
+      if (action === "continue" && String(letter || "").trim().toLowerCase() === "build") {
+        const clicked = String(await hit.session.call("Runtime.evaluate", {
+          expression: `(${PLAN_CLICK_BUILD_JS})()`,
+          returnByValue: true,
+        }).then((x) => x?.result?.value));
+        if (clicked !== "OK") return { ok: false, reason: clicked === "GONE" ? "ASK_WIDGET_NOT_FOUND" : "ASK_INVALID_OPTION" };
+        for (let i = 0; i < 8; i++) {
+          const v = await hit.session.call("Runtime.evaluate", {
+            expression: `(${PLAN_INSPECT_JS})()`, returnByValue: true,
+          }).then((x) => x?.result?.value);
+          if (!v || v.present !== true) return { ok: true };
+          await sleep(400);
+        }
+        return { ok: false, reason: "ASK_SUBMIT_FAILED" };
+      }
       if (action === "continue") {
         const clicked = String(await hit.session.call("Runtime.evaluate", {
           expression: `(${ASK_CLICK_LETTER_JS})(${JSON.stringify(String(letter || "").toUpperCase())})`,
