@@ -254,6 +254,10 @@ function dedupe(blocks: ChatBlock[]): ChatBlock[] {
     if (b.kind === "thought") {
       if (b.text === lastThought) continue;
       lastThought = b.text;
+    } else if (b.kind === "assistant") {
+      // jsonl 把 Briefly inform 收尾轮写两遍时，协议用户句已隐藏，只剩两条连续同文助手。
+      const prev = out.at(-1);
+      if (prev?.kind === "assistant" && prev.text === b.text) continue;
     } else if (b.kind === "ask") {
       let prev = b.request_id ? askById.get(b.request_id) : undefined;
       const pkey = b.prompt.trim();
@@ -372,6 +376,7 @@ function attachChildText(blocks: ChatBlock[], children: Map<string, ChildAcc>): 
  * prefixHooks 不含用户句,避免 fromEnd 下同一 BSP 在前缀里再画一次。
  * 子代理卡片来自父 jsonl 的 Task tool_use；Start/Stop 按 subagent_id 或 task 合并；
  * 子代理 jsonl 只填卡片正文，不进父助手骨架。
+ * 协议轮用户句隐藏后，jsonl 双写的连续同文助手只留先到的一条。
  */
 export function eventsToChat(events: RunEvent[]): ChatBlock[] {
   const sorted = [...events].sort((a, b) => a.seq - b.seq);

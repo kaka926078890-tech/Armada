@@ -320,6 +320,58 @@ describe("eventsToChat", () => {
     ]);
   });
 
+  test("Cursor protocol turn written twice in jsonl is one assistant bubble (r-a59ee486 seq 287/296)", () => {
+    const tsOnly = "<timestamp>Tuesday, Sep 15, 2026, 4:22 PM (UTC+8)</timestamp>";
+    const protocol =
+      `${tsOnly}\n\n<user_query>Briefly inform the user about the task result and perform any follow-up actions (if needed). If there's no follow-ups needed, don't explicitly say that.</user_query>`;
+    const long =
+      "I6 **没有整列车绿**。本地 `--force-build-all` 编出来的 aioncore / finclaw / finsafe 已用上，但 **`FINCLAW_FROM_PATH=finclaw/target/release` 这条路径冷启失败**。";
+    const summary =
+      "I6 **没有整列车绿**，但 plat-arch 路径上映像/开关沙箱已经能测出来。\n\n本地 `--force-build-all` 编出的三件套是齐的。直接用 `finclaw/target/release` 冷启会 502（finsafe 把整棵 cargo `release/` 当 plat-arch 拷贝，mux 20s 内起不来）。改成 **同一 SHA** 的 `bundled-finclaw/win32-x64` 后：\n\n- 沙箱开：映像在 `sandbox-images\\94eacac…\\finclaw.exe`，安装树 icacls 没新增 ACE，没有 `WRITE_DAC` / eager fallback\n- 关沙箱：映像回到 bundled 安装树\n- 再开：又回到 staging 副本\n- **p95 < 10s 未过**（冷启 12.3s / 再开 15.1s）\n- 短聊发了 202，50s 内没有助手回复，**不能算「能聊」**\n\npin 没 bump，不要把这次说成沙箱列车完成。";
+    const userLine = (seq: number, text: string) => ev({
+      seq, source: "transcript",
+      payload: JSON.stringify({ role: "user", message: { content: [{ type: "text", text }] } }),
+    });
+    const asstLine = (seq: number, text: string) => ev({
+      seq, source: "transcript",
+      payload: JSON.stringify({ role: "assistant", message: { content: [{ type: "text", text }] } }),
+    });
+    const protocolBlock = (start: number) => [
+      ...Array.from({ length: 7 }, (_, i) => userLine(start + i, tsOnly)),
+      userLine(start + 7, protocol),
+      asstLine(start + 8, summary),
+    ];
+    const blocks = eventsToChat([
+      asstLine(276, long),
+      ev({ seq: 277, source: "transcript", payload: JSON.stringify({ type: "turn_ended", status: "success" }) }),
+      ...protocolBlock(279),
+      ...protocolBlock(288),
+      ev({ seq: 297, source: "transcript", payload: JSON.stringify({ type: "turn_ended", status: "success" }) }),
+    ]);
+    const asst = blocks.filter((b) => b.kind === "assistant");
+    expect(asst.map((b) => b.kind === "assistant" ? b.text : "")).toEqual([long, summary]);
+    expect(asst[1]).toMatchObject({ kind: "assistant", seq: 287 });
+    expect(blocks.filter((b) => b.kind === "user")).toEqual([]);
+  });
+
+  test("same assistant text in two operator turns stays two bubbles", () => {
+    const blocks = eventsToChat([
+      ev({ seq: 1, source: "transcript", payload: JSON.stringify({
+        role: "user", message: { content: [{ type: "text", text: "<user_query>\n第一次\n</user_query>" }] },
+      }) }),
+      ev({ seq: 2, source: "transcript", payload: JSON.stringify({
+        role: "assistant", message: { content: [{ type: "text", text: "一样的回复" }] },
+      }) }),
+      ev({ seq: 3, source: "transcript", payload: JSON.stringify({
+        role: "user", message: { content: [{ type: "text", text: "<user_query>\n再问一次\n</user_query>" }] },
+      }) }),
+      ev({ seq: 4, source: "transcript", payload: JSON.stringify({
+        role: "assistant", message: { content: [{ type: "text", text: "一样的回复" }] },
+      }) }),
+    ]);
+    expect(blocks.filter((b) => b.kind === "assistant")).toHaveLength(2);
+  });
+
   test("Cursor scope-done protocol user_query is not an operator bubble (r-4510dd36 seq 3685)", () => {
     const blocks = eventsToChat([
       ev({ seq: 3677, source: "transcript", payload: JSON.stringify({
