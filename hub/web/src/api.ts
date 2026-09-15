@@ -25,6 +25,8 @@ export const api = {
     req("/api/runs", { method: "POST", body: JSON.stringify({ machineId, workspaceRoot, prompt, attachmentIds }) }).then((r) => r.json()),
   followup: (id: string, prompt: string, attachmentIds: string[] = []) =>
     req(`/api/runs/${id}/followup`, { method: "POST", body: JSON.stringify({ prompt, attachmentIds }) }).then((r) => r.json()),
+  retry: (id: string) =>
+    req(`/api/runs/${id}/retry`, { method: "POST" }).then((r) => r.json()),
   answerAsk: (id: string, body: { request_id: string; action: "continue" | "skip"; answers?: { question_id: string; option_ids: string[] }[] }) =>
     req(`/api/runs/${id}/answer-ask`, { method: "POST", body: JSON.stringify(body) }).then(async (r) => {
       const j = await r.json();

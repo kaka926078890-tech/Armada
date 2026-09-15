@@ -13,6 +13,11 @@ describe("AssistantMarkdown", () => {
     expect(html).toContain("<table");
     expect(html).toContain("findesk");
   });
+
+  test("single Enter becomes a hard break", () => {
+    const html = renderToStaticMarkup(<AssistantMarkdown text={"第一行\n第二行"} />);
+    expect(html).toContain("<br");
+  });
 });
 
 describe("user bubble markdown", () => {
@@ -28,5 +33,19 @@ describe("user bubble markdown", () => {
     expect(html).toContain("<li");
     expect(html).toContain("<br");
     expect(html).not.toContain("### 标题");
+  });
+
+  test("ask card prompt renders markdown line breaks", () => {
+    const blocks: ChatBlock[] = [{
+      kind: "ask",
+      seq: 1,
+      request_id: "ask-1",
+      prompt: "选一个\n第二行",
+      options: [{ id: "a", label: "A", text: "甲" }],
+      action: "resolved",
+    }];
+    const html = renderToStaticMarkup(<ChatThread blocks={blocks} />);
+    expect(html).toContain("<br");
+    expect(html).toContain("选一个");
   });
 });

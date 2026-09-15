@@ -237,3 +237,10 @@ export function isHubArchived(run: Pick<RunRow, "archived_at">): boolean {
 export function canArchiveRun(run: Pick<RunRow, "status">): boolean {
   return !LIVE.has(run.status);
 }
+
+const RETRY_STATUSES = ["error", "unknown", "aborted"] as const;
+
+/** 失败 / 未知 / 中止：同一张卡再派发或续上原对话。已取消、已完成不重试。 */
+export function canRetryRun(run: Pick<RunRow, "status">): boolean {
+  return (RETRY_STATUSES as readonly string[]).includes(run.status);
+}

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { api, getToken } from "../api";
 import type { RunEvent } from "../types";
-import { workspaceFolderName, runDisplayName, type RunRow } from "../boardState";
+import { workspaceFolderName, runDisplayName, canRetryRun, type RunRow } from "../boardState";
 import ChatThread from "./ChatThread";
 import { eventsToChat, mergePendingAsk, mergeOutboundChat, queuedOutbound, INITIAL_VISIBLE_TURNS, initialHiddenPrefixTurns, recentTurnsWindow } from "../chatView";
 import { collectEventPages, mergeEvents, EVENT_PAGE_SIZE, hasOlderEvents, olderEventsQuery, shouldLoadOlder, prependPreserveScroll } from "../loadEvents";
@@ -84,6 +84,7 @@ export default function RunDetail({ runId, onClose, onChanged }: {
   const [followupFiles, setFollowupFiles] = useState<File[]>([]);
   const [followupError, setFollowupError] = useState("");
   const [cancelError, setCancelError] = useState("");
+  const [retryError, setRetryError] = useState("");
   const [loadError, setLoadError] = useState("");
   const [missing, setMissing] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
@@ -390,6 +391,25 @@ export default function RunDetail({ runId, onClose, onChanged }: {
             className="px-2 py-1 rounded-md bg-red-950/80 hover:bg-red-900 text-red-200">取消</button>}
           {["error", "unknown"].includes(run.status) && <button onClick={() => api.close(run.id).then(onChanged)}
             className="px-2 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700">人工关闭</button>}
+          {canRetryRun(run) && <button onClick={() => {
+            setRetryError("");
+            api.retry(run.id).then((r) => {
+              if (r?.error) {
+                setRetryError(r.error === "INJECT_SLOT_BUSY"
+                  ? "正在把另一条任务打进 Composer，几秒后再试。"
+                  : r.error === "WORKSPACE_NOT_OPEN" ? "工作区没有打开。"
+                  : r.error === "MACHINE_OFFLINE" ? "机器离线。"
+                  : r.error === "PROMPT_COLLISION" ? "同一工作区已有相同内容的任务。"
+                  : r.error === "RUN_LIMIT" ? "这台机器任务数已满。"
+                  : r.error === "WINDOW_BUSY" ? "该窗口正忙。"
+                  : r.error);
+                return;
+              }
+              if (r?.run) setRun(r.run);
+              onChanged();
+            }).catch((err) => setRetryError(String(err)));
+          }}
+            className="px-2 py-1 rounded-md bg-sky-800 hover:bg-sky-700 text-sky-100">重试</button>}
           {run.archived_at
             ? <button onClick={() => { api.unarchive(run.id).then((res) => { if (res?.run) setRun(res.run); onChanged(); }); }} className="px-2 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700">取消隐藏</button>
             : ["dispatched", "binding", "running", "created"].includes(run.status) ? null
@@ -398,6 +418,7 @@ export default function RunDetail({ runId, onClose, onChanged }: {
             className="px-2 py-1 rounded-md bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300">导出审计</a>
         </div>
         {cancelError && <div className="mt-2 text-red-400 text-sm">{cancelError}</div>}
+        {retryError && <div className="mt-2 text-red-400 text-sm">{retryError}</div>}
         {askError && <div className="mt-2 text-red-400 text-sm">{askError}</div>}
       </div>
       <div

@@ -124,6 +124,16 @@ export function attachWithConfig(
         if (run) send({ type: "snap.run", run });
         return;
       }
+      if (msg.type === "cmd.retry") {
+        if (typeof msg.runId !== "string" || !msg.runId) return fail("INVALID");
+        const r = await hubFetch(`/api/runs/${encodeURIComponent(msg.runId)}/retry`, { method: "POST" });
+        const body = await r.json().catch(() => ({})) as any;
+        if (!r.ok) return fail(body.error ?? "HUB_ERROR");
+        const run = await snapOf(msg.runId);
+        send({ type: "cmd.result", requestId, ok: true, run });
+        if (run) send({ type: "snap.run", run });
+        return;
+      }
       if (msg.type === "cmd.answer") {
         const r = await hubFetch(`/api/runs/${encodeURIComponent(msg.runId)}/answer-ask`, {
           method: "POST",

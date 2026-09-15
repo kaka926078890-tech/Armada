@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   groupRuns, cardView, listWorkspaceSlots, encodeWorkspaceKey, decodeWorkspaceKey,
   filterRunsByWorkspace, sortConversations, groupSlotsByMachine, isUnreadCompleted, isUnreadMessage,
-  workspaceHasUnread, workspaceUnreadCount, formatUnreadCount, canArchiveRun, isHubArchived,
+  workspaceHasUnread, workspaceUnreadCount, formatUnreadCount, canArchiveRun, canRetryRun, isHubArchived,
   workspaceFolderName, workspaceHasLiveRun, resolveSelectedWorkspace, isUnreadNeedInput, cardChromeClass, type RunRow,
 } from "../src/boardState";
 
@@ -188,6 +188,15 @@ describe("unread dots", () => {
     expect(canArchiveRun({ status: "completed" })).toBe(true);
     expect(isHubArchived({ archived_at: 9 })).toBe(true);
     expect(isHubArchived({ archived_at: null })).toBe(false);
+  });
+
+  test("canRetryRun only for error / unknown / aborted", () => {
+    expect(canRetryRun({ status: "error" })).toBe(true);
+    expect(canRetryRun({ status: "unknown" })).toBe(true);
+    expect(canRetryRun({ status: "aborted" })).toBe(true);
+    expect(canRetryRun({ status: "cancelled" })).toBe(false);
+    expect(canRetryRun({ status: "completed" })).toBe(false);
+    expect(canRetryRun({ status: "running" })).toBe(false);
   });
 });
 

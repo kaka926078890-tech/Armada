@@ -1100,3 +1100,60 @@ describe("running followup outbound", () => {
   });
 });
 
+describe("run retry", () => {
+  test("rejected inject retries same card with run.start", async () => {
+    const { inbound, api } = await startWithExt();
+    const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "修好它" }) });
+    const { run } = await r.json() as any;
+    inbound.length = 0;
+    hub!.db.query("UPDATE runs SET status='error', end_reason='REJECTED', conversation_id=NULL WHERE id=?1").run(run.id);
+    const retry = await api(`/api/runs/${run.id}/retry`, { method: "POST" });
+    expect(retry.status).toBe(200);
+    const body = await retry.json() as any;
+    expect(body.run.id).toBe(run.id);
+    expect(body.run.status).toBe("dispatched");
+    expect(body.run.end_reason).toBeNull();
+    await new Promise((x) => setTimeout(x, 80));
+    expect(inbound.find((m) => m.type === "run.start")).toMatchObject({
+      runId: run.id, prompt: "修好它",
+    });
+  });
+
+  test("aborted with cid retries via run.followup", async () => {
+    const { ws, inbound, api } = await startWithExt();
+    const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "第一句" }) });
+    const { run } = await r.json() as any;
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId: run.id, conversationId: "cid-1", transcriptPath: null, promptMatch: true }));
+    await new Promise((x) => setTimeout(x, 80));
+    hub!.db.query("UPDATE runs SET status='aborted', end_reason='aborted' WHERE id=?1").run(run.id);
+    inbound.length = 0;
+    const retry = await api(`/api/runs/${run.id}/retry`, { method: "POST" });
+    expect(retry.status).toBe(200);
+    expect(((await retry.json()) as any).run.status).toBe("dispatched");
+    await new Promise((x) => setTimeout(x, 80));
+    expect(inbound.find((m) => m.type === "run.followup")).toMatchObject({
+      runId: run.id, conversationId: "cid-1", prompt: "第一句",
+    });
+    ws.close();
+  });
+
+  test("completed and cancelled cannot retry", async () => {
+    const { ws, api } = await startWithExt();
+    const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "x" }) });
+    const { run } = await r.json() as any;
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId: run.id, conversationId: "cid-1", transcriptPath: null, promptMatch: true }));
+    await new Promise((x) => setTimeout(x, 80));
+    hub!.db.query("UPDATE runs SET status='completed', end_reason='completed' WHERE id=?1").run(run.id);
+    const done = await api(`/api/runs/${run.id}/retry`, { method: "POST" });
+    expect(done.status).toBe(409);
+    expect(((await done.json()) as any).error).toBe("INVALID_STATE");
+    hub!.db.query("UPDATE runs SET status='cancelled', end_reason='OPERATOR_CLOSED' WHERE id=?1").run(run.id);
+    const closed = await api(`/api/runs/${run.id}/retry`, { method: "POST" });
+    expect(closed.status).toBe(409);
+    expect(((await closed.json()) as any).error).toBe("INVALID_STATE");
+    ws.close();
+  });
+});
+

@@ -46,4 +46,22 @@ describe("Board unread chrome", () => {
     );
     expect(html).not.toContain("border-red-500");
   });
+
+  test("error card shows a retry button", () => {
+    const html = renderToStaticMarkup(
+      <Board
+        runs={[{ ...run, status: "error", end_reason: "REJECTED", conversation_id: null }]}
+        machines={[{ id: "m-1", name: "Mac-A", os: "darwin", cursor_version: null, extension_version: null, open_workspaces: "[]", status: "online", last_seen_at: 1 }]}
+        selected={null}
+        onSelect={() => {}}
+        showArchived={false}
+        onHide={() => {}}
+        onUnhide={() => {}}
+        readMap={{ "r-1": 9000 }}
+        onRename={() => {}}
+        onRetry={() => {}}
+      />,
+    );
+    expect(html).toContain("重试");
+  });
 });

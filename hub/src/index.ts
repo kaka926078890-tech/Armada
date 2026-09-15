@@ -214,6 +214,11 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
     if (error) return c.json({ error }, httpStatusForRunError(error));
     return c.json({ run }, run.status === "running" ? 201 : 200);
   });
+  app.post("/api/runs/:id/retry", (c) => {
+    const { run, error } = runs.retry(c.req.param("id"));
+    if (error) return c.json({ error }, httpStatusForRunError(error));
+    return c.json({ run }, 200);
+  });
   app.post("/api/runs/:id/answer-ask", async (c) => {
     const body = await c.req.json().catch(() => ({}));
     const { run, error, already } = runs.answerAsk(c.req.param("id"), body);

@@ -71,6 +71,22 @@ function autoHub(ws: WebSocket, onDispatch?: (msg: any) => object | void) {
         },
       }));
     }
+    if (msg.type === "cmd.retry") {
+      ws.send(JSON.stringify({
+        type: "cmd.result",
+        requestId: msg.requestId,
+        ok: true,
+        run: {
+          runId: msg.runId,
+          machineId: "m-1",
+          workspaceRoot: "/Users/me/proj",
+          prompt: "retry",
+          status: "dispatched",
+          canRetry: false,
+          updatedAt: Date.now(),
+        },
+      }));
+    }
   });
 }
 
@@ -234,6 +250,36 @@ describe("relay serve", () => {
     const body = await f.json() as any;
     expect(body.run.runId).toBe("r-1");
     expect(body.run.prompt).toBe("继续");
+    expect(body.run.status).toBe("dispatched");
+    ws.close();
+  });
+
+  test("retry reopens the same error run", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    autoHub(ws);
+    ws.send(JSON.stringify({
+      type: "snap.run",
+      run: {
+        runId: "r-err",
+        machineId: "m-1",
+        workspaceRoot: "/Users/me/proj",
+        prompt: "失败句",
+        status: "error",
+        error: "REJECTED",
+        canRetry: true,
+        updatedAt: Date.now(),
+      },
+    }));
+    await Bun.sleep(40);
+    const headers = { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" };
+    const got = await (await fetch(url(s, "/mobile/runs/r-err"), { headers })).json() as any;
+    expect(got.canRetry).toBe(true);
+    const f = await fetch(url(s, "/mobile/runs/r-err/retry"), { method: "POST", headers });
+    expect(f.status).toBe(200);
+    const body = await f.json() as any;
+    expect(body.run.runId).toBe("r-err");
     expect(body.run.status).toBe("dispatched");
     ws.close();
   });

@@ -295,6 +295,7 @@ struct RunDetailView: View {
     @State private var run: RunDTO?
     @State private var err: String?
     @State private var mdHeight: CGFloat = 120
+    @State private var promptHeight: CGFloat = 40
     @State private var showDispatch = false
 
     private var slot: WorkspaceDTO? {
@@ -306,6 +307,7 @@ struct RunDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 if let run {
+                    if let err { Text(err).foregroundStyle(.red) }
                     HStack {
                         Circle().fill(statusColor(run.status)).frame(width: 10, height: 10)
                         Text(statusLabel(run.status)).font(.headline)
@@ -314,7 +316,8 @@ struct RunDetailView: View {
                         .font(.subheadline)
                     Text(run.workspaceRoot).font(.caption).foregroundStyle(.secondary)
                     if let e = run.displayError { Text(e).foregroundStyle(.red) }
-                    Text(run.prompt).font(.footnote).foregroundStyle(.secondary)
+                    MarkdownWebView(text: run.prompt, height: $promptHeight)
+                        .frame(height: max(promptHeight, 24))
                     Divider()
                     if let text = run.finalText, !text.isEmpty {
                         MarkdownWebView(text: text, height: $mdHeight)
@@ -344,6 +347,20 @@ struct RunDetailView: View {
                                 try? await session.api().cancel(runId: runId)
                                 await reload()
                                 await session.refresh()
+                            }
+                        }
+                    }
+                    if run.showsRetry {
+                        Button("重试") {
+                            Task {
+                                do {
+                                    _ = try await session.api().retry(runId: runId)
+                                    err = nil
+                                    await reload()
+                                    await session.refresh()
+                                } catch {
+                                    err = error.localizedDescription
+                                }
                             }
                         }
                     }

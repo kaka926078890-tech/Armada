@@ -394,6 +394,7 @@ export default function App() {
             onHide={(id) => { api.archive(id).then(() => { setSelectedRun((cur) => cur === id ? null : cur); refresh(); }); }}
             onUnhide={(id) => { api.unarchive(id).then(refresh); }}
             onRename={(id, prompt) => { api.renameRun(id, prompt).then(refresh); }}
+            onRetry={(id) => { api.retry(id).then(refresh); }}
           />
         </div>
       </div>

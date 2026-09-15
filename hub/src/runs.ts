@@ -973,6 +973,64 @@ export class RunService {
     return { run: this.get(runId) };
   }
 
+  /**
+   * 失败 / 未知 / 中止：同一张卡再跑。
+   * 已绑 cid → 当续聊（run.followup）；从未绑定 → 当新派发（run.start）。
+   */
+  retry(runId: string): { error?: string; run?: any } {
+    const run = this.get(runId);
+    if (!run) return { error: "NOT_FOUND" };
+    if (!["error", "unknown", "aborted"].includes(run.status)) return { error: "INVALID_STATE" };
+    const ids = parseAttachmentIds(run.attachments);
+    this.audit("operator", "run.retry", runId, { via: run.conversation_id ? "followup" : "start" });
+    if (run.conversation_id) return this.followup(runId, run.prompt ?? "", ids);
+    return this.redispatchFailed(run, ids);
+  }
+
+  private redispatchFailed(run: any, attachmentIds: string[]): { error?: string; run?: any } {
+    const m = this.registry.getMachine(run.machine_id);
+    if (!m || m.status !== "online") return { error: "MACHINE_OFFLINE" };
+    if (!JSON.parse(m.open_workspaces).includes(run.workspace_root)) return { error: "WORKSPACE_NOT_OPEN" };
+    const win = this.registry.findWindowForWorkspace(run.machine_id, run.workspace_root);
+    if (!win) return { error: "WORKSPACE_NOT_OPEN" };
+    if (!normalizePrompt(run.prompt ?? "") && attachmentIds.length === 0) return { error: "EMPTY_PROMPT" };
+    if (this.countOccupying(run.machine_id) >= this.limits.maxPerMachine) return { error: "RUN_LIMIT" };
+    if (this.countOccupying(run.machine_id, run.workspace_root) >= this.limits.maxPerWorkspace) return { error: "RUN_LIMIT" };
+    if (this.hasPromptCollision(run.machine_id, run.workspace_root, run.prompt ?? "", attachmentIds, run.id)) {
+      return { error: "PROMPT_COLLISION" };
+    }
+    if (!this.limits.multiRunPerWindow) {
+      const sameWindowActive = this.db.query(
+        `SELECT id FROM runs WHERE machine_id=?1 AND window_id=?2 AND status IN ('queued','dispatched','binding','running') LIMIT 1`,
+      ).get(run.machine_id, win.windowId);
+      if (sameWindowActive) return { error: "WINDOW_BUSY" };
+    }
+    const nextSeq = ((this.db.query(
+      `SELECT COALESCE(MAX(dispatch_seq), 0) AS n FROM runs WHERE machine_id=?1`,
+    ).get(run.machine_id) as { n: number }).n) + 1;
+    const slotFree = this.injectSlotCount(run.machine_id) === 0;
+    const canStartNow = slotFree && this.windowCanAcceptStart(run.machine_id, win.windowId);
+    const now = Date.now();
+    this.blobs?.applyRefDelta([], attachmentIds);
+    this.cancelRequested.delete(run.id);
+    this.retireLiveGeneration(run.id);
+    if (canStartNow) {
+      this.setStatus(run.id, "dispatched", {
+        ended_at: null, end_reason: null, started_at: now, window_id: win.windowId,
+        queued_at: null, dispatch_seq: nextSeq,
+      });
+      this.attachHubGenerationIfWindows(run.id, run.machine_id);
+      const live = this.get(run.id);
+      this.registry.sendTo(run.machine_id, win.windowId, this.startMessage(live ?? run, now));
+    } else {
+      this.setStatus(run.id, "queued", {
+        ended_at: null, end_reason: null, started_at: null, window_id: win.windowId,
+        queued_at: now, dispatch_seq: nextSeq,
+      });
+    }
+    return { run: this.get(run.id) };
+  }
+
   /** Operator close: only error/unknown → cancelled (SSE + audit via setStatus). */
   close(runId: string): { error?: string; run?: any } {
     const run = this.get(runId);

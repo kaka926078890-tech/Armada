@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { groupRuns, cardView, COLUMN_LABELS, canArchiveRun, isUnreadAlert, isUnreadNeedInput, machineLabel, workspaceFolderName, runDisplayName, cardChromeClass, type ColumnKey, type RunRow } from "../boardState";
+import { groupRuns, cardView, COLUMN_LABELS, canArchiveRun, canRetryRun, isUnreadAlert, isUnreadNeedInput, machineLabel, workspaceFolderName, runDisplayName, cardChromeClass, type ColumnKey, type RunRow } from "../boardState";
 import type { Machine } from "../types";
 
 const COL_ACCENT: Record<ColumnKey, string> = {
@@ -18,13 +18,14 @@ const BADGE_COLOR: Record<ColumnKey, string> = {
   error: "text-red-400",
 };
 
-export default function Board({ runs, machines, selected, onSelect, showArchived, onHide, onUnhide, readMap, onRename }: {
+export default function Board({ runs, machines, selected, onSelect, showArchived, onHide, onUnhide, readMap, onRename, onRetry }: {
   runs: RunRow[]; machines: Machine[]; selected: string | null; onSelect: (id: string) => void;
   showArchived: boolean;
   onHide: (id: string) => void;
   onUnhide: (id: string) => void;
   readMap: Record<string, number>;
   onRename: (id: string, title: string) => void;
+  onRetry?: (id: string) => void;
 }) {
   const g = groupRuns(runs);
   const now = Date.now();
@@ -114,6 +115,14 @@ export default function Board({ runs, machines, selected, onSelect, showArchived
                       ) : null}
                     </div>
                   )}
+                  {!editing && onRetry && canRetryRun(r) ? (
+                    <div className="px-2.5 pb-2">
+                      <button type="button" onClick={(e) => { e.stopPropagation(); onRetry(r.id); }}
+                        className="text-[11px] px-2 py-0.5 rounded bg-sky-800 hover:bg-sky-700 text-sky-100">
+                        重试
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
               );
             })}

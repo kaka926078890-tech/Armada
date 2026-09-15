@@ -34,6 +34,7 @@ export type RunSnap = {
   pendingAsk?: unknown;
   outbound?: OutboundSnap[];
   queueMessageDefaultBehavior?: string | null;
+  canRetry?: boolean;
   updatedAt: number;
 };
 
@@ -105,6 +106,7 @@ export function runToSnap(run: any, events: RunEvent[]): RunSnap {
     pendingAsk: run.pending_ask ?? null,
     outbound: snapOutbound(run.outbound),
     queueMessageDefaultBehavior: mode,
+    canRetry: ["error", "unknown", "aborted"].includes(status),
     updatedAt: Number(run.ended_at ?? run.started_at ?? run.created_at ?? Date.now()),
   };
 }
@@ -197,6 +199,16 @@ export function startRelayClient(opts: {
           method: "POST",
           body: JSON.stringify({ prompt: msg.prompt ?? "" }),
         });
+        const body = await r.json().catch(() => ({})) as any;
+        if (!r.ok) return fail(body.error ?? "HUB_ERROR");
+        const run = snapOf(msg.runId);
+        send({ type: "cmd.result", requestId, ok: true, run });
+        if (run) send({ type: "snap.run", run });
+        return;
+      }
+      if (msg.type === "cmd.retry") {
+        if (typeof msg.runId !== "string" || !msg.runId) return fail("INVALID");
+        const r = await hubFetch(`/api/runs/${encodeURIComponent(msg.runId)}/retry`, { method: "POST" });
         const body = await r.json().catch(() => ({})) as any;
         if (!r.ok) return fail(body.error ?? "HUB_ERROR");
         const run = snapOf(msg.runId);

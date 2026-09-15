@@ -115,7 +115,7 @@ const mdComponents = {
 export function AssistantMarkdown({ text }: { text: string }) {
   return (
     <div className="break-words leading-[1.65] text-[13px] text-zinc-200">
-      <Markdown remarkPlugins={[remarkGfm]} components={mdComponents}>{text}</Markdown>
+      <Markdown remarkPlugins={[remarkGfm, remarkBreaks]} components={mdComponents}>{text}</Markdown>
     </div>
   );
 }
@@ -206,7 +206,9 @@ function AskCard({ block, onAnswerAsk }: {
   return (
     <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2.5">
       <div className="text-[11px] uppercase tracking-wide text-zinc-500 mb-1">{plan ? "Created Plan" : "Questions"}</div>
-      <div className="text-[13px] text-zinc-200 whitespace-pre-wrap leading-relaxed">{block.prompt}</div>
+      <div className="text-[13px] text-zinc-200 leading-relaxed">
+        <AssistantMarkdown text={block.prompt} />
+      </div>
       {plan ? null : (
       <div className="mt-2 flex flex-col gap-1.5">
         {block.options.map((o) => (

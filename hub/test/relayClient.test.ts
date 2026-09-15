@@ -59,6 +59,7 @@ describe("runToSnap", () => {
     const run = { id: "r-1", machine_id: "m-1", workspace_root: "/ws/a", prompt: "hi", status: "completed", created_at: 1 };
     expect(runToSnap(run, []).status).toBe("error");
     expect(runToSnap(run, []).error).toBe("NO_ASSISTANT_BODY");
+    expect(runToSnap(run, []).canRetry).toBe(true);
     const events = [ev({
       seq: 1, source: "transcript",
       payload: JSON.stringify({ role: "assistant", message: { content: [{ type: "text", text: "全文正文" }] } }),
@@ -66,6 +67,7 @@ describe("runToSnap", () => {
     const snap = runToSnap(run, events);
     expect(snap.status).toBe("completed");
     expect(snap.finalText).toBe("全文正文");
+    expect(snap.canRetry).toBe(false);
   });
 
   test("completed finalText is the matching turn, not the whole thread", () => {

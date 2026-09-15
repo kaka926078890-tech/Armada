@@ -170,6 +170,7 @@ export function createRelayServer(opts: {
       pendingAsk: row.pending_ask ? JSON.parse(row.pending_ask) : null,
       outbound: row.outbound ? JSON.parse(row.outbound) : [],
       queueMessageDefaultBehavior: row.queue_message_default_behavior ?? null,
+      canRetry: ["error", "unknown", "aborted"].includes(String(row.status ?? "")),
       updatedAt: row.updated_at,
     };
   }
@@ -199,7 +200,7 @@ export function createRelayServer(opts: {
     if (err === "NOT_FOUND") return 404;
     if ([
       "PROMPT_COLLISION", "CONVERSATION_BUSY", "INJECT_SLOT_BUSY", "WINDOW_BUSY",
-      "NO_CONVERSATION", "OUTBOUND_TEXT_ONLY",
+      "NO_CONVERSATION", "OUTBOUND_TEXT_ONLY", "INVALID_STATE",
     ].includes(err)) return 409;
     if (err === "WORKSPACE_NOT_OPEN" || err === "MACHINE_OFFLINE" || err === "CLOSED" || err === "EMPTY_PROMPT" || err === "INVALID") {
       return 400;
@@ -328,6 +329,31 @@ export function createRelayServer(opts: {
     audit("operator", "run.followup", runId, { fleet: fleet.id });
     const next = db.query("SELECT * FROM runs WHERE id=?1 AND fleet_id=?2").get(runId, fleet.id) as { status?: string } | undefined;
     return c.json({ run: runToJson(next) }, next?.status === "running" ? 201 : 200);
+  });
+
+  app.post("/mobile/runs/:id/retry", async (c) => {
+    const tok = (c as any).get("opToken") as string;
+    const fleet = (c as any).get("fleet") as { id: string; hub_online: number };
+    if (!checkRate(tok)) {
+      audit("operator", "run.rate_limit", fleet.id);
+      return c.json({ error: "RATE_LIMIT" }, 429);
+    }
+    if (fleet.hub_online !== 1) return c.json({ error: "HUB_OFFLINE" }, 503);
+    const runId = c.req.param("id");
+    const row = db.query("SELECT id FROM runs WHERE id=?1 AND fleet_id=?2").get(runId, fleet.id);
+    if (!row) return c.json({ error: "NOT_FOUND" }, 404);
+    const requestId = `r${++reqSeq}`;
+    const sent = sendHub(fleet.id, { type: "cmd.retry", requestId, runId });
+    if (!sent) return c.json({ error: "HUB_OFFLINE" }, 503);
+    const result = await waitHub(requestId);
+    if (!result.ok) {
+      const err = result.error ?? "HUB_TIMEOUT";
+      return c.json({ error: err }, hubCmdStatus(err) as 400);
+    }
+    if (result.run) applyRunSnap(fleet.id, result.run);
+    audit("operator", "run.retry", runId, { fleet: fleet.id });
+    const next = db.query("SELECT * FROM runs WHERE id=?1 AND fleet_id=?2").get(runId, fleet.id);
+    return c.json({ run: runToJson(next) }, 200);
   });
 
   app.post("/mobile/runs/:id/answer", async (c) => {

@@ -78,6 +78,7 @@ struct RunDTO: Decodable, Identifiable, Hashable {
     var pendingAsk: PendingAskDTO?
     var outbound: [OutboundDTO]?
     var queueMessageDefaultBehavior: String?
+    var canRetry: Bool?
     var updatedAt: Int?
     var id: String { runId }
 
@@ -91,6 +92,10 @@ struct RunDTO: Decodable, Identifiable, Hashable {
 
     var canFollowup: Bool {
         pendingAsk == nil
+    }
+
+    var showsRetry: Bool {
+        canRetry ?? ["error", "unknown", "aborted"].contains(status)
     }
 
     var displayError: String? {
@@ -172,6 +177,10 @@ enum RelayAPIError: LocalizedError {
         case "HUB_OFFLINE": return "中台离线"
         case "OUTBOUND_LIMIT": return "待消化续发已达上限，等 Cursor 消化后再发"
         case "OUTBOUND_TEXT_ONLY": return "运行中续发暂只支持纯文本"
+        case "INVALID_STATE": return "当前状态不能重试"
+        case "MACHINE_OFFLINE": return "机器离线"
+        case "RUN_LIMIT": return "这台机器任务数已满"
+        case "WINDOW_BUSY": return "该窗口正忙"
         default: return code
         }
     }
@@ -209,6 +218,11 @@ actor RelayAPI {
     func followup(runId: String, prompt: String) async throws -> RunDTO {
         let body = try JSONSerialization.data(withJSONObject: ["prompt": prompt])
         let wrap: DispatchResponse = try await send("/mobile/runs/\(runId)/followup", method: "POST", body: body, ok: [200, 201])
+        return wrap.run
+    }
+
+    func retry(runId: String) async throws -> RunDTO {
+        let wrap: DispatchResponse = try await send("/mobile/runs/\(runId)/retry", method: "POST", body: Data("{}".utf8), ok: [200])
         return wrap.run
     }
 
