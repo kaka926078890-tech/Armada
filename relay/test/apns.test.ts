@@ -3,7 +3,19 @@ import { generateKeyPairSync } from "crypto";
 import { mkdtempSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { buildApnsRequest, createApnsSender, isUnregistered, loadApnsFromEnv, payloadTooLarge, signApnsJwt } from "../src/apns";
+import { buildApnsRequest, createApnsSender, isUnregistered, loadApnsFromEnv, applyHomeEnv, payloadTooLarge, signApnsJwt } from "../src/apns";
+
+test("applyHomeEnv fills blank keys from RELAY_HOME/env", () => {
+  const dir = mkdtempSync(join(tmpdir(), "armada-apns-"));
+  writeFileSync(join(dir, "env"), "RELAY_APNS_KEY_ID=797HGTVDN8\nRELAY_APNS_TEAM_ID=LW2A4J4KKG\n");
+  const env: NodeJS.ProcessEnv = { RELAY_APNS_KEY_ID: "" };
+  applyHomeEnv(dir, env);
+  expect(env.RELAY_APNS_KEY_ID).toBe("797HGTVDN8");
+  expect(env.RELAY_APNS_TEAM_ID).toBe("LW2A4J4KKG");
+  env.RELAY_APNS_KEY_ID = "keep";
+  applyHomeEnv(dir, env);
+  expect(env.RELAY_APNS_KEY_ID).toBe("keep");
+});
 
 test("loadApnsFromEnv requires all three", () => {
   expect(loadApnsFromEnv({})).toBeNull();

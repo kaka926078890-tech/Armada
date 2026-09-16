@@ -192,17 +192,16 @@ bun run dev:relay-attach
 
 一部手机目前只绑一条 op（一台在线中台）。多台受控机只要登记在这台中台上，选不同仓即可分别派。多部手机可贴同一条 op，共用操作者令牌。
 
-锁屏通知要响，中转机还需 **APNs Auth Key**（`.p8` 不进仓库）：
+锁屏通知要响，中转机还需 **APNs Auth Key**（`.p8` 不进仓库）。本机已约定放 `~/.armada-relay/`：
 
 ```bash
-export RELAY_APNS_KEY_PATH=/path/to/AuthKey_XXXX.p8
-export RELAY_APNS_KEY_ID=<Key ID>
-export RELAY_APNS_TEAM_ID=LW2A4J4KKG
-# 可选；默认 app.armada.remote
-# export RELAY_APNS_BUNDLE_ID=app.armada.remote
+# $RELAY_HOME/env（进程里没设时自动读入）
+RELAY_APNS_KEY_PATH=/Users/you/.armada-relay/AuthKey_XXXXXX.p8
+RELAY_APNS_KEY_ID=<Key ID>
+RELAY_APNS_TEAM_ID=LW2A4J4KKG
 ```
 
-缺任一项时中转打 `APNS_DISABLED`，前台轮询照常。App ID 需打开 Push Notifications，并打带 `aps-environment=production` 的新 TestFlight。模拟器没有 device token。
+也可以直接 `export` 上述变量。缺任一项时中转打 `APNS_DISABLED`，前台轮询照常。App ID 需打开 Push Notifications，并打带 `aps-environment=production` 的新 TestFlight。模拟器没有 device token。**公网中转**（App 连的那台）也要放同一份文件并重启，只放开发机不会给手机推。
 
 ### 不要做
 
@@ -459,7 +458,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\armada-cursor.ps1 C:
 | `RELAY_HOST` / `RELAY_PORT` | 环境变量 | 中转监听，默认 `127.0.0.1:8780` |
 | `RELAY_PUBLIC_BASE` | 环境变量 | 写进邀请的 origin；生产用 `https://域名` |
 | `RELAY_ADMIN_TOKEN` | 环境变量 | `POST /admin/fleets`；未设时进程启动会打印临时值 |
-| `RELAY_APNS_KEY_PATH` | 环境变量 | APNs Auth Key `.p8` 路径（不要进仓库）；缺则 `APNS_DISABLED`，不发推送 |
+| `RELAY_APNS_KEY_PATH` | 环境变量或 `$RELAY_HOME/env` | APNs Auth Key `.p8` 路径（不要进仓库）；缺则 `APNS_DISABLED` |
 | `RELAY_APNS_KEY_ID` | 环境变量 | APNs Key ID |
 | `RELAY_APNS_TEAM_ID` | 环境变量 | `LW2A4J4KKG` |
 | `RELAY_APNS_BUNDLE_ID` | 环境变量 | 默认 `app.armada.remote` |

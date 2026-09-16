@@ -1,6 +1,7 @@
 import { createPrivateKey, sign } from "crypto";
 import { existsSync, readFileSync } from "fs";
 import { connect } from "http2";
+import { join } from "path";
 import type { NotifyEdge } from "./notifyEdge";
 
 export type ApnsPost = (url: string, headers: Record<string, string>, body: string) => Promise<{ status: number; reason?: string }>;
@@ -16,6 +17,21 @@ export type ApnsConfig = {
 
 const JWT_TTL_MS = 50 * 60 * 1000;
 const HOST = "https://api.push.apple.com";
+
+export function applyHomeEnv(home: string, env: NodeJS.ProcessEnv = process.env): void {
+  const p = join(home, "env");
+  if (!existsSync(p)) return;
+  for (const raw of readFileSync(p, "utf8").split("\n")) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    const eq = line.indexOf("=");
+    if (eq <= 0) continue;
+    const key = line.slice(0, eq).trim();
+    if (!/^[A-Z_][A-Z0-9_]*$/.test(key)) continue;
+    const cur = env[key];
+    if (cur == null || cur === "") env[key] = line.slice(eq + 1).trim();
+  }
+}
 
 export function loadApnsFromEnv(env: NodeJS.ProcessEnv = process.env): ApnsConfig | null {
   const keyPath = env.RELAY_APNS_KEY_PATH?.trim();

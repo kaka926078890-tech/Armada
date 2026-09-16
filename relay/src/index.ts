@@ -1,10 +1,11 @@
 import { join } from "path";
-import { loadApnsFromEnv } from "./apns";
+import { loadApnsFromEnv, applyHomeEnv } from "./apns";
 import { createRelayServer } from "./server";
 
 const port = Number(process.env.RELAY_PORT ?? 8780);
 const hostname = process.env.RELAY_HOST ?? "127.0.0.1";
 const home = process.env.RELAY_HOME ?? join(process.env.HOME!, ".armada-relay");
+applyHomeEnv(home);
 const publicBase = (process.env.RELAY_PUBLIC_BASE ?? `http://${hostname}:${port}`).replace(/\/+$/, "");
 const adminToken = process.env.RELAY_ADMIN_TOKEN;
 
