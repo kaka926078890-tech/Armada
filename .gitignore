@@ -14,3 +14,4 @@ desktop/src-tauri/resources/scripts/
 desktop/src-tauri/resources/hooks/
 desktop/src-tauri/resources/*.vsix
 desktop/src-tauri/resources/bun.path
+mobile/ios/build/
