@@ -186,6 +186,7 @@ enum RelayAPIError: LocalizedError {
         case "OUTBOUND_TEXT_ONLY": return "运行中续发暂只支持纯文本"
         case "INVALID_STATE": return "当前状态不能重试"
         case "NOT_FOUND": return "任务不存在"
+        case "INVALID": return "推送登记失败"
         case "MACHINE_OFFLINE": return "机器离线"
         case "RUN_LIMIT": return "这台机器任务数已满"
         case "WINDOW_BUSY": return "该窗口正忙"
@@ -252,6 +253,16 @@ actor RelayAPI {
 
     func cancel(runId: String) async throws {
         let _: EmptyJSON = try await send("/mobile/runs/\(runId)/cancel", method: "POST", body: Data("{}".utf8), ok: [200], allowEmpty: true)
+    }
+
+    func registerPushToken(_ token: String) async throws {
+        let body = try JSONSerialization.data(withJSONObject: ["token": token, "environment": "production"])
+        let _: EmptyJSON = try await send("/mobile/push-token", method: "POST", body: body, ok: [204], allowEmpty: true)
+    }
+
+    func deletePushToken(_ token: String) async throws {
+        let body = try JSONSerialization.data(withJSONObject: ["token": token])
+        let _: EmptyJSON = try await send("/mobile/push-token", method: "DELETE", body: body, ok: [204], allowEmpty: true)
     }
 
     private func get<T: Decodable>(_ path: String) async throws -> T {

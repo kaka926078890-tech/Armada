@@ -15,7 +15,7 @@
 
 ## 它能做什么
 
-已具备：桌面创建/加入舰队、局域网发现、代装扩展、CDP 打开工作区、五列看板、图文派发、并行任务、中台续聊与答选择题、完成通知；可选自建中转 + iOS App 远程选仓、派发、续聊、答选择题。
+已具备：桌面创建/加入舰队、局域网发现、代装扩展、CDP 打开工作区、五列看板、图文派发、并行任务、中台续聊与答选择题、完成通知；可选自建中转 + iOS App 远程选仓、派发、续聊、答选择题、隐藏任务；锁屏 Ask / 终态走中转代发 APNs（需 Auth Key）。
 
 ### 舰队看板
 
@@ -187,10 +187,22 @@ bun run dev:relay-attach
 
 1. Xcode 打开 `mobile/ios/ArmadaRemote.xcodeproj`，模拟器或真机跑 **ArmadaRemote**（Bundle ID `app.armada.remote`）。
 2. 粘贴 **op** 邀请（不要贴 pair）。
-3. 舰队页按 **机器 → 工作区**；点仓看五列任务；仓顶栏 **派发** 新开对话，详情 **续聊** 同一对话。
+3. 舰队页按 **机器 → 工作区**；点仓看五列任务；仓顶栏 **派发** 新开对话，详情 **续聊** 同一对话。绑定后会申请通知权限；锁屏 Ask / 完成 / 失败由中转代发 APNs（点通知进详情强制 GET）。
 4. Agent 选择题在详情里 Continue / Skip。终态正文是这一轮助手回复，不是整段 Cursor 会话。
 
 一部手机目前只绑一条 op（一台在线中台）。多台受控机只要登记在这台中台上，选不同仓即可分别派。多部手机可贴同一条 op，共用操作者令牌。
+
+锁屏通知要响，中转机还需 **APNs Auth Key**（`.p8` 不进仓库）：
+
+```bash
+export RELAY_APNS_KEY_PATH=/path/to/AuthKey_XXXX.p8
+export RELAY_APNS_KEY_ID=<Key ID>
+export RELAY_APNS_TEAM_ID=LW2A4J4KKG
+# 可选；默认 app.armada.remote
+# export RELAY_APNS_BUNDLE_ID=app.armada.remote
+```
+
+缺任一项时中转打 `APNS_DISABLED`，前台轮询照常。App ID 需打开 Push Notifications，并打带 `aps-environment=production` 的新 TestFlight。模拟器没有 device token。
 
 ### 不要做
 
@@ -447,6 +459,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\armada-cursor.ps1 C:
 | `RELAY_HOST` / `RELAY_PORT` | 环境变量 | 中转监听，默认 `127.0.0.1:8780` |
 | `RELAY_PUBLIC_BASE` | 环境变量 | 写进邀请的 origin；生产用 `https://域名` |
 | `RELAY_ADMIN_TOKEN` | 环境变量 | `POST /admin/fleets`；未设时进程启动会打印临时值 |
+| `RELAY_APNS_KEY_PATH` | 环境变量 | APNs Auth Key `.p8` 路径（不要进仓库）；缺则 `APNS_DISABLED`，不发推送 |
+| `RELAY_APNS_KEY_ID` | 环境变量 | APNs Key ID |
+| `RELAY_APNS_TEAM_ID` | 环境变量 | `LW2A4J4KKG` |
+| `RELAY_APNS_BUNDLE_ID` | 环境变量 | 默认 `app.armada.remote` |
 
 看板主题、选中工作区、已读、详情宽度存在 hub 的 UI prefs，同一令牌下多端会同步。
 
@@ -508,6 +524,8 @@ Token **仅** query 鉴权；消息体不再带 token。连上后 10s 内必须 
 | POST | `/mobile/runs/:id/cancel` | 取消 |
 | POST | `/mobile/runs/:id/archive` | 从列表隐藏（数据保留） |
 | POST | `/mobile/runs/:id/unarchive` | 取消隐藏 |
+| POST | `/mobile/push-token` | 登记 APNs device token（64 hex，`environment=production`）→ 204 |
+| DELETE | `/mobile/push-token` | 解绑该 token；不存在也 204 |
 
 常见错误码：`MACHINE_OFFLINE`、`WORKSPACE_NOT_OPEN`、`RUN_LIMIT`、`PROMPT_COLLISION`、`CONVERSATION_BUSY`、`INJECT_SLOT_BUSY`、`OUTBOUND_LIMIT`、`OUTBOUND_TEXT_ONLY`、`WINDOW_BUSY`、`NOT_FOUND`、`INVALID_STATE`、`NO_CONVERSATION`、`IMAGE_PASTE_FAILED`、`FILE_MENTION_FAILED`、`ATTACHMENT_TOO_LARGE`、`ASK_IN_FLIGHT`、`HUB_OFFLINE`、`OPERATOR_REQUIRED`、`HUB_REQUIRED`。
 
@@ -544,7 +562,7 @@ hub 静态托管路径相对 `hub/src`，**请从仓库根**执行 `bun run dev:
 | 项 | 打算做 |
 | --- | --- |
 | **中转管理页 / 中台贴 pair** | 现在只有 CLI 与 `relay.json`；看板里还没有粘贴框 |
-| **App 通道** | 前台仍是轮询；锁屏 Ask/完成见 [App APNs 规格](docs/superpowers/specs/2026-09-16-armada-app-push-design.md) |
+| **App 通道** | 前台仍是 10s 轮询；锁屏 Ask/完成由中转代发生产 APNs（无 `.p8` 则 no-op） |
 | **多操作者 / 一部手机多中台** | v1 一条 op 对应一台在线中台；令牌轮换另开闸 |
 | **多机互联 · 团队协作** | 多台机器组成协作网，不只局域网点对点加入：团队共享舰队、一起派发和盯进度 |
 

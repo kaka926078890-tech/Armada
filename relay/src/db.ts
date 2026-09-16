@@ -47,5 +47,14 @@ export function openRelayDb(home: string): Database {
   ensureColumn(db, "runs", "outbound", "outbound TEXT");
   ensureColumn(db, "runs", "queue_message_default_behavior", "queue_message_default_behavior TEXT");
   ensureColumn(db, "runs", "archived_at", "archived_at INTEGER");
+  ensureColumn(db, "runs", "notified_status", "notified_status TEXT");
+  ensureColumn(db, "runs", "notified_ask_id", "notified_ask_id TEXT");
+  db.exec(`CREATE TABLE IF NOT EXISTS push_tokens (
+    token TEXT NOT NULL,
+    fleet_id TEXT NOT NULL REFERENCES fleets(id),
+    environment TEXT NOT NULL CHECK (environment = 'production'),
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (fleet_id, token)
+  )`);
   return db;
 }

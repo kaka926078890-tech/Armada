@@ -161,7 +161,17 @@ struct WorkspaceListView: View {
                 }
             }
             .refreshable { await session.refresh() }
+            .onAppear { openPending() }
+            .onChange(of: session.pendingOpenRunId) { _, _ in openPending() }
         }
+    }
+
+    private func openPending() {
+        session.adoptPendingOpen()
+        guard let id = session.pendingOpenRunId else { return }
+        path = NavigationPath()
+        path.append(AppRoute.run(id))
+        session.pendingOpenRunId = nil
     }
 }
 
@@ -476,12 +486,16 @@ struct RunDetailView: View {
             }
         }
         .task {
+            session.watchingId = runId
             session.markOpened(runId)
             await reload()
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
                 await reload()
             }
+        }
+        .onDisappear {
+            if session.watchingId == runId { session.watchingId = nil }
         }
         .refreshable { await reload() }
     }

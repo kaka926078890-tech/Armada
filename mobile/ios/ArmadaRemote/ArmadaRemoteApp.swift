@@ -1,5 +1,11 @@
 import SwiftUI
 import Combine
+import UIKit
+import UserNotifications
+
+enum PushInbox {
+    static var runId: String?
+}
 
 @MainActor
 final class Session: ObservableObject {
@@ -14,9 +20,12 @@ final class Session: ObservableObject {
     @Published var lastError: String?
     @Published var readAt: [String: Double] = [:]
     @Published var focusColumn: BoardColumn?
+    @Published var pendingOpenRunId: String?
+    @Published var watchingId: String?
 
     private var poll: Task<Void, Never>?
     private let readKey = "armada.readAt"
+    private let pushTokenKey = "armada.pushToken"
 
     var bound: Bool { !relay.isEmpty && !token.isEmpty }
 
@@ -46,19 +55,64 @@ final class Session: ObservableObject {
             UserDefaults.standard.set(token, forKey: "token")
             bindError = nil
             startPolling()
+            requestPush()
         }
     }
 
     func unbind() {
         poll?.cancel()
+        let push = UserDefaults.standard.string(forKey: pushTokenKey)
+        let relayApi = bound ? self.api() : nil
         relay = ""; fleet = ""; token = ""
         UserDefaults.standard.removeObject(forKey: "relay")
         UserDefaults.standard.removeObject(forKey: "fleet")
         UserDefaults.standard.removeObject(forKey: "token")
         workspaces = []; runs = []; hiddenRuns = []
+        pendingOpenRunId = nil
+        watchingId = nil
+        PushInbox.runId = nil
+        UIApplication.shared.applicationIconBadgeNumber = 0
+        UIApplication.shared.unregisterForRemoteNotifications()
+        if let push {
+            UserDefaults.standard.removeObject(forKey: pushTokenKey)
+            if let api = relayApi {
+                Task { try? await api.deletePushToken(push) }
+            }
+        }
     }
 
     func api() -> RelayAPI { RelayAPI(base: relay, token: token) }
+
+    func adoptPendingOpen() {
+        guard bound else {
+            PushInbox.runId = nil
+            pendingOpenRunId = nil
+            return
+        }
+        if let id = PushInbox.runId {
+            pendingOpenRunId = id
+            PushInbox.runId = nil
+        }
+    }
+
+    func requestPushIfBound() {
+        if bound { requestPush() }
+    }
+
+    func requestPush() {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
+            guard granted else { return }
+            DispatchQueue.main.async {
+                UIApplication.shared.registerForRemoteNotifications()
+            }
+        }
+    }
+
+    func registerPushToken(_ hex: String) async {
+        guard bound, hex.count == 64 else { return }
+        UserDefaults.standard.set(hex, forKey: pushTokenKey)
+        try? await api().registerPushToken(hex)
+    }
 
     func refresh() async {
         guard bound else { return }
@@ -73,9 +127,15 @@ final class Session: ObservableObject {
             runs = try await r
             hiddenRuns = try await h
             lastError = nil
+            applyBadge()
         } catch {
             lastError = error.localizedDescription
         }
+    }
+
+    func applyBadge() {
+        let n = workspaces.reduce(0) { $0 + unreadCount(in: $1) }
+        UIApplication.shared.applicationIconBadgeNumber = n
     }
 
     func startPolling() {
@@ -147,12 +207,70 @@ final class Session: ObservableObject {
 
 @main
 struct ArmadaRemoteApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var session = Session()
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environmentObject(session)
                 .onOpenURL { session.bind(uri: $0.absoluteString) }
+                .onAppear {
+                    appDelegate.session = session
+                    session.adoptPendingOpen()
+                    session.requestPushIfBound()
+                }
+        }
+    }
+}
+
+final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+    weak var session: Session?
+
+    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        UNUserNotificationCenter.current().delegate = self
+        if let info = launchOptions?[.remoteNotification] as? [AnyHashable: Any] {
+            Self.takeRunId(info)
+        }
+        return true
+    }
+
+    func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        let hex = deviceToken.map { String(format: "%02x", $0) }.joined()
+        Task { @MainActor in
+            await session?.registerPushToken(hex)
+        }
+    }
+
+    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {}
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        let runId = notification.request.content.userInfo["runId"] as? String
+        if let runId, session?.watchingId == runId {
+            completionHandler([])
+        } else {
+            completionHandler([.banner, .sound, .list])
+        }
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        Self.takeRunId(response.notification.request.content.userInfo)
+        Task { @MainActor in
+            session?.adoptPendingOpen()
+        }
+        completionHandler()
+    }
+
+    static func takeRunId(_ userInfo: [AnyHashable: Any]) {
+        if let runId = userInfo["runId"] as? String, !runId.isEmpty {
+            PushInbox.runId = runId
         }
     }
 }

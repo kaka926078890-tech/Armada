@@ -464,3 +464,4 @@ P0 与 P1 可同 PR。P2 必须带 Push 的新 build。P3 不能用模拟器。
 | 日期 | 变更 |
 | --- | --- |
 | 2026-09-16 | 初稿并定为实施基准。单通道可见 APNs；生产环境；边沿对齐中台；token 在中转；点进 GET。产品拍板：方案 1；TestFlight；不要轮询本地通知。 |
+| 2026-09-16 | P0–P2 落地：`notifyEdge` / `apns` / `push_tokens` / `POST|DELETE /mobile/push-token` / `applyRunSnap` 挂钩；iOS production entitlements、登记、点开、`willPresent`。无 `.p8` 仍 no-op。P3 真机 A9 待 Auth Key 与新 TestFlight。 |

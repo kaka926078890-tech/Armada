@@ -1,21 +1,32 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync } from "fs";
+import { generateKeyPairSync } from "crypto";
+import { mkdtempSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { createRelayServer, type RelayServer } from "../src/server";
 import { encodeWorkspaceId } from "../src/uri";
+import type { ApnsConfig, ApnsPost } from "../src/apns";
 
 let srv: RelayServer | null = null;
 afterEach(() => { srv?.stop(); srv = null; });
 
-function start() {
-  const home = mkdtempSync(join(tmpdir(), "armada-relay-"));
+function dummyApns(post: ApnsPost): ApnsConfig {
+  const dir = mkdtempSync(join(tmpdir(), "armada-apns-"));
+  const { privateKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+  const keyPath = join(dir, "key.p8");
+  writeFileSync(keyPath, privateKey.export({ type: "pkcs8", format: "pem" }).toString());
+  return { keyPath, keyId: "KEYID", teamId: "LW2A4J4KKG", retryDelays: [], post };
+}
+
+function start(extra?: { home?: string; apns?: ApnsConfig | null }) {
+  const home = extra?.home ?? mkdtempSync(join(tmpdir(), "armada-relay-"));
   srv = createRelayServer({
     port: 0,
     hostname: "127.0.0.1",
     home,
     publicBase: "http://127.0.0.1:8780",
     adminToken: "adm-test",
+    apns: extra?.apns,
   });
   return srv;
 }
@@ -447,5 +458,191 @@ describe("relay serve", () => {
     const j = await ok.json() as any;
     expect(j.pairUri).toContain("armada-relay://pair");
     expect(j.opUri).toContain("armada-relay://op");
+  });
+});
+
+const TOKEN_A = "a".repeat(64);
+
+function completedRun(runId = "r-push", extra: Record<string, unknown> = {}) {
+  return {
+    runId,
+    machineId: "m-1",
+    workspaceRoot: "/Users/me/proj",
+    prompt: "fix the bug",
+    status: "completed",
+    finalText: "SECRET_BODY_MUST_NOT_LEAVE",
+    updatedAt: Date.now(),
+    ...extra,
+  };
+}
+
+describe("relay APNs", () => {
+  test("push-token: no bearer 401, pair 403, non-production 400", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    expect((await fetch(url(s, "/mobile/push-token"), { method: "POST", body: "{}" })).status).toBe(401);
+    const pair = await fetch(url(s, "/mobile/push-token"), {
+      method: "POST",
+      headers: { authorization: `Bearer ${fleet.hubSecret}`, "content-type": "application/json" },
+      body: JSON.stringify({ token: TOKEN_A, environment: "production" }),
+    });
+    expect(pair.status).toBe(403);
+    expect(await pair.json()).toEqual({ error: "OPERATOR_REQUIRED" });
+    const headers = { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" };
+    const badEnv = await fetch(url(s, "/mobile/push-token"), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ token: TOKEN_A, environment: "sandbox" }),
+    });
+    expect(badEnv.status).toBe(400);
+    expect(await badEnv.json()).toEqual({ error: "INVALID" });
+    const badTok = await fetch(url(s, "/mobile/push-token"), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ token: "zz", environment: "production" }),
+    });
+    expect(badTok.status).toBe(400);
+  });
+
+  test("mock APNs 200: collapse-id, no finalText", async () => {
+    const posts: { url: string; headers: Record<string, string>; body: string }[] = [];
+    const s = start({
+      apns: dummyApns(async (url, headers, body) => {
+        posts.push({ url, headers, body });
+        return { status: 200 };
+      }),
+    });
+    const fleet = s.createFleet();
+    const headers = { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" };
+    const reg = await fetch(url(s, "/mobile/push-token"), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ token: TOKEN_A, environment: "production" }),
+    });
+    expect(reg.status).toBe(204);
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    ws.send(JSON.stringify({ type: "snap.run", run: completedRun() }));
+    await Bun.sleep(40);
+    await s.flushApns();
+    expect(posts).toHaveLength(1);
+    expect(posts[0].headers["apns-collapse-id"]).toBe("run-r-push");
+    const parsed = JSON.parse(posts[0].body);
+    expect(parsed.finalText).toBeUndefined();
+    expect(JSON.stringify(parsed)).not.toContain("SECRET_BODY_MUST_NOT_LEAVE");
+    expect(parsed.kind).toBe("completed");
+    expect(parsed.runId).toBe("r-push");
+    ws.close();
+  });
+
+  test("missing key file: snap still writes, post unused", async () => {
+    const home = mkdtempSync(join(tmpdir(), "armada-relay-"));
+    const posts: string[] = [];
+    const s = start({
+      home,
+      apns: {
+        keyPath: join(home, "missing.p8"),
+        keyId: "KEYID",
+        teamId: "LW2A4J4KKG",
+        post: async () => {
+          posts.push("hit");
+          return { status: 200 };
+        },
+      },
+    });
+    const fleet = s.createFleet();
+    const headers = { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" };
+    await fetch(url(s, "/mobile/push-token"), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ token: TOKEN_A, environment: "production" }),
+    });
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    ws.send(JSON.stringify({ type: "snap.run", run: completedRun() }));
+    await Bun.sleep(40);
+    await s.flushApns();
+    const got = await (await fetch(url(s, "/mobile/runs/r-push"), { headers })).json() as { status: string };
+    expect(got.status).toBe("completed");
+    expect(posts).toEqual([]);
+    ws.close();
+  });
+
+  test("restart does not backfill a completed run", async () => {
+    const home = mkdtempSync(join(tmpdir(), "armada-relay-"));
+    const posts1: string[] = [];
+    const s1 = start({
+      home,
+      apns: dummyApns(async (_u, _h, body) => {
+        posts1.push(body);
+        return { status: 200 };
+      }),
+    });
+    const fleet = s1.createFleet();
+    const headers = { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" };
+    await fetch(url(s1, "/mobile/push-token"), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ token: TOKEN_A, environment: "production" }),
+    });
+    const ws1 = await connectHub(s1, fleet.fleet, fleet.hubSecret);
+    ws1.send(JSON.stringify({ type: "snap.run", run: completedRun() }));
+    await Bun.sleep(40);
+    await s1.flushApns();
+    expect(posts1).toHaveLength(1);
+    ws1.close();
+    s1.stop();
+    srv = null;
+
+    const posts2: string[] = [];
+    const s2 = start({
+      home,
+      apns: dummyApns(async (_u, _h, body) => {
+        posts2.push(body);
+        return { status: 200 };
+      }),
+    });
+    await s2.flushApns();
+    expect(posts2).toHaveLength(0);
+    const ws2 = await connectHub(s2, fleet.fleet, fleet.hubSecret);
+    ws2.send(JSON.stringify({ type: "snap.run", run: completedRun() }));
+    await Bun.sleep(40);
+    await s2.flushApns();
+    expect(posts2).toHaveLength(0);
+    ws2.close();
+  });
+
+  test("410 deletes token so later edges are not sent", async () => {
+    const posts: number[] = [];
+    const s = start({
+      apns: dummyApns(async () => {
+        posts.push(1);
+        return { status: 410, reason: "Unregistered" };
+      }),
+    });
+    const fleet = s.createFleet();
+    const headers = { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" };
+    await fetch(url(s, "/mobile/push-token"), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ token: TOKEN_A, environment: "production" }),
+    });
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    ws.send(JSON.stringify({ type: "snap.run", run: completedRun() }));
+    await Bun.sleep(40);
+    await s.flushApns();
+    expect(posts).toHaveLength(1);
+    ws.send(JSON.stringify({ type: "snap.run", run: { ...completedRun(), status: "running", finalText: null } }));
+    await Bun.sleep(40);
+    await s.flushApns();
+    ws.send(JSON.stringify({ type: "snap.run", run: completedRun() }));
+    await Bun.sleep(40);
+    await s.flushApns();
+    expect(posts).toHaveLength(1);
+    const gone = await fetch(url(s, "/mobile/push-token"), {
+      method: "DELETE",
+      headers,
+      body: JSON.stringify({ token: TOKEN_A }),
+    });
+    expect(gone.status).toBe(204);
+    ws.close();
   });
 });

@@ -1,4 +1,5 @@
 import { join } from "path";
+import { loadApnsFromEnv } from "./apns";
 import { createRelayServer } from "./server";
 
 const port = Number(process.env.RELAY_PORT ?? 8780);
@@ -7,7 +8,8 @@ const home = process.env.RELAY_HOME ?? join(process.env.HOME!, ".armada-relay");
 const publicBase = (process.env.RELAY_PUBLIC_BASE ?? `http://${hostname}:${port}`).replace(/\/+$/, "");
 const adminToken = process.env.RELAY_ADMIN_TOKEN;
 
-const s = createRelayServer({ port, hostname, home, publicBase, adminToken });
+const apns = loadApnsFromEnv();
+const s = createRelayServer({ port, hostname, home, publicBase, adminToken, apns });
 console.log(`armada-relay listening on http://${hostname}:${s.port}`);
 console.log(`armada-relay publicBase=${s.publicBase} home=${home}`);
 console.log(`armada-relay admin header X-Relay-Admin (set RELAY_ADMIN_TOKEN in production)`);

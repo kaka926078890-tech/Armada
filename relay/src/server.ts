@@ -4,6 +4,8 @@ import { mkdirSync } from "fs";
 import { Hono } from "hono";
 import { openRelayDb } from "./db";
 import { decodeWorkspaceId, encodeWorkspaceId, formatOpUri, formatPairUri } from "./uri";
+import { createApnsSender, type ApnsConfig } from "./apns";
+import { notifyEdges, type NotifyEdge } from "./notifyEdge";
 
 export const PROTOCOL_VERSION = 1;
 const MAX_BODY = 20 * 1024 * 1024;
@@ -76,6 +78,7 @@ export interface RelayServer {
   publicBase: string;
   adminToken: string;
   stop: () => void;
+  flushApns: () => Promise<void>;
   createFleet: () => { fleet: string; pairUri: string; opUri: string; hubSecret: string; operatorToken: string };
 }
 
@@ -85,6 +88,7 @@ export function createRelayServer(opts: {
   home?: string;
   publicBase: string;
   adminToken?: string;
+  apns?: ApnsConfig | null;
 }): RelayServer {
   const home = opts.home ?? join(process.env.HOME!, ".armada-relay");
   mkdirSync(home, { recursive: true });
@@ -95,10 +99,45 @@ export function createRelayServer(opts: {
   const hubSockets = new Map<string, { send: (s: string) => void; ws: unknown }>();
   const rate = new Map<string, number[]>();
   let reqSeq = 0;
+  const apnsSender = createApnsSender(opts.apns ?? null);
+  if (!apnsSender.enabled) console.warn("armada-relay APNS_DISABLED");
+  const runSend = new Map<string, Promise<void>>();
+  let fleetInflight = 0;
 
   function audit(actor: string, action: string, target?: string, payload?: object) {
     db.query("INSERT INTO audit (ts, actor, action, target, payload) VALUES (?1,?2,?3,?4,?5)")
       .run(Date.now(), actor, action, target ?? null, payload ? JSON.stringify(payload) : null);
+  }
+
+  function enqueueRun(runId: string, fn: () => Promise<void>) {
+    const next = (runSend.get(runId) ?? Promise.resolve()).then(fn, fn);
+    runSend.set(runId, next.catch(() => {}));
+  }
+
+  function dispatchEdges(fleetId: string, runId: string, edges: NotifyEdge[]) {
+    if (!apnsSender.enabled || edges.length === 0) return;
+    const tokens = db.query("SELECT token FROM push_tokens WHERE fleet_id=?1").all(fleetId) as { token: string }[];
+    if (tokens.length === 0) return;
+    enqueueRun(runId, async () => {
+      for (const edge of edges) {
+        for (const { token } of tokens) {
+          while (fleetInflight >= 20) await new Promise((r) => setTimeout(r, 20));
+          fleetInflight++;
+          try {
+            const result = await apnsSender.send(token, runId, edge);
+            const tail = token.slice(-8);
+            if (result === "ok") audit("relay", "apns.ok", runId, { token: tail, kind: edge.kind });
+            else if (result === "unregistered") {
+              db.query("DELETE FROM push_tokens WHERE fleet_id=?1 AND token=?2").run(fleetId, token);
+              audit("relay", "apns.unregistered", runId, { token: tail });
+            } else if (result === "too_large") audit("relay", "apns.payload_too_large", runId, { token: tail, kind: edge.kind });
+            else if (result === "fail") audit("relay", "apns.fail", runId, { token: tail, kind: edge.kind });
+          } finally {
+            fleetInflight--;
+          }
+        }
+      }
+    });
   }
 
   function getFleetByOp(token: string) {
@@ -146,10 +185,16 @@ export function createRelayServer(opts: {
     const pendingAsk = snap.pendingAsk == null ? null : JSON.stringify(snap.pendingAsk);
     const outbound = Array.isArray(snap.outbound) ? JSON.stringify(snap.outbound) : null;
     const queueMode = typeof snap.queueMessageDefaultBehavior === "string" ? snap.queueMessageDefaultBehavior : null;
-    const existing = db.query("SELECT id, archived_at FROM runs WHERE id=?1").get(snap.runId) as { id: string; archived_at?: number | null } | undefined;
+    const existing = db.query("SELECT id, archived_at, notified_status, notified_ask_id FROM runs WHERE id=?1").get(snap.runId) as
+      | { id: string; archived_at?: number | null; notified_status?: string | null; notified_ask_id?: string | null }
+      | undefined;
     const archivedAt = snap.archived
       ? (existing?.archived_at && Number(existing.archived_at) > 0 ? Number(existing.archived_at) : Date.now())
       : null;
+    const prev = {
+      notifiedStatus: existing?.notified_status ?? null,
+      notifiedAskId: existing?.notified_ask_id ?? null,
+    };
     if (existing) {
       db.query(`UPDATE runs SET fleet_id=?2, machine_id=?3, workspace_root=?4, prompt=?5, status=?6,
         final_text=?7, error=?8, pending_ask=?9, outbound=?11, queue_message_default_behavior=?12, archived_at=?13, updated_at=?10 WHERE id=?1`)
@@ -159,6 +204,10 @@ export function createRelayServer(opts: {
         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?11,?12,?13,?10,?10)`)
         .run(snap.runId, fleetId, snap.machineId, snap.workspaceRoot, snap.prompt, status, finalText, error, pendingAsk, now, outbound, queueMode, archivedAt);
     }
+    const decided = notifyEdges(prev, { prompt: snap.prompt, status, pendingAsk: snap.pendingAsk });
+    db.query("UPDATE runs SET notified_status=?2, notified_ask_id=?3 WHERE id=?1")
+      .run(snap.runId, decided.notifiedStatus, decided.notifiedAskId);
+    dispatchEdges(fleetId, snap.runId, decided.edges);
     return db.query("SELECT * FROM runs WHERE id=?1").get(snap.runId);
   }
 
@@ -257,6 +306,39 @@ export function createRelayServer(opts: {
       online: w.online !== false,
     }));
     return c.json({ hubOffline, workspaces });
+  });
+
+  const TOKEN_HEX = /^[a-fA-F0-9]{64}$/;
+
+  app.post("/mobile/push-token", async (c) => {
+    const fleet = (c as any).get("fleet") as { id: string };
+    const body = await c.req.json().catch(() => null);
+    if (!body || typeof body.token !== "string" || !TOKEN_HEX.test(body.token)) {
+      return c.json({ error: "INVALID" }, 400);
+    }
+    if (body.environment !== "production") return c.json({ error: "INVALID" }, 400);
+    db.query(`INSERT INTO push_tokens (token, fleet_id, environment, updated_at) VALUES (?1,?2,'production',?3)
+      ON CONFLICT(fleet_id, token) DO UPDATE SET updated_at=excluded.updated_at`)
+      .run(body.token, fleet.id, Date.now());
+    const extra = db.query("SELECT token FROM push_tokens WHERE fleet_id=?1 ORDER BY updated_at ASC").all(fleet.id) as { token: string }[];
+    if (extra.length > 20) {
+      for (const row of extra.slice(0, extra.length - 20)) {
+        db.query("DELETE FROM push_tokens WHERE fleet_id=?1 AND token=?2").run(fleet.id, row.token);
+      }
+    }
+    audit("operator", "push.register", fleet.id, { token: body.token.slice(-8) });
+    return c.body(null, 204);
+  });
+
+  app.delete("/mobile/push-token", async (c) => {
+    const fleet = (c as any).get("fleet") as { id: string };
+    const body = await c.req.json().catch(() => null);
+    if (!body || typeof body.token !== "string" || !TOKEN_HEX.test(body.token)) {
+      return c.json({ error: "INVALID" }, 400);
+    }
+    db.query("DELETE FROM push_tokens WHERE fleet_id=?1 AND token=?2").run(fleet.id, body.token);
+    audit("operator", "push.delete", fleet.id, { token: body.token.slice(-8) });
+    return c.body(null, 204);
   });
 
   app.post("/mobile/runs", async (c) => {
@@ -484,6 +566,7 @@ export function createRelayServer(opts: {
     publicBase,
     adminToken,
     createFleet,
+    async flushApns() { await Promise.all([...runSend.values()]); },
     stop() { server.stop(true); db.close(); },
   };
 }
