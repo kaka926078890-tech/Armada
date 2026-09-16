@@ -354,6 +354,42 @@ describe("eventsToChat", () => {
     expect(blocks.filter((b) => b.kind === "user")).toEqual([]);
   });
 
+  test("jsonl A/B/A/B replay after turn_ended is one pair (r-c56e8162 seq 191-223)", () => {
+    const status = "把剩余设计收成一份完整规格：触发/失败路径一并写死，只把必须你拍板或动手的运维项单独列出来。";
+    const body =
+      "完整方案已经写成实施基准，并推到 `armada` 的 `origin/master`：\n\n[`docs/superpowers/specs/2026-09-16-armada-app-push-design.md`](armada/docs/superpowers/specs/2026-09-16-armada-app-push-design.md)";
+    const asst = (seq: number, text: string) => ev({
+      seq, source: "transcript",
+      payload: JSON.stringify({ role: "assistant", message: { content: [{ type: "text", text }] } }),
+    });
+    const tool = (seq: number) => ev({
+      seq, source: "transcript",
+      payload: JSON.stringify({
+        role: "assistant",
+        message: { content: [{ type: "tool_use", name: "Read", input: { path: "/ws/spec.md" } }] },
+      }),
+    });
+    const ended = (seq: number) => ev({
+      seq, source: "transcript", payload: JSON.stringify({ type: "turn_ended", status: "success" }),
+    });
+    const replay = (start: number) => [
+      tool(start), asst(start + 1, status), tool(start + 2), asst(start + 3, body), ended(start + 4),
+    ];
+    const blocks = eventsToChat([
+      ev({ seq: 124, source: "transcript", payload: JSON.stringify({
+        role: "user", message: { content: [{ type: "text", text: "<user_query>\n继续\n</user_query>" }] },
+      }) }),
+      ...replay(190),
+      ...replay(202),
+      ...replay(214),
+    ]);
+    const assts = blocks.filter((b) => b.kind === "assistant");
+    expect(assts.map((b) => b.kind === "assistant" ? b.text : "")).toEqual([status, body]);
+    expect(assts[0]).toMatchObject({ kind: "assistant", seq: 191 });
+    expect(assts[1]).toMatchObject({ kind: "assistant", seq: 193 });
+    expect(assistantBodyForPrompt(blocks, "继续")).toBe(`${status}\n\n${body}`);
+  });
+
   test("same assistant text in two operator turns stays two bubbles", () => {
     const blocks = eventsToChat([
       ev({ seq: 1, source: "transcript", payload: JSON.stringify({

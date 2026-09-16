@@ -94,6 +94,30 @@ describe("runToSnap", () => {
     expect(snap.finalText).toBe("现在修好了。");
   });
 
+  test("completed finalText drops A/B/A/B jsonl replay (r-c56e8162)", () => {
+    const status = "把剩余设计收成一份完整规格。";
+    const body = "完整方案已经写成实施基准。";
+    const asst = (seq: number, text: string): RunEvent => ev({
+      seq, source: "transcript",
+      payload: JSON.stringify({ role: "assistant", message: { content: [{ type: "text", text }] } }),
+    });
+    const run = {
+      id: "r-1", machine_id: "m-1", workspace_root: "/ws/a",
+      prompt: "继续", status: "completed", created_at: 1,
+    };
+    const events = [
+      ev({ seq: 1, source: "transcript", payload: JSON.stringify({
+        role: "user", message: { content: [{ type: "text", text: "<user_query>\n继续\n</user_query>" }] },
+      }) }),
+      asst(2, status), asst(3, body),
+      asst(4, status), asst(5, body),
+      asst(6, status), asst(7, body),
+    ];
+    const snap = runToSnap(run, events);
+    expect(snap.status).toBe("completed");
+    expect(snap.finalText).toBe(`${status}\n\n${body}`);
+  });
+
   test("running snap carries visible outbound and queue mode", () => {
     const run = {
       id: "r-1", machine_id: "m-1", workspace_root: "/ws/a", prompt: "hi", status: "running",
