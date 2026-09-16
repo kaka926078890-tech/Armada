@@ -1,9 +1,12 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import {
   groupRuns, cardView, listWorkspaceSlots, encodeWorkspaceKey, decodeWorkspaceKey,
   filterRunsByWorkspace, sortConversations, groupSlotsByMachine, isUnreadCompleted, isUnreadMessage,
   workspaceHasUnread, workspaceUnreadCount, formatUnreadCount, canArchiveRun, canRetryRun, isHubArchived,
-  workspaceFolderName, workspaceHasLiveRun, resolveSelectedWorkspace, isUnreadNeedInput, cardChromeClass, type RunRow,
+  workspaceFolderName, workspaceHasLiveRun, resolveSelectedWorkspace, isUnreadNeedInput, cardChromeClass,
+  extensionLagNotice, REQUIRED_EXTENSION_VERSION, type RunRow,
 } from "../src/boardState";
 
 const base: RunRow = {
@@ -260,5 +263,28 @@ describe("resolveSelectedWorkspace", () => {
 
   test("returns null when nothing is listed and there is no ghost", () => {
     expect(resolveSelectedWorkspace([], keyA, null)).toBeNull();
+  });
+});
+
+describe("extensionLagNotice", () => {
+  test("0.4.18 behind 0.4.21 names both versions", () => {
+    expect(extensionLagNotice("0.4.18", "0.4.21")).toBe("扩展 0.4.18，需 0.4.21（Ask / Build）");
+  });
+
+  test("equal or newer is silent", () => {
+    expect(extensionLagNotice("0.4.21", "0.4.21")).toBeNull();
+    expect(extensionLagNotice("0.4.22", "0.4.21")).toBeNull();
+    expect(extensionLagNotice("0.5.0", "0.4.21")).toBeNull();
+  });
+
+  test("missing or junk version is silent", () => {
+    expect(extensionLagNotice(null, "0.4.21")).toBeNull();
+    expect(extensionLagNotice("", "0.4.21")).toBeNull();
+    expect(extensionLagNotice("dev", "0.4.21")).toBeNull();
+  });
+
+  test("required version tracks the shipped vsix", () => {
+    const pkg = JSON.parse(readFileSync(join(import.meta.dir, "../../../extension/package.json"), "utf8")) as { version: string };
+    expect(REQUIRED_EXTENSION_VERSION).toBe(pkg.version);
   });
 });

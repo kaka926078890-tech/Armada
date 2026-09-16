@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { Machine } from "../types";
 import type { RunRow } from "../boardState";
 import {
-  encodeWorkspaceKey, filterRunsByWorkspace, formatUnreadCount, groupSlotsByMachine,
+  encodeWorkspaceKey, extensionLagNotice, filterRunsByWorkspace, formatUnreadCount, groupSlotsByMachine,
   workspaceFolderName, workspaceHasLiveRun, workspaceUnreadCount, type WorkspaceSlot,
 } from "../boardState";
 
@@ -62,6 +62,7 @@ export default function Sidebar({
   const [draft, setDraft] = useState("");
 
   const hostOf = (id: string) => machines.find((m) => m.id === id)?.name ?? "";
+  const lagOf = (id: string) => extensionLagNotice(machines.find((m) => m.id === id)?.extension_version);
 
   const commit = (machineId: string) => {
     onRename(machineId, draft.trim());
@@ -101,7 +102,9 @@ export default function Sidebar({
         {groups.length === 0 && (
           <div className="px-3 py-4 text-[12px] text-zinc-600">暂无在线工作区</div>
         )}
-        {groups.map((g) => (
+        {groups.map((g) => {
+          const lag = lagOf(g.machineId);
+          return (
           <div key={g.machineId} className="pb-2">
             <div className="group px-3 py-1.5 flex items-center gap-2">
               <span className={g.online ? "text-emerald-400 text-[10px]" : "text-zinc-600 text-[10px]"}>●</span>
@@ -133,6 +136,9 @@ export default function Sidebar({
                 </>
               )}
             </div>
+            {lag ? (
+              <div className="pl-7 pr-3 pb-1 text-[10px] text-amber-400 leading-snug">{lag}</div>
+            ) : null}
             {g.workspaces.map((s) => {
               const key = encodeWorkspaceKey(s.machineId, s.root);
               const wsRuns = filterRunsByWorkspace(allRuns, s.machineId, s.root);
@@ -154,7 +160,8 @@ export default function Sidebar({
               );
             })}
           </div>
-        ))}
+          );
+        })}
       </div>
     </aside>
   );

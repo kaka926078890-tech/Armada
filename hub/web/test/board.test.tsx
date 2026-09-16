@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import Board from "../src/components/Board";
-import type { RunRow } from "../src/boardState";
+import { extensionLagNotice, type RunRow } from "../src/boardState";
 
 const run: RunRow = {
   id: "r-1", machine_id: "m-1", window_id: "w-1", workspace_root: "/ws/a",
@@ -63,5 +63,22 @@ describe("Board unread chrome", () => {
       />,
     );
     expect(html).toContain("重试");
+  });
+
+  test("card on a stale Windows extension names the vsix gap", () => {
+    const html = renderToStaticMarkup(
+      <Board
+        runs={[run]}
+        machines={[{ id: "m-1", name: "Win Destop", os: "win32", cursor_version: "1.128.0", extension_version: "0.4.18", open_workspaces: "[]", status: "online", last_seen_at: 1 }]}
+        selected={null}
+        onSelect={() => {}}
+        showArchived={false}
+        onHide={() => {}}
+        onUnhide={() => {}}
+        readMap={{}}
+        onRename={() => {}}
+      />,
+    );
+    expect(html).toContain(extensionLagNotice("0.4.18")!);
   });
 });

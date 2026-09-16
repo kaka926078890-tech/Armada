@@ -92,6 +92,30 @@ export function machineLabel(m: { name: string; display_name?: string | null }):
   return d || m.name;
 }
 
+/** 中台当前打包的 vsix。落后的被控机看不到 Ask 归属 / Created Plan。 */
+export const REQUIRED_EXTENSION_VERSION = "0.4.21";
+
+function parseExtVersion(raw: string | null | undefined): [number, number, number] | null {
+  if (typeof raw !== "string") return null;
+  const m = raw.trim().match(/^(\d+)\.(\d+)\.(\d+)/);
+  if (!m) return null;
+  return [Number(m[1]), Number(m[2]), Number(m[3])];
+}
+
+export function extensionLagNotice(
+  installed: string | null | undefined,
+  required = REQUIRED_EXTENSION_VERSION,
+): string | null {
+  const got = parseExtVersion(installed);
+  const need = parseExtVersion(required);
+  if (!got || !need) return null;
+  for (let i = 0; i < 3; i++) {
+    if (got[i] > need[i]) return null;
+    if (got[i] < need[i]) return `扩展 ${got.join(".")}，需 ${need.join(".")}（Ask / Build）`;
+  }
+  return null;
+}
+
 export function listWorkspaceSlots(machines: Array<{
   id: string; name: string; os: string; status: string; open_workspaces: string; display_name?: string | null;
 }>): WorkspaceSlot[] {

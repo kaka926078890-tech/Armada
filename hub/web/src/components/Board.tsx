@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { groupRuns, cardView, COLUMN_LABELS, canArchiveRun, canRetryRun, isUnreadAlert, isUnreadNeedInput, machineLabel, workspaceFolderName, runDisplayName, cardChromeClass, type ColumnKey, type RunRow } from "../boardState";
+import { groupRuns, cardView, COLUMN_LABELS, canArchiveRun, canRetryRun, isUnreadAlert, isUnreadNeedInput, machineLabel, workspaceFolderName, runDisplayName, cardChromeClass, extensionLagNotice, type ColumnKey, type RunRow } from "../boardState";
 import type { Machine } from "../types";
 
 const COL_ACCENT: Record<ColumnKey, string> = {
@@ -35,6 +35,7 @@ export default function Board({ runs, machines, selected, onSelect, showArchived
     const m = machines.find((x) => x.id === id);
     return m ? machineLabel(m) : id;
   };
+  const lagOf = (id: string) => extensionLagNotice(machines.find((x) => x.id === id)?.extension_version);
   const startEdit = (r: RunRow) => {
     setDraft(runDisplayName(r));
     setEditingId(r.id);
@@ -61,6 +62,7 @@ export default function Board({ runs, machines, selected, onSelect, showArchived
               const v = cardView(r, now);
               const unread = isUnreadAlert(r, readMap[r.id]) || isUnreadNeedInput(r, readMap[r.id]);
               const editing = editingId === r.id;
+              const lag = lagOf(r.machine_id);
               return (
                 <div key={r.id} className={`group relative min-w-0 text-left rounded-md border ${cardChromeClass(unread, selected === r.id)}`}>
                   {editing ? (
@@ -81,6 +83,9 @@ export default function Board({ runs, machines, selected, onSelect, showArchived
                     <button onClick={() => onSelect(r.id)} className="w-full min-w-0 text-left px-2.5 py-2">
                       <div className="text-[13px] font-medium leading-snug text-zinc-100 pr-16 break-all">{v.title}</div>
                       <div className="text-[11px] text-zinc-500 mt-1 truncate">{nameOf(r.machine_id)} · {workspaceFolderName(r.workspace_root)}</div>
+                      {lag ? (
+                        <div className="text-[11px] text-amber-400 mt-1 leading-snug">{lag}</div>
+                      ) : null}
                       {r.status === "binding" && (
                         <div className="text-[11px] text-sky-500/80 mt-1">已提交,正在关联会话</div>
                       )}
