@@ -154,7 +154,7 @@
 
 限流：archive / unarchive **不计入** 派发 20/5min（不是 dispatch）。失败不改中转行。
 
-中转表：`ensureColumn(db, "runs", "archived_at", "archived_at INTEGER")`。`applyRunSnap`：`archived === true` 写 `Date.now()`（若已有非空则保留原值）；`false`/`缺省` 写 `NULL`。不要求与 hub 时间戳逐毫秒相等；列表过滤只认是否非空。
+中转表：`ensureColumn(db, "runs", "archived_at", "archived_at INTEGER")`。`applyRunSnap`：`archived === true` 写 `Date.now()`（若已有非空则保留原值）；`archived === false` 写 `NULL`；**缺省不改**已有 `archived_at`（后到的旧 snap 不得把已隐藏行重新露出）。不要求与 hub 时间戳逐毫秒相等；列表过滤只认是否非空。
 
 **备选不选：** 中转收到 `archived:true` 就 `DELETE` 行。详情打不开，违反 P2。
 
@@ -220,7 +220,7 @@ App POST /mobile/runs/:id/archive
 
 ### 5.3 列表与未读
 
-`Session.refresh`：**始终**并行拉默认列表与 `?archived=1`（对齐中台 `api.runs()` + `api.runs({ archived: true })`），客户端按仓页开关选用。未读红点 **只计默认列表**（已隐藏不贡献 workspace 红点）。
+`Session.refresh`：**始终**并行拉默认列表与 `?archived=1`（对齐中台 `api.runs()` + `api.runs({ archived: true })`），客户端按仓页开关选用。未读红点 **只计默认列表**（已隐藏不贡献 workspace 红点）。滑动/按钮隐藏必须**同步**把该 id 从 `Session.runs` 挪到 `hiddenRuns`（SwiftUI `allowsFullSwipe` 要求数据源立刻少一行，否则切 tab 回闪、连划崩溃）。`refresh` 用序号丢弃过期响应；`pendingArchive` 直到 `?archived=1` 含该 id 才清，避免 10s 轮询把未落地的隐藏冲掉。
 
 ### 5.4 失败路径
 
@@ -316,3 +316,4 @@ v1 任务切分（实施计划展开）：
 | --- | --- |
 | 2026-09-16 | 初稿。方案 A（全闭环对等）已在对话拍板。 |
 | 2026-09-16 | 落地：`runToSnap.archived`、中转 archive 路由、relayAttach 消失检测、iOS 隐藏/查看已隐藏。 |
+| 2026-09-16 | 修：`applyRunSnap` 缺省 `archived` 不覆盖已有隐藏；App 滑动立刻改 `Session.runs`，pending 意图抗旧 refresh（切 tab 回闪 / List 崩溃）。 |

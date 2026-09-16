@@ -24,6 +24,9 @@ final class Session: ObservableObject {
     @Published var watchingId: String?
 
     private var poll: Task<Void, Never>?
+    private var refreshSeq = 0
+    private var pendingArchive = Set<String>()
+    private var pendingUnarchive = Set<String>()
     private let readKey = "armada.readAt"
     private let pushTokenKey = "armada.pushToken"
 
@@ -68,6 +71,8 @@ final class Session: ObservableObject {
         UserDefaults.standard.removeObject(forKey: "fleet")
         UserDefaults.standard.removeObject(forKey: "token")
         workspaces = []; runs = []; hiddenRuns = []
+        pendingArchive = []; pendingUnarchive = []
+        refreshSeq += 1
         pendingOpenRunId = nil
         watchingId = nil
         PushInbox.runId = nil
@@ -114,23 +119,105 @@ final class Session: ObservableObject {
         try? await api().registerPushToken(hex)
     }
 
+    func applyLocalArchive(_ runId: String, archived: Bool, snapshot: RunDTO? = nil) {
+        if archived {
+            pendingUnarchive.remove(runId)
+            pendingArchive.insert(runId)
+            let moved = snapshot ?? runs.first { $0.runId == runId } ?? hiddenRuns.first { $0.runId == runId }
+            runs.removeAll { $0.runId == runId }
+            if var run = moved {
+                run.archived = true
+                hiddenRuns = [run] + hiddenRuns.filter { $0.runId != runId }
+            }
+        } else {
+            pendingArchive.remove(runId)
+            pendingUnarchive.insert(runId)
+            let moved = snapshot ?? hiddenRuns.first { $0.runId == runId } ?? runs.first { $0.runId == runId }
+            hiddenRuns.removeAll { $0.runId == runId }
+            if var run = moved {
+                run.archived = false
+                runs = [run] + runs.filter { $0.runId != runId }
+            }
+        }
+    }
+
+    func revertLocalArchive(_ runId: String) {
+        if pendingArchive.contains(runId) {
+            pendingArchive.remove(runId)
+            let moved = hiddenRuns.first { $0.runId == runId }
+            hiddenRuns.removeAll { $0.runId == runId }
+            if var run = moved {
+                run.archived = false
+                runs = [run] + runs.filter { $0.runId != runId }
+            }
+            return
+        }
+        if pendingUnarchive.contains(runId) {
+            pendingUnarchive.remove(runId)
+            let moved = runs.first { $0.runId == runId }
+            runs.removeAll { $0.runId == runId }
+            if var run = moved {
+                run.archived = true
+                hiddenRuns = [run] + hiddenRuns.filter { $0.runId != runId }
+            }
+        }
+    }
+
     func refresh() async {
         guard bound else { return }
+        refreshSeq += 1
+        let seq = refreshSeq
         do {
             let api = api()
             async let w = api.workspaces()
             async let r = api.runs()
             async let h = api.runs(archived: true)
             let ws = try await w
+            let newRuns = try await r
+            let newHidden = try await h
+            guard seq == refreshSeq else { return }
             hubOffline = ws.hubOffline
             workspaces = ws.workspaces
-            runs = try await r
-            hiddenRuns = try await h
+            adoptFetchedLists(runs: newRuns, hidden: newHidden)
             lastError = nil
             applyBadge()
         } catch {
+            guard seq == refreshSeq else { return }
             lastError = error.localizedDescription
         }
+    }
+
+    private func adoptFetchedLists(runs incomingRuns: [RunDTO], hidden incomingHidden: [RunDTO]) {
+        var nextRuns = incomingRuns
+        var nextHidden = incomingHidden
+        var stillArchive = pendingArchive
+        var stillUnarchive = pendingUnarchive
+        for id in pendingArchive {
+            if incomingHidden.contains(where: { $0.runId == id }) {
+                stillArchive.remove(id)
+            } else {
+                nextRuns.removeAll { $0.runId == id }
+                if let local = hiddenRuns.first(where: { $0.runId == id }),
+                   !nextHidden.contains(where: { $0.runId == id }) {
+                    nextHidden.insert(local, at: 0)
+                }
+            }
+        }
+        for id in pendingUnarchive {
+            if incomingRuns.contains(where: { $0.runId == id }) && !incomingHidden.contains(where: { $0.runId == id }) {
+                stillUnarchive.remove(id)
+            } else {
+                nextHidden.removeAll { $0.runId == id }
+                if let local = runs.first(where: { $0.runId == id }),
+                   !nextRuns.contains(where: { $0.runId == id }) {
+                    nextRuns.insert(local, at: 0)
+                }
+            }
+        }
+        runs = nextRuns
+        hiddenRuns = nextHidden
+        pendingArchive = stillArchive
+        pendingUnarchive = stillUnarchive
     }
 
     func applyBadge() {

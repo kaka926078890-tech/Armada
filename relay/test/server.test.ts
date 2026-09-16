@@ -346,6 +346,36 @@ describe("relay serve", () => {
     ws.close();
   });
 
+  test("later snap omitting archived does not unhide", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    const visible = {
+      runId: "r-1",
+      machineId: "m-1",
+      workspaceRoot: "/Users/me/proj",
+      prompt: "hello fleet",
+      status: "completed",
+      finalText: "好了",
+      archived: false,
+      updatedAt: Date.now(),
+    };
+    ws.send(JSON.stringify({ type: "snap.run", run: visible }));
+    await Bun.sleep(40);
+    ws.send(JSON.stringify({ type: "snap.run", run: { ...visible, archived: true } }));
+    await Bun.sleep(40);
+    const { archived: _archived, ...omitted } = visible;
+    ws.send(JSON.stringify({ type: "snap.run", run: omitted }));
+    await Bun.sleep(40);
+    const headers = { authorization: `Bearer ${fleet.operatorToken}` };
+    const open = await (await fetch(url(s, "/mobile/runs"), { headers })).json() as any;
+    expect(open.runs.map((r: any) => r.runId)).not.toContain("r-1");
+    const hidden = await (await fetch(url(s, "/mobile/runs?archived=1"), { headers })).json() as any;
+    expect(hidden.runs.map((r: any) => r.runId)).toContain("r-1");
+    expect(hidden.runs[0].archived).toBe(true);
+    ws.close();
+  });
+
   test("archive and unarchive roundtrip with fake hub", async () => {
     const s = start();
     const fleet = s.createFleet();

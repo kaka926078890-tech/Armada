@@ -259,15 +259,21 @@ struct WorkspaceHome: View {
                 if filtered.isEmpty {
                     Text("这一列还没有任务").foregroundStyle(.secondary)
                 }
-                ForEach(filtered) { run in
+                ForEach(filtered, id: \.runId) { run in
                     NavigationLink(value: AppRoute.run(run.runId)) {
                         RunRow(run: run, unread: session.isUnread(run))
                     }
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                         if showArchived {
-                            Button("取消隐藏") { Task { await unhide(run.runId) } }
+                            Button("取消隐藏") {
+                                session.applyLocalArchive(run.runId, archived: false)
+                                Task { await unhide(run.runId) }
+                            }
                         } else if run.showsArchive {
-                            Button("隐藏", role: .destructive) { Task { await hide(run.runId) } }
+                            Button("隐藏", role: .destructive) {
+                                session.applyLocalArchive(run.runId, archived: true)
+                                Task { await hide(run.runId) }
+                            }
                         }
                     }
                 }
@@ -306,20 +312,24 @@ struct WorkspaceHome: View {
 
     private func hide(_ runId: String) async {
         do {
-            _ = try await session.api().archive(runId: runId)
+            let run = try await session.api().archive(runId: runId)
+            session.applyLocalArchive(runId, archived: true, snapshot: run)
             session.lastError = nil
             await session.refresh()
         } catch {
+            session.revertLocalArchive(runId)
             session.lastError = hideError(error)
         }
     }
 
     private func unhide(_ runId: String) async {
         do {
-            _ = try await session.api().unarchive(runId: runId)
+            let run = try await session.api().unarchive(runId: runId)
+            session.applyLocalArchive(runId, archived: false, snapshot: run)
             session.lastError = nil
             await session.refresh()
         } catch {
+            session.revertLocalArchive(runId)
             session.lastError = error.localizedDescription
         }
     }
@@ -464,12 +474,15 @@ struct RunDetailView: View {
                     if run.isArchived {
                         Button("取消隐藏") {
                             Task {
+                                session.applyLocalArchive(runId, archived: false, snapshot: run)
                                 do {
-                                    _ = try await session.api().unarchive(runId: runId)
+                                    let next = try await session.api().unarchive(runId: runId)
+                                    session.applyLocalArchive(runId, archived: false, snapshot: next)
                                     err = nil
                                     await reload()
                                     await session.refresh()
                                 } catch {
+                                    session.revertLocalArchive(runId)
                                     err = error.localizedDescription
                                 }
                             }
@@ -477,12 +490,15 @@ struct RunDetailView: View {
                     } else if run.showsArchive {
                         Button("隐藏") {
                             Task {
+                                session.applyLocalArchive(runId, archived: true, snapshot: run)
                                 do {
-                                    _ = try await session.api().archive(runId: runId)
+                                    let next = try await session.api().archive(runId: runId)
+                                    session.applyLocalArchive(runId, archived: true, snapshot: next)
                                     err = nil
                                     await session.refresh()
                                     dismiss()
                                 } catch {
+                                    session.revertLocalArchive(runId)
                                     err = hideError(error)
                                 }
                             }

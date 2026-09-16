@@ -188,9 +188,12 @@ export function createRelayServer(opts: {
     const existing = db.query("SELECT id, archived_at, notified_status, notified_ask_id FROM runs WHERE id=?1").get(snap.runId) as
       | { id: string; archived_at?: number | null; notified_status?: string | null; notified_ask_id?: string | null }
       | undefined;
-    const archivedAt = snap.archived
-      ? (existing?.archived_at && Number(existing.archived_at) > 0 ? Number(existing.archived_at) : Date.now())
-      : null;
+    const existingArchived = existing?.archived_at && Number(existing.archived_at) > 0 ? Number(existing.archived_at) : null;
+    const archivedAt = snap.archived === true
+      ? (existingArchived ?? Date.now())
+      : snap.archived === false
+        ? null
+        : existingArchived;
     const prev = {
       notifiedStatus: existing?.notified_status ?? null,
       notifiedAskId: existing?.notified_ask_id ?? null,
