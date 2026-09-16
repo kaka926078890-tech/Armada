@@ -227,10 +227,21 @@ export function isUnreadCompleted(run: RunRow, readAt: number | undefined): bool
   return run.status === "completed" && isUnreadAlert(run, readAt);
 }
 
-/** 看板卡片外框：未读红点太小，未读完成/待处理用红边+红光圈。 */
-export function cardChromeClass(unread: boolean, selected: boolean): string {
-  if (unread) {
+export type CardChrome = "need" | "done" | "none";
+
+/** 待操作（Ask / Build）红框；成功完成绿框。不跟未读绑定，答完/隐藏前一直在。 */
+export function cardChromeOf(run: Pick<RunRow, "status" | "pending_ask">): CardChrome {
+  if (run.pending_ask) return "need";
+  if (run.status === "completed") return "done";
+  return "none";
+}
+
+export function cardChromeClass(chrome: CardChrome, selected: boolean): string {
+  if (chrome === "need") {
     return "border-red-500/90 bg-zinc-900 shadow-[0_0_0_1px_rgba(248,113,113,0.55),0_0_16px_rgba(239,68,68,0.5)]";
+  }
+  if (chrome === "done") {
+    return "border-emerald-500/90 bg-zinc-900 shadow-[0_0_0_1px_rgba(52,211,153,0.55),0_0_16px_rgba(16,185,129,0.45)]";
   }
   if (selected) return "border-sky-600/80 bg-zinc-900";
   return "border-transparent bg-zinc-900/50 hover:border-zinc-700";

@@ -5,7 +5,7 @@ import {
   groupRuns, cardView, listWorkspaceSlots, encodeWorkspaceKey, decodeWorkspaceKey,
   filterRunsByWorkspace, sortConversations, groupSlotsByMachine, isUnreadCompleted, isUnreadMessage,
   workspaceHasUnread, workspaceUnreadCount, formatUnreadCount, canArchiveRun, canRetryRun, isHubArchived,
-  workspaceFolderName, workspaceHasLiveRun, resolveSelectedWorkspace, isUnreadNeedInput, cardChromeClass,
+  workspaceFolderName, workspaceHasLiveRun, resolveSelectedWorkspace, isUnreadNeedInput, cardChromeClass, cardChromeOf,
   extensionLagNotice, REQUIRED_EXTENSION_VERSION, type RunRow,
 } from "../src/boardState";
 
@@ -159,12 +159,15 @@ describe("unread dots", () => {
     expect(workspaceHasUnread([run], {})).toBe(false);
   });
 
-  test("unread cards get a red ring; selected without unread stays sky", () => {
-    expect(cardChromeClass(true, false)).toContain("border-red-500");
-    expect(cardChromeClass(true, false)).toContain("shadow-[");
-    expect(cardChromeClass(true, true)).toContain("border-red-500");
-    expect(cardChromeClass(false, true)).toContain("border-sky-600");
-    expect(cardChromeClass(false, false)).toContain("border-transparent");
+  test("need-input is a red ring; completed is a green ring; selected idle stays sky", () => {
+    expect(cardChromeOf({ ...base, pending_ask: { request_id: "a1", questions: [] } })).toBe("need");
+    expect(cardChromeOf({ ...base, status: "completed" })).toBe("done");
+    expect(cardChromeOf(base)).toBe("none");
+    expect(cardChromeClass("need", false)).toContain("border-red-500");
+    expect(cardChromeClass("need", true)).toContain("border-red-500");
+    expect(cardChromeClass("done", false)).toContain("border-emerald-500");
+    expect(cardChromeClass("none", true)).toContain("border-sky-600");
+    expect(cardChromeClass("none", false)).toContain("border-transparent");
   });
 
   test("pending_ask unread adds to workspace count with terminal unread", () => {

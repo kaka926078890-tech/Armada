@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { groupRuns, cardView, COLUMN_LABELS, canArchiveRun, canRetryRun, isUnreadAlert, isUnreadNeedInput, machineLabel, workspaceFolderName, runDisplayName, cardChromeClass, extensionLagNotice, type ColumnKey, type RunRow } from "../boardState";
+import { groupRuns, cardView, COLUMN_LABELS, canArchiveRun, canRetryRun, isUnreadAlert, isUnreadNeedInput, machineLabel, workspaceFolderName, runDisplayName, cardChromeClass, cardChromeOf, extensionLagNotice, type ColumnKey, type RunRow } from "../boardState";
 import type { Machine } from "../types";
 
 const COL_ACCENT: Record<ColumnKey, string> = {
@@ -60,11 +60,12 @@ export default function Board({ runs, machines, selected, onSelect, showArchived
             )}
             {g[col].map((r) => {
               const v = cardView(r, now);
+              const chrome = cardChromeOf(r);
               const unread = isUnreadAlert(r, readMap[r.id]) || isUnreadNeedInput(r, readMap[r.id]);
               const editing = editingId === r.id;
               const lag = lagOf(r.machine_id);
               return (
-                <div key={r.id} className={`group relative min-w-0 text-left rounded-md border ${cardChromeClass(unread, selected === r.id)}`}>
+                <div key={r.id} className={`group relative min-w-0 text-left rounded-md border ${cardChromeClass(chrome, selected === r.id)}`}>
                   {editing ? (
                     <div className="px-2.5 py-2">
                       <input
@@ -94,7 +95,7 @@ export default function Board({ runs, machines, selected, onSelect, showArchived
                       )}
                       <div className="text-[11px] text-zinc-500 mt-1 flex justify-between items-center">
                         <span className={`inline-flex items-center gap-1.5 ${BADGE_COLOR[col]}`}>
-                          {unread ? <span className="size-1.5 shrink-0 rounded-full bg-red-500" title="完成未读" /> : null}
+                          {unread ? <span className={`size-1.5 shrink-0 rounded-full ${chrome === "done" ? "bg-emerald-500" : "bg-red-500"}`} title={chrome === "need" ? "待处理" : "未读"} /> : null}
                           {v.badge}
                         </span>
                         <span className="text-zinc-600">{v.elapsed}</span>

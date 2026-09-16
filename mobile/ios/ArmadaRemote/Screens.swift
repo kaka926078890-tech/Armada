@@ -19,6 +19,12 @@ func askOptionBody(label: String, text: String) -> String {
     return t.isEmpty ? label : t
 }
 
+func runRowChrome(_ run: RunDTO) -> Color? {
+    if run.pendingAsk != nil { return .red }
+    if run.status == "completed" { return .green }
+    return nil
+}
+
 func statusLabel(_ status: String) -> String {
     switch status {
     case "queued": return "排队中"
@@ -69,13 +75,26 @@ struct RunRow: View {
                      : !run.queuedOutbound.isEmpty ? "队列 \(run.queuedOutbound.count)"
                      : statusLabel(run.status))
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(captionColor)
             }
             Spacer(minLength: 8)
             if unread {
-                Circle().fill(Color.red).frame(width: 7, height: 7).padding(.top, 8)
+                Circle().fill(run.status == "completed" && run.pendingAsk == nil ? Color.green : Color.red).frame(width: 7, height: 7).padding(.top, 8)
             }
         }
+        .padding(8)
+        .overlay {
+            if let c = runRowChrome(run) {
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(c, lineWidth: 2)
+            }
+        }
+    }
+
+    private var captionColor: Color {
+        if run.pendingAsk != nil { return .red }
+        if run.status == "completed" { return .green }
+        return .secondary
     }
 }
 
@@ -579,6 +598,10 @@ struct AskView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(uiColor: .secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.red, lineWidth: 2)
+        )
     }
 
     private var isPlan: Bool {

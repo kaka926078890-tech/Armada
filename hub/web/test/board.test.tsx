@@ -11,7 +11,7 @@ const run: RunRow = {
 };
 
 describe("Board unread chrome", () => {
-  test("completed unread card has a red ring, not only a 6px dot", () => {
+  test("completed card has a green ring, not a red one", () => {
     const html = renderToStaticMarkup(
       <Board
         runs={[run]}
@@ -25,12 +25,12 @@ describe("Board unread chrome", () => {
         onRename={() => {}}
       />,
     );
-    expect(html).toContain("border-red-500");
+    expect(html).toContain("border-emerald-500");
     expect(html).toContain("shadow-[");
-    expect(html).toContain("bg-red-500");
+    expect(html).not.toContain("border-red-500");
   });
 
-  test("opened completed card does not keep the red ring", () => {
+  test("opened completed card keeps the green ring", () => {
     const html = renderToStaticMarkup(
       <Board
         runs={[run]}
@@ -44,7 +44,26 @@ describe("Board unread chrome", () => {
         onRename={() => {}}
       />,
     );
+    expect(html).toContain("border-emerald-500");
     expect(html).not.toContain("border-red-500");
+  });
+
+  test("pending ask card has a red ring even after it was opened", () => {
+    const html = renderToStaticMarkup(
+      <Board
+        runs={[{ ...run, status: "running", ended_at: null, end_reason: null, pending_ask: { request_id: "ask-1", questions: [{ id: "q0", prompt: "选一个", options: [] }] } }]}
+        machines={[{ id: "m-1", name: "Mac-A", os: "darwin", cursor_version: null, extension_version: null, open_workspaces: "[]", status: "online", last_seen_at: 1 }]}
+        selected={null}
+        onSelect={() => {}}
+        showArchived={false}
+        onHide={() => {}}
+        onUnhide={() => {}}
+        readMap={{ "r-1": 9000 }}
+        onRename={() => {}}
+      />,
+    );
+    expect(html).toContain("border-red-500");
+    expect(html).not.toContain("border-emerald-500");
   });
 
   test("error card shows a retry button", () => {
