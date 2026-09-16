@@ -437,7 +437,10 @@ export function activate(context: vscode.ExtensionContext): void {
       if (hit.present) { inspectRaw = hit; break; }
     }
     const inspect = parseAskInspect(inspectRaw);
-    const acts = askPollActions(boundRuns, askLastByRun, inspect, (runId) => `ask-${runId}-${nextExtSeq()}`);
+    const acts = askPollActions(
+      boundRuns, askLastByRun, inspect,
+      (runId) => `ask-${runId}-${nextExtSeq()}`, Date.now(), stopSent,
+    );
     for (const act of acts) {
       if (act.type === "askQuestion") {
         askLastByRun.set(act.runId, act.payload.request_id);
@@ -515,7 +518,7 @@ export function activate(context: vscode.ExtensionContext): void {
       core.sendRegister({
         type: "register", machineId, windowId,
         name: hostname(), os: `${process.platform}-${process.arch}`,
-        cursorVersion: vscode.version, extensionVersion: "0.4.20",
+        cursorVersion: vscode.version, extensionVersion: "0.4.21",
         openWorkspaces: workspaces(),
       });
     });

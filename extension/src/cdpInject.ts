@@ -236,16 +236,42 @@ function defaultConnect(wsUrl: string, timeoutMs: number): Promise<CdpSession> {
 
 const ASK_ESC = /[.*+?^${}()|[\\]\\\\]/g;
 
-/** Questions 探测。最后一个 letter 是 Skip 控件，不得算作选项。 */
+/** Questions 探测。最后一个 letter 是 Skip 控件，不得算作选项。cid：toolbar 祖先 → 包含 toolbar 的 [data-composer-id] → 唯一可见输入框祖先（Windows 控件常不在 composer 树上）。 */
 export const ASK_INSPECT_JS = `function () {
+  function composerIdFromNode(start) {
+    var n = start;
+    for (var i = 0; i < 40 && n; i++) {
+      var id = n.getAttribute && n.getAttribute("data-composer-id");
+      if (id && String(id).trim()) return String(id).trim();
+      n = n.parentElement;
+    }
+    return "";
+  }
   var bar = document.querySelector(".composer-questionnaire-toolbar");
   if (!bar) return { present: false };
-  var n = bar;
-  var conversation_id = "";
-  for (var i = 0; i < 24 && n; i++) {
-    var id = n.getAttribute && n.getAttribute("data-composer-id");
-    if (id && String(id).trim()) { conversation_id = String(id).trim(); break; }
-    n = n.parentElement;
+  var conversation_id = composerIdFromNode(bar);
+  if (!conversation_id) {
+    var hosts = document.querySelectorAll("[data-composer-id]");
+    for (var h = 0; h < hosts.length; h++) {
+      if (hosts[h].contains && hosts[h].contains(bar)) {
+        conversation_id = String(hosts[h].getAttribute("data-composer-id") || "").trim();
+        if (conversation_id) break;
+      }
+    }
+  }
+  if (!conversation_id) {
+    var els = Array.prototype.slice.call(document.querySelectorAll(${JSON.stringify(SEL)})).filter(function (e) {
+      return e.offsetWidth > 0 && e.offsetHeight > 0;
+    });
+    var seen = "";
+    var unique = true;
+    for (var i = 0; i < els.length; i++) {
+      var cid = composerIdFromNode(els[i]);
+      if (!cid) continue;
+      if (!seen) seen = cid;
+      else if (seen !== cid) unique = false;
+    }
+    if (unique && seen) conversation_id = seen;
   }
   var btns = Array.prototype.slice.call(bar.querySelectorAll("button.composer-questionnaire-toolbar-option-letter"));
   var real = btns.length >= 2 ? btns.slice(0, -1) : [];

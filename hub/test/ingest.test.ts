@@ -405,6 +405,37 @@ describe("event ingest", () => {
     ws.close();
   });
 
+  test("Windows last-key ask on a dead runId rematches the live owner by cid", async () => {
+    const { ws, api, runId } = await startBoundRun();
+    ws.send(JSON.stringify({
+      type: "run.event",
+      runId: "r-645dd1c8-1054-4c88-be6c-2143cdfaba53",
+      conversationId: "cid-1",
+      source: "cdp",
+      hookEventName: "askQuestion",
+      seq: 1,
+      ts: Date.now(),
+      payload: {
+        request_id: "ask-r-645dd1c8-1054-4c88-be6c-2143cdfaba53-1789470761886",
+        detect_via: "cdp",
+        conversation_id: "cid-1",
+        questions: [{
+          id: "q0",
+          prompt: "这批修复你更想先落地哪一层？",
+          options: [{ id: "b", label: "B", text: "给 ACP 开 Git bash" }],
+        }],
+      },
+    }));
+    await new Promise((r) => setTimeout(r, 150));
+    const liveBody = (await (await api(`/api/runs/${runId}`)).json()) as any;
+    expect(liveBody.status).toBe("running");
+    expect(liveBody.pending_ask).toMatchObject({
+      request_id: "ask-r-645dd1c8-1054-4c88-be6c-2143cdfaba53-1789470761886",
+      conversation_id: "cid-1",
+    });
+    ws.close();
+  });
+
   test("completed run does not ingest another conversation via cid lookup", async () => {
     const { ws, api, runId } = await startBoundRun();
     ws.send(JSON.stringify(ev(runId, 1, "stop", { status: "completed", conversation_id: "cid-1" })));

@@ -125,17 +125,20 @@ function uniqueBoundRunId(bound: Iterable<[string, { conversationId: string }]>)
   return only;
 }
 
-/** Questions 只挂拥有该 composer cid 的 run。无 cid 时仅唯一 bound run 可挂；多主人禁止 last-key。 */
+/** Questions 只挂拥有该 composer cid 的 run。无 cid 时仅唯一仍活的 bound run 可挂；已停跑不得 last-key。Plan/Build 可挂停跑主人以便 hub 复开。 */
 export function askPollActions(
   bound: Iterable<[string, { conversationId: string }]>,
   prevByRun: Iterable<[string, string]>,
   inspect: AskInspect,
   makeId: (runId: string) => string,
   now = Date.now(),
+  stopped: Iterable<string> = [],
 ): AskPollAct[] {
+  const dead = inspect.present && inspect.kind === "plan" ? new Set<string>() : new Set(stopped);
+  const live = [...bound].filter(([id]) => !dead.has(id));
   const widgetCid = inspect.present ? inspect.conversation_id : undefined;
-  const owner = latestRunIdForConversation(bound, widgetCid)
-    ?? (inspect.present && !widgetCid ? uniqueBoundRunId(bound) : undefined);
+  const owner = latestRunIdForConversation(live, widgetCid)
+    ?? (inspect.present && !widgetCid ? uniqueBoundRunId(live) : undefined);
   const prev = new Map(prevByRun);
   const out: AskPollAct[] = [];
   for (const [runId, requestId] of prev) {
@@ -145,7 +148,7 @@ export function askPollActions(
   if (!inspect.present || !owner) return out;
   const act = nextAskAction(prev.get(owner) ?? null, inspect, () => makeId(owner), now);
   if (act?.type === "askQuestion") {
-    const conversation_id = act.payload.conversation_id || boundConversationId(bound, owner) || "";
+    const conversation_id = act.payload.conversation_id || boundConversationId(live, owner) || "";
     out.push({ type: "askQuestion", runId: owner, payload: { ...act.payload, conversation_id } });
   }
   return out;

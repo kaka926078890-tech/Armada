@@ -90,6 +90,64 @@ describe("askPollActions", () => {
     expect(acts).toEqual([]);
   });
 
+  test("PF39WTSM 09:36: empty cid ignores completed leftover and stamps the unique live run", () => {
+    const bound = new Map<string, { conversationId: string }>([
+      ["r-c424f731-17ef-4ae1-9bf5-db9fbc85b73b", { conversationId: "ca3d4388-990d-44cc-bb43-b472bee8812c" }],
+      ["r-645dd1c8-1054-4c88-be6c-2143cdfaba53", { conversationId: "c742be7e-4808-4639-9ea5-df35ecd99ce8" }],
+    ]);
+    const acts = askPollActions(
+      bound,
+      new Map(),
+      { ...inspect, conversation_id: "" },
+      () => "ask-live",
+      Date.now(),
+      ["r-645dd1c8-1054-4c88-be6c-2143cdfaba53"],
+    );
+    expect(acts).toEqual([
+      expect.objectContaining({
+        type: "askQuestion",
+        runId: "r-c424f731-17ef-4ae1-9bf5-db9fbc85b73b",
+        payload: expect.objectContaining({
+          request_id: "ask-live",
+          conversation_id: "ca3d4388-990d-44cc-bb43-b472bee8812c",
+        }),
+      }),
+    ]);
+  });
+
+  test("empty cid with two live runs stays fail-closed even if a third is stopped", () => {
+    const bound = new Map<string, { conversationId: string }>([
+      ["r-live-a", { conversationId: "cid-a" }],
+      ["r-live-b", { conversationId: "cid-b" }],
+      ["r-dead", { conversationId: "cid-dead" }],
+    ]);
+    const acts = askPollActions(
+      bound,
+      new Map(),
+      { ...inspect, conversation_id: "" },
+      () => "ask-1",
+      Date.now(),
+      ["r-dead"],
+    );
+    expect(acts).toEqual([]);
+  });
+
+  test("plan Ask still attaches to a stopped cid owner so hub can reopen Build", () => {
+    const bound = new Map([["r-plan", { conversationId: "cid-plan" }]]);
+    const plan = {
+      present: true as const,
+      kind: "plan" as const,
+      filename: "Markdown date line",
+      prompt: "Created Plan: Markdown date line",
+      conversation_id: "cid-plan",
+      options: [{ id: "build", label: "Build", text: "Build" }],
+    };
+    const acts = askPollActions(bound, new Map(), plan, () => "ask-plan", 9, ["r-plan"]);
+    expect(acts).toEqual([
+      expect.objectContaining({ type: "askQuestion", runId: "r-plan" }),
+    ]);
+  });
+
   test("gone widget resolves only the owner that had pending", () => {
     const bound = new Map([["r-1", { conversationId: "cid-1" }]]);
     const acts = askPollActions(bound, new Map([["r-1", "ask-1"]]), { present: false }, () => "x");

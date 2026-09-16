@@ -405,6 +405,86 @@ describe("AskQuestion toolbar JS", () => {
     expect(result.conversation_id).toBe("15eba46c-1011-44b3-9535-f00596728279");
   });
 
+  test("Windows portal toolbar: cid comes from the unique visible composer input", () => {
+    const cid = "ca3d4388-990d-44cc-bb43-b472bee8812c";
+    const bar = {
+      className: "composer-questionnaire-toolbar",
+      innerText: "Questions 1 of 1 1. 这批修复你更想先落地哪一层？ A x B y C z D w Skip Esc Continue",
+      parentElement: { getAttribute: () => null, parentElement: null },
+      querySelectorAll(sel: string) {
+        if (sel === "button.composer-questionnaire-toolbar-option-letter") {
+          return ["A", "B", "C", "D", "Skip"].map((L) => ({ innerText: L }));
+        }
+        return [];
+      },
+    };
+    const input = {
+      innerText: "",
+      offsetWidth: 120,
+      offsetHeight: 40,
+      parentElement: {
+        getAttribute(name: string) { return name === "data-composer-id" ? cid : null; },
+        parentElement: null,
+      },
+    };
+    const document = {
+      querySelector(sel: string) {
+        if (sel === ".composer-questionnaire-toolbar") return bar;
+        return null;
+      },
+      querySelectorAll(sel: string) {
+        if (sel === "[data-composer-id]") return [input.parentElement];
+        if (sel.includes("tiptap") || sel.includes("aislash-editor-input")) return [input];
+        return [];
+      },
+    };
+    (input.parentElement as { contains?: (n: unknown) => boolean }).contains = () => false;
+    const fn = new Function("document", `return (${ASK_INSPECT_JS});`)(document);
+    const result = fn() as { present: boolean; conversation_id: string; options: { id: string }[] };
+    expect(result.present).toBe(true);
+    expect(result.conversation_id).toBe(cid);
+  });
+
+  test("two visible composer cids with a portaled toolbar stay empty (no last-key)", () => {
+    const mkInput = (cid: string) => {
+      const parent = {
+        getAttribute(name: string) { return name === "data-composer-id" ? cid : null; },
+        parentElement: null,
+        contains: () => false,
+      };
+      return {
+        innerText: "hi",
+        offsetWidth: 100,
+        offsetHeight: 20,
+        parentElement: parent,
+      };
+    };
+    const a = mkInput("cid-a");
+    const b = mkInput("cid-b");
+    const bar = {
+      innerText: "Questions 1 of 1 1. q A x B y Skip Esc Continue",
+      parentElement: null,
+      querySelectorAll(sel: string) {
+        if (sel === "button.composer-questionnaire-toolbar-option-letter") return [{ innerText: "A" }, { innerText: "B" }, { innerText: "Skip" }];
+        return [];
+      },
+    };
+    const document = {
+      querySelector(sel: string) {
+        if (sel === ".composer-questionnaire-toolbar") return bar;
+        return null;
+      },
+      querySelectorAll(sel: string) {
+        if (sel === "[data-composer-id]") return [a.parentElement, b.parentElement];
+        if (sel.includes("tiptap") || sel.includes("aislash-editor-input")) return [a, b];
+        return [];
+      },
+    };
+    const fn = new Function("document", `return (${ASK_INSPECT_JS});`)(document);
+    const result = fn() as { conversation_id: string };
+    expect(result.conversation_id).toBe("");
+  });
+
   test("click B hits B; D is Skip and must not be clicked", () => {
     const b = runAskClick(["A", "B", "C", "D"], "B");
     expect(b.result).toBe("OK");
@@ -427,7 +507,7 @@ describe("AskQuestion CDP driver", () => {
     expect(log.some((c) => c.method === "Input.dispatchKeyEvent" && c.params?.key === "Enter")).toBe(true);
     const evals = log.filter((c) => c.method === "Runtime.evaluate").map((c) => String(c.params?.expression ?? ""));
     expect(evals.some((e) => e.includes("composer-questionnaire-toolbar-option-letter"))).toBe(true);
-    expect(evals.some((e) => e.includes("aislash-editor-input"))).toBe(false);
+    expect(evals.some((e) => e.includes("armadaDraftHit"))).toBe(false);
   });
 
   test("skip sends Escape not Enter", async () => {
