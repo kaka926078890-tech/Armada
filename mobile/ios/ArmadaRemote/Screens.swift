@@ -13,6 +13,12 @@ func hideError(_ error: Error) -> String {
     return error.localizedDescription
 }
 
+/// CDP Ask 的 label 是 A/B/C，正文在 text；jsonl 可能只有 label。
+func askOptionBody(label: String, text: String) -> String {
+    let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    return t.isEmpty ? label : t
+}
+
 func statusLabel(_ status: String) -> String {
     switch status {
     case "queued": return "排队中"
@@ -523,17 +529,42 @@ struct AskView: View {
         VStack(alignment: .leading, spacing: 8) {
             if isPlan {
                 Text("Created Plan").font(.headline)
-                Text(ask.questions.first?.prompt ?? "").font(.subheadline)
+                Text(ask.questions.first?.prompt ?? "")
+                    .font(.body)
+                    .fixedSize(horizontal: false, vertical: true)
                 if let err { Text(err).foregroundStyle(.red) }
                 Button("Build") { Task { await submitBuild() } }
             } else {
                 Text("需要选择").font(.headline)
                 ForEach(ask.questions) { q in
-                    Text(q.prompt).font(.subheadline)
+                    Text(q.prompt)
+                        .font(.body)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     ForEach(q.options) { o in
-                        Button(o.label.isEmpty ? o.text : o.label) { optionId = o.id }
-                            .buttonStyle(.bordered)
-                            .tint(optionId == o.id ? .accentColor : .secondary)
+                        Button {
+                            optionId = o.id
+                        } label: {
+                            HStack(alignment: .top, spacing: 8) {
+                                Text(o.label.isEmpty ? o.id.uppercased() : o.label)
+                                    .font(.body.monospaced())
+                                    .foregroundStyle(.secondary)
+                                Text(askOptionBody(label: o.label, text: o.text))
+                                    .font(.body)
+                                    .multilineTextAlignment(.leading)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .padding(.vertical, 6)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.primary)
+                        .padding(.horizontal, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(optionId == o.id ? Color.accentColor : Color.secondary.opacity(0.35))
+                        )
                     }
                 }
                 if let err { Text(err).foregroundStyle(.red) }
@@ -544,7 +575,10 @@ struct AskView: View {
                 }
             }
         }
-        .padding(.vertical)
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(uiColor: .secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     private var isPlan: Bool {
