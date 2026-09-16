@@ -500,12 +500,14 @@ Token **仅** query 鉴权；消息体不再带 token。连上后 10s 内必须 
 | --- | --- | --- |
 | GET | `/health` | 中转健康检查（无需令牌） |
 | GET | `/mobile/workspaces` | 已打开的仓；`hubOffline` 时列表为空 |
-| GET | `/mobile/runs` | 快照列表 |
-| GET | `/mobile/runs/:id` | 含 `finalText`、`pendingAsk` |
+| GET | `/mobile/runs` | 快照列表（默认非隐藏；`?archived=1` 仅已隐藏） |
+| GET | `/mobile/runs/:id` | 含 `finalText`、`pendingAsk`；已隐藏仍返回 |
 | POST | `/mobile/runs` | 新派发 |
 | POST | `/mobile/runs/:id/followup` | 续聊同一对话 |
 | POST | `/mobile/runs/:id/answer` | 回答 Ask |
 | POST | `/mobile/runs/:id/cancel` | 取消 |
+| POST | `/mobile/runs/:id/archive` | 从列表隐藏（数据保留） |
+| POST | `/mobile/runs/:id/unarchive` | 取消隐藏 |
 
 常见错误码：`MACHINE_OFFLINE`、`WORKSPACE_NOT_OPEN`、`RUN_LIMIT`、`PROMPT_COLLISION`、`CONVERSATION_BUSY`、`INJECT_SLOT_BUSY`、`OUTBOUND_LIMIT`、`OUTBOUND_TEXT_ONLY`、`WINDOW_BUSY`、`NOT_FOUND`、`INVALID_STATE`、`NO_CONVERSATION`、`IMAGE_PASTE_FAILED`、`FILE_MENTION_FAILED`、`ATTACHMENT_TOO_LARGE`、`ASK_IN_FLIGHT`、`HUB_OFFLINE`、`OPERATOR_REQUIRED`、`HUB_REQUIRED`。
 
@@ -549,6 +551,7 @@ hub 静态托管路径相对 `hub/src`，**请从仓库根**执行 `bun run dev:
 ## 设计文档
 
 - 中转 + iOS：[docs/superpowers/specs/2026-09-12-armada-relay-mobile-design.md](docs/superpowers/specs/2026-09-12-armada-relay-mobile-design.md)
+- App 任务隐藏：[docs/superpowers/specs/2026-09-16-armada-app-run-hide-design.md](docs/superpowers/specs/2026-09-16-armada-app-run-hide-design.md)
 - App 可见 APNs：[docs/superpowers/specs/2026-09-16-armada-app-push-design.md](docs/superpowers/specs/2026-09-16-armada-app-push-design.md)
 - 局域网发现：[docs/superpowers/specs/2026-09-07-armada-lan-fleet-discovery-design.md](docs/superpowers/specs/2026-09-07-armada-lan-fleet-discovery-design.md)
 - 图文派发：[docs/superpowers/specs/2026-09-02-armada-composer-image-chip-design.md](docs/superpowers/specs/2026-09-02-armada-composer-image-chip-design.md)

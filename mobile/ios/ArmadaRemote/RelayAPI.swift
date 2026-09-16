@@ -79,11 +79,18 @@ struct RunDTO: Decodable, Identifiable, Hashable {
     var outbound: [OutboundDTO]?
     var queueMessageDefaultBehavior: String?
     var canRetry: Bool?
+    var archived: Bool?
     var updatedAt: Int?
     var id: String { runId }
 
     var isLive: Bool {
         ["created", "queued", "dispatched", "binding", "running"].contains(status)
+    }
+
+    var isArchived: Bool { archived ?? false }
+
+    var showsArchive: Bool {
+        !isLive && !isArchived
     }
 
     var queuedOutbound: [OutboundDTO] {
@@ -178,6 +185,7 @@ enum RelayAPIError: LocalizedError {
         case "OUTBOUND_LIMIT": return "待消化续发已达上限，等 Cursor 消化后再发"
         case "OUTBOUND_TEXT_ONLY": return "运行中续发暂只支持纯文本"
         case "INVALID_STATE": return "当前状态不能重试"
+        case "NOT_FOUND": return "任务不存在"
         case "MACHINE_OFFLINE": return "机器离线"
         case "RUN_LIMIT": return "这台机器任务数已满"
         case "WINDOW_BUSY": return "该窗口正忙"
@@ -199,9 +207,10 @@ actor RelayAPI {
         try await get("/mobile/workspaces")
     }
 
-    func runs(limit: Int = 50) async throws -> [RunDTO] {
+    func runs(limit: Int = 50, archived: Bool = false) async throws -> [RunDTO] {
         struct Wrap: Decodable { var runs: [RunDTO] }
-        let w: Wrap = try await get("/mobile/runs?limit=\(limit)")
+        let q = archived ? "&archived=1" : ""
+        let w: Wrap = try await get("/mobile/runs?limit=\(limit)\(q)")
         return w.runs
     }
 
@@ -223,6 +232,16 @@ actor RelayAPI {
 
     func retry(runId: String) async throws -> RunDTO {
         let wrap: DispatchResponse = try await send("/mobile/runs/\(runId)/retry", method: "POST", body: Data("{}".utf8), ok: [200])
+        return wrap.run
+    }
+
+    func archive(runId: String) async throws -> RunDTO {
+        let wrap: DispatchResponse = try await send("/mobile/runs/\(runId)/archive", method: "POST", body: Data("{}".utf8), ok: [200])
+        return wrap.run
+    }
+
+    func unarchive(runId: String) async throws -> RunDTO {
+        let wrap: DispatchResponse = try await send("/mobile/runs/\(runId)/unarchive", method: "POST", body: Data("{}".utf8), ok: [200])
         return wrap.run
     }
 

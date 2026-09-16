@@ -87,6 +87,23 @@ function autoHub(ws: WebSocket, onDispatch?: (msg: any) => object | void) {
         },
       }));
     }
+    if (msg.type === "cmd.archive" || msg.type === "cmd.unarchive") {
+      ws.send(JSON.stringify({
+        type: "cmd.result",
+        requestId: msg.requestId,
+        ok: true,
+        run: {
+          runId: msg.runId,
+          machineId: "m-1",
+          workspaceRoot: "/Users/me/proj",
+          prompt: "hello fleet",
+          status: "completed",
+          finalText: "好了",
+          archived: msg.type === "cmd.archive",
+          updatedAt: Date.now(),
+        },
+      }));
+    }
   });
 }
 
@@ -281,6 +298,123 @@ describe("relay serve", () => {
     const body = await f.json() as any;
     expect(body.run.runId).toBe("r-err");
     expect(body.run.status).toBe("dispatched");
+    ws.close();
+  });
+
+  test("archived snap is hidden from default list and listed with archived=1", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    const visible = {
+      runId: "r-1",
+      machineId: "m-1",
+      workspaceRoot: "/Users/me/proj",
+      prompt: "hello fleet",
+      status: "completed",
+      finalText: "好了",
+      archived: false,
+      updatedAt: Date.now(),
+    };
+    ws.send(JSON.stringify({ type: "snap.run", run: visible }));
+    await Bun.sleep(40);
+    const headers = { authorization: `Bearer ${fleet.operatorToken}` };
+    const open = await (await fetch(url(s, "/mobile/runs"), { headers })).json() as any;
+    expect(open.runs.map((r: any) => r.runId)).toContain("r-1");
+    expect(open.runs[0].archived).toBe(false);
+
+    ws.send(JSON.stringify({ type: "snap.run", run: { ...visible, archived: true } }));
+    await Bun.sleep(40);
+    const hiddenList = await (await fetch(url(s, "/mobile/runs"), { headers })).json() as any;
+    expect(hiddenList.runs.map((r: any) => r.runId)).not.toContain("r-1");
+    const archived = await (await fetch(url(s, "/mobile/runs?archived=1"), { headers })).json() as any;
+    expect(archived.runs.map((r: any) => r.runId)).toContain("r-1");
+    expect(archived.runs[0].archived).toBe(true);
+    const got = await (await fetch(url(s, "/mobile/runs/r-1"), { headers })).json() as any;
+    expect(got.archived).toBe(true);
+    expect(got.finalText).toBe("好了");
+    ws.close();
+  });
+
+  test("archive and unarchive roundtrip with fake hub", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    autoHub(ws);
+    ws.send(JSON.stringify({
+      type: "snap.run",
+      run: {
+        runId: "r-1",
+        machineId: "m-1",
+        workspaceRoot: "/Users/me/proj",
+        prompt: "hello fleet",
+        status: "completed",
+        finalText: "好了",
+        updatedAt: Date.now(),
+      },
+    }));
+    await Bun.sleep(40);
+    const headers = { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" };
+    const a = await fetch(url(s, "/mobile/runs/r-1/archive"), { method: "POST", headers });
+    expect(a.status).toBe(200);
+    const archived = await a.json() as any;
+    expect(archived.run.archived).toBe(true);
+    const open = await (await fetch(url(s, "/mobile/runs"), { headers })).json() as any;
+    expect(open.runs.map((r: any) => r.runId)).not.toContain("r-1");
+
+    const u = await fetch(url(s, "/mobile/runs/r-1/unarchive"), { method: "POST", headers });
+    expect(u.status).toBe(200);
+    const back = await u.json() as any;
+    expect(back.run.archived).toBe(false);
+    const open2 = await (await fetch(url(s, "/mobile/runs"), { headers })).json() as any;
+    expect(open2.runs.map((r: any) => r.runId)).toContain("r-1");
+    ws.close();
+  });
+
+  test("archive of unknown run is 404 without hub command", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    const headers = { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" };
+    const r = await fetch(url(s, "/mobile/runs/nope/archive"), { method: "POST", headers });
+    expect(r.status).toBe(404);
+    expect(await r.json()).toEqual({ error: "NOT_FOUND" });
+    ws.close();
+  });
+
+  test("archive occupying is 409 INVALID_STATE and snap unchanged", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    ws.addEventListener("message", (e) => {
+      const msg = JSON.parse(String(e.data));
+      if (msg.type === "cmd.archive") {
+        ws.send(JSON.stringify({
+          type: "cmd.result",
+          requestId: msg.requestId,
+          ok: false,
+          error: "INVALID_STATE",
+        }));
+      }
+    });
+    ws.send(JSON.stringify({
+      type: "snap.run",
+      run: {
+        runId: "r-live",
+        machineId: "m-1",
+        workspaceRoot: "/Users/me/proj",
+        prompt: "hello fleet",
+        status: "running",
+        updatedAt: Date.now(),
+      },
+    }));
+    await Bun.sleep(40);
+    const headers = { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" };
+    const r = await fetch(url(s, "/mobile/runs/r-live/archive"), { method: "POST", headers });
+    expect(r.status).toBe(409);
+    expect(await r.json()).toEqual({ error: "INVALID_STATE" });
+    const list = await (await fetch(url(s, "/mobile/runs"), { headers })).json() as any;
+    expect(list.runs.map((x: any) => x.runId)).toContain("r-live");
+    expect(list.runs[0].archived).toBe(false);
     ws.close();
   });
 

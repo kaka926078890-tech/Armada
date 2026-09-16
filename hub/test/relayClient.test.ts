@@ -131,6 +131,13 @@ describe("runToSnap", () => {
     ]);
     expect(snap.queueMessageDefaultBehavior).toBe("queue");
   });
+
+  test("archived_at becomes archived boolean", () => {
+    const base = { id: "r-1", machine_id: "m-1", workspace_root: "/ws/a", prompt: "hi", status: "completed", created_at: 1 };
+    expect(runToSnap({ ...base, archived_at: 9 }, []).archived).toBe(true);
+    expect(runToSnap({ ...base, archived_at: null }, []).archived).toBe(false);
+    expect(runToSnap(base, []).archived).toBe(false);
+  });
 });
 
 describe("hub outbound to relay", () => {
@@ -230,6 +237,85 @@ describe("hub outbound to relay", () => {
 
     const got = await (await fetch(`http://127.0.0.1:${relay.port}/mobile/runs/${runId}`, { headers })).json() as any;
     expect(got.outbound?.[0]).toMatchObject({ prompt: "续", state: "injecting" });
+    ext.close();
+  });
+
+  test("hub archive hides the run from the default mobile list", async () => {
+    const relayHome = mkdtempSync(join(tmpdir(), "armada-relay-"));
+    const hubHome = mkdtempSync(join(tmpdir(), "armada-hub-"));
+    relay = createRelayServer({
+      port: 0, hostname: "127.0.0.1", home: relayHome,
+      publicBase: "http://127.0.0.1", adminToken: "adm",
+    });
+    const fleet = relay.createFleet();
+    writeFileSync(join(hubHome, "relay.json"), JSON.stringify({
+      relay: `http://127.0.0.1:${relay.port}`, fleet: fleet.fleet, secret: fleet.hubSecret,
+    }), { mode: 0o600 });
+
+    hub = createServer({ port: 0, home: hubHome });
+    const ext: WebSocket = await new Promise((res, rej) => {
+      const w = new WebSocket(`ws://127.0.0.1:${hub!.port}/ws?token=${hub!.token}`);
+      w.onopen = () => res(w);
+      w.onerror = rej;
+    });
+    ext.send(JSON.stringify({
+      type: "register", machineId: "m-1", windowId: "w-1", name: "A", os: "darwin",
+      extensionVersion: "0.4.0", openWorkspaces: ["/ws/a"],
+    }));
+
+    const headers = { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" };
+    await waitUntil(async () => {
+      const j = await (await fetch(`http://127.0.0.1:${relay!.port}/mobile/workspaces`, { headers })).json() as any;
+      return j.hubOffline === false && j.workspaces?.[0]?.workspaceRoot === "/ws/a";
+    });
+
+    const d = await fetch(`http://127.0.0.1:${relay.port}/mobile/runs`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ workspaceId: encodeWorkspaceId("m-1", "/ws/a"), prompt: "from phone" }),
+    });
+    const body = await d.json() as any;
+    const runId = body.run.runId as string;
+    ext.send(JSON.stringify({ type: "run.ack", runId, status: "accepted" }));
+    ext.send(JSON.stringify({
+      type: "run.bound", runId, conversationId: "cid-1", transcriptPath: null, promptMatch: true,
+    }));
+    await waitUntil(() => hub!.runs.get(runId)?.status === "running");
+    const live = await fetch(`http://127.0.0.1:${relay.port}/mobile/runs/${runId}/archive`, { method: "POST", headers });
+    expect(live.status).toBe(409);
+    expect(await live.json()).toEqual({ error: "INVALID_STATE" });
+
+    ext.send(JSON.stringify({
+      type: "run.event", runId, source: "transcript", seq: 1, ts: Date.now(),
+      payload: { role: "assistant", message: { content: [{ type: "text", text: "全文正文" }] } },
+    }));
+    ext.send(JSON.stringify({
+      type: "run.event", runId, source: "hook", hookEventName: "stop",
+      payload: { status: "completed" }, ts: Date.now(), seq: 2,
+    }));
+    await waitUntil(async () => {
+      const j = await (await fetch(`http://127.0.0.1:${relay!.port}/mobile/runs/${runId}`, { headers })).json() as any;
+      return j.status === "completed";
+    });
+    const hidden = await fetch(`http://127.0.0.1:${relay.port}/mobile/runs/${runId}/archive`, { method: "POST", headers });
+    expect(hidden.status).toBe(200);
+    const archived = await hidden.json() as any;
+    expect(archived.run.archived).toBe(true);
+
+    await waitUntil(async () => {
+      const j = await (await fetch(`http://127.0.0.1:${relay!.port}/mobile/runs`, { headers })).json() as any;
+      return !j.runs.map((r: any) => r.runId).includes(runId);
+    });
+    const listed = await (await fetch(`http://127.0.0.1:${relay!.port}/mobile/runs?archived=1`, { headers })).json() as any;
+    expect(listed.runs.map((r: any) => r.runId)).toContain(runId);
+
+    const restored = await fetch(`http://127.0.0.1:${relay.port}/mobile/runs/${runId}/unarchive`, { method: "POST", headers });
+    expect(restored.status).toBe(200);
+    expect((await restored.json() as any).run.archived).toBe(false);
+    await waitUntil(async () => {
+      const j = await (await fetch(`http://127.0.0.1:${relay!.port}/mobile/runs`, { headers })).json() as any;
+      return j.runs.map((r: any) => r.runId).includes(runId);
+    });
     ext.close();
   });
 });

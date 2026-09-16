@@ -46,5 +46,6 @@ export function openRelayDb(home: string): Database {
   db.exec(SCHEMA);
   ensureColumn(db, "runs", "outbound", "outbound TEXT");
   ensureColumn(db, "runs", "queue_message_default_behavior", "queue_message_default_behavior TEXT");
+  ensureColumn(db, "runs", "archived_at", "archived_at INTEGER");
   return db;
 }

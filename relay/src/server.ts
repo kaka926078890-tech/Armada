@@ -46,6 +46,7 @@ export type RunSnap = {
   pendingAsk?: unknown;
   outbound?: OutboundSnap[];
   queueMessageDefaultBehavior?: string | null;
+  archived?: boolean;
   updatedAt?: number;
 };
 
@@ -145,15 +146,18 @@ export function createRelayServer(opts: {
     const pendingAsk = snap.pendingAsk == null ? null : JSON.stringify(snap.pendingAsk);
     const outbound = Array.isArray(snap.outbound) ? JSON.stringify(snap.outbound) : null;
     const queueMode = typeof snap.queueMessageDefaultBehavior === "string" ? snap.queueMessageDefaultBehavior : null;
-    const existing = db.query("SELECT id FROM runs WHERE id=?1").get(snap.runId) as { id: string } | undefined;
+    const existing = db.query("SELECT id, archived_at FROM runs WHERE id=?1").get(snap.runId) as { id: string; archived_at?: number | null } | undefined;
+    const archivedAt = snap.archived
+      ? (existing?.archived_at && Number(existing.archived_at) > 0 ? Number(existing.archived_at) : Date.now())
+      : null;
     if (existing) {
       db.query(`UPDATE runs SET fleet_id=?2, machine_id=?3, workspace_root=?4, prompt=?5, status=?6,
-        final_text=?7, error=?8, pending_ask=?9, outbound=?11, queue_message_default_behavior=?12, updated_at=?10 WHERE id=?1`)
-        .run(snap.runId, fleetId, snap.machineId, snap.workspaceRoot, snap.prompt, status, finalText, error, pendingAsk, now, outbound, queueMode);
+        final_text=?7, error=?8, pending_ask=?9, outbound=?11, queue_message_default_behavior=?12, archived_at=?13, updated_at=?10 WHERE id=?1`)
+        .run(snap.runId, fleetId, snap.machineId, snap.workspaceRoot, snap.prompt, status, finalText, error, pendingAsk, now, outbound, queueMode, archivedAt);
     } else {
-      db.query(`INSERT INTO runs (id, fleet_id, machine_id, workspace_root, prompt, status, final_text, error, pending_ask, outbound, queue_message_default_behavior, updated_at, created_at)
-        VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?11,?12,?10,?10)`)
-        .run(snap.runId, fleetId, snap.machineId, snap.workspaceRoot, snap.prompt, status, finalText, error, pendingAsk, now, outbound, queueMode);
+      db.query(`INSERT INTO runs (id, fleet_id, machine_id, workspace_root, prompt, status, final_text, error, pending_ask, outbound, queue_message_default_behavior, archived_at, updated_at, created_at)
+        VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?11,?12,?13,?10,?10)`)
+        .run(snap.runId, fleetId, snap.machineId, snap.workspaceRoot, snap.prompt, status, finalText, error, pendingAsk, now, outbound, queueMode, archivedAt);
     }
     return db.query("SELECT * FROM runs WHERE id=?1").get(snap.runId);
   }
@@ -171,6 +175,7 @@ export function createRelayServer(opts: {
       outbound: row.outbound ? JSON.parse(row.outbound) : [],
       queueMessageDefaultBehavior: row.queue_message_default_behavior ?? null,
       canRetry: ["error", "unknown", "aborted"].includes(String(row.status ?? "")),
+      archived: Number(row.archived_at) > 0,
       updatedAt: row.updated_at,
     };
   }
@@ -293,7 +298,9 @@ export function createRelayServer(opts: {
   app.get("/mobile/runs", (c) => {
     const fleet = (c as any).get("fleet") as { id: string };
     const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 50) || 50, 1), 50);
-    const rows = db.query("SELECT * FROM runs WHERE fleet_id=?1 ORDER BY updated_at DESC LIMIT ?2").all(fleet.id, limit);
+    const hidden = c.req.query("archived") === "1";
+    const filter = hidden ? "AND archived_at IS NOT NULL" : "AND archived_at IS NULL";
+    const rows = db.query(`SELECT * FROM runs WHERE fleet_id=?1 ${filter} ORDER BY updated_at DESC LIMIT ?2`).all(fleet.id, limit);
     return c.json({ runs: rows.map(runToJson) });
   });
 
@@ -380,6 +387,29 @@ export function createRelayServer(opts: {
     if (result.run) applyRunSnap(fleet.id, result.run);
     return c.json({ ok: true });
   });
+
+  async function archiveAction(c: any, action: "archive" | "unarchive") {
+    const fleet = (c as any).get("fleet") as { id: string; hub_online: number };
+    if (fleet.hub_online !== 1) return c.json({ error: "HUB_OFFLINE" }, 503);
+    const runId = c.req.param("id");
+    const row = db.query("SELECT id FROM runs WHERE id=?1 AND fleet_id=?2").get(runId, fleet.id);
+    if (!row) return c.json({ error: "NOT_FOUND" }, 404);
+    const requestId = `r${++reqSeq}`;
+    const sent = sendHub(fleet.id, { type: action === "archive" ? "cmd.archive" : "cmd.unarchive", requestId, runId });
+    if (!sent) return c.json({ error: "HUB_OFFLINE" }, 503);
+    const result = await waitHub(requestId);
+    if (!result.ok) {
+      const err = result.error ?? "HUB_TIMEOUT";
+      return c.json({ error: err }, hubCmdStatus(err) as 400);
+    }
+    if (result.run) applyRunSnap(fleet.id, result.run);
+    audit("operator", `run.${action}`, runId, { fleet: fleet.id });
+    const next = db.query("SELECT * FROM runs WHERE id=?1 AND fleet_id=?2").get(runId, fleet.id);
+    return c.json({ run: runToJson(next) }, 200);
+  }
+
+  app.post("/mobile/runs/:id/archive", (c) => archiveAction(c, "archive"));
+  app.post("/mobile/runs/:id/unarchive", (c) => archiveAction(c, "unarchive"));
 
   const server = Bun.serve<{ fleetId?: string; role?: string }>({
     port: opts.port ?? 8780,

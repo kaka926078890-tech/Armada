@@ -35,6 +35,7 @@ export type RunSnap = {
   outbound?: OutboundSnap[];
   queueMessageDefaultBehavior?: string | null;
   canRetry?: boolean;
+  archived?: boolean;
   updatedAt: number;
 };
 
@@ -107,6 +108,7 @@ export function runToSnap(run: any, events: RunEvent[]): RunSnap {
     outbound: snapOutbound(run.outbound),
     queueMessageDefaultBehavior: mode,
     canRetry: ["error", "unknown", "aborted"].includes(status),
+    archived: Number(run.archived_at) > 0,
     updatedAt: Number(run.ended_at ?? run.started_at ?? run.created_at ?? Date.now()),
   };
 }
@@ -162,7 +164,7 @@ export function startRelayClient(opts: {
     prevEvent?.(runId, event);
     const t = (event as { type?: string }).type;
     if (t === "machine.updated") pushWorkspaces();
-    if (t === "run.status" || t === "run.ask" || t === "run.outbound") pushRun(runId);
+    if (t === "run.status" || t === "run.ask" || t === "run.outbound" || t === "run.archived") pushRun(runId);
   };
 
   const hubFetch = (path: string, init?: RequestInit) =>
@@ -230,6 +232,17 @@ export function startRelayClient(opts: {
       }
       if (msg.type === "cmd.cancel") {
         const r = await hubFetch(`/api/runs/${encodeURIComponent(msg.runId)}/cancel`, { method: "POST" });
+        const body = await r.json().catch(() => ({})) as any;
+        if (!r.ok) return fail(body.error ?? "HUB_ERROR");
+        const run = snapOf(msg.runId);
+        send({ type: "cmd.result", requestId, ok: true, run });
+        if (run) send({ type: "snap.run", run });
+        return;
+      }
+      if (msg.type === "cmd.archive" || msg.type === "cmd.unarchive") {
+        if (typeof msg.runId !== "string" || !msg.runId) return fail("INVALID");
+        const action = msg.type === "cmd.archive" ? "archive" : "unarchive";
+        const r = await hubFetch(`/api/runs/${encodeURIComponent(msg.runId)}/${action}`, { method: "POST" });
         const body = await r.json().catch(() => ({})) as any;
         if (!r.ok) return fail(body.error ?? "HUB_ERROR");
         const run = snapOf(msg.runId);

@@ -1,7 +1,7 @@
 # Armada App：任务隐藏（对齐中台）
 
 - 日期：2026-09-16
-- 状态：**设计草案**（方案 A 已拍板；待规格确认后写实施计划）
+- 状态：**实施基准**（方案 A 已落地：snap `archived`、中转过滤/写路径、App 隐藏闭环）
 - 父文档：
   - [2026-09-12-armada-relay-mobile-design.md](./2026-09-12-armada-relay-mobile-design.md)（下称《远程》：§4.5 列表「最近 50，非 archive」；**无** archive 写路径）
   - [armada-hub-app-parity](../../../.cursor/rules/armada-hub-app-parity.mdc)（操作员能力 App 同一轮要能看见、做完；权威在 `runToSnap`）
@@ -306,7 +306,7 @@ v1 任务切分（实施计划展开）：
 - [x] 跨层发布：hub snap → 中转 → App；旧 App 兼容策略
 - [x] 路径可落到 `relayClient.ts` / `relayAttach.ts` / `relay/src/server.ts` / `RelayAPI.swift` / `Screens.swift`
 - [x] 每个必须做有验收；性能承诺 = App 轮询 ≤10s，无新 SLA
-- [ ] 用户确认本文后 → 写 `docs/superpowers/plans/2026-09-16-armada-app-run-hide.md`
+- [x] 用户确认本文后 → 写 `docs/superpowers/plans/2026-09-16-armada-app-run-hide.md`
 
 ---
 
@@ -315,3 +315,4 @@ v1 任务切分（实施计划展开）：
 | 日期 | 变更 |
 | --- | --- |
 | 2026-09-16 | 初稿。方案 A（全闭环对等）已在对话拍板。 |
+| 2026-09-16 | 落地：`runToSnap.archived`、中转 archive 路由、relayAttach 消失检测、iOS 隐藏/查看已隐藏。 |

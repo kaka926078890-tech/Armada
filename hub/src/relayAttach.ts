@@ -51,7 +51,7 @@ export function attachWithConfig(
   };
 
   const fpOf = (row: any) =>
-    `${row.status ?? ""}|${row.ended_at ?? ""}|${row.prompt ?? ""}|${JSON.stringify(row.pending_ask ?? null)}|${JSON.stringify(row.outbound ?? [])}`;
+    `${row.status ?? ""}|${row.ended_at ?? ""}|${row.prompt ?? ""}|${JSON.stringify(row.pending_ask ?? null)}|${JSON.stringify(row.outbound ?? [])}|${row.archived_at ?? ""}`;
 
   const pushWorkspaces = async (machines?: any[]) => {
     const list = machines ?? await (await hubFetch("/api/machines")).json().catch(() => null);
@@ -76,12 +76,23 @@ export function attachWithConfig(
       }
       const runs = await (await hubFetch("/api/runs")).json().catch(() => null);
       if (!Array.isArray(runs)) return;
+      const visible = new Set<string>();
       for (const row of runs.slice(0, 30)) {
         if (typeof row?.id !== "string") continue;
+        visible.add(row.id);
         const fp = fpOf(row);
         if (lastRunFp.get(row.id) === fp) continue;
         lastRunFp.set(row.id, fp);
         await pushRun(row.id);
+      }
+      for (const id of [...lastRunFp.keys()]) {
+        if (visible.has(id)) continue;
+        const row = await (await hubFetch(`/api/runs/${encodeURIComponent(id)}`)).json().catch(() => null);
+        if (!row?.id) continue;
+        const fp = fpOf(row);
+        if (lastRunFp.get(id) === fp) continue;
+        lastRunFp.set(id, fp);
+        await pushRun(id);
       }
     } finally {
       polling = false;
@@ -148,6 +159,17 @@ export function attachWithConfig(
       }
       if (msg.type === "cmd.cancel") {
         const r = await hubFetch(`/api/runs/${encodeURIComponent(msg.runId)}/cancel`, { method: "POST" });
+        const body = await r.json().catch(() => ({})) as any;
+        if (!r.ok) return fail(body.error ?? "HUB_ERROR");
+        const run = await snapOf(msg.runId);
+        send({ type: "cmd.result", requestId, ok: true, run });
+        if (run) send({ type: "snap.run", run });
+        return;
+      }
+      if (msg.type === "cmd.archive" || msg.type === "cmd.unarchive") {
+        if (typeof msg.runId !== "string" || !msg.runId) return fail("INVALID");
+        const action = msg.type === "cmd.archive" ? "archive" : "unarchive";
+        const r = await hubFetch(`/api/runs/${encodeURIComponent(msg.runId)}/${action}`, { method: "POST" });
         const body = await r.json().catch(() => ({})) as any;
         if (!r.ok) return fail(body.error ?? "HUB_ERROR");
         const run = await snapOf(msg.runId);

@@ -223,7 +223,10 @@ armada-relay://op?relay=https%3A%2F%2Frelay.example.com&fleet={fleetId}&token={o
 | 列仓 | `GET /mobile/workspaces` | `{ hubOffline, workspaces: [{ workspaceId, machineId, workspaceRoot, label }] }` | 401 |
 | 派发 | `POST /mobile/runs` `{ workspaceId, prompt }` | `201 { run }` | `400 INVALID`；透传 `WORKSPACE_NOT_OPEN` / `MACHINE_OFFLINE` / `409 PROMPT_COLLISION` / `429 RUN_LIMIT` → HTTP 与 hub 同码 |
 | 列表 | `GET /mobile/runs?limit=50` | 最近 50，非 archive | |
-| 详情 | `GET /mobile/runs/:id` | 含 `finalText` 全文、`pendingAsk`、`outbound` | 404 |
+| 已隐藏 | `GET /mobile/runs?archived=1` | 最近 50，仅 archive | |
+| 详情 | `GET /mobile/runs/:id` | 含 `finalText` 全文、`pendingAsk`、`outbound`、`archived`；已隐藏也 200 | 404 |
+| 隐藏 | `POST /mobile/runs/:id/archive` | `200 { run }` | `409 INVALID_STATE`；`404` |
+| 取消隐藏 | `POST /mobile/runs/:id/unarchive` | `200 { run }` | `404` |
 | 续聊 | `POST /mobile/runs/:id/followup` | running → **201**；终态重开 → **200**；body `{ run }` 含 outbound | 409 `CONVERSATION_BUSY` / `INJECT_SLOT_BUSY`；429 `OUTBOUND_LIMIT` |
 | 回答 | `POST /mobile/runs/:id/answer` | 202；body 同 hub `answer-ask` | 409 无 pending |
 | 取消 | `POST /mobile/runs/:id/cancel` | 200 | v1 建议做 |

@@ -10,6 +10,7 @@ final class Session: ObservableObject {
     @Published var workspaces: [WorkspaceDTO] = []
     @Published var hubOffline = false
     @Published var runs: [RunDTO] = []
+    @Published var hiddenRuns: [RunDTO] = []
     @Published var lastError: String?
     @Published var readAt: [String: Double] = [:]
     @Published var focusColumn: BoardColumn?
@@ -54,7 +55,7 @@ final class Session: ObservableObject {
         UserDefaults.standard.removeObject(forKey: "relay")
         UserDefaults.standard.removeObject(forKey: "fleet")
         UserDefaults.standard.removeObject(forKey: "token")
-        workspaces = []; runs = []
+        workspaces = []; runs = []; hiddenRuns = []
     }
 
     func api() -> RelayAPI { RelayAPI(base: relay, token: token) }
@@ -65,10 +66,12 @@ final class Session: ObservableObject {
             let api = api()
             async let w = api.workspaces()
             async let r = api.runs()
+            async let h = api.runs(archived: true)
             let ws = try await w
             hubOffline = ws.hubOffline
             workspaces = ws.workspaces
             runs = try await r
+            hiddenRuns = try await h
             lastError = nil
         } catch {
             lastError = error.localizedDescription
@@ -86,8 +89,9 @@ final class Session: ObservableObject {
         }
     }
 
-    func runs(in workspace: WorkspaceDTO) -> [RunDTO] {
-        runs.filter { $0.machineId == workspace.machineId && $0.workspaceRoot == workspace.workspaceRoot }
+    func runs(in workspace: WorkspaceDTO, archived: Bool = false) -> [RunDTO] {
+        let src = archived ? hiddenRuns : runs
+        return src.filter { $0.machineId == workspace.machineId && $0.workspaceRoot == workspace.workspaceRoot }
     }
 
     func markOpened(_ runId: String) {

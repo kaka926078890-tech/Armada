@@ -6,6 +6,13 @@ enum AppRoute: Hashable {
     case run(String)
 }
 
+func hideError(_ error: Error) -> String {
+    if let e = error as? RelayAPIError, case .http(_, let code) = e, code == "INVALID_STATE" {
+        return "运行中不能隐藏"
+    }
+    return error.localizedDescription
+}
+
 func statusLabel(_ status: String) -> String {
     switch status {
     case "queued": return "排队中"
@@ -163,9 +170,19 @@ struct WorkspaceHome: View {
     let workspace: WorkspaceDTO
     @State private var tab: BoardColumn = .completed
     @State private var showDispatch = false
+    @State private var showArchived = false
+
+    private var boardRuns: [RunDTO] {
+        session.runs(in: workspace, archived: showArchived)
+    }
+
+    private var hideLabel: String {
+        let n = session.runs(in: workspace, archived: true).count
+        return n > 0 ? "查看已隐藏 \(n)" : "查看已隐藏"
+    }
 
     var filtered: [RunDTO] {
-        session.runs(in: workspace).filter { $0.column == tab }
+        boardRuns.filter { $0.column == tab }
     }
 
     var body: some View {
@@ -173,7 +190,7 @@ struct WorkspaceHome: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(BoardColumn.allCases) { col in
-                        let n = session.runs(in: workspace).filter { $0.column == col }.count
+                        let n = boardRuns.filter { $0.column == col }.count
                         Button {
                             tab = col
                         } label: {
@@ -194,12 +211,25 @@ struct WorkspaceHome: View {
                 .padding(.vertical, 10)
             }
             List {
+                if let err = session.lastError {
+                    Text(err).foregroundStyle(.red).font(.caption)
+                }
+                if showArchived {
+                    Text("已隐藏的任务仍保留，可取消隐藏。").font(.caption).foregroundStyle(.secondary)
+                }
                 if filtered.isEmpty {
                     Text("这一列还没有任务").foregroundStyle(.secondary)
                 }
                 ForEach(filtered) { run in
                     NavigationLink(value: AppRoute.run(run.runId)) {
                         RunRow(run: run, unread: session.isUnread(run))
+                    }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        if showArchived {
+                            Button("取消隐藏") { Task { await unhide(run.runId) } }
+                        } else if run.showsArchive {
+                            Button("隐藏", role: .destructive) { Task { await hide(run.runId) } }
+                        }
                     }
                 }
             }
@@ -208,7 +238,14 @@ struct WorkspaceHome: View {
         .navigationTitle(workspace.label)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button("派发") { showDispatch = true }
+                HStack(spacing: 12) {
+                    Button(showArchived ? "返回看板" : hideLabel) {
+                        showArchived.toggle()
+                    }
+                    if !showArchived {
+                        Button("派发") { showDispatch = true }
+                    }
+                }
             }
         }
         .sheet(isPresented: $showDispatch) {
@@ -225,6 +262,26 @@ struct WorkspaceHome: View {
         if let col = session.focusColumn {
             tab = col
             session.focusColumn = nil
+        }
+    }
+
+    private func hide(_ runId: String) async {
+        do {
+            _ = try await session.api().archive(runId: runId)
+            session.lastError = nil
+            await session.refresh()
+        } catch {
+            session.lastError = hideError(error)
+        }
+    }
+
+    private func unhide(_ runId: String) async {
+        do {
+            _ = try await session.api().unarchive(runId: runId)
+            session.lastError = nil
+            await session.refresh()
+        } catch {
+            session.lastError = error.localizedDescription
         }
     }
 }
@@ -297,6 +354,7 @@ struct RunDetailView: View {
     @State private var mdHeight: CGFloat = 120
     @State private var promptHeight: CGFloat = 40
     @State private var showDispatch = false
+    @Environment(\.dismiss) private var dismiss
 
     private var slot: WorkspaceDTO? {
         guard let run else { return nil }
@@ -360,6 +418,33 @@ struct RunDetailView: View {
                                     await session.refresh()
                                 } catch {
                                     err = error.localizedDescription
+                                }
+                            }
+                        }
+                    }
+                    if run.isArchived {
+                        Button("取消隐藏") {
+                            Task {
+                                do {
+                                    _ = try await session.api().unarchive(runId: runId)
+                                    err = nil
+                                    await reload()
+                                    await session.refresh()
+                                } catch {
+                                    err = error.localizedDescription
+                                }
+                            }
+                        }
+                    } else if run.showsArchive {
+                        Button("隐藏") {
+                            Task {
+                                do {
+                                    _ = try await session.api().archive(runId: runId)
+                                    err = nil
+                                    await session.refresh()
+                                    dismiss()
+                                } catch {
+                                    err = hideError(error)
                                 }
                             }
                         }
