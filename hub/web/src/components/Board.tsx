@@ -60,7 +60,7 @@ export default function Board({ runs, machines, selected, onSelect, showArchived
             )}
             {g[col].map((r) => {
               const v = cardView(r, now);
-              const chrome = cardChromeOf(r);
+              const chrome = cardChromeOf(r, readMap[r.id]);
               const unread = isUnreadAlert(r, readMap[r.id]) || isUnreadNeedInput(r, readMap[r.id]);
               const editing = editingId === r.id;
               const lag = lagOf(r.machine_id);
@@ -95,7 +95,7 @@ export default function Board({ runs, machines, selected, onSelect, showArchived
                       )}
                       <div className="text-[11px] text-zinc-500 mt-1 flex justify-between items-center">
                         <span className={`inline-flex items-center gap-1.5 ${BADGE_COLOR[col]}`}>
-                          {unread ? <span className={`size-1.5 shrink-0 rounded-full ${chrome === "done" ? "bg-emerald-500" : "bg-red-500"}`} title={chrome === "need" ? "待处理" : "未读"} /> : null}
+                          {unread ? <span className={`size-1.5 shrink-0 rounded-full ${chrome === "done" ? "bg-emerald-400" : "bg-red-400"}`} title={chrome === "need" ? "待处理" : "未读"} /> : null}
                           {v.badge}
                         </span>
                         <span className="text-zinc-600">{v.elapsed}</span>

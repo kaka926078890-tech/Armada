@@ -11,7 +11,7 @@ const run: RunRow = {
 };
 
 describe("Board unread chrome", () => {
-  test("completed card has a green ring, not a red one", () => {
+  test("unread completed card has a green accent, not a red one", () => {
     const html = renderToStaticMarkup(
       <Board
         runs={[run]}
@@ -25,12 +25,12 @@ describe("Board unread chrome", () => {
         onRename={() => {}}
       />,
     );
-    expect(html).toContain("border-emerald-500");
-    expect(html).toContain("shadow-[");
-    expect(html).not.toContain("border-red-500");
+    expect(html).toContain("border-l-emerald-400");
+    expect(html).not.toContain("border-l-red-400");
+    expect(html).not.toContain("shadow-[");
   });
 
-  test("opened completed card keeps the green ring", () => {
+  test("opened completed card has no green accent", () => {
     const html = renderToStaticMarkup(
       <Board
         runs={[run]}
@@ -44,11 +44,11 @@ describe("Board unread chrome", () => {
         onRename={() => {}}
       />,
     );
-    expect(html).toContain("border-emerald-500");
-    expect(html).not.toContain("border-red-500");
+    expect(html).not.toContain("border-l-emerald-400");
+    expect(html).not.toContain("border-l-red-400");
   });
 
-  test("pending ask card has a red ring even after it was opened", () => {
+  test("pending ask card has a red accent even after it was opened", () => {
     const html = renderToStaticMarkup(
       <Board
         runs={[{ ...run, status: "running", ended_at: null, end_reason: null, pending_ask: { request_id: "ask-1", questions: [{ id: "q0", prompt: "选一个", options: [] }] } }]}
@@ -62,8 +62,8 @@ describe("Board unread chrome", () => {
         onRename={() => {}}
       />,
     );
-    expect(html).toContain("border-red-500");
-    expect(html).not.toContain("border-emerald-500");
+    expect(html).toContain("border-l-red-400");
+    expect(html).not.toContain("border-l-emerald-400");
   });
 
   test("error card shows a retry button", () => {

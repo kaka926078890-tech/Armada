@@ -159,13 +159,14 @@ describe("unread dots", () => {
     expect(workspaceHasUnread([run], {})).toBe(false);
   });
 
-  test("need-input is a red ring; completed is a green ring; selected idle stays sky", () => {
+  test("need-input is a red bar; unread completed is a green bar; selected idle stays sky", () => {
     expect(cardChromeOf({ ...base, pending_ask: { request_id: "a1", questions: [] } })).toBe("need");
-    expect(cardChromeOf({ ...base, status: "completed" })).toBe("done");
+    expect(cardChromeOf({ ...base, status: "completed", ended_at: 9 })).toBe("done");
+    expect(cardChromeOf({ ...base, status: "completed", ended_at: 9 }, 9000)).toBe("none");
     expect(cardChromeOf(base)).toBe("none");
-    expect(cardChromeClass("need", false)).toContain("border-red-500");
-    expect(cardChromeClass("need", true)).toContain("border-red-500");
-    expect(cardChromeClass("done", false)).toContain("border-emerald-500");
+    expect(cardChromeClass("need", false)).toContain("border-l-red-400");
+    expect(cardChromeClass("need", true)).toContain("border-l-red-400");
+    expect(cardChromeClass("done", false)).toContain("border-l-emerald-400");
     expect(cardChromeClass("none", true)).toContain("border-sky-600");
     expect(cardChromeClass("none", false)).toContain("border-transparent");
   });

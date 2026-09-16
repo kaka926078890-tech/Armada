@@ -19,9 +19,9 @@ func askOptionBody(label: String, text: String) -> String {
     return t.isEmpty ? label : t
 }
 
-func runRowChrome(_ run: RunDTO) -> Color? {
+func runRowChrome(_ run: RunDTO, unread: Bool) -> Color? {
     if run.pendingAsk != nil { return .red }
-    if run.status == "completed" { return .green }
+    if unread && run.status == "completed" { return .green }
     return nil
 }
 
@@ -68,7 +68,8 @@ struct RunRow: View {
     let unread: Bool
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            Circle().fill(statusColor(run.status)).frame(width: 10, height: 10).padding(.top, 6)
+            accent
+            Circle().fill(statusColor(run.status)).frame(width: 8, height: 8).padding(.top, 6)
             VStack(alignment: .leading, spacing: 4) {
                 Text(run.prompt).lineLimit(2)
                 Text(run.pendingAsk != nil && run.status == "running" ? "待处理"
@@ -82,18 +83,21 @@ struct RunRow: View {
                 Circle().fill(run.status == "completed" && run.pendingAsk == nil ? Color.green : Color.red).frame(width: 7, height: 7).padding(.top, 8)
             }
         }
-        .padding(8)
-        .overlay {
-            if let c = runRowChrome(run) {
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(c, lineWidth: 2)
-            }
-        }
+        .padding(.vertical, 2)
+    }
+
+    @ViewBuilder
+    private var accent: some View {
+        let c = runRowChrome(run, unread: unread)
+        RoundedRectangle(cornerRadius: 1.5)
+            .fill(c ?? Color.clear)
+            .frame(width: 3)
+            .padding(.vertical, 2)
     }
 
     private var captionColor: Color {
         if run.pendingAsk != nil { return .red }
-        if run.status == "completed" { return .green }
+        if unread && run.status == "completed" { return .green }
         return .secondary
     }
 }
@@ -598,10 +602,13 @@ struct AskView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(uiColor: .secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(Color.red, lineWidth: 2)
-        )
+        .overlay(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 1.5)
+                .fill(Color.red)
+                .frame(width: 3)
+                .padding(.vertical, 10)
+                .padding(.leading, 4)
+        }
     }
 
     private var isPlan: Bool {

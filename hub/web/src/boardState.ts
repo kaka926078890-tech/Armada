@@ -229,19 +229,23 @@ export function isUnreadCompleted(run: RunRow, readAt: number | undefined): bool
 
 export type CardChrome = "need" | "done" | "none";
 
-/** 待操作（Ask / Build）红框；成功完成绿框。不跟未读绑定，答完/隐藏前一直在。 */
-export function cardChromeOf(run: Pick<RunRow, "status" | "pending_ask">): CardChrome {
+/** 待操作红条一直在；完成绿条只给未读。 */
+export function cardChromeOf(
+  run: Pick<RunRow, "status" | "pending_ask" | "ended_at" | "started_at" | "created_at">,
+  readAt?: number,
+): CardChrome {
   if (run.pending_ask) return "need";
-  if (run.status === "completed") return "done";
+  if (run.status === "completed" && (readAt == null || runActivityTs(run as RunRow) > readAt)) return "done";
   return "none";
 }
 
 export function cardChromeClass(chrome: CardChrome, selected: boolean): string {
+  const selectedRing = selected ? " ring-1 ring-sky-500/40" : "";
   if (chrome === "need") {
-    return "border-red-500/90 bg-zinc-900 shadow-[0_0_0_1px_rgba(248,113,113,0.55),0_0_16px_rgba(239,68,68,0.5)]";
+    return `border-zinc-800/80 border-l-[3px] border-l-red-400 bg-zinc-900${selectedRing}`;
   }
   if (chrome === "done") {
-    return "border-emerald-500/90 bg-zinc-900 shadow-[0_0_0_1px_rgba(52,211,153,0.55),0_0_16px_rgba(16,185,129,0.45)]";
+    return `border-zinc-800/80 border-l-[3px] border-l-emerald-400 bg-zinc-900${selectedRing}`;
   }
   if (selected) return "border-sky-600/80 bg-zinc-900";
   return "border-transparent bg-zinc-900/50 hover:border-zinc-700";
