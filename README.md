@@ -542,13 +542,14 @@ hub 静态托管路径相对 `hub/src`，**请从仓库根**执行 `bun run dev:
 | 项 | 打算做 |
 | --- | --- |
 | **中转管理页 / 中台贴 pair** | 现在只有 CLI 与 `relay.json`；看板里还没有粘贴框 |
-| **App 通道** | 前台仍是轮询；锁屏 Ask/完成通知要 APNs；TestFlight 另开 |
+| **App 通道** | 前台仍是轮询；锁屏 Ask/完成见 [App APNs 规格](docs/superpowers/specs/2026-09-16-armada-app-push-design.md) |
 | **多操作者 / 一部手机多中台** | v1 一条 op 对应一台在线中台；令牌轮换另开闸 |
 | **多机互联 · 团队协作** | 多台机器组成协作网，不只局域网点对点加入：团队共享舰队、一起派发和盯进度 |
 
 ## 设计文档
 
 - 中转 + iOS：[docs/superpowers/specs/2026-09-12-armada-relay-mobile-design.md](docs/superpowers/specs/2026-09-12-armada-relay-mobile-design.md)
+- App 可见 APNs：[docs/superpowers/specs/2026-09-16-armada-app-push-design.md](docs/superpowers/specs/2026-09-16-armada-app-push-design.md)
 - 局域网发现：[docs/superpowers/specs/2026-09-07-armada-lan-fleet-discovery-design.md](docs/superpowers/specs/2026-09-07-armada-lan-fleet-discovery-design.md)
 - 图文派发：[docs/superpowers/specs/2026-09-02-armada-composer-image-chip-design.md](docs/superpowers/specs/2026-09-02-armada-composer-image-chip-design.md)
 - 离线工作区从侧栏消失：[docs/superpowers/specs/2026-09-10-armada-offline-workspace-slots-design.md](docs/superpowers/specs/2026-09-10-armada-offline-workspace-slots-design.md)

@@ -119,7 +119,7 @@
 | --- | --- | --- | --- |
 | **v1** | 中转 serve；hub 出站 WSS；邀请 URI；iOS 五屏；**前台 10s 轮询**；完整 `finalText`；Ask；Simulator 可测 | 上架；小程序；App SSE；APNs；远程开窗；followup | 本 spec；先求能跑通 |
 | **v1.5** | `GET /mobile/stream` 前台 SSE；轮询仅作断线降级；`POST cancel` 若 v1 未做齐 | 锁屏实时；多中转集群 | 开着 App 仍觉得 10s 钝 |
-| **v2** | **APNs 可见通知**（Ask / 终态）；点进详情强制 GET；中转管理页生成邀请；operator/hub secret 轮换与多操作者另开闸；App Store 再另开闸 | APNs 塞正文；静默推送当主通道；把 7380 公网化 | 开发者账号 Active + 真机；内测需要离开 App 仍能知道 Ask/完成 |
+| **v2** | **APNs 可见通知**（Ask / 终态）；点进详情强制 GET。契约见 [2026-09-16-armada-app-push-design.md](./2026-09-16-armada-app-push-design.md)。中转管理页生成邀请、secret 轮换、App Store **仍另开闸** | APNs 塞正文；静默推送当主通道；把 7380 公网化 | 开发者账号 Active + 真机；已拍板 2026-09-16 |
 
 ---
 
@@ -487,5 +487,6 @@ p95（同区域 VPS，排除 DERP）：`GET /mobile/workspaces` < 400ms；`POST 
 | 2026-09-13 | 草稿代码入库（`relay/`、hub 出站、`mobile/ios/`）。**状态改为：App 交互与启动待确认（N1–N3）**；五屏实现不作为发布基准。 |
 | 2026-09-15 | snap 增加 `outbound` + `queueMessageDefaultBehavior`；`POST /mobile/runs/:id/followup` running → 201；App 运行中可续聊并画队列托盘。不加 protocolVersion（字段向后兼容）。 |
 | 2026-09-15 | Created Plan / Build：CDP 探测 Mac `split-button[data-tone=plan]` 或 Windows `ui-split-button` 上文案 `Build`（不含 Building）+ `element.click()`；`pendingAsk.kind=plan`；plan-writing `stop` 后复开 `running`。App 详情 Build 按钮。Windows Win Destop 2026-09-15 已点通。 |
+| 2026-09-16 | App 可见 APNs 从「v2 以后」落到独立实施基准：[2026-09-16-armada-app-push-design.md](./2026-09-16-armada-app-push-design.md)。本文件 §4.9 原则仍有效（可见推送、不带 `finalText`）。 |
 
 本文件为远程能力的 **实施基准**。变更绑定字段或完成门禁须改本 spec 并升 `protocolVersion`。
