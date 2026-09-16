@@ -424,7 +424,7 @@ P0 与 P1 可同 PR。P2 必须带 Push 的新 build。P3 不能用模拟器。
 | 苹果到达延迟 / 丢（极少） | 锁屏晚或没有 | 不写进 SLA；轮询兜底 | 已知 |
 | 游标先写导致三次都失败则漏推 | 该次边沿不再发 | 接受；新 Ask / 新一轮终态会再火 | 已选 |
 | 中台改 `ALERT_STATUSES` 中转未跟 | 两边通知不一致 | 镜像测试；改中台通知须改本模块 | 已知 |
-| archive 脚本 `CODE_SIGNING_ALLOWED=NO` | 可能打出无 Push 的包 | 实现时 archive 必须带 Push capability；以 TF 包 entitlements 为准 | 实现注意 |
+| archive 脚本 `CODE_SIGNING_ALLOWED=NO` | 可能打出无 Push 的包 | 归档后 ad-hoc 签上 `aps-environment=production`，IPA 无此项则拒传 | **已修** |
 | 模拟器 | 无法验 A9 | 文档写死 | 已关闭 |
 
 ### 8.1 需要你动手（不是产品分叉）

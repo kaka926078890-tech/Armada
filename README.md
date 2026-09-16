@@ -201,7 +201,7 @@ RELAY_APNS_KEY_ID=<Key ID>
 RELAY_APNS_TEAM_ID=LW2A4J4KKG
 ```
 
-也可以直接 `export` 上述变量。缺任一项时中转打 `APNS_DISABLED`，前台轮询照常。App ID 需打开 Push Notifications，并打带 `aps-environment=production` 的新 TestFlight。模拟器没有 device token。**公网中转**（App 连的那台）也要放同一份文件并重启，只放开发机不会给手机推。
+也可以直接 `export` 上述变量。缺任一项时中转打 `APNS_DISABLED`，前台轮询照常。App ID 打开 Push Notifications 即可，**不要**再配 Push SSL 证书（token 认证用 `.p8`）。打 TestFlight 必须走 `mobile/ios/scripts/archive-testflight.sh`：未签名归档要先 ad-hoc 签上 `aps-environment=production`，否则云签名会打出没有 Push 的包。模拟器没有 device token。**公网中转**（App 连的那台）也要放同一份文件并重启，只放开发机不会给手机推。
 
 ### 不要做
 

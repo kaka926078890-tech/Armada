@@ -3,8 +3,10 @@
 #
 # This machine has Apple Development but no local Apple Distribution identity, and
 # the team has no registered iPhone for a Development profile. Archive unsigned,
-# then exportArchive re-signs with Xcode's Cloud Managed Apple Distribution
-# (same path as TestFlight build 1). Never put CODE_SIGNING_ALLOWED=NO in pbxproj.
+# ad-hoc sign with production APNs entitlements, then exportArchive re-signs
+# with Xcode Cloud Managed Apple Distribution. Never put CODE_SIGNING_ALLOWED=NO
+# in pbxproj. An unsigned archive with empty signature entitlements makes Apple
+# reuse a baseline Store profile that lacks aps-environment (builds 1–3).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -36,9 +38,16 @@ if ! archive_with -destination 'generic/platform=iOS'; then
 fi
 
 APP="$ARCHIVE/Products/Applications/ArmadaRemote.app"
+ENT="$ROOT/ArmadaRemote/ArmadaRemote.entitlements"
 echo "=== archived Info.plist version ==="
 /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Info.plist"
 /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Info.plist"
+
+# Cloud export copies signature entitlements into the Store profile request.
+# Without this, the IPA is push-dead even when the App ID has Push enabled.
+codesign --force --sign - --entitlements "$ENT" "$APP"
+echo "=== ad-hoc archive entitlements ==="
+codesign -d --entitlements :- "$APP"
 
 EXPORT_OPTS="$OUT/ExportOptions.export.plist"
 UPLOAD_OPTS="$OUT/ExportOptions.upload.plist"
@@ -64,7 +73,13 @@ echo "IPA: $IPA"
 echo "=== signed entitlements in IPA ==="
 TMP=$(mktemp -d)
 unzip -qo "$IPA" -d "$TMP"
-codesign -d --entitlements :- "$TMP/Payload/ArmadaRemote.app" 2>/dev/null || true
+ENT_XML="$(codesign -d --entitlements :- "$TMP/Payload/ArmadaRemote.app" 2>/dev/null || true)"
+printf '%s\n' "$ENT_XML"
+if ! printf '%s\n' "$ENT_XML" | grep -q '<key>aps-environment</key>' || \
+   ! printf '%s\n' "$ENT_XML" | grep -q '<string>production</string>'; then
+  echo "IPA missing aps-environment=production; refusing TestFlight upload" >&2
+  exit 1
+fi
 
 xcodebuild -exportArchive \
   -archivePath "$ARCHIVE" \
