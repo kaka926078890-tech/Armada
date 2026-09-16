@@ -1,7 +1,7 @@
 export function consumeQueryToken(search: string, currentToken: string): { token: string; stripQuery: boolean } {
   const q = search.startsWith("?") ? search.slice(1) : search;
   const token = new URLSearchParams(q).get("token")?.trim() ?? "";
-  if (token) return { token, stripQuery: true };
+  if (token) return { token, stripQuery: !isDesktopShell(search) };
   return { token: currentToken, stripQuery: false };
 }
 

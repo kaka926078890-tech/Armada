@@ -10,6 +10,7 @@ test("requestDesktop posts to parent with the shared source", () => {
     requestDesktop("open-workspace");
     requestDesktop("get-share-link");
     requestDesktop("leave-fleet");
+    requestDesktop("need-token");
   } finally {
     (globalThis as { window: typeof original }).window = original;
   }
@@ -17,6 +18,7 @@ test("requestDesktop posts to parent with the shared source", () => {
     { source: DESKTOP_BOARD_SOURCE, type: "open-workspace" },
     { source: DESKTOP_BOARD_SOURCE, type: "get-share-link" },
     { source: DESKTOP_BOARD_SOURCE, type: "leave-fleet" },
+    { source: DESKTOP_BOARD_SOURCE, type: "need-token" },
   ]);
 });
 

@@ -5,6 +5,7 @@ import {
   boardUrl,
   cdpZombieCopy,
   copiedToast,
+  decideBoardReopen,
   defaultDiscoverable,
   defaultLandingMode,
   discoveredRowView,
@@ -13,9 +14,11 @@ import {
   formatOpenRunUri,
   noOpenFleetsCopy,
   noShareIpCopy,
+  parseBoardSession,
   parseDesktopBoardRequest,
   parsePastedJoin,
   selectShareCandidate,
+  serializeBoardSession,
   shareJoinUri,
   shouldOpenBoardAfterCreate,
   shouldShowCreate,
@@ -57,6 +60,12 @@ type JoinFleetResult = {
 };
 
 let lastShareUri = "";
+const BOARD_SESSION_KEY = "armada.boardSession";
+let lastBoard = parseBoardSession(
+  typeof sessionStorage === "undefined" ? null : sessionStorage.getItem(BOARD_SESSION_KEY),
+);
+let reopenCount = 0;
+let lastReopenAt: number | null = null;
 
 type FoundFleet = { id: string; name: string; ipv4: string; port: number; joinUri: string };
 const discovered = new Map<string, FoundFleet>();
@@ -234,9 +243,26 @@ function toastAttach(attach: LocalAttachView | null | undefined) {
   }
 }
 
-function openBoard(origin: string, token: string) {
+function persistBoard(origin: string, token: string) {
+  lastBoard = { origin, token };
+  try { sessionStorage.setItem(BOARD_SESSION_KEY, serializeBoardSession(lastBoard)); } catch { /* quota / private */ }
+}
+
+function clearBoardSession() {
+  lastBoard = null;
+  reopenCount = 0;
+  lastReopenAt = null;
+  try { sessionStorage.removeItem(BOARD_SESSION_KEY); } catch { /* ignore */ }
+}
+
+function openBoard(origin: string, token: string, fromNeedToken = false) {
+  persistBoard(origin, token);
+  if (!fromNeedToken) {
+    reopenCount = 0;
+    lastReopenAt = null;
+  }
   stopJoinBrowse();
-  const url = boardUrl(origin, token);
+  const url = fromNeedToken ? `${boardUrl(origin, token)}&_=${Date.now()}` : boardUrl(origin, token);
   const frame = boardEl();
   if (frame) {
     frame.hidden = false;
@@ -246,6 +272,25 @@ function openBoard(origin: string, token: string) {
     return;
   }
   window.location.assign(url);
+}
+
+function onNeedToken() {
+  if (!lastBoard && typeof sessionStorage !== "undefined") {
+    lastBoard = parseBoardSession(sessionStorage.getItem(BOARD_SESSION_KEY));
+  }
+  if (!lastBoard) {
+    showToast("鉴权失败，请重新创建或加入舰队", "err");
+    return;
+  }
+  const decision = decideBoardReopen({ reopenCount, lastAt: lastReopenAt, now: Date.now() });
+  if (decision === "wait") return;
+  if (decision === "give-up") {
+    showToast("鉴权失败，请重新创建或加入舰队", "err");
+    return;
+  }
+  reopenCount += 1;
+  lastReopenAt = Date.now();
+  openBoard(lastBoard.origin, lastBoard.token, true);
 }
 
 type OpenRunPayload = { runId: string; machineId: string; workspaceRoot: string };
@@ -283,6 +328,7 @@ function wireRunAlertClick() {
 }
 
 function leaveBoard() {
+  clearBoardSession();
   const frame = boardEl();
   if (frame) {
     frame.hidden = true;
@@ -418,6 +464,10 @@ window.addEventListener("DOMContentLoaded", () => {
     }
     if (req.type === "leave-fleet") {
       leaveBoard();
+      return;
+    }
+    if (req.type === "need-token") {
+      onNeedToken();
       return;
     }
     if (req.type === "run.alert") {

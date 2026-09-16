@@ -1,7 +1,7 @@
 export const DESKTOP_BOARD_SOURCE = "armada-desktop";
 export const DESKTOP_HOST_SOURCE = "armada-desktop-host";
 
-export type DesktopBoardCommand = "open-workspace" | "get-share-link" | "leave-fleet";
+export type DesktopBoardCommand = "open-workspace" | "get-share-link" | "leave-fleet" | "need-token";
 
 export type DesktopRunAlert = {
   runId: string;

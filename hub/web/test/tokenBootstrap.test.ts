@@ -6,6 +6,11 @@ test("prefers query token and asks to strip", () => {
   expect(consumeQueryToken("token=abc", "old")).toEqual({ token: "abc", stripQuery: true });
 });
 
+test("desktop query token stays in the URL so a restored iframe can re-bootstrap", () => {
+  expect(consumeQueryToken("?token=abc&desktop=1", "")).toEqual({ token: "abc", stripQuery: false });
+  expect(consumeQueryToken("?token=abc&desktop=1", "old")).toEqual({ token: "abc", stripQuery: false });
+});
+
 test("keeps localStorage when no query", () => {
   expect(consumeQueryToken("", "stored")).toEqual({ token: "stored", stripQuery: false });
   expect(consumeQueryToken("?foo=1", "")).toEqual({ token: "", stripQuery: false });

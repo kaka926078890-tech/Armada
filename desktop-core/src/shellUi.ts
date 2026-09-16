@@ -14,7 +14,7 @@ export type AttachBanner = { kind: "red" | "info" | "none"; lines: string[] };
 
 export const DESKTOP_BOARD_SOURCE = "armada-desktop";
 
-export type DesktopBoardCommand = "open-workspace" | "get-share-link" | "leave-fleet";
+export type DesktopBoardCommand = "open-workspace" | "get-share-link" | "leave-fleet" | "need-token";
 
 export type DesktopRunAlert = {
   type: "run.alert";
@@ -35,6 +35,43 @@ export function boardUrl(webviewOrigin: string, token: string): string {
   return `http://${webviewOrigin}/?token=${token}&desktop=1`;
 }
 
+export type BoardSession = { origin: string; token: string };
+
+export function serializeBoardSession(session: BoardSession): string {
+  return JSON.stringify({ origin: session.origin, token: session.token });
+}
+
+export function parseBoardSession(raw: string | null): BoardSession | null {
+  if (!raw) return null;
+  try {
+    const o = JSON.parse(raw) as Record<string, unknown>;
+    if (typeof o.origin !== "string" || !o.origin.trim()) return null;
+    if (typeof o.token !== "string" || !o.token) return null;
+    return { origin: o.origin.trim(), token: o.token };
+  } catch {
+    return null;
+  }
+}
+
+export const BOARD_REOPEN_COOLDOWN_MS = 8000;
+export const BOARD_REOPEN_MAX = 2;
+
+export type BoardReopenDecision = "reopen" | "wait" | "give-up";
+
+export function decideBoardReopen(opts: {
+  reopenCount: number;
+  lastAt: number | null;
+  now: number;
+  cooldownMs?: number;
+  maxReopens?: number;
+}): BoardReopenDecision {
+  const max = opts.maxReopens ?? BOARD_REOPEN_MAX;
+  const cooldown = opts.cooldownMs ?? BOARD_REOPEN_COOLDOWN_MS;
+  if (opts.reopenCount >= max) return "give-up";
+  if (opts.lastAt != null && opts.now - opts.lastAt < cooldown) return "wait";
+  return "reopen";
+}
+
 export function defaultLandingMode(platform: string): LandingMode {
   return shouldShowCreate(platform) ? "create" : "join";
 }
@@ -43,7 +80,7 @@ export function parseDesktopBoardRequest(data: unknown): DesktopBoardRequest | n
   if (!data || typeof data !== "object") return null;
   const o = data as Record<string, unknown>;
   if (o.source !== DESKTOP_BOARD_SOURCE) return null;
-  if (o.type === "open-workspace" || o.type === "get-share-link" || o.type === "leave-fleet") {
+  if (o.type === "open-workspace" || o.type === "get-share-link" || o.type === "leave-fleet" || o.type === "need-token") {
     return { type: o.type };
   }
   if (o.type !== "run.alert") return null;

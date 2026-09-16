@@ -5,10 +5,13 @@ import {
   boardUrl,
   copiedToast,
   defaultLandingMode,
+  decideBoardReopen,
   firstArmadaJoinUri,
   noShareIpCopy,
+  parseBoardSession,
   parseDesktopBoardRequest,
   parsePastedJoin,
+  serializeBoardSession,
   selectShareCandidate,
   shareJoinUri,
   shouldOpenBoardAfterCreate,
@@ -44,6 +47,7 @@ describe("parseDesktopBoardRequest", () => {
     expect(parseDesktopBoardRequest({ source: "armada-desktop", type: "open-workspace" })).toEqual({ type: "open-workspace" });
     expect(parseDesktopBoardRequest({ source: "armada-desktop", type: "get-share-link" })).toEqual({ type: "get-share-link" });
     expect(parseDesktopBoardRequest({ source: "armada-desktop", type: "leave-fleet" })).toEqual({ type: "leave-fleet" });
+    expect(parseDesktopBoardRequest({ source: "armada-desktop", type: "need-token" })).toEqual({ type: "need-token" });
   });
 
   test("parses run.alert with three ids", () => {
@@ -75,6 +79,29 @@ describe("parseDesktopBoardRequest", () => {
     expect(parseDesktopBoardRequest({ source: "other", type: "open-workspace" })).toBeNull();
     expect(parseDesktopBoardRequest({ source: "armada-desktop", type: "dispatch" })).toBeNull();
     expect(parseDesktopBoardRequest(null)).toBeNull();
+  });
+});
+
+describe("board session", () => {
+  test("round-trips origin and token for host reopen", () => {
+    const raw = serializeBoardSession({ origin: "127.0.0.1:7380", token });
+    expect(parseBoardSession(raw)).toEqual({ origin: "127.0.0.1:7380", token });
+  });
+
+  test("drops incomplete or junk session", () => {
+    expect(parseBoardSession(null)).toBeNull();
+    expect(parseBoardSession("")).toBeNull();
+    expect(parseBoardSession("{}")).toBeNull();
+    expect(parseBoardSession(JSON.stringify({ origin: "127.0.0.1:7380", token: "" }))).toBeNull();
+  });
+});
+
+describe("decideBoardReopen", () => {
+  test("first need-token reopens; cooldown then give-up after two reopens", () => {
+    expect(decideBoardReopen({ reopenCount: 0, lastAt: null, now: 1000 })).toBe("reopen");
+    expect(decideBoardReopen({ reopenCount: 1, lastAt: 1000, now: 2000 })).toBe("wait");
+    expect(decideBoardReopen({ reopenCount: 1, lastAt: 1000, now: 1000 + 8000 })).toBe("reopen");
+    expect(decideBoardReopen({ reopenCount: 2, lastAt: 9000, now: 20000 })).toBe("give-up");
   });
 });
 

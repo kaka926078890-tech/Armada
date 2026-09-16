@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, clearToken, getToken, setToken } from "./api";
 import { consumeQueryToken, isDesktopShell, searchWithoutToken } from "./tokenBootstrap";
 import { requestDesktop, parseHostOpenRun } from "./desktopBridge";
+import { decideAuthLoss } from "./authSession";
 import type { Machine } from "./types";
 import type { RunRow } from "./boardState";
 import {
@@ -56,6 +57,8 @@ export default function App() {
   const [loadError, setLoadError] = useState("");
   const [authDenied, setAuthDenied] = useState(false);
   const [theme, setTheme] = useState<ThemeName>(() => loadTheme());
+  const desktop = isDesktopShell(window.location.search);
+  const askedHost = useRef(false);
   const readMapRef = useRef(readMap);
   readMapRef.current = readMap;
   const readPatchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -131,13 +134,24 @@ export default function App() {
 
   useEffect(() => {
     const on401 = () => {
+      if (decideAuthLoss(desktop) === "ask-host") {
+        requestDesktop("need-token");
+        return;
+      }
       localStorage.removeItem("armada.token");
       setAuthed(false);
       setAuthDenied(true);
     };
     window.addEventListener("armada:unauthorized", on401);
     return () => window.removeEventListener("armada:unauthorized", on401);
-  }, []);
+  }, [desktop]);
+
+  useEffect(() => {
+    if (authed || !desktop) return;
+    if (askedHost.current) return;
+    askedHost.current = true;
+    requestDesktop("need-token");
+  }, [authed, desktop]);
 
   useEffect(() => {
     refresh();
@@ -291,6 +305,22 @@ export default function App() {
   }, [authed]);
 
   if (!authed) {
+    if (desktop) {
+      return (
+        <div className="h-screen flex items-center justify-center bg-zinc-950 text-zinc-100">
+          <div className="flex flex-col items-center gap-3">
+            <p className="text-[13px] text-zinc-500">正在重新连接中台…</p>
+            <button
+              type="button"
+              onClick={() => requestDesktop("leave-fleet")}
+              className="text-[12px] text-zinc-400 hover:text-zinc-100 px-2 py-0.5 rounded border border-zinc-700"
+            >
+              返回
+            </button>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="h-screen flex items-center justify-center bg-zinc-950 text-zinc-100">
         <form className="flex flex-col gap-3 w-80" onSubmit={(e) => {
@@ -310,7 +340,6 @@ export default function App() {
     );
   }
 
-  const desktop = isDesktopShell(window.location.search);
   const leaveFleet = () => {
     if (desktop) {
       requestDesktop("leave-fleet");
