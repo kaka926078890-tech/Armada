@@ -1,5 +1,5 @@
 import { decodeWorkspaceId } from "../../relay/src/uri";
-import { hubWsUrl, loadRelayConfig, runToSnap, type RelayConfig, type RunSnap } from "./relayClient";
+import { hubWsUrl, loadEventsForSnap, loadRelayConfig, runToSnap, type RelayConfig, type RunSnap } from "./relayClient";
 import type { RunEvent } from "../web/src/types";
 
 /** Attach a hub that only speaks HTTP/SSE (packaged 0.1.0) to a local relay. */
@@ -46,6 +46,7 @@ export function attachWithConfig(
     const runRes = await hubFetch(`/api/runs/${encodeURIComponent(runId)}`);
     const run = await runRes.json().catch(() => null) as any;
     if (!run?.id) return null;
+    if (!loadEventsForSnap(String(run.status ?? ""))) return runToSnap(run, []);
     const events = await (await hubFetch(`/api/runs/${encodeURIComponent(runId)}/events`)).json().catch(() => []) as RunEvent[];
     return runToSnap(run, Array.isArray(events) ? events : []);
   };

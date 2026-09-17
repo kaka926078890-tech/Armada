@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { createServer, type HubServer } from "../src/index";
-import { loadRelayConfig, runToSnap } from "../src/relayClient";
+import { loadEventsForSnap, loadRelayConfig, runToSnap } from "../src/relayClient";
 import { createRelayServer, type RelayServer } from "../../relay/src/server";
 import { encodeWorkspaceId } from "../../relay/src/uri";
 import type { RunEvent } from "../web/src/types";
@@ -138,6 +138,21 @@ describe("runToSnap", () => {
     expect(runToSnap({ ...base, archived_at: null }, []).archived).toBe(false);
     expect(runToSnap(base, []).archived).toBe(false);
   });
+
+  test("cmd.result snaps skip run_events unless the card is completed", () => {
+    expect(loadEventsForSnap("dispatched")).toBe(false);
+    expect(loadEventsForSnap("binding")).toBe(false);
+    expect(loadEventsForSnap("running")).toBe(false);
+    expect(loadEventsForSnap("queued")).toBe(false);
+    expect(loadEventsForSnap("completed")).toBe(true);
+    const long = "长文".repeat(4000);
+    const snap = runToSnap({
+      id: "r-1", machine_id: "m-1", workspace_root: "/ws/a", prompt: long, status: "dispatched", created_at: 1,
+    }, []);
+    expect(snap.status).toBe("dispatched");
+    expect(snap.prompt).toBe(long);
+    expect(snap.finalText).toBeNull();
+  });
 });
 
 describe("hub outbound to relay", () => {
@@ -180,6 +195,72 @@ describe("hub outbound to relay", () => {
     expect(["queued", "dispatched", "binding", "running"]).toContain(body.run.status);
     const local = hub.runs.get(body.run.runId);
     expect(local.prompt).toBe("from phone");
+    ext.close();
+  });
+
+  test("mobile dispatch and followup keep an 8k prompt without HUB_TIMEOUT", async () => {
+    const relayHome = mkdtempSync(join(tmpdir(), "armada-relay-"));
+    const hubHome = mkdtempSync(join(tmpdir(), "armada-hub-"));
+    relay = createRelayServer({
+      port: 0, hostname: "127.0.0.1", home: relayHome,
+      publicBase: "http://127.0.0.1", adminToken: "adm",
+    });
+    const fleet = relay.createFleet();
+    writeFileSync(join(hubHome, "relay.json"), JSON.stringify({
+      relay: `http://127.0.0.1:${relay.port}`, fleet: fleet.fleet, secret: fleet.hubSecret,
+    }), { mode: 0o600 });
+
+    hub = createServer({ port: 0, home: hubHome });
+    const ext: WebSocket = await new Promise((res, rej) => {
+      const w = new WebSocket(`ws://127.0.0.1:${hub!.port}/ws?token=${hub!.token}`);
+      w.onopen = () => res(w);
+      w.onerror = rej;
+    });
+    ext.send(JSON.stringify({
+      type: "register", machineId: "m-1", windowId: "w-1", name: "A", os: "darwin",
+      extensionVersion: "0.4.0", openWorkspaces: ["/ws/a"],
+    }));
+
+    const headers = { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" };
+    await waitUntil(async () => {
+      const j = await (await fetch(`http://127.0.0.1:${relay!.port}/mobile/workspaces`, { headers })).json() as any;
+      return j.hubOffline === false && j.workspaces?.[0]?.workspaceRoot === "/ws/a";
+    });
+
+    const long = `下面按**现网事实**对比：${"能力对齐。".repeat(900)}`;
+    const t0 = Date.now();
+    const d = await fetch(`http://127.0.0.1:${relay.port}/mobile/runs`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ workspaceId: encodeWorkspaceId("m-1", "/ws/a"), prompt: long }),
+    });
+    expect(d.status).toBe(201);
+    const body = await d.json() as any;
+    expect(body.run.prompt).toBe(long);
+    expect(body.run.error).not.toBe("HUB_TIMEOUT");
+    const runId = body.run.runId as string;
+    ext.send(JSON.stringify({ type: "run.ack", runId, status: "accepted" }));
+    ext.send(JSON.stringify({
+      type: "run.bound", runId, conversationId: "cid-long", transcriptPath: null, promptMatch: true,
+    }));
+    await waitUntil(() => hub!.runs.get(runId)?.status === "running");
+    const fat = JSON.stringify({ role: "assistant", message: { content: [{ type: "text", text: "x".repeat(4000) }] } });
+    const insert = hub.db.query(
+      `INSERT INTO run_events (run_id, seq, machine_id, ext_seq, source, hook_event_name, payload, ts, post_terminal)
+       VALUES (?1,?2,'m-1',?2,'transcript',NULL,?3,?4,0)`,
+    );
+    for (let i = 0; i < 400; i++) insert.run(runId, 10_000 + i, fat, Date.now());
+
+    const f = await fetch(`http://127.0.0.1:${relay.port}/mobile/runs/${runId}/followup`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ prompt: long }),
+    });
+    expect(Date.now() - t0).toBeLessThan(8000);
+    expect(f.status).toBe(201);
+    const followed = await f.json() as any;
+    expect(followed.run.prompt).toBe(long);
+    expect(followed.run.error).not.toBe("HUB_TIMEOUT");
     ext.close();
   });
 

@@ -358,20 +358,42 @@ struct DispatchSheet: View {
     @State private var err: String?
     @Environment(\.dismiss) private var dismiss
 
+    private var trimmed: String {
+        prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var canSend: Bool { !sending && !trimmed.isEmpty }
+
     var body: some View {
         NavigationStack {
             Form {
+                if let err {
+                    Section {
+                        Text(err).foregroundStyle(.red)
+                    }
+                }
                 Section(workspace.machineName.isEmpty ? workspace.label : "\(workspace.machineName) · \(workspace.label)") {
                     Text(workspace.workspaceRoot).font(.caption).foregroundStyle(.secondary)
                     if followupRunId != nil {
                         Text("在当前对话里继续，不会新开一条任务").font(.caption).foregroundStyle(.secondary)
                     }
                 }
-                Section("Prompt") {
-                    TextField("不限字数", text: $prompt, axis: .vertical)
-                        .lineLimit(8...20)
+                Section {
+                    TextEditor(text: $prompt)
+                        .frame(minHeight: 220)
+                        .font(.body)
+                    Text(trimmed.isEmpty ? "粘贴后应显示字数" : "\(prompt.count) 字")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button(sending ? "发送中…" : (followupRunId == nil ? "派发" : "发送")) {
+                        Task { await send() }
+                    }
+                    .disabled(!canSend)
+                } header: {
+                    Text("Prompt")
+                } footer: {
+                    Text("长文请用此处按钮发送；导航栏「派发」在键盘弹起时可能点不到。")
                 }
-                if let err { Text(err).foregroundStyle(.red) }
             }
             .navigationTitle(followupRunId == nil ? "派发任务" : "续聊")
             .toolbar {
@@ -382,21 +404,23 @@ struct DispatchSheet: View {
                     Button(sending ? "发送中…" : (followupRunId == nil ? "派发" : "发送")) {
                         Task { await send() }
                     }
-                    .disabled(sending || prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(!canSend)
                 }
             }
         }
     }
 
     private func send() async {
+        let text = trimmed
+        guard canSend else { return }
         sending = true
         defer { sending = false }
         do {
             let run: RunDTO
             if let followupRunId {
-                run = try await session.api().followup(runId: followupRunId, prompt: prompt)
+                run = try await session.api().followup(runId: followupRunId, prompt: text)
             } else {
-                run = try await session.api().dispatch(workspaceId: workspace.workspaceId, prompt: prompt)
+                run = try await session.api().dispatch(workspaceId: workspace.workspaceId, prompt: text)
             }
             err = nil
             await session.refresh()

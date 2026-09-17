@@ -25,4 +25,10 @@ describe("classifyRelayHttp", () => {
     expect(r.code).toBe("HUB_OFFLINE");
     expect(r.message).toBe("中台离线");
   });
+
+  test("JSON 502 HUB_TIMEOUT and 429 RATE_LIMIT have operator copy", () => {
+    expect(classifyRelayHttp(502, '{"error":"HUB_TIMEOUT"}').message).toBe("中台处理超时，请再发一次");
+    expect(classifyRelayHttp(429, '{"error":"RATE_LIMIT"}').message).toBe("点得太快，请稍后再发");
+    expect(classifyRelayHttp(400, '{"error":"EMPTY_PROMPT"}').message).toBe("提示词是空的");
+  });
 });

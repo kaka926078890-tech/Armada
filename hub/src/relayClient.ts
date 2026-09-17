@@ -81,6 +81,11 @@ export function hubWsUrl(cfg: RelayConfig): string {
   return u.toString();
 }
 
+/** cmd.result / live snaps must not scan transcript jsonl. Only completed cards need finalText. */
+export function loadEventsForSnap(status: string): boolean {
+  return status === "completed";
+}
+
 export function runToSnap(run: any, events: RunEvent[]): RunSnap {
   const body = assistantBodyForPrompt(eventsToChat(events), run.prompt ?? "");
   let status = String(run.status ?? "unknown");
@@ -137,7 +142,7 @@ export function startRelayClient(opts: {
   const snapOf = (runId: string): RunSnap | null => {
     const run = opts.runs.get(runId);
     if (!run) return null;
-    return runToSnap(run, eventsFor(runId));
+    return runToSnap(run, loadEventsForSnap(String(run.status ?? "")) ? eventsFor(runId) : []);
   };
 
   const send = (msg: object) => {

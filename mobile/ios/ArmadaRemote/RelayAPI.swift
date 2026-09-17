@@ -189,6 +189,9 @@ enum RelayAPIError: LocalizedError {
         case "CLOSED": return "这条对话已关闭"
         case "PROMPT_COLLISION": return "同一工作区已有相同内容的任务"
         case "HUB_OFFLINE": return "中台离线"
+        case "HUB_TIMEOUT": return "中台处理超时，请再发一次"
+        case "RATE_LIMIT": return "点得太快，请稍后再发"
+        case "EMPTY_PROMPT": return "提示词是空的"
         case "NET_INTERCEPT": return "当前网络拦截了中转。请关掉 Wi‑Fi 改用蜂窝，或换一个网络后再打开。"
         case "OUTBOUND_LIMIT": return "待消化续发已达上限，等 Cursor 消化后再发"
         case "OUTBOUND_TEXT_ONLY": return "运行中续发暂只支持纯文本"
@@ -241,14 +244,12 @@ actor RelayAPI {
     }
 
     func dispatch(workspaceId: String, prompt: String) async throws -> RunDTO {
-        let body = try JSONSerialization.data(withJSONObject: ["workspaceId": workspaceId, "prompt": prompt])
-        let wrap: DispatchResponse = try await send("/mobile/runs", method: "POST", body: body, ok: [201])
+        let wrap: DispatchResponse = try await send("/mobile/runs", method: "POST", body: encode(["workspaceId": workspaceId, "prompt": prompt]), ok: [201])
         return wrap.run
     }
 
     func followup(runId: String, prompt: String) async throws -> RunDTO {
-        let body = try JSONSerialization.data(withJSONObject: ["prompt": prompt])
-        let wrap: DispatchResponse = try await send("/mobile/runs/\(runId)/followup", method: "POST", body: body, ok: [200, 201])
+        let wrap: DispatchResponse = try await send("/mobile/runs/\(runId)/followup", method: "POST", body: encode(["prompt": prompt]), ok: [200, 201])
         return wrap.run
     }
 
@@ -330,6 +331,7 @@ actor RelayAPI {
         guard let url = URL(string: base + path) else { throw RelayAPIError.transport("bad url") }
         var req = URLRequest(url: url)
         req.httpMethod = method
+        req.timeoutInterval = 30
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         if let body {
             req.httpBody = body
@@ -346,5 +348,9 @@ actor RelayAPI {
             if allowEmpty { return try JSONDecoder().decode(T.self, from: Data("{}".utf8)) }
             throw error
         }
+    }
+
+    private func encode(_ body: [String: String]) throws -> Data {
+        try JSONEncoder().encode(body)
     }
 }

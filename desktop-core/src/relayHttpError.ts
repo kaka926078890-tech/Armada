@@ -7,6 +7,9 @@ export function operatorCopy(code: string): string {
   switch (code) {
     case "OPERATOR_REQUIRED": return PAIR_INVITE_COPY;
     case "HUB_OFFLINE": return "中台离线";
+    case "HUB_TIMEOUT": return "中台处理超时，请再发一次";
+    case "RATE_LIMIT": return "点得太快，请稍后再发";
+    case "EMPTY_PROMPT": return "提示词是空的";
     case "NET_INTERCEPT": return NETWORK_INTERCEPT_COPY;
     default: return code;
   }
