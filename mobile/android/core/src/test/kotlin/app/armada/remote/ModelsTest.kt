@@ -66,4 +66,24 @@ class ModelsTest {
         assertTrue(isUnread(done, emptyMap()))
         assertFalse(isUnread(done, mapOf("r1" to 20.0)))
     }
+
+    @Test
+    fun stampReadAtCoversActivityEvenIfClockIsBehind() {
+        assertEquals(20.0, stampReadAt(5.0, 20))
+        assertEquals(21.0, stampReadAt(21.0, 20))
+        assertEquals(9.0, stampReadAt(9.0, null))
+    }
+
+    @Test
+    fun watchingCompleteWithoutRestampStaysUnread() {
+        val done = run("completed").copy(updatedAt = 20)
+        assertTrue(isUnread(done, mapOf("r1" to 5.0)))
+    }
+
+    @Test
+    fun watchingCompleteRestampClearsUnread() {
+        val done = run("completed").copy(updatedAt = 20)
+        val seen = stampReadAt(5.0, done.activityTs)
+        assertFalse(isUnread(done, mapOf("r1" to seen)))
+    }
 }

@@ -353,7 +353,12 @@ fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String) {
         }
     }
     val streamed = state.board.runs.find { it.runId == runId } ?: state.board.hidden.find { it.runId == runId }
-    LaunchedEffect(streamed) { if (streamed != null) run = streamed }
+    LaunchedEffect(streamed) {
+        if (streamed != null) {
+            run = streamed
+            if (state.watchingId == runId) vm.markOpened(runId)
+        }
+    }
     Scaffold(topBar = {
         TopAppBar(
             title = { Text("详情") },

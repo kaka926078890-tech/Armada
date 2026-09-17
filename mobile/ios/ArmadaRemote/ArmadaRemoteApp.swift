@@ -27,7 +27,6 @@ final class Session: ObservableObject {
     private var live: Task<Void, Never>?
     private var foreground = true
     private var refreshSeq = 0
-    private var lastBadge = -1
     private var pendingArchive = Set<String>()
     private var pendingUnarchive = Set<String>()
     private let readKey = "armada.readAt"
@@ -89,7 +88,7 @@ final class Session: ObservableObject {
         pendingOpenRunId = nil
         watchingId = nil
         PushInbox.runId = nil
-        UIApplication.shared.applicationIconBadgeNumber = 0
+        UNUserNotificationCenter.current().setBadgeCount(0)
         UIApplication.shared.unregisterForRemoteNotifications()
         if let push {
             UserDefaults.standard.removeObject(forKey: pushTokenKey)
@@ -198,7 +197,11 @@ final class Session: ObservableObject {
             if workspaces != ws.workspaces { workspaces = ws.workspaces }
             adoptFetchedLists(runs: newRuns, hidden: newHidden)
             lastError = nil
-            applyBadge()
+            if let id = watchingId {
+                markOpened(id)
+            } else {
+                applyBadge()
+            }
         } catch {
             guard seq == refreshSeq else { return }
             lastError = error.localizedDescription
@@ -250,16 +253,20 @@ final class Session: ObservableObject {
 
     func applyBadge() {
         let n = workspaces.reduce(0) { $0 + unreadCount(in: $1) }
-        if n == lastBadge { return }
-        lastBadge = n
-        UIApplication.shared.applicationIconBadgeNumber = n
+        // APNs writes badge:1 on the icon without going through App state; always reconcile.
+        UNUserNotificationCenter.current().setBadgeCount(n)
     }
 
     func setForeground(_ active: Bool) {
         if foreground == active { return }
         foreground = active
         guard bound else { return }
-        if active { startLive() } else { stopLive() }
+        if active {
+            applyBadge()
+            startLive()
+        } else {
+            stopLive()
+        }
     }
 
     func startLive() {
@@ -350,6 +357,7 @@ final class Session: ObservableObject {
                 runs.insert(run, at: 0)
             }
         }
+        if watchingId == run.runId { markOpened(run.runId) }
     }
 
     func runs(in workspace: WorkspaceDTO, archived: Bool = false) -> [RunDTO] {
@@ -358,8 +366,11 @@ final class Session: ObservableObject {
     }
 
     func markOpened(_ runId: String) {
-        readAt[runId] = Date().timeIntervalSince1970 * 1000
+        let activity = runs.first { $0.runId == runId }?.activityTs
+            ?? hiddenRuns.first { $0.runId == runId }?.activityTs
+        readAt[runId] = stampReadAt(nowMs: Date().timeIntervalSince1970 * 1000, activityTs: activity)
         persistRead()
+        applyBadge()
     }
 
     func isUnread(_ run: RunDTO) -> Bool {

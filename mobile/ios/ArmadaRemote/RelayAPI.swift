@@ -127,6 +127,10 @@ struct RunDTO: Decodable, Identifiable, Hashable {
     }
 }
 
+func stampReadAt(nowMs: Double, activityTs: Int?) -> Double {
+    max(nowMs, Double(activityTs ?? 0))
+}
+
 enum BoardColumn: String, CaseIterable, Identifiable {
     case waiting, running, completed, cancelled, error
     var id: String { rawValue }

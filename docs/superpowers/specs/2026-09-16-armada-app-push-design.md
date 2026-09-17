@@ -223,7 +223,7 @@ Body（未压缩 JSON ≤ 4KB；超限视为实现 bug，不截 `finalText` 来�
 
 **禁止字段：** `finalText`、完整 prompt、Ask 选项全文、`hubSecret`、op token。
 
-角标：APNs 固定 `badge: 1`（中转不知道 App 已读）。App 下次 `refresh` 把 `UIApplication.shared.applicationIconBadgeNumber` 设成全部未读条数；清零当未读为 0。
+角标：APNs 固定 `badge: 1`（中转不知道 App 已读）。App 在 `markOpened`、回前台、`refresh` / SSE 后**每次**用 `UNUserNotificationCenter.setBadgeCount` 写成当前未读和（0 则清零）。禁止用内存 lastBadge 跳过写入：系统推送会在 App 不知情时改图标。盯着详情时，snap 的 `updatedAt` 变新必须再盖 `readAt = max(now, activityTs)`。
 
 ### 4.6 JWT / 环境变量
 
@@ -440,7 +440,7 @@ P0 与 P1 可同 PR。P2 必须带 Push 的新 build。P3 不能用模拟器。
 | --- | --- |
 | 文案 | 与中台 title/body 相同 |
 | `cancelled` | 不推 |
-| 角标 | APNs 发 `1`；App 刷新后改成未读数 |
+| 角标 | APNs 发 `1`；App 点开/回前台/刷新**每次**写成未读数，不因 lastBadge 跳过 |
 | 多设备 | 同 fleet 全推 |
 | SSE / 本地通知 | 不做 |
 | Android FCM | 本规格不做；见 [2026-09-17-armada-android-app-design.md](./2026-09-17-armada-android-app-design.md)（与 iOS 完整态一次落地） |
@@ -467,3 +467,4 @@ P0 与 P1 可同 PR。P2 必须带 Push 的新 build。P3 不能用模拟器。
 | 2026-09-16 | 初稿并定为实施基准。单通道可见 APNs；生产环境；边沿对齐中台；token 在中转；点进 GET。产品拍板：方案 1；TestFlight；不要轮询本地通知。 |
 | 2026-09-16 | P0–P2 落地：`notifyEdge` / `apns` / `push_tokens` / `POST|DELETE /mobile/push-token` / `applyRunSnap` 挂钩；iOS production entitlements、登记、点开、`willPresent`。无 `.p8` 仍 no-op。P3 真机 A9 待 Auth Key 与新 TestFlight。 |
 | 2026-09-17 | Android 锁屏通道不在本文件扩 APNs。FCM 见 [2026-09-17-armada-android-app-design.md](./2026-09-17-armada-android-app-design.md) §4.5。 |
+| 2026-09-17 | iOS 角标：`markOpened` 必写系统角标；禁止 lastBadge 跳过；盯着详情时 `readAt = max(now, activityTs)`。 |

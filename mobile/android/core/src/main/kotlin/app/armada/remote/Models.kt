@@ -102,6 +102,10 @@ fun keepListBodies(incoming: List<RunDto>, prior: List<RunDto>): List<RunDto> {
     }
 }
 
+fun stampReadAt(nowMs: Double, activityTs: Long?): Double {
+    return maxOf(nowMs, (activityTs ?: 0L).toDouble())
+}
+
 fun isUnread(run: RunDto, readAt: Map<String, Double>): Boolean {
     val seen = readAt[run.runId]
     if (run.pendingAsk != null) {

@@ -666,7 +666,10 @@ struct RunDetailView: View {
             }
         }
         .onChange(of: streamed) { _, next in
-            if let next, next != run { run = next }
+            if let next, next != run {
+                run = next
+                if session.watchingId == runId { session.markOpened(runId) }
+            }
         }
         .onDisappear {
             if session.watchingId == runId { session.watchingId = nil }

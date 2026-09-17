@@ -110,7 +110,9 @@ class SessionVm(app: Application) : AndroidViewModel(app) {
     }
 
     fun markOpened(runId: String) {
-        readAt[runId] = System.currentTimeMillis().toDouble()
+        val activity = _state.value.board.runs.find { it.runId == runId }?.activityTs
+            ?: _state.value.board.hidden.find { it.runId == runId }?.activityTs
+        readAt[runId] = stampReadAt(System.currentTimeMillis().toDouble(), activity)
         store.saveReadAt(readAt)
     }
 
@@ -185,6 +187,7 @@ class SessionVm(app: Application) : AndroidViewModel(app) {
                 val run = frame.optJSONObject("run")?.let(::parseRun) ?: return
                 val next = applyStreamRun(_state.value.board, run)
                 _state.value = _state.value.copy(board = next, lastError = null)
+                if (_state.value.watchingId == run.runId) markOpened(run.runId)
             }
         }
     }
@@ -207,6 +210,7 @@ class SessionVm(app: Application) : AndroidViewModel(app) {
                 board = adoptFetchedLists(_state.value.board, runs, hidden),
                 lastError = null,
             )
+            _state.value.watchingId?.let { markOpened(it) }
         } catch (e: Exception) {
             if (seq != refreshSeq) return
             _state.value = _state.value.copy(lastError = e.message)
