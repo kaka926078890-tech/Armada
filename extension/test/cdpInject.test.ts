@@ -601,6 +601,7 @@ describe("Created Plan / Build JS", () => {
       present: true,
       filename: "Markdown date line",
       conversation_id: "17ce6eee-b18a-4550-9548-b1b50040ca27",
+      overview: "在任意一份现有 markdown 文件末尾追加一行日期",
     });
     const after = mockPlanDoc({ filename: "Markdown date line", build: false });
     const gone = new Function("document", `return (${PLAN_INSPECT_JS});`)(after);

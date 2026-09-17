@@ -202,6 +202,14 @@ export function askSkipLabel(busy: boolean): string {
   return busy ? "Skipping..." : "Skip";
 }
 
+/** Cursor's card body is plan.overview, stored on the Build option. Do not hide it. */
+export function planOverviewOf(options: { id: string; text?: string }[]): string {
+  if (!isPlanAskOptions(options)) return "";
+  const text = options[0]?.text?.trim() ?? "";
+  if (!text || text === "Build") return "";
+  return text;
+}
+
 function AskSpinner() {
   return (
     <svg className="size-3.5 animate-spin" viewBox="0 0 16 16" fill="none" aria-hidden>
@@ -223,6 +231,7 @@ function AskCard({ block, onAnswerAsk }: {
   const skipBusy = busyAction === "skip";
   const interactive = pending && !!onAnswerAsk;
   const plan = isPlanAskOptions(block.options);
+  const overview = plan ? planOverviewOf(block.options) : "";
   const submit = async (action: "continue" | "skip") => {
     if (!onAnswerAsk || wait) return;
     setBusyAction(action);
@@ -250,6 +259,11 @@ function AskCard({ block, onAnswerAsk }: {
       <div className="text-[13px] text-zinc-200 leading-relaxed">
         <AssistantMarkdown text={block.prompt} />
       </div>
+      {overview ? (
+        <div className="mt-2 text-[13px] text-zinc-400 leading-relaxed">
+          <AssistantMarkdown text={overview} />
+        </div>
+      ) : null}
       {plan ? null : (
       <div className="mt-2.5 flex flex-col gap-2">
         {block.options.map((o) => {

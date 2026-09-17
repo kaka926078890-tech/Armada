@@ -575,6 +575,13 @@ struct AskView: View {
                 Text(ask.questions.first?.prompt ?? "")
                     .font(.body)
                     .fixedSize(horizontal: false, vertical: true)
+                if let overview = ask.questions.first?.options.first?.text,
+                   !overview.isEmpty, overview != "Build" {
+                    Text(overview)
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 if let err { Text(err).foregroundStyle(.red) }
                 Button {
                     Task { await submitBuild() }

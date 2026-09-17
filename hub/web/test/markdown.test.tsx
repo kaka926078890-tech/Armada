@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import ChatThread, { AssistantMarkdown, askContinueLabel, askSkipLabel, isPlanAskOptions } from "../src/components/ChatThread";
+import ChatThread, { AssistantMarkdown, askContinueLabel, askSkipLabel, isPlanAskOptions, planOverviewOf } from "../src/components/ChatThread";
 import type { ChatBlock } from "../src/chatView";
 
 describe("AssistantMarkdown", () => {
@@ -72,6 +72,7 @@ describe("ask / plan action buttons", () => {
     expect(html).toContain("border-l-[#F1B467]");
     expect(html).not.toContain("px-2.5 py-1");
     expect(html).not.toContain("Building...");
+    expect(html).toContain("overview");
   });
 
   test("submitting plan shows Building... spinner until the ask clears", () => {
@@ -124,5 +125,25 @@ describe("ask / plan action buttons", () => {
     expect(askContinueLabel(false, true)).toBe("Continuing...");
     expect(askSkipLabel(false)).toBe("Skip");
     expect(askSkipLabel(true)).toBe("Skipping...");
+  });
+
+  test("plan card renders captured overview, not just Created Plan filename", () => {
+    expect(planOverviewOf([{ id: "build", text: "同一分支继续完成内嵌通道修复" }])).toBe("同一分支继续完成内嵌通道修复");
+    expect(planOverviewOf([{ id: "build", text: "Build" }])).toBe("");
+    const html = renderToStaticMarkup(
+      <ChatThread
+        blocks={[{
+          kind: "ask",
+          seq: 1,
+          request_id: "plan-1",
+          prompt: "Created Plan: Dual Browser Channels",
+          options: [{ id: "build", label: "Build", text: "同一分支继续完成内嵌通道修复，并并列接入腾讯 BrowserSkill。" }],
+          action: "pending",
+        }]}
+        onAnswerAsk={async () => true}
+      />,
+    );
+    expect(html).toContain("Created Plan: Dual Browser Channels");
+    expect(html).toContain("同一分支继续完成内嵌通道修复，并并列接入腾讯 BrowserSkill。");
   });
 });
