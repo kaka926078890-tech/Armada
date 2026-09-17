@@ -227,21 +227,24 @@ export function isUnreadCompleted(run: RunRow, readAt: number | undefined): bool
   return run.status === "completed" && isUnreadAlert(run, readAt);
 }
 
-export type CardChrome = "need" | "done" | "none";
+export type CardChrome = "need" | "done" | "fail" | "none";
 
-/** 待操作红条一直在；完成绿条只给未读。 */
+/** 待操作红条一直在；完成绿条 / 异常红条只给未读。 */
 export function cardChromeOf(
   run: Pick<RunRow, "status" | "pending_ask" | "ended_at" | "started_at" | "created_at">,
   readAt?: number,
 ): CardChrome {
   if (run.pending_ask) return "need";
   if (run.status === "completed" && (readAt == null || runActivityTs(run as RunRow) > readAt)) return "done";
+  if (["error", "unknown", "aborted"].includes(run.status) && (readAt == null || runActivityTs(run as RunRow) > readAt)) {
+    return "fail";
+  }
   return "none";
 }
 
 export function cardChromeClass(chrome: CardChrome, selected: boolean): string {
   const selectedRing = selected ? " ring-1 ring-sky-500/40" : "";
-  if (chrome === "need") {
+  if (chrome === "need" || chrome === "fail") {
     return `border-zinc-800/80 border-l-[3px] border-l-red-400 bg-zinc-900${selectedRing}`;
   }
   if (chrome === "done") {
@@ -249,6 +252,15 @@ export function cardChromeClass(chrome: CardChrome, selected: boolean): string {
   }
   if (selected) return "border-sky-600/80 bg-zinc-900";
   return "border-transparent bg-zinc-900/50 hover:border-zinc-700";
+}
+
+/** 列上的红点：该列有待答 Ask 或未读失败/中止。已完成未读走绿条，不算问题点。 */
+export function columnHasAlert(runs: RunRow[], column: ColumnKey, readMap: Record<string, number>): boolean {
+  return runs.some((r) => {
+    if ((COLUMN_MAP[r.status] ?? "error") !== column) return false;
+    const chrome = cardChromeOf(r, readMap[r.id]);
+    return chrome === "need" || chrome === "fail";
+  });
 }
 
 /** 侧栏未读数：终态未读（完成/失败/异常/中止）。进行中不计入。 */

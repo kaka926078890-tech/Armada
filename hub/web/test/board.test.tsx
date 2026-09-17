@@ -66,6 +66,26 @@ describe("Board unread chrome", () => {
     expect(html).not.toContain("border-l-emerald-400");
   });
 
+  test("unread error card has a red accent like completed has green", () => {
+    const html = renderToStaticMarkup(
+      <Board
+        runs={[{ ...run, status: "error", end_reason: "REJECTED", conversation_id: null }]}
+        machines={[{ id: "m-1", name: "Mac-A", os: "darwin", cursor_version: null, extension_version: null, open_workspaces: "[]", status: "online", last_seen_at: 1 }]}
+        selected={null}
+        onSelect={() => {}}
+        showArchived={false}
+        onHide={() => {}}
+        onUnhide={() => {}}
+        readMap={{}}
+        onRename={() => {}}
+        onRetry={() => {}}
+      />,
+    );
+    expect(html).toContain("border-l-red-400");
+    expect(html).not.toContain("border-l-emerald-400");
+    expect(html).toContain("data-col-alert=\"error\"");
+  });
+
   test("error card shows a retry button", () => {
     const html = renderToStaticMarkup(
       <Board

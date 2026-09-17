@@ -22,7 +22,16 @@ func askOptionBody(label: String, text: String) -> String {
 func runRowChrome(_ run: RunDTO, unread: Bool) -> Color? {
     if run.pendingAsk != nil { return .red }
     if unread && run.status == "completed" { return .green }
+    if unread && ["error", "aborted", "unknown"].contains(run.status) { return .red }
     return nil
+}
+
+func columnHasAlert(_ runs: [RunDTO], column: BoardColumn, isUnread: (RunDTO) -> Bool) -> Bool {
+    runs.contains { run in
+        guard run.column == column else { return false }
+        if let c = runRowChrome(run, unread: isUnread(run)), c == .red { return true }
+        return false
+    }
 }
 
 func statusLabel(_ status: String) -> String {
@@ -98,6 +107,7 @@ struct RunRow: View {
     private var captionColor: Color {
         if run.pendingAsk != nil { return .red }
         if unread && run.status == "completed" { return .green }
+        if unread && ["error", "aborted", "unknown"].contains(run.status) { return .red }
         return .secondary
     }
 }
@@ -236,6 +246,9 @@ struct WorkspaceHome: View {
                             HStack(spacing: 4) {
                                 Text(col.title)
                                 if n > 0 { Text("\(n)").font(.caption2) }
+                                if columnHasAlert(boardRuns, column: col, isUnread: session.isUnread) {
+                                    Circle().fill(Color.red).frame(width: 7, height: 7)
+                                }
                             }
                             .font(.subheadline.weight(tab == col ? .semibold : .regular))
                             .padding(.horizontal, 12)

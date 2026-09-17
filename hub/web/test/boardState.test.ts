@@ -5,7 +5,7 @@ import {
   groupRuns, cardView, listWorkspaceSlots, encodeWorkspaceKey, decodeWorkspaceKey,
   filterRunsByWorkspace, sortConversations, groupSlotsByMachine, isUnreadCompleted, isUnreadMessage,
   workspaceHasUnread, workspaceUnreadCount, formatUnreadCount, canArchiveRun, canRetryRun, isHubArchived,
-  workspaceFolderName, workspaceHasLiveRun, resolveSelectedWorkspace, isUnreadNeedInput, cardChromeClass, cardChromeOf,
+  workspaceFolderName, workspaceHasLiveRun, resolveSelectedWorkspace, isUnreadNeedInput, cardChromeClass, cardChromeOf, columnHasAlert,
   extensionLagNotice, REQUIRED_EXTENSION_VERSION, type RunRow,
 } from "../src/boardState";
 
@@ -159,16 +159,35 @@ describe("unread dots", () => {
     expect(workspaceHasUnread([run], {})).toBe(false);
   });
 
-  test("need-input is a red bar; unread completed is a green bar; selected idle stays sky", () => {
+  test("need-input is a red bar; unread completed is a green bar; unread error is a red bar", () => {
     expect(cardChromeOf({ ...base, pending_ask: { request_id: "a1", questions: [] } })).toBe("need");
     expect(cardChromeOf({ ...base, status: "completed", ended_at: 9 })).toBe("done");
     expect(cardChromeOf({ ...base, status: "completed", ended_at: 9 }, 9000)).toBe("none");
+    expect(cardChromeOf({ ...base, status: "error", ended_at: 9 })).toBe("fail");
+    expect(cardChromeOf({ ...base, status: "unknown", ended_at: 9 })).toBe("fail");
+    expect(cardChromeOf({ ...base, status: "aborted", ended_at: 9 })).toBe("fail");
+    expect(cardChromeOf({ ...base, status: "error", ended_at: 9 }, 9000)).toBe("none");
     expect(cardChromeOf(base)).toBe("none");
     expect(cardChromeClass("need", false)).toContain("border-l-red-400");
+    expect(cardChromeClass("fail", false)).toContain("border-l-red-400");
     expect(cardChromeClass("need", true)).toContain("border-l-red-400");
     expect(cardChromeClass("done", false)).toContain("border-l-emerald-400");
     expect(cardChromeClass("none", true)).toContain("border-sky-600");
     expect(cardChromeClass("none", false)).toContain("border-transparent");
+  });
+
+  test("column alert dots follow need-input and unread errors, not completed", () => {
+    const need = { ...base, pending_ask: { request_id: "a1", questions: [] } };
+    const fail = { ...base, id: "e1", status: "error", ended_at: 9 };
+    const done = { ...base, id: "c1", status: "completed", ended_at: 9 };
+    expect(columnHasAlert([need, fail, done], "running", {})).toBe(true);
+    expect(columnHasAlert([need, fail, done], "error", {})).toBe(true);
+    expect(columnHasAlert([need, fail, done], "completed", {})).toBe(false);
+    expect(columnHasAlert([fail], "error", { e1: 9000 })).toBe(false);
+    expect(columnHasAlert([need], "running", { "r-1": 9000 })).toBe(true);
+    const aborted = { ...base, id: "a1", status: "aborted", ended_at: 9 };
+    expect(columnHasAlert([aborted], "cancelled", {})).toBe(true);
+    expect(columnHasAlert([aborted], "cancelled", { a1: 9000 })).toBe(false);
   });
 
   test("pending_ask unread adds to workspace count with terminal unread", () => {

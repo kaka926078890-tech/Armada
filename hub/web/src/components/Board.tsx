@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { groupRuns, cardView, COLUMN_LABELS, canArchiveRun, canRetryRun, isUnreadAlert, isUnreadNeedInput, machineLabel, workspaceFolderName, runDisplayName, cardChromeClass, cardChromeOf, extensionLagNotice, type ColumnKey, type RunRow } from "../boardState";
+import { groupRuns, cardView, COLUMN_LABELS, canArchiveRun, canRetryRun, isUnreadAlert, isUnreadNeedInput, machineLabel, workspaceFolderName, runDisplayName, cardChromeClass, cardChromeOf, columnHasAlert, extensionLagNotice, type ColumnKey, type RunRow } from "../boardState";
 import type { Machine } from "../types";
 
 const COL_ACCENT: Record<ColumnKey, string> = {
@@ -51,8 +51,11 @@ export default function Board({ runs, machines, selected, onSelect, showArchived
     <main className="flex-1 min-w-0 overflow-x-auto flex gap-2 p-3">
       {(Object.keys(COLUMN_LABELS) as ColumnKey[]).map((col) => (
         <section key={col} className={`w-60 min-w-60 max-w-60 shrink-0 flex flex-col rounded-lg bg-zinc-900/40 border-t-2 ${COL_ACCENT[col]}`}>
-          <h2 className="text-[11px] tracking-wide uppercase text-zinc-500 px-2.5 pb-2 pt-2">
+          <h2 className="text-[11px] tracking-wide uppercase text-zinc-500 px-2.5 pb-2 pt-2 inline-flex items-center gap-1.5">
             {COLUMN_LABELS[col]} <span className="text-zinc-600 normal-case tracking-normal">{g[col].length}</span>
+            {columnHasAlert(runs, col, readMap) ? (
+              <span className="size-1.5 shrink-0 rounded-full bg-red-400" data-col-alert={col} title="待处理或未读异常" />
+            ) : null}
           </h2>
           <div className="flex-1 overflow-y-auto flex flex-col gap-1.5 px-1.5 pb-2">
             {g[col].length === 0 && (
@@ -95,7 +98,7 @@ export default function Board({ runs, machines, selected, onSelect, showArchived
                       )}
                       <div className="text-[11px] text-zinc-500 mt-1 flex justify-between items-center">
                         <span className={`inline-flex items-center gap-1.5 ${BADGE_COLOR[col]}`}>
-                          {unread ? <span className={`size-1.5 shrink-0 rounded-full ${chrome === "done" ? "bg-emerald-400" : "bg-red-400"}`} title={chrome === "need" ? "待处理" : "未读"} /> : null}
+                          {unread ? <span className={`size-1.5 shrink-0 rounded-full ${chrome === "done" ? "bg-emerald-400" : "bg-red-400"}`} title={chrome === "need" ? "待处理" : chrome === "fail" ? "异常未读" : "未读"} /> : null}
                           {v.badge}
                         </span>
                         <span className="text-zinc-600">{v.elapsed}</span>
