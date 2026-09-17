@@ -35,7 +35,16 @@ final class Session: ObservableObject {
     init() {
         relay = UserDefaults.standard.string(forKey: "relay") ?? ""
         fleet = UserDefaults.standard.string(forKey: "fleet") ?? ""
-        token = UserDefaults.standard.string(forKey: "token") ?? ""
+        if let stored = OperatorKeychain.load(), !stored.isEmpty {
+            token = stored
+        } else {
+            let legacy = UserDefaults.standard.string(forKey: "token") ?? ""
+            token = legacy
+            if !legacy.isEmpty {
+                OperatorKeychain.save(legacy)
+                UserDefaults.standard.removeObject(forKey: "token")
+            }
+        }
         if let data = UserDefaults.standard.data(forKey: readKey),
            let map = try? JSONDecoder().decode([String: Double].self, from: data) {
             readAt = map
@@ -55,7 +64,7 @@ final class Session: ObservableObject {
             token = inv.tokenOrSecret
             UserDefaults.standard.set(relay, forKey: "relay")
             UserDefaults.standard.set(fleet, forKey: "fleet")
-            UserDefaults.standard.set(token, forKey: "token")
+            OperatorKeychain.save(token)
             bindError = nil
             startPolling()
             requestPush()
@@ -70,6 +79,7 @@ final class Session: ObservableObject {
         UserDefaults.standard.removeObject(forKey: "relay")
         UserDefaults.standard.removeObject(forKey: "fleet")
         UserDefaults.standard.removeObject(forKey: "token")
+        OperatorKeychain.delete()
         workspaces = []; runs = []; hiddenRuns = []
         pendingArchive = []; pendingUnarchive = []
         refreshSeq += 1
