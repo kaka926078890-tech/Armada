@@ -221,8 +221,10 @@ describe("isWithinTranscriptBindWindow", () => {
     expect(isWithinTranscriptBindWindow(0, 59_000)).toBe(true);
   });
 
-  test("still scans a few seconds after hub BIND_TIMEOUT so a late run.bound can resurrect", () => {
+  test("still scans past Windows hub BIND_TIMEOUT so a late run.bound can resurrect", () => {
+    expect(TRANSCRIPT_BIND_WINDOW_MS).toBeGreaterThanOrEqual(180_000);
     expect(isWithinTranscriptBindWindow(0, 61_000)).toBe(true);
-    expect(isWithinTranscriptBindWindow(0, 71_000)).toBe(false);
+    expect(isWithinTranscriptBindWindow(0, 181_000)).toBe(true);
+    expect(isWithinTranscriptBindWindow(0, 191_000)).toBe(false);
   });
 });

@@ -339,6 +339,48 @@ describe("Run dispatch", () => {
     ws.close();
   });
 
+  test("darwin binding past 60s → BIND_TIMEOUT", async () => {
+    const { ws, api } = await startWithExt();
+    const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "x" }) });
+    const { run } = await r.json() as any;
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    await new Promise((r2) => setTimeout(r2, 100));
+    hub!.db.query("UPDATE runs SET started_at=?1 WHERE id=?2").run(Date.now() - 61_000, run.id);
+    hub!.runs.sweepTimeouts();
+    const after = (await (await api(`/api/runs/${run.id}`)).json()) as any;
+    expect(after.status).toBe("unknown");
+    expect(after.end_reason).toBe("BIND_TIMEOUT");
+    ws.close();
+  });
+
+  test("win32 binding still binding at 61s so a slow jsonl is not 异常", async () => {
+    const { ws, api } = await startWithExt({ os: "win32-x64" });
+    const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "x" }) });
+    const { run } = await r.json() as any;
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    await new Promise((r2) => setTimeout(r2, 100));
+    hub!.db.query("UPDATE runs SET started_at=?1 WHERE id=?2").run(Date.now() - 61_000, run.id);
+    hub!.runs.sweepTimeouts();
+    const after = (await (await api(`/api/runs/${run.id}`)).json()) as any;
+    expect(after.status).toBe("binding");
+    expect(after.end_reason).toBeNull();
+    ws.close();
+  });
+
+  test("win32 binding past 180s → BIND_TIMEOUT", async () => {
+    const { ws, api } = await startWithExt({ os: "win32-x64" });
+    const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "x" }) });
+    const { run } = await r.json() as any;
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    await new Promise((r2) => setTimeout(r2, 100));
+    hub!.db.query("UPDATE runs SET started_at=?1 WHERE id=?2").run(Date.now() - 181_000, run.id);
+    hub!.runs.sweepTimeouts();
+    const after = (await (await api(`/api/runs/${run.id}`)).json()) as any;
+    expect(after.status).toBe("unknown");
+    expect(after.end_reason).toBe("BIND_TIMEOUT");
+    ws.close();
+  });
+
   test("machine offline → running run becomes unknown", async () => {
     const { ws, api } = await startWithExt();
     const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "x" }) });

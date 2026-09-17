@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   createCdpSubmitter,
   createImagePaster,
+  createFileMentionPaster,
   createAskQuestionDriver,
   COMPOSER_FOCUS_JS,
   COMPOSER_FOCUS_IMAGE_JS,
@@ -363,6 +364,25 @@ describe("createImagePaster", () => {
     expect(log.filter((c) => c.method === "Input.dispatchKeyEvent")).toHaveLength(2);
     const insert = log.find((c) => c.method === "Input.insertText");
     expect(insert?.params?.text).toBe("看图");
+  });
+});
+
+describe("createFileMentionPaster", () => {
+  test("NO_MENU then OK still mentions (Windows typeahead is slow)", async () => {
+    const paste = createFileMentionPaster(deps({
+      connect: async () => mockSession(["OK", "NO_MENU", "NO_MENU", "OK", 1]),
+    }));
+    const r = await paste("/Users/x/armada-test-ws", ["eb022972-2026-09-17.aioncore.log"]);
+    expect(r).toEqual({ ok: true });
+  });
+
+  test("menu never appears → MENTION_CLICK:NO_MENU", async () => {
+    const paste = createFileMentionPaster(deps({
+      connect: async () => mockSession(["OK", "NO_MENU"]),
+    }));
+    const r = await paste("/Users/x/armada-test-ws", ["notes.txt"]);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe("MENTION_CLICK:NO_MENU");
   });
 });
 

@@ -177,7 +177,7 @@ export class Executor {
           return;
         }
       }
-      // Binding window starts after inject so multi-image paste cannot expire the 70s scan.
+      // Binding window starts after inject so multi-image paste cannot expire the jsonl scan.
       this.deps.addPending?.({
         runId: msg.runId,
         workspaceRoot: msg.workspaceRoot,

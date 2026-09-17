@@ -691,6 +691,8 @@ export function createFileMentionPaster(deps: CdpSubmitterDeps) {
         else await sleep(800);
       }
       if (!focused) return { ok: false, reason: "NO_INPUT_AFTER_RETRY" };
+      // Inbox files just landed; Windows typeahead lags (hub: FILE_MENTION_FAILED then retry ok).
+      await sleep(800);
 
       for (let i = 0; i < needles.length; i++) {
         const needle = needles[i]!;
@@ -698,9 +700,13 @@ export function createFileMentionPaster(deps: CdpSubmitterDeps) {
         await sleep(400);
         await session.call("Input.insertText", { text: needle });
         await sleep(700);
-        const clicked = String(await session.call("Runtime.evaluate", {
-          expression: `(${COMPOSER_CLICK_FILE_MENTION_JS})(${JSON.stringify(needle)})`, returnByValue: true,
-        }).then((x) => x?.result?.value));
+        let clicked = "NO_MENU";
+        for (let attempt = 0; attempt < 8 && clicked !== "OK"; attempt++) {
+          clicked = String(await session.call("Runtime.evaluate", {
+            expression: `(${COMPOSER_CLICK_FILE_MENTION_JS})(${JSON.stringify(needle)})`, returnByValue: true,
+          }).then((x) => x?.result?.value));
+          if (clicked !== "OK") await sleep(400);
+        }
         if (clicked !== "OK") return { ok: false, reason: `MENTION_CLICK:${clicked}` };
         let okChip = false;
         for (let retry = 0; retry < 5 && !okChip; retry++) {

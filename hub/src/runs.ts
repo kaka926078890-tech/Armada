@@ -10,6 +10,7 @@ import {
   OCCUPYING_STATUSES,
 } from "./concurrency";
 import { workspacePathIn } from "../../extension/src/workspacePath";
+import { BIND_TIMEOUT_MS, WINDOWS_BIND_TIMEOUT_MS } from "../../extension/src/transcriptBind";
 import { collisionKey, hasImageMarkers, stripImageMarkers } from "../../extension/src/imageMarkers";
 import { BlobStore, parseAttachmentIds, type BlobMeta } from "./blobs";
 import { appendRetired, decideArm, decideStop, parseRetiredIds, isWindowsMachineOs, genOf } from "./generationOwnership";
@@ -20,7 +21,6 @@ import {
 
 const ACTIVE = ["created", "dispatched", "binding", "running"];
 const DISPATCH_TIMEOUT_MS = 30_000;
-const BIND_TIMEOUT_MS = 60_000;
 
 export class RunService {
   private cancelRequested = new Set<string>();
@@ -665,9 +665,13 @@ export class RunService {
       machines.add(r.machine_id);
     }
     const b = this.db.query("SELECT id, machine_id, created_at, started_at FROM runs WHERE status='binding'").all() as any[];
-    for (const r of b) if (age(r) > BIND_TIMEOUT_MS) {
-      this.setStatus(r.id, "unknown", { end_reason: "BIND_TIMEOUT" });
-      machines.add(r.machine_id);
+    for (const r of b) {
+      const os = this.registry.getMachine(r.machine_id)?.os;
+      const limit = isWindowsMachineOs(os) ? WINDOWS_BIND_TIMEOUT_MS : BIND_TIMEOUT_MS;
+      if (age(r) > limit) {
+        this.setStatus(r.id, "unknown", { end_reason: "BIND_TIMEOUT" });
+        machines.add(r.machine_id);
+      }
     }
     const inj = this.db.query(
       `SELECT o.id, r.machine_id FROM run_outbound o JOIN runs r ON r.id=o.run_id

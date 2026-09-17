@@ -226,17 +226,18 @@ export class FollowupStopGuard {
  * How long after dispatch we keep scanning for the first jsonl so we can
  * bind the run.
  *
- * Hub BIND_TIMEOUT_MS is 60s (`hub/src/runs.ts`). Cursor on Windows often
+ * Hub bind clocks (`hub/src/runs.ts` sweepTimeouts). Cursor on Windows often
  * writes the first jsonl *after* CDP inject returns — observed 22s on a
- * busy window. A 20s local window therefore stopped scanning while hub
- * still waited, and the card went 异常 with BIND_TIMEOUT even though the
- * file eventually appeared.
+ * busy window; attachment-heavy injects can sit in binding well past 60s.
+ * A 20s/70s local window stopped scanning while the agent was still running.
  *
- * Keep this >= hub timeout so we don't give up first. Extra 10s past
- * hub BIND_TIMEOUT lets a late run.bound resurrect the unknown card
+ * Keep this >= the slower hub clock (Windows) so we don't give up first.
+ * Extra 10s past Windows BIND_TIMEOUT lets a late run.bound resurrect
  * (hub `onRunBound` treats BIND_TIMEOUT as recoverable).
  */
-export const TRANSCRIPT_BIND_WINDOW_MS = 70_000;
+export const BIND_TIMEOUT_MS = 60_000;
+export const WINDOWS_BIND_TIMEOUT_MS = 180_000;
+export const TRANSCRIPT_BIND_WINDOW_MS = WINDOWS_BIND_TIMEOUT_MS + 10_000;
 
 export function isWithinTranscriptBindWindow(
   dispatchedAt: number,
