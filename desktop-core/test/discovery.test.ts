@@ -12,7 +12,8 @@ import {
   shouldHideOwnFleet,
 } from "../src/discovery";
 
-const token = "b".repeat(64);
+const ticket = `jt_${"b".repeat(64)}`;
+const longLived = "c".repeat(64);
 
 describe("defaults and copy", () => {
   test("create is discoverable by default", () => {
@@ -21,22 +22,22 @@ describe("defaults and copy", () => {
 
   test("service type is armada tcp local", () => {
     expect(MDNS_SERVICE_TYPE).toBe("_armada._tcp.local.");
-    expect(MDNS_TXT_VER).toBe("1");
+    expect(MDNS_TXT_VER).toBe("2");
   });
 
-  test("empty-list and advertise-failed copy do not include token", () => {
+  test("empty-list and advertise-failed copy do not include credentials", () => {
     expect(noOpenFleetsCopy()).toMatch(/未发现开放舰队/);
     expect(noOpenFleetsCopy()).toMatch(/粘贴/);
     expect(advertiseFailedCopy()).toMatch(/分享链接/);
-    expect(noOpenFleetsCopy().includes(token)).toBe(false);
+    expect(noOpenFleetsCopy().includes(ticket)).toBe(false);
     expect(advertiseFailedCopy().toLowerCase().includes("token")).toBe(false);
   });
 });
 
 describe("parseDiscoveryTxt", () => {
-  test("builds a fleet from ip token ver and srv port", () => {
+  test("builds a fleet from ip ticket ver=2 and srv port", () => {
     const fleet = parseDiscoveryTxt(
-      { ip: "192.168.1.23", token, ver: "1" },
+      { ip: "192.168.1.23", ticket, ver: "2" },
       "Studio",
       7380,
     );
@@ -44,13 +45,13 @@ describe("parseDiscoveryTxt", () => {
       name: "Studio",
       ipv4: "192.168.1.23",
       port: 7380,
-      token,
+      ticket,
     });
   });
 
   test("zero srv port falls back to 7380", () => {
     const fleet = parseDiscoveryTxt(
-      { ip: "10.0.0.2", token, ver: "1" },
+      { ip: "10.0.0.2", ticket, ver: "2" },
       "WinBox",
       0,
     );
@@ -59,28 +60,30 @@ describe("parseDiscoveryTxt", () => {
     expect(fleet.port).toBe(7380);
   });
 
-  test("drops missing ip, token, or wrong ver", () => {
-    expect(parseDiscoveryTxt({ token, ver: "1" }, "A", 7380)).toEqual({ error: "incomplete" });
-    expect(parseDiscoveryTxt({ ip: "192.168.1.23", ver: "1" }, "A", 7380)).toEqual({ error: "incomplete" });
-    expect(parseDiscoveryTxt({ ip: "192.168.1.23", token, ver: "2" }, "A", 7380)).toEqual({ error: "incomplete" });
-    expect(parseDiscoveryTxt({ ip: "not-an-ip", token, ver: "1" }, "A", 7380)).toEqual({ error: "incomplete" });
+  test("drops long-lived token TXT and incomplete records", () => {
+    expect(parseDiscoveryTxt({ ticket, ver: "2" }, "A", 7380)).toEqual({ error: "incomplete" });
+    expect(parseDiscoveryTxt({ ip: "192.168.1.23", ver: "2" }, "A", 7380)).toEqual({ error: "incomplete" });
+    expect(parseDiscoveryTxt({ ip: "192.168.1.23", token: longLived, ver: "1" }, "A", 7380)).toEqual({ error: "incomplete" });
+    expect(parseDiscoveryTxt({ ip: "192.168.1.23", ticket, ver: "1" }, "A", 7380)).toEqual({ error: "incomplete" });
+    expect(parseDiscoveryTxt({ ip: "not-an-ip", ticket, ver: "2" }, "A", 7380)).toEqual({ error: "incomplete" });
+    expect(parseDiscoveryTxt({ ip: "192.168.1.23", ticket: longLived, ver: "2" }, "A", 7380)).toEqual({ error: "incomplete" });
   });
 });
 
 describe("discoveryJoinUri and row view", () => {
-  test("join uri matches formatJoinUri and row omits token", () => {
+  test("join uri carries ticket and row omits it", () => {
     const fleet = {
       name: "Studio",
       ipv4: "192.168.1.23",
       port: 7380,
-      token,
+      ticket,
     };
-    expect(discoveryJoinUri(fleet)).toBe(formatJoinUri("192.168.1.23:7380", token));
+    expect(discoveryJoinUri(fleet)).toBe(formatJoinUri("192.168.1.23:7380", ticket));
     const row = discoveredRowView(fleet);
     expect(row.title).toBe("Studio");
     expect(row.subtitle).toBe("192.168.1.23:7380");
-    expect(row.subtitle.includes(token)).toBe(false);
-    expect(JSON.stringify(row).includes(token)).toBe(false);
+    expect(row.subtitle.includes(ticket)).toBe(false);
+    expect(JSON.stringify(row).includes(ticket)).toBe(false);
   });
 });
 

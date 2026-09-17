@@ -125,6 +125,20 @@ armada://join?hub=192.168.1.10:7380&token=<中台令牌>
 
 加入**不会**在本机再起一份 hub。令牌以中台 `~/.armada/token` 为准，不要在受控端重新生成。
 
+### 威胁模型（局域网）
+
+产品默认是 **可信局域网舰队**（家里 / 办公室 Wi-Fi），不是公网多租户。
+
+| 路径 | 凭证 | 含义 |
+| --- | --- | --- |
+| 粘贴 `armada://join?hub=&token=` | 长期操作员 token | 等于把中台钥匙交给对方；不要发到群聊 |
+| mDNS 开放广播 | 30 分钟 `jt_…` ticket，兑成长期 token | TXT **不再**带长期 token；关掉开放或过期后，旧抓包不能加入 |
+| pair URI | 一次性 `code`（24h） | 兑成 `hub_secret` 后作废；截图不能长期冒充中台 |
+| CDP `9222` | 只绑 `127.0.0.1` | 启动器带 `--remote-debugging-address=127.0.0.1` |
+| iOS op token | Keychain | 不再写 UserDefaults |
+
+不可信 Wi-Fi（咖啡厅、访客网）上勾选「开放到局域网」，同网的人仍可在 ticket 有效期内加入并拿到长期 token。那种场景不要开放广播，只用当面粘贴链接。
+
 ### 打开工作区并派发
 
 1. 看板左侧 **打开工作区** → 选绝对路径文件夹。
@@ -148,10 +162,10 @@ App  --HTTPS-->  中转  <--出站 WSS--  中台  <--局域网--  受控 Cursor
 
 | 邀请 | 给谁 | 令牌 |
 | --- | --- | --- |
-| `armada-relay://pair?relay=…&fleet=…&secret=…` | 中台 | `secret`，出站连 `/hub` |
+| `armada-relay://pair?relay=…&fleet=…&code=…` | 中台 | 一次性 `code`（24h / 用过即废），兑成 `hub_secret` 后写出 `relay.json` |
 | `armada-relay://op?relay=…&fleet=…&token=…` | iOS App | `token`，调 `/mobile/*` |
 
-两条令牌不能互换。App **只绑中转**，看不到中台局域网 token。谁拿着 pair 连上，中转就认谁是这支远程舰队的中台（同一 `fleet` 同时只留一条中台连接）。公网 `relay` 必须是 **https**（模拟器可用 `http://127.0.0.1`）。不要把 `7380` 用 frp/Funnel 映射到公网。
+两条令牌不能互换。App **只绑中转**，看不到中台局域网 token。谁拿着已兑换的 `hub_secret` 连上，中转就认谁是这支远程舰队的中台（同一 `fleet` 同时只留一条中台连接）。pair 链接里的 `code` 只能兑一次，截图过期后不能冒充中台。公网 `relay` 必须是 **https**（模拟器可用 `http://127.0.0.1`）。不要把 `7380` 用 frp/Funnel 映射到公网。
 
 ### 起中转并签发邀请
 
@@ -167,7 +181,13 @@ JSON 里的 `pairUri` / `opUri` 各给中台和手机。中转公网地址来自
 
 ### 中台贴 pair
 
-把 pair 落到中台机 `~/.armada/relay.json`（`0600`）：
+把 **pair URI** 交给中台机兑换（一次性），或直接写 `~/.armada/relay.json`（`0600`）。JSON 管理接口仍返回长期 `hubSecret`，但 **不要把 `hubSecret` 写进可转发的 URI**。
+
+```bash
+ARMADA_PAIR_URI='armada-relay://pair?relay=https%3A%2F%2Frelay.example.com&fleet=fleet-…&code=…' bun run dev:relay-attach
+```
+
+手工文件：
 
 ```json
 { "relay": "https://relay.example.com", "fleet": "fleet-…", "secret": "<hub_secret>" }

@@ -12,7 +12,7 @@
 | 项 | 内容 |
 | --- | --- |
 | 问题 | 受控端必须手工拿到 `armada://join?…`；同网有开放中台时仍要复制 IP/token。 |
-| 核心方案 | 创建时默认勾选「开放到局域网」→ 桌面壳 mDNS 广播 `_armada._tcp`（TXT 带分享 IP + token）。加入页浏览列表，点一行走现有 `join_fleet`。不勾选则不广播；`--lan` 与粘贴链接不变。 |
+| 核心方案 | 创建时默认勾选「开放到局域网」→ 桌面壳 mDNS 广播 `_armada._tcp`（TXT 带分享 IP + 短时 join ticket）。加入页浏览列表，点一行走现有 `join_fleet`（ticket 先兑成长期 token）。不勾选则不广播；`--lan` 与粘贴链接不变。 |
 | 关键约束 | ① 广播/浏览只在 Tauri 桌面进程，hub 仍 `src/index.ts --lan`。② 加入 URI 格式不变。③ 列表不展示 token。④ 广播失败不阻断创建。⑤ UDP 5353；拦组播时降级为粘贴。⑥ 本机 IP 与 TXT `ip` 相同的条目隐藏。 |
 | 明确不做 | 改 hub 监听/鉴权；扫描网段；自建 UDP 信标端口；公网发现；看板内热切换开放；轮换 token；UI/日志打印完整 join URI 或 token。 |
 
@@ -25,7 +25,7 @@
 | R1 | 发现局域网内开放的舰队 | 加入页 mDNS 列表，实时增删 |
 | R2 | 创建时可选择是否开放 | 创建 pane 复选框；默认**勾选** |
 | R3 | 受控可选发现的舰队或自己输入链接 | 列表 + 现有粘贴框；两条路都进 `join_fleet` |
-| R4 | 点一下就能加入 | TXT 携带 token，前端拼 `armada://join?hub={ip}:{port}&token={token}` |
+| R4 | 点一下就能加入 | TXT 携带短时 ticket，前端拼 `armada://join?hub={ip}:{port}&token={ticket}` |
 | R5 | 不开放时链接仍可用 | 不广播；spawn 仍 `--lan`；复制分享链接行为不变 |
 
 ---
@@ -80,20 +80,20 @@
 | 主机名 | `{ipv4}.local.`（mdns-sd 要求以 `.local.` 结尾） |
 | 地址 | 与 `selectShareCandidate` 相同的 IPv4 |
 
-TXT（每个 value ≤ 255 字节；token 为 64 hex，满足）：
+TXT（每个 value ≤ 255 字节；ticket 为 `jt_` + 64 hex）：
 
 | 键 | 约束 | 例 |
 | --- | --- | --- |
 | `ip` | 点分 IPv4，等于分享候选 | `192.168.1.23` |
-| `token` | 非空；trim | `loadToken` 产物 |
-| `ver` | 必须为 `1`，否则丢弃 | `1` |
+| `ticket` | `jt_` + 64 位 hex；trim | hub `POST /api/join-tickets` 产物 |
+| `ver` | 必须为 `2`，否则丢弃 | `2` |
 
-缺 `ip` / `token` / `ver!=1` → 不当作舰队。
+缺 `ip` / `ticket` / `ver!=2`，或 TXT 仍带长期 `token` → 不当作舰队。
 
-拼加入链接（与 `desktop-core/src/joinUri.ts` 一致）：
+拼加入链接（与 `desktop-core/src/joinUri.ts` 一致；`token=` 字段此时是 ticket，加入时向中台 `POST /join/ticket` 兑成长期令牌）：
 
 ```
-armada://join?hub={ip}:{port}&token={token}
+armada://join?hub={ip}:{port}&token={ticket}
 ```
 
 `port` 取 SRV；若为 0 则 7380。
@@ -135,7 +135,7 @@ armada://join?hub={ip}:{port}&token={token}
 
 ```ts
 export const MDNS_SERVICE_TYPE = "_armada._tcp.local.";
-export const MDNS_TXT_VER = "1";
+export const MDNS_TXT_VER = "2";
 export function defaultDiscoverable(): boolean; // true
 export function parseDiscoveryTxt(txt: Record<string, string>, name: string, port: number): DiscoveredFleet | { error: "incomplete" };
 export function discoveryJoinUri(fleet: DiscoveredFleet): string;
@@ -145,7 +145,7 @@ export function advertiseFailedCopy(): string; // 「开放广播失败，请用
 export function noOpenFleetsCopy(): string; // 「未发现开放舰队，可粘贴链接加入」
 ```
 
-`DiscoveredFleet = { name, ipv4, port, token }`。
+`DiscoveredFleet = { name, ipv4, port, ticket }`。
 
 错误码：沿用现有 `fleetErrorMessage`；广播失败只用 toast，不占用 `#err`。
 

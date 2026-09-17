@@ -8,7 +8,7 @@ use tauri::{AppHandle, Emitter};
 use crate::hub::HubState;
 
 pub const SERVICE_TYPE: &str = "_armada._tcp.local.";
-pub const TXT_VER: &str = "1";
+pub const TXT_VER: &str = "2";
 
 #[derive(Default)]
 pub struct DiscoveryState {
@@ -32,8 +32,8 @@ pub struct FleetLost {
     pub id: String,
 }
 
-pub fn txt_pairs<'a>(ip: &'a str, token: &'a str) -> [(&'a str, &'a str); 3] {
-    [("ip", ip), ("token", token), ("ver", TXT_VER)]
+pub fn txt_pairs<'a>(ip: &'a str, ticket: &'a str) -> [(&'a str, &'a str); 3] {
+    [("ip", ip), ("ticket", ticket), ("ver", TXT_VER)]
 }
 
 pub fn should_hide_own(advertised_ip: &str, local_ips: &[String]) -> bool {
@@ -58,9 +58,9 @@ pub fn fleet_from_txt(
     local_ips: &[String],
 ) -> Option<FleetFound> {
     let ipv4 = txt.get("ip")?.trim();
-    let token = txt.get("token")?.trim();
+    let ticket = txt.get("ticket")?.trim();
     let ver = txt.get("ver")?.trim();
-    if ver != TXT_VER || ipv4.is_empty() || token.is_empty() {
+    if ver != TXT_VER || ipv4.is_empty() || !is_join_ticket(ticket) {
         return None;
     }
     if !ipv4.bytes().all(|b| b.is_ascii_digit() || b == b'.') {
@@ -75,7 +75,7 @@ pub fn fleet_from_txt(
         name: name.to_string(),
         ipv4: ipv4.to_string(),
         port,
-        join_uri: format!("armada://join?hub={ipv4}:{port}&token={token}"),
+        join_uri: format!("armada://join?hub={ipv4}:{port}&token={ticket}"),
     })
 }
 
@@ -112,12 +112,12 @@ fn daemon_of(state: &HubState) -> Result<ServiceDaemon, String> {
     Ok(d)
 }
 
-pub fn start_advertise(state: &HubState, ipv4: &str, token: &str) -> Result<(), String> {
+pub fn start_advertise(state: &HubState, ipv4: &str, ticket: &str) -> Result<(), String> {
     stop_advertise(state);
     let mdns = daemon_of(state)?;
     let instance = computer_name();
     let host = format!("{ipv4}.local.");
-    let pairs = txt_pairs(ipv4, token);
+    let pairs = txt_pairs(ipv4, ticket);
     let info = ServiceInfo::new(SERVICE_TYPE, &instance, &host, ipv4, 7380, &pairs[..])
         .map_err(|_| "advertise-failed".to_string())?;
     let fullname = info.get_fullname().to_string();
@@ -225,15 +225,26 @@ fn instance_from_fullname(fullname: &str) -> String {
     }
 }
 
+pub fn is_join_ticket(cred: &str) -> bool {
+    let rest = match cred.strip_prefix("jt_") {
+        Some(r) => r,
+        None => return false,
+    };
+    rest.len() == 64 && rest.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn txt_pairs_match_contract() {
-        let p = txt_pairs("192.168.1.23", "tok");
-        assert_eq!(p, [("ip", "192.168.1.23"), ("token", "tok"), ("ver", "1")]);
+        let ticket = format!("jt_{}", "ab".repeat(32));
+        let p = txt_pairs("192.168.1.23", &ticket);
+        assert_eq!(p, [("ip", "192.168.1.23"), ("ticket", ticket.as_str()), ("ver", "2")]);
         assert_eq!(SERVICE_TYPE, "_armada._tcp.local.");
+        assert!(is_join_ticket(&ticket));
+        assert!(!is_join_ticket(&"ab".repeat(32)));
     }
 
     #[test]
@@ -242,18 +253,22 @@ mod tests {
         assert!(should_hide_own("192.168.1.23", &local));
         assert!(!should_hide_own("10.0.0.2", &local));
 
+        let ticket = format!("jt_{}", "ab".repeat(32));
         let mut txt = HashMap::new();
         txt.insert("ip".into(), "10.0.0.2".into());
-        txt.insert("token".into(), "ab".repeat(32));
-        txt.insert("ver".into(), "1".into());
+        txt.insert("ticket".into(), ticket.clone());
+        txt.insert("ver".into(), "2".into());
         let found = fleet_from_txt("N._armada._tcp.local.", "N", 0, &txt, &local).unwrap();
         assert_eq!(found.ipv4, "10.0.0.2");
         assert_eq!(found.port, 7380);
-        assert_eq!(found.join_uri, format!("armada://join?hub=10.0.0.2:7380&token={}", "ab".repeat(32)));
+        assert_eq!(found.join_uri, format!("armada://join?hub=10.0.0.2:7380&token={ticket}"));
         assert_eq!(found.name, "N");
 
         assert!(fleet_from_txt("N._armada._tcp.local.", "N", 7380, &txt, &["10.0.0.2".into()]).is_none());
+        txt.insert("ver".into(), "1".into());
+        assert!(fleet_from_txt("N._armada._tcp.local.", "N", 7380, &txt, &local).is_none());
         txt.insert("ver".into(), "2".into());
+        txt.insert("ticket".into(), "ab".repeat(32));
         assert!(fleet_from_txt("N._armada._tcp.local.", "N", 7380, &txt, &local).is_none());
     }
 

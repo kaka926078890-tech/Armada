@@ -316,6 +316,18 @@ pub fn tcp_open(host: &str, port: u16, timeout: Duration) -> bool {
 }
 
 fn http_get(host: &str, port: u16, path: &str, bearer: Option<&str>, timeout: Duration) -> Result<(u16, String), String> {
+    http_req("GET", host, port, path, bearer, None, timeout)
+}
+
+fn http_req(
+    method: &str,
+    host: &str,
+    port: u16,
+    path: &str,
+    bearer: Option<&str>,
+    body: Option<&str>,
+    timeout: Duration,
+) -> Result<(u16, String), String> {
     let addr = format!("{host}:{port}");
     let sa: SocketAddr = addr
         .to_socket_addrs()
@@ -325,25 +337,74 @@ fn http_get(host: &str, port: u16, path: &str, bearer: Option<&str>, timeout: Du
     let mut stream = TcpStream::connect_timeout(&sa, timeout).map_err(|_| "unreachable".to_string())?;
     let _ = stream.set_read_timeout(Some(timeout));
     let _ = stream.set_write_timeout(Some(timeout));
-    let mut req = format!("GET {path} HTTP/1.1\r\nHost: {host}:{port}\r\nConnection: close\r\n");
-    if let Some(_token) = bearer {
+    let payload = body.unwrap_or("");
+    let mut req = format!("{method} {path} HTTP/1.1\r\nHost: {host}:{port}\r\nConnection: close\r\n");
+    if let Some(token) = bearer {
         req.push_str("Authorization: Bearer ");
-        req.push_str(_token);
+        req.push_str(token);
         req.push_str("\r\n");
     }
+    if body.is_some() {
+        req.push_str("Content-Type: application/json\r\n");
+        req.push_str(&format!("Content-Length: {}\r\n", payload.len()));
+    }
     req.push_str("\r\n");
+    req.push_str(payload);
     stream.write_all(req.as_bytes()).map_err(|_| "unreachable".to_string())?;
     let mut buf = Vec::new();
     stream.read_to_end(&mut buf).map_err(|_| "unreachable".to_string())?;
     let text = String::from_utf8_lossy(&buf);
-    let (head, body) = text.split_once("\r\n\r\n").unwrap_or((text.as_ref(), ""));
+    let (head, resp_body) = text.split_once("\r\n\r\n").unwrap_or((text.as_ref(), ""));
     let status = head
         .lines()
         .next()
         .and_then(|l| l.split_whitespace().nth(1))
         .and_then(|s| s.parse().ok())
         .unwrap_or(0);
-    Ok((status, body.to_string()))
+    Ok((status, resp_body.to_string()))
+}
+
+pub(crate) fn mint_join_ticket(host: &str, port: u16, token: &str) -> Result<String, String> {
+    let timeout = Duration::from_secs(1);
+    let (status, body) = http_req("POST", host, port, "/api/join-tickets", Some(token), Some("{}"), timeout)?;
+    if !(200..300).contains(&status) {
+        return Err("advertise-failed".into());
+    }
+    let v: serde_json::Value = serde_json::from_str(&body).map_err(|_| "advertise-failed".to_string())?;
+    v.get("ticket")
+        .and_then(|t| t.as_str())
+        .filter(|s| crate::discovery::is_join_ticket(s))
+        .map(|s| s.to_string())
+        .ok_or_else(|| "advertise-failed".to_string())
+}
+
+pub(crate) fn exchange_join_ticket(host: &str, port: u16, ticket: &str) -> Result<String, String> {
+    let timeout = Duration::from_secs(1);
+    let payload = format!(r#"{{"ticket":"{ticket}"}}"#);
+    let (status, body) = http_req("POST", host, port, "/join/ticket", None, Some(&payload), timeout)?;
+    if status != 200 {
+        return Err("unauthorized".into());
+    }
+    let v: serde_json::Value = serde_json::from_str(&body).map_err(|_| "unauthorized".to_string())?;
+    v.get("token")
+        .and_then(|t| t.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .ok_or_else(|| "unauthorized".to_string())
+}
+
+fn revoke_join_tickets() {
+    if let Some(token) = load_token_from_home() {
+        let _ = http_req(
+            "DELETE",
+            "127.0.0.1",
+            HUB_PORT,
+            "/api/join-tickets",
+            Some(&token),
+            None,
+            Duration::from_millis(400),
+        );
+    }
 }
 
 pub(crate) fn may_write_cursor_settings(p: &Probe) -> bool {
@@ -729,8 +790,11 @@ fn maybe_advertise(
         result.advertise_error = Some("advertise-failed".into());
         return Ok(result);
     };
-    match crate::discovery::start_advertise(state, &ip, &result.token) {
-        Ok(()) => result.advertised = true,
+    match mint_join_ticket("127.0.0.1", HUB_PORT, &result.token) {
+        Ok(ticket) => match crate::discovery::start_advertise(state, &ip, &ticket) {
+            Ok(()) => result.advertised = true,
+            Err(_) => result.advertise_error = Some("advertise-failed".into()),
+        },
         Err(_) => result.advertise_error = Some("advertise-failed".into()),
     }
     Ok(result)
@@ -762,6 +826,11 @@ pub fn join_fleet(app: tauri::AppHandle, uri: String, _state: tauri::State<'_, H
     if !tcp_open(probe_host, probe_port, Duration::from_millis(400)) {
         return Err("unreachable".into());
     }
+    let token = if crate::discovery::is_join_ticket(&token) {
+        exchange_join_ticket(probe_host, probe_port, &token).map_err(|e| e)?
+    } else {
+        token
+    };
     let probe = probe_hub(probe_host, probe_port, &token);
     let action = decide_occupancy(false, true, probe.health_name.as_deref(), probe.auth);
     match apply_decision(false, action)? {
@@ -801,6 +870,7 @@ pub fn quit_owned_hub(state: tauri::State<'_, HubState>) -> Result<(), String> {
 
 pub fn quit_owned_inner(state: &HubState) {
     crate::discovery::shutdown(state);
+    revoke_join_tickets();
     if let Ok(mut owned) = state.owned.lock() {
         quit_child(&mut owned);
     }

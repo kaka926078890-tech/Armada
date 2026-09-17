@@ -11,6 +11,7 @@ import { handleWsMessage, type WsData } from "./ws";
 import { limitsFromEnv, httpStatusForRunError, type ConcurrencyLimits } from "./concurrency";
 import { BlobStore } from "./blobs";
 import { readUiPrefs, writeUiPrefs, mergeUiPrefs } from "./uiPrefs";
+import { JoinTickets } from "./joinTickets";
 import { startRelayClient } from "./relayClient";
 
 export interface HubServer {
@@ -31,6 +32,7 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
   const sse = new SseHub();
   const limits = opts.concurrency ?? limitsFromEnv();
   const blobs = new BlobStore(db, home);
+  const tickets = new JoinTickets(db);
   const runs = new RunService(db, registry, sse, { limits, blobs });
   registry.onMachinesChanged = () => sse.broadcast("*", { type: "machine.updated" });
 
@@ -62,7 +64,18 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
 
   const app = new Hono();
   app.get("/api/health", (c) => c.json({ ok: true, name: "armada-hub" }));
+  app.post("/join/ticket", async (c) => {
+    const body = await c.req.json().catch(() => ({})) as { ticket?: string };
+    const ticket = typeof body.ticket === "string" ? body.ticket.trim() : "";
+    if (!tickets.exchange(ticket)) return c.json({ error: "unauthorized" }, 401);
+    return c.json({ token });
+  });
   app.use("/api/*", authMiddleware(token));
+  app.post("/api/join-tickets", (c) => c.json(tickets.mint(), 201));
+  app.delete("/api/join-tickets", (c) => {
+    tickets.revoke();
+    return c.json({ ok: true });
+  });
   app.get("/api/machines", (c) => c.json(registry.listMachines()));
   app.patch("/api/machines/:id", async (c) => {
     const body = await c.req.json().catch(() => ({}));

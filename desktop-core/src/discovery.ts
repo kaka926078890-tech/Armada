@@ -1,15 +1,16 @@
 import { formatJoinUri } from "./joinUri";
 
 export const MDNS_SERVICE_TYPE = "_armada._tcp.local.";
-export const MDNS_TXT_VER = "1";
+export const MDNS_TXT_VER = "2";
 
 const IPV4 = /^(\d{1,3}\.){3}\d{1,3}$/;
+const JOIN_TICKET = /^jt_[0-9a-f]{64}$/;
 
 export type DiscoveredFleet = {
   name: string;
   ipv4: string;
   port: number;
-  token: string;
+  ticket: string;
 };
 
 export function defaultDiscoverable(): boolean {
@@ -22,21 +23,21 @@ export function parseDiscoveryTxt(
   port: number,
 ): DiscoveredFleet | { error: "incomplete" } {
   const ipv4 = txt.ip?.trim() ?? "";
-  const token = txt.token?.trim() ?? "";
+  const ticket = txt.ticket?.trim() ?? "";
   const ver = txt.ver?.trim() ?? "";
-  if (!ipv4 || !IPV4.test(ipv4) || !token || ver !== MDNS_TXT_VER) {
+  if (!ipv4 || !IPV4.test(ipv4) || !JOIN_TICKET.test(ticket) || ver !== MDNS_TXT_VER) {
     return { error: "incomplete" };
   }
   return {
     name,
     ipv4,
     port: port > 0 ? port : 7380,
-    token,
+    ticket,
   };
 }
 
 export function discoveryJoinUri(fleet: DiscoveredFleet): string {
-  return formatJoinUri(`${fleet.ipv4}:${fleet.port}`, fleet.token);
+  return formatJoinUri(`${fleet.ipv4}:${fleet.port}`, fleet.ticket);
 }
 
 export function shouldHideOwnFleet(advertisedIp: string, localIps: string[]): boolean {
