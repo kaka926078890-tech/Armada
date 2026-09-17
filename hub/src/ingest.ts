@@ -25,6 +25,23 @@ export function cidBelongsToRun(run: { id?: string; conversation_id?: string | n
   return false;
 }
 
+const TRANSCRIPT_SOURCES = new Set(["transcript", "subagent-transcript"]);
+/** Identical `turn_ended` from a second tailer lands in the same second; a later turn is minutes later. */
+const REPEAT_TURN_ENDED_MS = 60_000;
+
+/** Second Cursor window tails the same cid jsonl with a different ext_seq clock (r-182f5c19). */
+export function isRepeatTranscriptPayload(
+  source: unknown,
+  payload: unknown,
+  stored: { ts: number } | null | undefined,
+  eventTs: number,
+): boolean {
+  if (typeof source !== "string" || !TRANSCRIPT_SOURCES.has(source) || !stored) return false;
+  const role = payload && typeof payload === "object" ? (payload as { role?: unknown }).role : undefined;
+  if (role === "user" || role === "assistant") return true;
+  return Math.abs(eventTs - stored.ts) < REPEAT_TURN_ENDED_MS;
+}
+
 function cdpAskOwnsConversation(run: { conversation_id?: string | null }, msg: any, cid: unknown): boolean {
   if (msg.source !== "cdp") return true;
   if (msg.hookEventName !== "askQuestion" && msg.hookEventName !== "askQuestionResolved") return true;
@@ -67,11 +84,23 @@ export function ingestEvent(db: Database, runs: RunService, sse: SseHub, machine
   const dup = db.query("SELECT id FROM run_events WHERE machine_id=?1 AND ext_seq=?2").get(machineId, extSeq);
   if (dup) { (msg as any).__ack = ack(); return; }
 
+  const source = msg.source ?? "hook";
+  if (TRANSCRIPT_SOURCES.has(source)) {
+    const body = JSON.stringify(msg.payload ?? {});
+    const prev = db.query(
+      `SELECT ts FROM run_events WHERE run_id=?1 AND source=?2 AND payload=?3 ORDER BY seq DESC LIMIT 1`,
+    ).get(runId, source, body) as { ts: number } | undefined;
+    if (isRepeatTranscriptPayload(source, msg.payload, prev, msg.ts ?? Date.now())) {
+      (msg as any).__ack = ack();
+      return;
+    }
+  }
+
   const maxSeq = (db.query("SELECT COALESCE(MAX(seq),0) AS m FROM run_events WHERE run_id=?1").get(runId) as any).m as number;
   const terminal = !["created", "dispatched", "binding", "running"].includes(run.status);
   db.query(`INSERT INTO run_events (run_id, seq, machine_id, ext_seq, source, hook_event_name, payload, ts, post_terminal)
             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)`)
-    .run(runId, maxSeq + 1, machineId, extSeq, msg.source ?? "hook", msg.hookEventName ?? null,
+    .run(runId, maxSeq + 1, machineId, extSeq, source, msg.hookEventName ?? null,
          JSON.stringify(msg.payload ?? {}), msg.ts ?? Date.now(), terminal ? 1 : 0);
 
   // sessionStart 在 newAgentChat 瞬间触发,不得据此进入 running

@@ -716,6 +716,7 @@ export class RunService {
       pending_ask: parsePendingAsk(row.pending_ask),
       outbound: this.listVisibleOutbound(row.id),
       queue_message_default_behavior: mode,
+      window_connected: !!(row.window_id && this.registry.isConnected(row.machine_id, row.window_id)),
     };
   }
 

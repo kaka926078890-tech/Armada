@@ -58,6 +58,52 @@ describe("event ingest", () => {
     ws.close();
   });
 
+  test("two tailers of the same jsonl user line store once (r-182f5c19 dual ext_seq)", async () => {
+    // Real shape: Win Desktop two Cursor windows tailed 32f5e647.jsonl; hub UNIQUE(machine_id, ext_seq)
+    // let both in because createExtSeq() seeds per process. Detail then painted two user pills.
+    const { ws, inbound, api, runId } = await startBoundRun();
+    const payload = {
+      role: "user",
+      message: { content: [{ type: "text", text: "<timestamp>Thursday, Sep 17, 2026, 4:29 PM (UTC+8)</timestamp>\n<user_query>\ncommit  push一下代码，然后告诉我修改了哪些仓库的哪些分支，我让别的同事review一下代码，不要在main\n</user_query>" }] },
+    };
+    ws.send(JSON.stringify({ type: "run.event", runId, source: "transcript", seq: 1789619097212, ts: 1_726_563_356_000, payload }));
+    ws.send(JSON.stringify({ type: "run.event", runId, source: "transcript", seq: 1789542803229, ts: 1_726_563_356_000, payload }));
+    await new Promise((r) => setTimeout(r, 150));
+    const events = (await (await api(`/api/runs/${runId}/events`)).json()) as any[];
+    const users = events.filter((e) => e.source === "transcript");
+    expect(users).toHaveLength(1);
+    expect(JSON.parse(users[0].payload).message.content[0].text).toContain("commit  push一下代码");
+    expect(inbound.filter((m) => m.type === "event.ack").length).toBeGreaterThanOrEqual(2);
+    ws.close();
+  });
+
+  test("two operator turns with the same words but different jsonl timestamps both store", async () => {
+    const { ws, api, runId } = await startBoundRun();
+    const user = (stamp: string) => ({
+      role: "user",
+      message: { content: [{ type: "text", text: `<timestamp>${stamp}</timestamp>\n<user_query>\n继续\n</user_query>` }] },
+    });
+    ws.send(JSON.stringify({ type: "run.event", runId, source: "transcript", seq: 10, ts: 1_000, payload: user("4:24 PM") }));
+    ws.send(JSON.stringify({ type: "run.event", runId, source: "transcript", seq: 20, ts: 2_000, payload: user("4:29 PM") }));
+    await new Promise((r) => setTimeout(r, 150));
+    const users = ((await (await api(`/api/runs/${runId}/events`)).json()) as any[]).filter((e) => e.source === "transcript");
+    expect(users).toHaveLength(2);
+    ws.close();
+  });
+
+  test("second tailer's turn_ended of the same turn is dropped; a later turn still stores", async () => {
+    const { ws, api, runId } = await startBoundRun();
+    const ended = { type: "turn_ended", status: "success" };
+    ws.send(JSON.stringify({ type: "run.event", runId, source: "transcript", seq: 1, ts: 1_000, payload: ended }));
+    ws.send(JSON.stringify({ type: "run.event", runId, source: "transcript", seq: 2, ts: 1_050, payload: ended }));
+    ws.send(JSON.stringify({ type: "run.event", runId, source: "transcript", seq: 3, ts: 120_000, payload: ended }));
+    await new Promise((r) => setTimeout(r, 150));
+    const endedRows = ((await (await api(`/api/runs/${runId}/events`)).json()) as any[])
+      .filter((e) => e.source === "transcript" && JSON.parse(e.payload).type === "turn_ended");
+    expect(endedRows).toHaveLength(2);
+    ws.close();
+  });
+
   test("stop completed → run completed; later events flagged post_terminal", async () => {
     const { ws, api, runId } = await startBoundRun();
     ws.send(JSON.stringify(ev(runId, 1, "stop", { status: "completed" })));

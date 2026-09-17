@@ -1,3 +1,5 @@
+import { workspacePathIn } from "./workspacePath";
+
 export interface HubRunRow {
   id: string;
   machine_id: string;
@@ -6,6 +8,8 @@ export interface HubRunRow {
   workspace_root: string;
   prompt?: string;
   live_generation_id?: string | null;
+  window_id?: string | null;
+  window_connected?: boolean;
 }
 
 export interface AdoptTarget {
@@ -16,8 +20,10 @@ export interface AdoptTarget {
   liveGenerationId?: string;
 }
 
+export type AdoptWindow = { windowId: string; openWorkspaces: string[] };
+
 /** Hub runs this window must re-attach after Reload (in-memory boundRuns is gone). */
-export function hubRunsNeedingTranscriptFollow(machineId: string, runs: HubRunRow[]): AdoptTarget[] {
+export function hubRunsNeedingTranscriptFollow(machineId: string, runs: HubRunRow[], win: AdoptWindow): AdoptTarget[] {
   const live = new Set(["running", "binding"]);
   const out: AdoptTarget[] = [];
   for (const r of runs) {
@@ -25,6 +31,9 @@ export function hubRunsNeedingTranscriptFollow(machineId: string, runs: HubRunRo
     if (!live.has(r.status)) continue;
     if (!r.conversation_id) continue;
     if (!r.workspace_root) continue;
+    if (!workspacePathIn(r.workspace_root, win.openWorkspaces)) continue;
+    // Another live Cursor window already tails this cid; Reload sets window_connected false.
+    if (r.window_id && r.window_id !== win.windowId && r.window_connected === true) continue;
     out.push({
       runId: r.id,
       conversationId: r.conversation_id,

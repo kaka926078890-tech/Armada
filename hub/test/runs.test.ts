@@ -160,6 +160,14 @@ describe("Run dispatch", () => {
     wsB.close();
   });
 
+  test("GET run reports window_connected so a second window can skip adopt", async () => {
+    const { api } = await startWithExt();
+    const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "hello" }) });
+    const { run } = await r.json() as any;
+    expect(run.window_id).toBe("w-1");
+    expect(run.window_connected).toBe(true);
+  });
+
   test("third run on same workspace hits 429 RUN_LIMIT when M=2", async () => {
     const { api } = await startWithExt({
       extensionVersion: "0.4.0",
@@ -992,14 +1000,14 @@ describe("running followup outbound", () => {
     const created = (hub!.db.query("SELECT created_at FROM run_outbound WHERE run_id=?1").get(run.id) as { created_at: number }).created_at;
     ws.send(JSON.stringify({
       type: "run.event", runId: run.id, source: "transcript", seq: 30, ts: created - 5_000,
-      payload: { role: "user", conversation_id: "cid-1", message: { content: [{ type: "text", text: "<user_query>\n排队句\n</user_query>" }] } },
+      payload: { role: "user", conversation_id: "cid-1", message: { content: [{ type: "text", text: "<timestamp>Thursday, Sep 17, 2026, 4:20 PM (UTC+8)</timestamp>\n<user_query>\n排队句\n</user_query>" }] } },
     }));
     await new Promise((x) => setTimeout(x, 50));
     expect(((await (await api(`/api/runs/${run.id}`)).json()) as any).outbound[0].state).toBe("queued");
     inbound.length = 0;
     ws.send(JSON.stringify({
       type: "run.event", runId: run.id, source: "transcript", seq: 31, ts: created + 10,
-      payload: { role: "user", conversation_id: "cid-1", message: { content: [{ type: "text", text: "<user_query>\n排队句\n</user_query>" }] } },
+      payload: { role: "user", conversation_id: "cid-1", message: { content: [{ type: "text", text: "<timestamp>Thursday, Sep 17, 2026, 4:29 PM (UTC+8)</timestamp>\n<user_query>\n排队句\n</user_query>" }] } },
     }));
     await new Promise((x) => setTimeout(x, 80));
     const after = (await (await api(`/api/runs/${run.id}`)).json()) as any;

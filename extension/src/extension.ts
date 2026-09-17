@@ -485,7 +485,9 @@ export function activate(context: vscode.ExtensionContext): void {
       if (!res.ok) { log(`adopt runs http ${res.status}`); return; }
       const rows = await res.json() as unknown;
       if (!Array.isArray(rows)) return;
-      const targets = hubRunsNeedingTranscriptFollow(machineId!, rows);
+      const targets = hubRunsNeedingTranscriptFollow(machineId!, rows, {
+        windowId, openWorkspaces: workspaces(),
+      });
       for (const t of targets) {
         const alreadyBound = boundRuns.has(t.runId);
         if (!alreadyBound) {
