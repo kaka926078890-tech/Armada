@@ -454,10 +454,11 @@ export default function RunDetail({ runId, onClose, onChanged }: {
               setAskError(r.error === "ASK_IN_FLIGHT" ? "正在提交，请稍候"
                 : r.error === "ASK_INVALID_OPTION" ? "选项无效，请改选或 Skip"
                 : "提交失败，请到本机点 Continue / Skip");
-              return;
+              return false;
             }
             if (r?.run) setRun(r.run);
             onChanged();
+            return true;
           } : undefined}
         />
         {queued.length > 0 && (

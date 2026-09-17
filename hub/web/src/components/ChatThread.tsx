@@ -177,53 +177,97 @@ function CopyIconButton({ text }: { text: string }) {
   );
 }
 
+export type AnswerAskBody = {
+  request_id: string;
+  action: "continue" | "skip";
+  answers?: { question_id: string; option_ids: string[] }[];
+};
+
+/** Cursor plan Build is yellow primary; Ask Continue is accent blue. Size matches the IDE split-button, not a 12px chip. */
+export const ASK_PRIMARY_BTN = "inline-flex items-center justify-center gap-2 min-h-9 min-w-[128px] px-4 rounded-lg text-[13px] font-medium disabled:opacity-70";
+export const ASK_PLAN_BTN = `${ASK_PRIMARY_BTN} bg-[#F1B467] text-[#1a1a1a] hover:bg-[#f6c57e]`;
+export const ASK_CONTINUE_BTN = `${ASK_PRIMARY_BTN} bg-[#599CE7] text-white hover:bg-[#7aafeb]`;
+export const ASK_SKIP_BTN = "inline-flex items-center justify-center min-h-9 px-4 rounded-lg text-[13px] font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-200 disabled:opacity-70";
+
+export function isPlanAskOptions(options: { id: string }[]): boolean {
+  return options.length === 1 && options[0]?.id === "build";
+}
+
+export function askContinueLabel(plan: boolean, busy: boolean): string {
+  if (plan) return busy ? "Building..." : "Build";
+  return busy ? "Continuing..." : "Continue";
+}
+
+export function askSkipLabel(busy: boolean): string {
+  return busy ? "Skipping..." : "Skip";
+}
+
+function AskSpinner() {
+  return (
+    <svg className="size-3.5 animate-spin" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.8" opacity="0.25" />
+      <path d="M14 8a6 6 0 0 0-6-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function AskCard({ block, onAnswerAsk }: {
   block: Extract<ChatBlock, { kind: "ask" }>;
-  onAnswerAsk?: (body: {
-    request_id: string;
-    action: "continue" | "skip";
-    answers?: { question_id: string; option_ids: string[] }[];
-  }) => Promise<void> | void;
+  onAnswerAsk?: (body: AnswerAskBody) => Promise<boolean | void> | boolean | void;
 }) {
   const [picked, setPicked] = useState(block.options[0]?.id ?? "");
-  const [busy, setBusy] = useState(false);
-  const pending = block.action === "pending" || block.action === "submit_failed";
+  const [busyAction, setBusyAction] = useState<"continue" | "skip" | null>(null);
+  const pending = block.action === "pending" || block.action === "submit_failed" || block.action === "submitting";
+  const wait = busyAction !== null || block.action === "submitting";
+  const continueBusy = busyAction === "continue" || (block.action === "submitting" && busyAction !== "skip");
+  const skipBusy = busyAction === "skip";
   const interactive = pending && !!onAnswerAsk;
-  const plan = block.options.length === 1 && block.options[0]?.id === "build";
+  const plan = isPlanAskOptions(block.options);
   const submit = async (action: "continue" | "skip") => {
-    if (!onAnswerAsk || busy) return;
-    setBusy(true);
+    if (!onAnswerAsk || wait) return;
+    setBusyAction(action);
     try {
-      await onAnswerAsk({
+      const ok = await onAnswerAsk({
         request_id: block.request_id,
         action,
         answers: action === "continue" ? [{ question_id: "q0", option_ids: [picked] }] : [],
       });
-    } finally {
-      setBusy(false);
+      if (ok === false) setBusyAction(null);
+    } catch {
+      setBusyAction(null);
     }
   };
+  const stopCard = (e: { stopPropagation: () => void; preventDefault: () => void }) => {
+    e.stopPropagation();
+    e.preventDefault();
+  };
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2.5">
+    <div
+      className={`rounded-lg border border-zinc-800 bg-zinc-900/60 pl-3 pr-3 py-3 border-l-[3px] ${plan ? "border-l-[#F1B467]" : "border-l-[#599CE7]"}`}
+      onClick={(e) => e.stopPropagation()}
+    >
       <div className="text-[11px] uppercase tracking-wide text-zinc-500 mb-1">{plan ? "Created Plan" : "Questions"}</div>
       <div className="text-[13px] text-zinc-200 leading-relaxed">
         <AssistantMarkdown text={block.prompt} />
       </div>
       {plan ? null : (
-      <div className="mt-2 flex flex-col gap-1.5">
-        {block.options.map((o) => (
-          <label key={o.id} className="flex items-start gap-2 text-[13px] text-zinc-300">
-            <input
-              type="radio"
-              name={`ask-${block.request_id}`}
-              className="mt-1"
-              disabled={!interactive || busy}
-              checked={picked === o.id}
-              onChange={() => setPicked(o.id)}
-            />
-            <span><span className="text-zinc-500 font-mono mr-1">{o.label}</span>{o.text}</span>
-          </label>
-        ))}
+      <div className="mt-2.5 flex flex-col gap-2">
+        {block.options.map((o) => {
+          const on = picked === o.id;
+          return (
+            <button
+              key={o.id}
+              type="button"
+              disabled={!interactive || wait}
+              aria-pressed={on}
+              onClick={(e) => { stopCard(e); setPicked(o.id); }}
+              className={`w-full min-h-11 px-3 py-2.5 rounded-lg border text-left text-[13px] text-zinc-200 disabled:opacity-70 ${on ? "border-[#599CE7] bg-[#599CE7]/10" : "border-zinc-800 hover:border-zinc-700 bg-zinc-950/40"}`}
+            >
+              <span className="text-zinc-500 font-mono mr-1.5">{o.label}</span>
+              {o.text}
+            </button>
+          );
+        })}
       </div>
       )}
       {block.action === "resolved" ? (
@@ -233,25 +277,29 @@ function AskCard({ block, onAnswerAsk }: {
         <div className="mt-2 text-[12px] text-red-400">{block.error || "提交失败，请到本机点 Continue / Skip"}</div>
       ) : null}
       {interactive ? (
-        <div className="mt-2.5 flex gap-2">
-          <button
-            type="button"
-            disabled={busy || !picked}
-            onClick={() => void submit("continue")}
-            className="px-2.5 py-1 rounded-md bg-sky-700 hover:bg-sky-600 text-[12px] disabled:opacity-40"
-          >
-            {plan ? "Build" : "Continue"}
-          </button>
+        <div className="mt-3 pt-3 border-t border-zinc-800/80 flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
           {plan ? null : (
           <button
             type="button"
-            disabled={busy}
-            onClick={() => void submit("skip")}
-            className="px-2.5 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700 text-[12px] disabled:opacity-40"
+            disabled={wait}
+            aria-busy={skipBusy}
+            onClick={(e) => { stopCard(e); void submit("skip"); }}
+            className={ASK_SKIP_BTN}
           >
-            Skip
+            {skipBusy ? <AskSpinner /> : null}
+            {askSkipLabel(skipBusy)}
           </button>
           )}
+          <button
+            type="button"
+            disabled={wait || (!plan && !picked)}
+            aria-busy={continueBusy}
+            onClick={(e) => { stopCard(e); void submit("continue"); }}
+            className={plan ? ASK_PLAN_BTN : ASK_CONTINUE_BTN}
+          >
+            {continueBusy ? <AskSpinner /> : null}
+            {askContinueLabel(plan, continueBusy)}
+          </button>
         </div>
       ) : null}
     </div>
@@ -260,11 +308,7 @@ function AskCard({ block, onAnswerAsk }: {
 
 export default function ChatThread({ blocks, onAnswerAsk }: {
   blocks: ChatBlock[];
-  onAnswerAsk?: (body: {
-    request_id: string;
-    action: "continue" | "skip";
-    answers?: { question_id: string; option_ids: string[] }[];
-  }) => Promise<void> | void;
+  onAnswerAsk?: (body: AnswerAskBody) => Promise<boolean | void> | boolean | void;
 }) {
   if (blocks.length === 0) {
     return <div className="text-zinc-500 text-sm px-1 py-8 text-center">等待对话内容…</div>;

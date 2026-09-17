@@ -563,16 +563,34 @@ struct AskView: View {
     @EnvironmentObject var session: Session
     @State private var optionId: String?
     @State private var err: String?
+    @State private var busyAction: String?
+
+    private static let planYellow = Color(red: 241 / 255, green: 180 / 255, blue: 103 / 255)
+    private static let accentBlue = Color(red: 89 / 255, green: 156 / 255, blue: 231 / 255)
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             if isPlan {
                 Text("Created Plan").font(.headline)
                 Text(ask.questions.first?.prompt ?? "")
                     .font(.body)
                     .fixedSize(horizontal: false, vertical: true)
                 if let err { Text(err).foregroundStyle(.red) }
-                Button("Build") { Task { await submitBuild() } }
+                Button {
+                    Task { await submitBuild() }
+                } label: {
+                    HStack(spacing: 8) {
+                        if busyAction == "continue" { ProgressView().tint(.black) }
+                        Text(busyAction == "continue" ? "Building..." : "Build")
+                            .font(.body.weight(.semibold))
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .tint(Self.planYellow)
+                .foregroundStyle(.black)
+                .disabled(busyAction != nil)
             } else {
                 Text("需要选择").font(.headline)
                 ForEach(ask.questions) { q in
@@ -594,34 +612,64 @@ struct AskView: View {
                                     .fixedSize(horizontal: false, vertical: true)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             }
-                            .padding(.vertical, 6)
+                            .padding(.vertical, 12)
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .disabled(busyAction != nil)
                         .foregroundStyle(.primary)
-                        .padding(.horizontal, 10)
+                        .padding(.horizontal, 12)
+                        .frame(minHeight: 44)
                         .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(optionId == o.id ? Color.accentColor : Color.secondary.opacity(0.35))
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(optionId == o.id ? Self.accentBlue.opacity(0.12) : Color.clear)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(optionId == o.id ? Self.accentBlue : Color.secondary.opacity(0.35), lineWidth: optionId == o.id ? 2 : 1)
                         )
                     }
                 }
                 if let err { Text(err).foregroundStyle(.red) }
-                HStack {
-                    Button("继续") { Task { await submit(action: "continue") } }
-                        .disabled(optionId == nil)
-                    Button("跳过") { Task { await submit(action: "skip") } }
+                HStack(spacing: 10) {
+                    Button {
+                        Task { await submit(action: "skip") }
+                    } label: {
+                        HStack(spacing: 8) {
+                            if busyAction == "skip" { ProgressView() }
+                            Text(busyAction == "skip" ? "Skipping..." : "跳过")
+                                .font(.body.weight(.medium))
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .disabled(busyAction != nil)
+                    Button {
+                        Task { await submit(action: "continue") }
+                    } label: {
+                        HStack(spacing: 8) {
+                            if busyAction == "continue" { ProgressView().tint(.white) }
+                            Text(busyAction == "continue" ? "Continuing..." : "继续")
+                                .font(.body.weight(.semibold))
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .tint(Self.accentBlue)
+                    .disabled(optionId == nil || busyAction != nil)
                 }
             }
         }
-        .padding(12)
+        .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(uiColor: .secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(alignment: .leading) {
             RoundedRectangle(cornerRadius: 1.5)
-                .fill(Color.red)
-                .frame(width: 3)
+                .fill(isPlan ? Self.planYellow : Self.accentBlue)
+                .frame(width: 4)
                 .padding(.vertical, 10)
                 .padding(.leading, 4)
         }
@@ -633,8 +681,9 @@ struct AskView: View {
     }
 
     private func submitBuild() async {
-        guard let q = ask.questions.first, let opt = q.options.first else { return }
+        guard busyAction == nil, let q = ask.questions.first, let opt = q.options.first else { return }
         optionId = opt.id
+        busyAction = "continue"
         var body: [String: Any] = [
             "request_id": ask.request_id,
             "action": "continue",
@@ -645,10 +694,14 @@ struct AskView: View {
             await onDone()
         } catch {
             err = error.localizedDescription
+            busyAction = nil
         }
     }
 
     private func submit(action: String) async {
+        guard busyAction == nil else { return }
+        if action == "continue", optionId == nil { return }
+        busyAction = action
         var body: [String: Any] = ["request_id": ask.request_id, "action": action]
         if action == "continue", let q = ask.questions.first, let optionId {
             body["answers"] = [["question_id": q.id, "option_ids": [optionId]]]
@@ -658,6 +711,7 @@ struct AskView: View {
             await onDone()
         } catch {
             err = error.localizedDescription
+            busyAction = nil
         }
     }
 }
