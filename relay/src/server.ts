@@ -58,6 +58,9 @@ function hex64(): string {
   return randomBytes(32).toString("hex");
 }
 
+const HEX64 = /^[a-f0-9]{64}$/;
+const PAIR_TTL_MS = 24 * 60 * 60 * 1000;
+
 function fleetId(): string {
   return `fleet-${randomBytes(6).toString("hex")}`;
 }
@@ -160,14 +163,18 @@ export function createRelayServer(opts: {
     const id = fleetId();
     const hubSecret = hex64();
     const operatorToken = hex64();
+    const pairCode = hex64();
+    const now = Date.now();
     db.query("INSERT INTO fleets (id, hub_secret, operator_token, hub_online, workspaces, created_at) VALUES (?1,?2,?3,0,'[]',?4)")
-      .run(id, hubSecret, operatorToken, Date.now());
+      .run(id, hubSecret, operatorToken, now);
+    db.query("INSERT INTO pair_codes (code, fleet_id, expires_at, used_at) VALUES (?1,?2,?3,NULL)")
+      .run(pairCode, id, now + PAIR_TTL_MS);
     audit("admin", "fleet.create", id);
     return {
       fleet: id,
       hubSecret,
       operatorToken,
-      pairUri: formatPairUri(publicBase, id, hubSecret),
+      pairUri: formatPairUri(publicBase, id, pairCode),
       opUri: formatOpUri(publicBase, id, operatorToken),
     };
   }
@@ -276,6 +283,23 @@ export function createRelayServer(opts: {
 
   const app = new Hono();
   app.get("/health", (c) => c.json({ ok: true, name: "armada-relay", protocolVersion: PROTOCOL_VERSION }));
+
+  app.post("/pair", async (c) => {
+    const body = await c.req.json().catch(() => ({})) as { fleet?: string; code?: string };
+    const fleet = typeof body.fleet === "string" ? body.fleet.trim() : "";
+    const code = typeof body.code === "string" ? body.code.trim() : "";
+    if (!HEX64.test(code) || !fleet) return c.json({ error: "unauthorized" }, 401);
+    const row = db.query("SELECT fleet_id, expires_at, used_at FROM pair_codes WHERE code=?1 AND fleet_id=?2")
+      .get(code, fleet) as { fleet_id: string; expires_at: number; used_at: number | null } | undefined;
+    if (!row) return c.json({ error: "unauthorized" }, 401);
+    if (row.used_at) return c.json({ error: "PAIR_USED" }, 410);
+    if (row.expires_at < Date.now()) return c.json({ error: "PAIR_EXPIRED" }, 410);
+    const fleetRow = getFleet(row.fleet_id);
+    if (!fleetRow) return c.json({ error: "unauthorized" }, 401);
+    db.query("UPDATE pair_codes SET used_at=?2 WHERE code=?1").run(code, Date.now());
+    audit("hub", "pair.redeem", fleetRow.id);
+    return c.json({ relay: publicBase, fleet: fleetRow.id, secret: fleetRow.hub_secret });
+  });
 
   app.post("/admin/fleets", async (c) => {
     if (c.req.header("x-relay-admin") !== adminToken) return c.json({ error: "unauthorized" }, 401);

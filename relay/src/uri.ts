@@ -1,4 +1,4 @@
-export type PairInvite = { kind: "pair"; relay: string; fleet: string; secret: string };
+export type PairInvite = { kind: "pair"; relay: string; fleet: string; code?: string; secret?: string };
 export type OpInvite = { kind: "op"; relay: string; fleet: string; token: string };
 export type RelayInvite = PairInvite | OpInvite;
 export type RelayUriError = { error: "invalid" | "incomplete" | "insecure" };
@@ -22,8 +22,8 @@ export function originOf(relay: string): string | null {
   }
 }
 
-export function formatPairUri(relay: string, fleet: string, secret: string): string {
-  const q = new URLSearchParams({ relay, fleet, secret });
+export function formatPairUri(relay: string, fleet: string, code: string): string {
+  const q = new URLSearchParams({ relay, fleet, code });
   return `armada-relay://pair?${q}`;
 }
 
@@ -52,9 +52,11 @@ export function parseRelayUri(input: string): RelayInvite | RelayUriError {
   if (!origin) return { error: "insecure" };
   if (!FLEET_RE.test(fleet)) return { error: "incomplete" };
   if (kind === "pair") {
+    const code = url.searchParams.get("code")?.trim() ?? "";
     const secret = url.searchParams.get("secret")?.trim() ?? "";
-    if (!HEX64.test(secret)) return { error: "incomplete" };
-    return { kind: "pair", relay: origin, fleet, secret };
+    if (HEX64.test(code)) return { kind: "pair", relay: origin, fleet, code };
+    if (HEX64.test(secret)) return { kind: "pair", relay: origin, fleet, secret };
+    return { error: "incomplete" };
   }
   const token = url.searchParams.get("token")?.trim() ?? "";
   if (!HEX64.test(token)) return { error: "incomplete" };

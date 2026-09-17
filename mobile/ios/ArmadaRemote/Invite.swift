@@ -48,12 +48,15 @@ enum RelayInviteParser {
         func q(_ name: String) -> String {
             items.first(where: { $0.name == name })?.value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         }
+        func nonEmpty(_ s: String) -> String? {
+            s.isEmpty ? nil : s
+        }
         let relayRaw = q("relay")
         let fleet = q("fleet")
         if relayRaw.isEmpty || fleet.isEmpty { return .failure(.incomplete) }
         guard let origin = origin(of: relayRaw) else { return .failure(.insecure) }
         if !matches(fleetRe, fleet) { return .failure(.incomplete) }
-        let cred = kind == .pair ? q("secret") : q("token")
+        let cred = kind == .pair ? (nonEmpty(q("code")) ?? q("secret")) : q("token")
         if !matches(hex64Re, cred) { return .failure(.incomplete) }
         return .success(RelayInvite(kind: kind, relay: origin, fleet: fleet, tokenOrSecret: cred))
     }

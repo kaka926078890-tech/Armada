@@ -7,9 +7,16 @@ const SECRET = "a".repeat(64);
 const TOKEN = "b".repeat(64);
 
 describe("parseRelayUri", () => {
-  test("parses pair invite", () => {
+  test("pair invite uses one-time code not long-lived secret", () => {
     const uri = formatPairUri(RELAY, FLEET, SECRET);
-    expect(parseRelayUri(uri)).toEqual({ kind: "pair", relay: RELAY, fleet: FLEET, secret: SECRET });
+    expect(uri).toContain("code=");
+    expect(uri).not.toContain("secret=");
+    expect(parseRelayUri(uri)).toEqual({ kind: "pair", relay: RELAY, fleet: FLEET, code: SECRET });
+  });
+
+  test("legacy pair secret= still parses", () => {
+    expect(parseRelayUri(`armada-relay://pair?relay=${encodeURIComponent(RELAY)}&fleet=${FLEET}&secret=${SECRET}`))
+      .toEqual({ kind: "pair", relay: RELAY, fleet: FLEET, secret: SECRET });
   });
 
   test("parses op invite", () => {

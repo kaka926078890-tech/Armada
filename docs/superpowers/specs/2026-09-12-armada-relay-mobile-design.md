@@ -135,18 +135,18 @@
 #### 中台绑定（出站）
 
 ```
-armada-relay://pair?relay=https%3A%2F%2Frelay.example.com&fleet={fleetId}&secret={hubSecret}
+armada-relay://pair?relay=https%3A%2F%2Frelay.example.com&fleet={fleetId}&code={pairCode}
 ```
 
 | 查询键 | 约束 |
 | --- | --- |
 | `relay` | `https://` 主机，无路径或仅 origin；禁止 `http://`（v1） |
 | `fleet` | `[a-z0-9-]{8,64}` |
-| `secret` | 32 字节 hex（64 字符），中转签发，**仅 hub 使用** |
+| `code` | 32 字节 hex；一次性，24h 或兑过即废。`POST /pair` 兑成长期 `hub_secret` |
 
-中台落盘：`~/.armada/relay.json`（mode `0600`），字段 `{ relay, fleet, secret }`。解析失败 → 不拨号，局域网不受影响。
+中台落盘：`~/.armada/relay.json`（mode `0600`），字段 `{ relay, fleet, secret }`。pair URI **不得**内嵌 `hub_secret`。解析失败 → 不拨号，局域网不受影响。
 
-验收：粘贴错误 secret → 中转 `401`，hub 日志 `RELAY_AUTH`，**不**把 secret 打进日志。
+验收：错误 code → 中转 `401`；第二次兑换 → `410 PAIR_USED`。**不**把 secret 打进日志。
 
 #### App 绑定（操作者）
 

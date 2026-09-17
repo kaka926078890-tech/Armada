@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { createRelayServer, type RelayServer } from "../src/server";
-import { encodeWorkspaceId } from "../src/uri";
+import { encodeWorkspaceId, parseRelayUri } from "../src/uri";
 import type { ApnsConfig, ApnsPost } from "../src/apns";
 
 let srv: RelayServer | null = null;
@@ -488,6 +488,39 @@ describe("relay serve", () => {
     const j = await ok.json() as any;
     expect(j.pairUri).toContain("armada-relay://pair");
     expect(j.opUri).toContain("armada-relay://op");
+    expect(j.pairUri).not.toContain(j.hubSecret);
+  });
+});
+
+describe("pair one-time code", () => {
+  test("POST /pair redeems code once then 410", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    expect(fleet.pairUri).not.toContain(fleet.hubSecret);
+    const parsed = parseRelayUri(fleet.pairUri);
+    if ("error" in parsed || parsed.kind !== "pair" || !parsed.code) throw new Error("expected pair code");
+    const body = JSON.stringify({ fleet: fleet.fleet, code: parsed.code });
+    const r1 = await fetch(url(s, "/pair"), { method: "POST", headers: { "content-type": "application/json" }, body });
+    expect(r1.status).toBe(200);
+    expect(await r1.json()).toEqual({
+      relay: s.publicBase,
+      fleet: fleet.fleet,
+      secret: fleet.hubSecret,
+    });
+    const r2 = await fetch(url(s, "/pair"), { method: "POST", headers: { "content-type": "application/json" }, body });
+    expect(r2.status).toBe(410);
+    expect(await r2.json()).toEqual({ error: "PAIR_USED" });
+  });
+
+  test("POST /pair wrong code is 401", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const r = await fetch(url(s, "/pair"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ fleet: fleet.fleet, code: "c".repeat(64) }),
+    });
+    expect(r.status).toBe(401);
   });
 });
 

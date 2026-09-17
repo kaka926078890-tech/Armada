@@ -56,5 +56,11 @@ export function openRelayDb(home: string): Database {
     updated_at INTEGER NOT NULL,
     PRIMARY KEY (fleet_id, token)
   )`);
+  db.exec(`CREATE TABLE IF NOT EXISTS pair_codes (
+    code TEXT PRIMARY KEY,
+    fleet_id TEXT NOT NULL REFERENCES fleets(id),
+    expires_at INTEGER NOT NULL,
+    used_at INTEGER
+  )`);
   return db;
 }
