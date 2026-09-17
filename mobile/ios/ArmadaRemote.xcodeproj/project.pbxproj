@@ -187,7 +187,7 @@
 				CODE_SIGN_ENTITLEMENTS = ArmadaRemote/ArmadaRemote.entitlements;
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 5;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ArmadaRemote/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
@@ -209,7 +209,7 @@
 				CODE_SIGN_ENTITLEMENTS = ArmadaRemote/ArmadaRemote.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 5;
 				DEVELOPMENT_TEAM = LW2A4J4KKG;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ArmadaRemote/Info.plist;
