@@ -260,7 +260,7 @@ function AskCard({ block, onAnswerAsk }: {
         <AssistantMarkdown text={block.prompt} />
       </div>
       {overview ? (
-        <div className="mt-2 text-[13px] text-zinc-400 leading-relaxed">
+        <div className="mt-2 max-h-80 overflow-y-auto text-[13px] text-zinc-400 leading-relaxed pr-1">
           <AssistantMarkdown text={overview} />
         </div>
       ) : null}

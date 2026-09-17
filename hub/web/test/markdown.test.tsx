@@ -146,4 +146,22 @@ describe("ask / plan action buttons", () => {
     expect(html).toContain("Created Plan: Dual Browser Channels");
     expect(html).toContain("同一分支继续完成内嵌通道修复，并并列接入腾讯 BrowserSkill。");
   });
+
+  test("plan card renders the plan file markdown body, not only the one-line overview", () => {
+    const html = renderToStaticMarkup(
+      <ChatThread
+        blocks={[{
+          kind: "ask",
+          seq: 1,
+          request_id: "plan-1",
+          prompt: "Created Plan: Markdown date line",
+          options: [{ id: "build", label: "Build", text: "# 在 markdown 追加日期\n\n在任意一份现有 markdown 末尾追加一行。" }],
+          action: "pending",
+        }]}
+        onAnswerAsk={async () => true}
+      />,
+    );
+    expect(html).toContain("在 markdown 追加日期");
+    expect(html).toContain("max-h-80");
+  });
 });

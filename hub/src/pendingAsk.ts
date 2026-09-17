@@ -80,6 +80,21 @@ export function continueAllowed(ask: PendingAsk): boolean {
   return ask.questions.length === 1 && ask.questions[0].allow_multiple !== true;
 }
 
+export function mergePendingAskRecord(existing: PendingAsk | null, incoming: PendingAsk): PendingAsk {
+  if (!existing || existing.request_id !== incoming.request_id) return incoming;
+  const oldText = existing.questions[0]?.options[0]?.text ?? "";
+  const newText = incoming.questions[0]?.options[0]?.text ?? "";
+  const takeQuestions = isPlanAsk(incoming) && newText.length > oldText.length;
+  return {
+    ...existing,
+    questions: takeQuestions ? incoming.questions : existing.questions,
+    filename: incoming.filename ?? existing.filename,
+    detect_via: existing.detect_via === "jsonl" && incoming.detect_via !== "jsonl"
+      ? incoming.detect_via
+      : existing.detect_via,
+  };
+}
+
 export function optionInAsk(ask: PendingAsk, questionId: string, optionId: string): boolean {
   const q = ask.questions.find((x) => x.id === questionId)
     ?? (ask.questions.length === 1 ? ask.questions[0] : undefined);

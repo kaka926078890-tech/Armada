@@ -19,6 +19,7 @@ import { createExtSeq } from "./extSeq";
 import { hubRunsNeedingTranscriptFollow, shouldArmFollowupStopOnAdopt } from "./adoptRuns";
 import { noteOwnerBsp, clearGeneration, synthesizedStopPayload, noteHubGeneration, onFollowupBindGeneration, shouldSynthesizeTranscriptStop } from "./generationStamp";
 import { parseAskInspect, askPollActions } from "./askDetect";
+import { enrichPlanAsk, planDirsFor } from "./planFile";
 
 let client: { dispose: () => void } | null = null;
 
@@ -74,6 +75,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const cancelWatcher = new CancelWatcher();
   const followupStopGuard = new FollowupStopGuard();
   const askLastByRun = new Map<string, string>();
+  const askPlanTextByRun = new Map<string, string>();
 
   const cdpSubmit = config.autoSubmit ? createCdpSubmitter({ port: config.cdpPort, log }) : null;
   const imagePaster = createImagePaster({ port: config.cdpPort, log });
@@ -432,18 +434,26 @@ export function activate(context: vscode.ExtensionContext): void {
     const roots = workspaces();
     if (roots.length === 0) return;
     let inspectRaw: unknown = { present: false };
+    let inspectRoot = "";
     for (const root of roots) {
       const hit = await askDriver.inspect(root);
-      if (hit.present) { inspectRaw = hit; break; }
+      if (hit.present) { inspectRaw = hit; inspectRoot = root; break; }
     }
-    const inspect = parseAskInspect(inspectRaw);
+    let inspect = parseAskInspect(inspectRaw);
+    if (inspect.present && inspect.kind === "plan") {
+      inspect = enrichPlanAsk(inspect, planDirsFor(homedir(), inspectRoot));
+    }
     const acts = askPollActions(
       boundRuns, askLastByRun, inspect,
       (runId) => `ask-${runId}-${nextExtSeq()}`, Date.now(), stopSent,
+      askPlanTextByRun,
     );
     for (const act of acts) {
       if (act.type === "askQuestion") {
         askLastByRun.set(act.runId, act.payload.request_id);
+        if (act.payload.kind === "plan") {
+          askPlanTextByRun.set(act.runId, act.payload.questions[0]?.options[0]?.text ?? "");
+        }
         const owner = boundRuns.get(act.runId);
         core.enqueue({
           type: "run.event", runId: act.runId, conversationId: owner?.conversationId ?? act.payload.conversation_id,
@@ -454,6 +464,7 @@ export function activate(context: vscode.ExtensionContext): void {
         continue;
       }
       askLastByRun.delete(act.runId);
+      askPlanTextByRun.delete(act.runId);
       const owner = boundRuns.get(act.runId);
       core.enqueue({
         type: "run.event", runId: act.runId, conversationId: owner?.conversationId,

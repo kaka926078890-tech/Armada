@@ -564,6 +564,7 @@ struct AskView: View {
     @State private var optionId: String?
     @State private var err: String?
     @State private var busyAction: String?
+    @State private var planHeight: CGFloat = 80
 
     private static let planYellow = Color(red: 241 / 255, green: 180 / 255, blue: 103 / 255)
     private static let accentBlue = Color(red: 89 / 255, green: 156 / 255, blue: 231 / 255)
@@ -577,10 +578,8 @@ struct AskView: View {
                     .fixedSize(horizontal: false, vertical: true)
                 if let overview = ask.questions.first?.options.first?.text,
                    !overview.isEmpty, overview != "Build" {
-                    Text(overview)
-                        .font(.body)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    MarkdownWebView(text: overview, height: $planHeight)
+                        .frame(height: max(planHeight, 80))
                 }
                 if let err { Text(err).foregroundStyle(.red) }
                 Button {

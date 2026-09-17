@@ -13,7 +13,7 @@ import { workspacePathIn } from "../../extension/src/workspacePath";
 import { collisionKey, hasImageMarkers, stripImageMarkers } from "../../extension/src/imageMarkers";
 import { BlobStore, parseAttachmentIds, type BlobMeta } from "./blobs";
 import { appendRetired, decideArm, decideStop, parseRetiredIds, isWindowsMachineOs, genOf } from "./generationOwnership";
-import { parsePendingAsk, continueAllowed, optionInAsk, isPlanAsk, type PendingAsk } from "./pendingAsk";
+import { parsePendingAsk, continueAllowed, optionInAsk, isPlanAsk, mergePendingAskRecord } from "./pendingAsk";
 import {
   OUTBOUND_LIMIT, QUEUE_DRAIN_MS, queueModeOf,
 } from "./outboundClaim";
@@ -764,14 +764,7 @@ export class RunService {
       this.setStatus(runId, "running", { ended_at: null, end_reason: null });
     }
     const existing = parsePendingAsk(this.get(runId)?.pending_ask);
-    const next: PendingAsk = existing && existing.request_id === incoming.request_id
-      ? {
-          ...existing,
-          detect_via: existing.detect_via === "jsonl" && incoming.detect_via !== "jsonl"
-            ? incoming.detect_via
-            : existing.detect_via,
-        }
-      : incoming;
+    const next = mergePendingAskRecord(existing, incoming);
     this.db.query("UPDATE runs SET pending_ask=?1 WHERE id=?2").run(JSON.stringify(next), runId);
     this.audit("extension", "run.pending_ask", runId, { request_id: next.request_id });
     this.sse.broadcast(runId, { type: "run.status", runId, status: "running" });

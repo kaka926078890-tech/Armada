@@ -841,6 +841,35 @@ describe("event ingest", () => {
     ws.close();
   });
 
+  test("same request_id plan askQuestion with a longer body replaces the short overview", async () => {
+    const { ws, api, runId } = await startBoundRun();
+    const base = {
+      request_id: "ask-plan-1",
+      kind: "plan",
+      filename: "Markdown date line",
+      conversation_id: "cid-1",
+      questions: [{ id: "q0", prompt: "Created Plan: Markdown date line", options: [{ id: "build", label: "Build", text: "追加一行日期" }] }],
+      detected_at: 1, detect_via: "cdp",
+    };
+    ws.send(JSON.stringify({
+      type: "run.event", runId, conversationId: "cid-1", source: "cdp", hookEventName: "askQuestion", seq: 1, ts: Date.now(),
+      payload: base,
+    }));
+    await new Promise((r) => setTimeout(r, 120));
+    ws.send(JSON.stringify({
+      type: "run.event", runId, conversationId: "cid-1", source: "cdp", hookEventName: "askQuestion", seq: 2, ts: Date.now(),
+      payload: {
+        ...base,
+        questions: [{ id: "q0", prompt: "Created Plan: Markdown date line", options: [{ id: "build", label: "Build", text: "# 在 markdown 追加日期\n\n在任意一份现有 markdown 末尾追加一行。" }] }],
+      },
+    }));
+    await new Promise((r) => setTimeout(r, 120));
+    const run = (await (await api(`/api/runs/${runId}`)).json()) as any;
+    expect(run.pending_ask.request_id).toBe("ask-plan-1");
+    expect(run.pending_ask.questions[0].options[0].text).toContain("# 在 markdown 追加日期");
+    ws.close();
+  });
+
   test("regular askQuestion on completed does not reopen", async () => {
     const { ws, api, runId } = await startBoundRun();
     ws.send(JSON.stringify(ev(runId, 1, "stop", { status: "completed", conversation_id: "cid-1" })));

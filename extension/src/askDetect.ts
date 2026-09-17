@@ -86,24 +86,29 @@ export function nextAskAction(
   inspect: AskInspect,
   makeId: () => string,
   now = Date.now(),
+  prevPlanText?: string,
 ): { type: "askQuestion"; payload: PendingAskPayload } | { type: "askQuestionResolved"; request_id: string } | null {
   if (!inspect.present) {
     if (!prevRequestId) return null;
     return { type: "askQuestionResolved", request_id: prevRequestId };
   }
-  if (prevRequestId) return null;
   if (inspect.options.length === 0) return null;
-  return {
-    type: "askQuestion",
-    payload: {
-      request_id: makeId(),
-      questions: [{ id: "q0", prompt: inspect.prompt, options: inspect.options }],
-      detected_at: now,
-      detect_via: "cdp",
-      conversation_id: inspect.conversation_id,
-      ...(inspect.kind === "plan" ? { kind: "plan" as const, filename: inspect.filename } : {}),
-    },
-  };
+  const payload = (request_id: string): PendingAskPayload => ({
+    request_id,
+    questions: [{ id: "q0", prompt: inspect.prompt, options: inspect.options }],
+    detected_at: now,
+    detect_via: "cdp",
+    conversation_id: inspect.conversation_id,
+    ...(inspect.kind === "plan" ? { kind: "plan" as const, filename: inspect.filename } : {}),
+  });
+  if (prevRequestId) {
+    if (inspect.kind === "plan") {
+      const text = inspect.options[0]?.text ?? "";
+      if (text && text !== prevPlanText) return { type: "askQuestion", payload: payload(prevRequestId) };
+    }
+    return null;
+  }
+  return { type: "askQuestion", payload: payload(makeId()) };
 }
 
 function boundConversationId(
@@ -133,6 +138,7 @@ export function askPollActions(
   makeId: (runId: string) => string,
   now = Date.now(),
   stopped: Iterable<string> = [],
+  prevPlanTextByRun: Iterable<[string, string]> = [],
 ): AskPollAct[] {
   const dead = inspect.present && inspect.kind === "plan" ? new Set<string>() : new Set(stopped);
   const live = [...bound].filter(([id]) => !dead.has(id));
@@ -140,13 +146,14 @@ export function askPollActions(
   const owner = latestRunIdForConversation(live, widgetCid)
     ?? (inspect.present && !widgetCid ? uniqueBoundRunId(live) : undefined);
   const prev = new Map(prevByRun);
+  const prevText = new Map(prevPlanTextByRun);
   const out: AskPollAct[] = [];
   for (const [runId, requestId] of prev) {
     if (runId === owner) continue;
     out.push({ type: "askQuestionResolved", runId, request_id: requestId });
   }
   if (!inspect.present || !owner) return out;
-  const act = nextAskAction(prev.get(owner) ?? null, inspect, () => makeId(owner), now);
+  const act = nextAskAction(prev.get(owner) ?? null, inspect, () => makeId(owner), now, prevText.get(owner));
   if (act?.type === "askQuestion") {
     const conversation_id = act.payload.conversation_id || boundConversationId(live, owner) || "";
     out.push({ type: "askQuestion", runId: owner, payload: { ...act.payload, conversation_id } });

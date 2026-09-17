@@ -25,6 +25,28 @@ describe("nextAskAction", () => {
   test("no options does not emit", () => {
     expect(nextAskAction(null, { present: true, prompt: "x", conversation_id: "cid-1", options: [] }, () => "ask-1")).toBeNull();
   });
+
+  test("plan body growing reuses request_id so hub can replace the short overview", () => {
+    const short = {
+      present: true as const,
+      kind: "plan" as const,
+      filename: "Markdown date line",
+      prompt: "Created Plan: Markdown date line",
+      conversation_id: "cid-1",
+      options: [{ id: "build", label: "Build", text: "追加一行日期" }],
+    };
+    const full = {
+      ...short,
+      options: [{ id: "build", label: "Build", text: "# 在 markdown 追加日期\n\n在任意一份现有 markdown 末尾追加一行。" }],
+    };
+    expect(nextAskAction("ask-plan-1", short, () => "ask-2", 9, "追加一行日期")).toBeNull();
+    const again = nextAskAction("ask-plan-1", full, () => "ask-2", 9, "追加一行日期");
+    expect(again).toMatchObject({
+      type: "askQuestion",
+      payload: { request_id: "ask-plan-1", kind: "plan" },
+    });
+    expect(again && again.type === "askQuestion" ? again.payload.questions[0].options[0].text : "").toContain("# 在 markdown 追加日期");
+  });
 });
 
 describe("parseAskInspect", () => {
