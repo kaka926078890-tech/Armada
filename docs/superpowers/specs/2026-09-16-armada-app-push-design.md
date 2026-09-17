@@ -443,7 +443,7 @@ P0 与 P1 可同 PR。P2 必须带 Push 的新 build。P3 不能用模拟器。
 | 角标 | APNs 发 `1`；App 刷新后改成未读数 |
 | 多设备 | 同 fleet 全推 |
 | SSE / 本地通知 | 不做 |
-| Android FCM | 本规格不做；见 [2026-09-17-armada-android-app-design.md](./2026-09-17-armada-android-app-design.md) v1.5 |
+| Android FCM | 本规格不做；见 [2026-09-17-armada-android-app-design.md](./2026-09-17-armada-android-app-design.md)（与 iOS 完整态一次落地） |
 
 无其它未决产品项。
 
