@@ -214,7 +214,12 @@ export function createRelayServer(opts: {
         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?11,?12,?13,?10,?10)`)
         .run(snap.runId, fleetId, snap.machineId, snap.workspaceRoot, snap.prompt, status, finalText, error, pendingAsk, now, outbound, queueMode, archivedAt);
     }
-    const decided = notifyEdges(prev, { prompt: snap.prompt, status, pendingAsk: snap.pendingAsk });
+    const decided = notifyEdges(prev, {
+      prompt: snap.prompt,
+      status,
+      pendingAsk: snap.pendingAsk,
+      archived: archivedAt != null,
+    });
     db.query("UPDATE runs SET notified_status=?2, notified_ask_id=?3 WHERE id=?1")
       .run(snap.runId, decided.notifiedStatus, decided.notifiedAskId);
     dispatchEdges(fleetId, snap.runId, decided.edges);

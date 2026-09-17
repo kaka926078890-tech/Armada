@@ -57,6 +57,28 @@ describe("notifyEdges terminal", () => {
     expect(notifyEdges(emptyPrev, { ...snap, status: "aborted" }).edges[0].kind).toBe("aborted");
     expect(notifyEdges(emptyPrev, { ...snap, status: "cancelled" }).edges).toEqual([]);
   });
+
+  test("archived completed does not fire; cursor still advances so unhide will not backfill", () => {
+    const hidden = notifyEdges(emptyPrev, { ...snap, status: "completed", archived: true });
+    expect(hidden.edges).toEqual([]);
+    expect(hidden.notifiedStatus).toBe("completed");
+    const shown = notifyEdges(
+      { notifiedStatus: hidden.notifiedStatus, notifiedAskId: hidden.notifiedAskId },
+      { ...snap, status: "completed", archived: false },
+    );
+    expect(shown.edges).toEqual([]);
+  });
+
+  test("hide after an unread complete does not fire again", () => {
+    const first = notifyEdges(emptyPrev, { ...snap, status: "completed" });
+    expect(first.edges).toHaveLength(1);
+    const hidden = notifyEdges(
+      { notifiedStatus: first.notifiedStatus, notifiedAskId: first.notifiedAskId },
+      { ...snap, status: "completed", archived: true },
+    );
+    expect(hidden.edges).toEqual([]);
+    expect(hidden.notifiedStatus).toBe("completed");
+  });
 });
 
 describe("notifyEdges ask", () => {
@@ -99,5 +121,11 @@ describe("notifyEdges ask", () => {
       pendingAsk: { request_id: "plan-1", kind: "plan", questions: [{ prompt: "Created Plan" }] },
     });
     expect(first.edges.map((e) => e.kind)).toEqual(["ask"]);
+  });
+
+  test("archived pending ask does not fire", () => {
+    const hidden = notifyEdges(emptyPrev, { ...snap, pendingAsk: pending, archived: true });
+    expect(hidden.edges).toEqual([]);
+    expect(hidden.notifiedAskId).toBe("ask-1");
   });
 });

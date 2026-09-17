@@ -597,6 +597,58 @@ describe("relay APNs", () => {
     ws.close();
   });
 
+  test("archiving a completed run does not send another APNs", async () => {
+    const posts: string[] = [];
+    const s = start({
+      apns: dummyApns(async (_u, _h, body) => {
+        posts.push(body);
+        return { status: 200 };
+      }),
+    });
+    const fleet = s.createFleet();
+    const headers = { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" };
+    await fetch(url(s, "/mobile/push-token"), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ token: TOKEN_A, environment: "production" }),
+    });
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    autoHub(ws);
+    ws.send(JSON.stringify({ type: "snap.run", run: completedRun("r-1", { archived: false }) }));
+    await Bun.sleep(40);
+    await s.flushApns();
+    expect(posts).toHaveLength(1);
+    const hide = await fetch(url(s, "/mobile/runs/r-1/archive"), { method: "POST", headers });
+    expect(hide.status).toBe(200);
+    await Bun.sleep(40);
+    await s.flushApns();
+    expect(posts).toHaveLength(1);
+    ws.close();
+  });
+
+  test("first snap already archived does not send APNs", async () => {
+    const posts: string[] = [];
+    const s = start({
+      apns: dummyApns(async (_u, _h, body) => {
+        posts.push(body);
+        return { status: 200 };
+      }),
+    });
+    const fleet = s.createFleet();
+    const headers = { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" };
+    await fetch(url(s, "/mobile/push-token"), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ token: TOKEN_A, environment: "production" }),
+    });
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    ws.send(JSON.stringify({ type: "snap.run", run: completedRun("r-push", { archived: true }) }));
+    await Bun.sleep(40);
+    await s.flushApns();
+    expect(posts).toHaveLength(0);
+    ws.close();
+  });
+
   test("missing key file: snap still writes, post unused", async () => {
     const home = mkdtempSync(join(tmpdir(), "armada-relay-"));
     const posts: string[] = [];

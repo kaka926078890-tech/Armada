@@ -28,6 +28,7 @@ export type NotifySnap = {
   prompt?: string;
   status: string;
   pendingAsk?: unknown;
+  archived?: boolean;
 };
 
 export function isAlertStatus(s: string): s is AlertStatus {
@@ -64,8 +65,15 @@ export function notifyEdges(prev: NotifyPrev, snap: NotifySnap): {
   notifiedStatus: string | null;
   notifiedAskId: string | null;
 } {
-  const edges: NotifyEdge[] = [];
   const nextAsk = askIdOf(snap.pendingAsk);
+  if (snap.archived) {
+    return {
+      edges: [],
+      notifiedStatus: isAlertStatus(snap.status) ? (prev.notifiedStatus ?? snap.status) : null,
+      notifiedAskId: nextAsk,
+    };
+  }
+  const edges: NotifyEdge[] = [];
   if (nextAsk && nextAsk !== prev.notifiedAskId) {
     edges.push({ kind: "ask", title: NEED_INPUT_TITLE, body: askBody(snap) });
   }
