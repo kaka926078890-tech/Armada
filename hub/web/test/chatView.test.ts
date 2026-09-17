@@ -597,6 +597,14 @@ describe("segmentChat", () => {
     expect(assistantBodyForPrompt(blocks, "那时还没修好？")).toBe("现在修好了。");
     expect(assistantBodyForPrompt(blocks, "未知 prompt")).toBe("现在修好了。");
   });
+
+  test("assistantBodyForPrompt does not give App an older turn via startsWith", () => {
+    const blocks = [
+      user(1, "请帮我看一下这个 PR 的全部改动"), asst(2, "上一折长文。"),
+      user(3, "再改一处"), asst(4, "当前折。"),
+    ];
+    expect(assistantBodyForPrompt(blocks, "请帮我看")).toBe("当前折。");
+  });
 });
 
 describe("Cursor generation rendering", () => {

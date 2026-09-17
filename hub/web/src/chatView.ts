@@ -560,8 +560,6 @@ export function assistantBodyForPrompt(blocks: ChatBlock[], prompt: string): str
   if (p) {
     const exact = pick((u) => u === p);
     if (exact) return exact;
-    const loose = pick((u) => u.startsWith(p) || p.startsWith(u));
-    if (loose) return loose;
   }
   for (let i = turns.length - 1; i >= 0; i--) {
     const body = assistantBodyText(turns[i]);
