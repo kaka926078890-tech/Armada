@@ -245,3 +245,21 @@ export function isWithinTranscriptBindWindow(
 ): boolean {
   return now - dispatchedAt <= TRANSCRIPT_BIND_WINDOW_MS;
 }
+
+export function transcriptJsonlPath(dir: string, conversationId: string): string {
+  return join(dir, conversationId, `${conversationId}.jsonl`);
+}
+
+export type LateTranscriptAttach =
+  | { action: "attach"; path: string; fromEnd: false }
+  | { action: "skip" };
+
+/** Hook bind often races the first jsonl create. Attach from start so turn_ended is not dropped. */
+export function decideLateTranscriptAttach(input: {
+  alreadyAttachedPath: string | undefined;
+  candidatePath: string | null;
+}): LateTranscriptAttach {
+  if (input.alreadyAttachedPath) return { action: "skip" };
+  if (!input.candidatePath) return { action: "skip" };
+  return { action: "attach", path: input.candidatePath, fromEnd: false };
+}

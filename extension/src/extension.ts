@@ -13,7 +13,7 @@ import { Executor, CancelWatcher } from "./executor";
 import { createCdpSubmitter, createImagePaster, createFileMentionPaster, createComposerFinisher, createAskQuestionDriver } from "./cdpInject";
 import { createOsClipboardWriter, writeOsImageClipboard } from "./osClipboard";
 import { mergeHooks, hooksDriftHash, spoolScriptName, shouldInstallArmadaHooks } from "./hooksInstall";
-import { collectTranscriptViews, matchTranscriptToPending, stopPayloadFromTranscriptLine, stopFromTranscriptFileContent, transcriptsDirForWorkspace, isWithinTranscriptBindWindow, FollowupStopGuard, listSubagentTranscripts, childCidFromSubagentPath } from "./transcriptBind";
+import { collectTranscriptViews, matchTranscriptToPending, stopPayloadFromTranscriptLine, stopFromTranscriptFileContent, transcriptsDirForWorkspace, isWithinTranscriptBindWindow, FollowupStopGuard, listSubagentTranscripts, childCidFromSubagentPath, decideLateTranscriptAttach, transcriptJsonlPath } from "./transcriptBind";
 import { TranscriptDirWatcher, debounceLeading, watchTranscriptDir, watchFileSize, TRANSCRIPT_WATCHDOG_MS, TRANSCRIPT_WATCH_DEBOUNCE_MS } from "./transcriptWatch";
 import { createExtSeq } from "./extSeq";
 import { hubRunsNeedingTranscriptFollow, shouldArmFollowupStopOnAdopt } from "./adoptRuns";
@@ -69,6 +69,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const boundRuns = new Map<string, { conversationId: string; prompt: string }>();
   const lastGenerationId = new Map<string, string>();
   const boundPaths = new Map<string, string>();
+  const boundWorkspaces = new Map<string, string>();
   const stopSent = new Set<string>();
   const childConversations = new Map<string, string>();
   const sizeWatches = new Map<string, () => void>();
@@ -181,10 +182,33 @@ export function activate(context: vscode.ExtensionContext): void {
     tailer.poll(runId);
   };
 
+  const attachMissingTranscripts = (): void => {
+    for (const [runId, owner] of boundRuns) {
+      const root = boundWorkspaces.get(runId);
+      const dir = root ? transcriptsDirForWorkspace(homedir(), root) : null;
+      const jsonl = dir ? transcriptJsonlPath(dir, owner.conversationId) : null;
+      const candidate = jsonl && existsSync(jsonl) && transcriptPathBelongsToCid(jsonl, owner.conversationId)
+        ? jsonl
+        : null;
+      const d = decideLateTranscriptAttach({
+        alreadyAttachedPath: boundPaths.get(runId),
+        candidatePath: candidate,
+      });
+      if (d.action !== "attach") continue;
+      boundPaths.set(runId, d.path);
+      tailer.attach(runId, d.path, { fromEnd: d.fromEnd });
+      ensureSizeWatch(runId, d.path);
+      followBoundTranscripts(runId);
+      maybeCompleteFromDisk(runId);
+      log(`late transcript attach ${runId}`);
+    }
+  };
+
   const applyBinding = (match: BindingMatch, via: string): void => {
     const idx = pendingRuns.indexOf(match.run);
     if (idx >= 0) pendingRuns.splice(idx, 1);
     claimConversation(boundRuns, match.run.runId, match.conversationId, match.run.prompt);
+    boundWorkspaces.set(match.run.runId, match.run.workspaceRoot);
     const path = match.transcriptPath && transcriptPathBelongsToCid(match.transcriptPath, match.conversationId)
       ? match.transcriptPath
       : null;
@@ -203,6 +227,8 @@ export function activate(context: vscode.ExtensionContext): void {
       ensureSizeWatch(match.run.runId, path);
       followBoundTranscripts(match.run.runId);
       maybeCompleteFromDisk(match.run.runId);
+    } else {
+      attachMissingTranscripts();
     }
   };
 
@@ -231,6 +257,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const onTranscriptDisk = debounceLeading(() => {
     tryBindFromTranscripts();
+    attachMissingTranscripts();
     for (const id of boundRuns.keys()) followBoundTranscripts(id);
   }, TRANSCRIPT_WATCH_DEBOUNCE_MS);
 
@@ -264,7 +291,7 @@ export function activate(context: vscode.ExtensionContext): void {
       const run = pendingRuns.find((r) => r.runId === runId);
       if (!run) return;
       const dir = transcriptsDirForWorkspace(homedir(), workspaceRoot);
-      const path = dir ? join(dir, conversationId, `${conversationId}.jsonl`) : null;
+      const path = dir ? transcriptJsonlPath(dir, conversationId) : null;
       applyBinding({
         run,
         conversationId,
@@ -490,12 +517,13 @@ export function activate(context: vscode.ExtensionContext): void {
       });
       for (const t of targets) {
         const alreadyBound = boundRuns.has(t.runId);
+        boundWorkspaces.set(t.runId, t.workspaceRoot);
         if (!alreadyBound) {
           claimConversation(boundRuns, t.runId, t.conversationId, t.prompt);
           log(`adopt ${t.runId} cid=${t.conversationId}`);
         }
         const dir = transcriptsDirForWorkspace(homedir(), t.workspaceRoot);
-        const path = dir ? join(dir, t.conversationId, `${t.conversationId}.jsonl`) : null;
+        const path = dir ? transcriptJsonlPath(dir, t.conversationId) : null;
         if (!path || !existsSync(path) || !transcriptPathBelongsToCid(path, t.conversationId)) continue;
         boundPaths.set(t.runId, path);
         let lastRecordIsTurnEnded = false;

@@ -6,7 +6,7 @@ export type ChatBlock =
   | { kind: "assistant"; text: string; seq: number }
   | { kind: "thought"; text: string; seq: number }
   | { kind: "turn_end"; seq: number }
-  | { kind: "tool"; name: string; summary: string; seq: number }
+  | { kind: "tool"; name: string; summary: string; seq: number; count?: number }
   | { kind: "file"; path: string; seq: number }
   | {
     kind: "ask";
@@ -361,7 +361,7 @@ function applyCursorGenerations(blocks: ChatBlock[]): ChatBlock[] {
 function finish(blocks: ChatBlock[]): ChatBlock[] {
   const hasSub = blocks.some((b) => b.kind === "subagent");
   const filtered = hasSub ? blocks.filter((b) => !(b.kind === "tool" && b.name === "Task")) : blocks;
-  return applyCursorGenerations(dedupe(filtered));
+  return collapseRepeatedTools(applyCursorGenerations(dedupe(filtered)));
 }
 
 /** Stable by seq so same-seq transcript parts keep relative order. */
@@ -568,19 +568,15 @@ export function assistantBodyForPrompt(blocks: ChatBlock[], prompt: string): str
   return assistantBodyText(blocks);
 }
 
-/** 有正文后把该轮思考/工具收成一段；尚未出正文时保持一条条列出。 */
+/** 有正文后把该轮思考/工具收成一段；尚未出正文时同样折叠（Cursor 生成中也不平铺工具墙）。 */
 export function segmentChat(blocks: ChatBlock[]): ChatSegment[] {
   const turns = splitChatTurns(blocks);
   const out: ChatSegment[] = [];
   for (const turn of turns) {
-    if (!turn.some((b) => b.kind === "assistant")) {
-      out.push(...turn);
-      continue;
-    }
     const buf: ChatBlock[] = [];
     const flush = () => {
       if (buf.length === 0) return;
-      out.push({ kind: "process", collapsed: true, steps: [...buf], seq: buf[0].seq });
+      out.push({ kind: "process", collapsed: true, steps: [...buf], seq: buf[0]!.seq });
       buf.length = 0;
     };
     for (const b of turn) {
@@ -660,6 +656,34 @@ export function mergeOutboundChat(blocks: ChatBlock[], outbound: OutboundRow[] |
     seen.add(n);
   }
   return extra.length ? [...blocks, ...extra] : blocks;
+}
+
+/** Consecutive identical tools (same name+summary) become one row with count. */
+export function collapseRepeatedTools(blocks: ChatBlock[]): ChatBlock[] {
+  const out: ChatBlock[] = [];
+  for (const b of blocks) {
+    const prev = out.at(-1);
+    if (
+      b.kind === "tool" && prev?.kind === "tool"
+      && prev.name === b.name && prev.summary === b.summary
+    ) {
+      out[out.length - 1] = { ...prev, count: (prev.count ?? 1) + (b.count ?? 1) };
+      continue;
+    }
+    out.push(b);
+  }
+  return out;
+}
+
+/** Cursor-like compact process header: last tool + × N, else step count. */
+export function processFoldLabel(steps: ChatBlock[]): string {
+  for (let i = steps.length - 1; i >= 0; i--) {
+    const b = steps[i];
+    if (b?.kind !== "tool") continue;
+    const times = b.count && b.count > 1 ? ` × ${b.count}` : "";
+    return `思考过程 · ${b.summary}${times}`;
+  }
+  return `思考过程 · ${steps.length} 步`;
 }
 
 

@@ -2,7 +2,7 @@ import { useState, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
-import { segmentChat, type ChatBlock } from "../chatView";
+import { segmentChat, processFoldLabel, type ChatBlock } from "../chatView";
 
 function ThoughtLive({ text }: { text: string }) {
   return <div className="text-[12px] text-zinc-500 whitespace-pre-wrap leading-relaxed">{text}</div>;
@@ -21,10 +21,11 @@ function durationLabel(ms?: number): string {
 function ProcessStep({ block }: { block: ChatBlock }) {
   if (block.kind === "thought") return <ThoughtLive text={block.text} />;
   if (block.kind === "tool") {
+    const times = block.count && block.count > 1 ? ` × ${block.count}` : "";
     return (
       <div className="flex items-center gap-2 text-[12px] text-zinc-400">
         <span className="size-1.5 rounded-full bg-zinc-600 shrink-0" />
-        <span className="font-mono text-zinc-300">{block.summary}</span>
+        <span className="font-mono text-zinc-300">{block.summary}{times}</span>
       </div>
     );
   }
@@ -67,8 +68,7 @@ function ProcessFold({ steps }: { steps: ChatBlock[] }) {
         onClick={() => setOpen((v) => !v)}
         className="text-left text-[12px] text-zinc-500 hover:text-zinc-300"
       >
-        <span className="text-zinc-600">{open ? "▾" : "▸"}</span> 思考过程
-        <span className="text-zinc-600"> · {steps.length} 步</span>
+        <span className="text-zinc-600">{open ? "▾" : "▸"}</span> {processFoldLabel(steps)}
       </button>
       {open ? (
         <div className="mt-2 flex flex-col gap-2 pl-3 border-l border-zinc-800">

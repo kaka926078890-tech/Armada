@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { assistantBodyForPrompt, assistantBodyText, eventsToChat, extractUserText, segmentChat, INITIAL_VISIBLE_TURNS, initialHiddenPrefixTurns, recentTurnsWindow, mergeOutboundChat, queuedOutbound } from "../src/chatView";
+import { assistantBodyForPrompt, assistantBodyText, eventsToChat, extractUserText, segmentChat, INITIAL_VISIBLE_TURNS, initialHiddenPrefixTurns, recentTurnsWindow, mergeOutboundChat, queuedOutbound, collapseRepeatedTools, processFoldLabel } from "../src/chatView";
 import type { ChatBlock } from "../src/chatView";
 import type { RunEvent } from "../src/types";
 
@@ -556,9 +556,13 @@ describe("segmentChat", () => {
   const asst = (seq: number, text: string): ChatBlock => ({ kind: "assistant", seq, text });
   const tool = (seq: number, name: string): ChatBlock => ({ kind: "tool", seq, name, summary: name });
 
-  test("lists thoughts while the turn has no assistant yet", () => {
+  test("folds thoughts and tools before the assistant reply (Cursor process fold)", () => {
     const segs = segmentChat([user(1, "hi"), thought(2, "先想"), tool(3, "Shell")]);
-    expect(segs.map((s) => s.kind)).toEqual(["user", "thought", "tool"]);
+    expect(segs.map((s) => s.kind)).toEqual(["user", "process"]);
+    const proc = segs[1];
+    expect(proc.kind).toBe("process");
+    if (proc.kind !== "process") return;
+    expect(proc.steps.map((s) => s.kind)).toEqual(["thought", "tool"]);
   });
 
   test("folds thoughts and tools into one process after the assistant reply", () => {
@@ -573,12 +577,12 @@ describe("segmentChat", () => {
     expect(proc.steps.map((s) => s.kind)).toEqual(["thought", "tool"]);
   });
 
-  test("completed turn folds; live follow-up turn stays listed", () => {
+  test("completed turn folds; live follow-up turn also folds", () => {
     const segs = segmentChat([
       user(1, "a"), thought(2, "t1"), asst(3, "done"),
       user(4, "b"), thought(5, "t2"), tool(6, "Read"),
     ]);
-    expect(segs.map((s) => s.kind)).toEqual(["user", "process", "assistant", "user", "thought", "tool"]);
+    expect(segs.map((s) => s.kind)).toEqual(["user", "process", "assistant", "user", "process"]);
   });
 
   test("assistantBodyText joins assistant replies and skips process", () => {
@@ -777,5 +781,53 @@ describe("mergeOutboundChat / queuedOutbound", () => {
       { id: "o2", prompt: "直发", expected_mode: "steer", state: "steered", created_at: 2 },
     ];
     expect(mergeOutboundChat(blocks, outbound)).toEqual(blocks);
+  });
+});
+
+describe("collapseRepeatedTools", () => {
+  const read = (seq: number, file = "552282.txt"): ChatBlock => ({
+    kind: "tool", seq, name: "Read", summary: `Read · ${file}`,
+  });
+
+  test("r-3a334fe3: consecutive Read of the same file collapse to × N", () => {
+    const got = collapseRepeatedTools([read(1), read(2), read(3)]);
+    expect(got).toEqual([
+      { kind: "tool", seq: 1, name: "Read", summary: "Read · 552282.txt", count: 3 },
+    ]);
+  });
+
+  test("different files or a thought in between do not merge", () => {
+    const got = collapseRepeatedTools([
+      read(1, "a.txt"),
+      read(2, "b.txt"),
+      { kind: "thought", seq: 3, text: "再看" },
+      read(4, "a.txt"),
+    ]);
+    expect(got.filter((b) => b.kind === "tool")).toHaveLength(3);
+    expect(got.some((b) => b.kind === "tool" && "count" in b && b.count)).toBe(false);
+  });
+
+  test("eventsToChat merges live hook Reads of the same path", () => {
+    const evs = [1, 2, 3].map((seq) => ev({
+      seq,
+      source: "hook",
+      hook_event_name: "preToolUse",
+      payload: JSON.stringify({
+        tool_name: "Read",
+        tool_input: { file_path: "/Users/apple/.cursor/projects/Users-apple-Desktop-desk/terminals/552282.txt" },
+      }),
+    }));
+    const blocks = eventsToChat(evs);
+    expect(blocks).toEqual([
+      { kind: "tool", name: "Read", summary: "Read · 552282.txt", seq: 1, count: 3 },
+    ]);
+  });
+
+  test("processFoldLabel shows last tool and × N like Cursor's compact row", () => {
+    expect(processFoldLabel([
+      { kind: "thought", seq: 1, text: "等编译" },
+      { kind: "tool", seq: 2, name: "Read", summary: "Read · 552282.txt", count: 1250 },
+    ])).toBe("思考过程 · Read · 552282.txt × 1250");
+    expect(processFoldLabel([{ kind: "thought", seq: 1, text: "想" }])).toBe("思考过程 · 1 步");
   });
 });

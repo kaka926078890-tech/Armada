@@ -18,6 +18,8 @@ import {
   stopFromTranscriptFileContent,
   FollowupStopGuard,
   userPromptFromEventPayload,
+  decideLateTranscriptAttach,
+  transcriptJsonlPath,
 } from "../src/transcriptBind";
 
 const CID = "c9597541-e291-40c9-9041-772c292acc24";
@@ -226,5 +228,32 @@ describe("isWithinTranscriptBindWindow", () => {
     expect(isWithinTranscriptBindWindow(0, 61_000)).toBe(true);
     expect(isWithinTranscriptBindWindow(0, 181_000)).toBe(true);
     expect(isWithinTranscriptBindWindow(0, 191_000)).toBe(false);
+  });
+});
+
+describe("decideLateTranscriptAttach", () => {
+  // 2026-09-17 r-3a334fe3: BSP bind with transcript_path=null; jsonl appeared later;
+  // turn_ended never tailed → card stayed 运行中 until sidecar stop+AAR.
+  const cid = "5b225248-9ca8-4bbd-9727-23569079d723";
+  const path = transcriptJsonlPath("/tx", cid);
+
+  test("attaches from the start when a bound run has no path and jsonl now exists", () => {
+    expect(decideLateTranscriptAttach({ alreadyAttachedPath: undefined, candidatePath: path }))
+      .toEqual({ action: "attach", path, fromEnd: false });
+  });
+
+  test("does not fromEnd (would drop the first-turn turn_ended)", () => {
+    const d = decideLateTranscriptAttach({ alreadyAttachedPath: undefined, candidatePath: path });
+    expect(d.action === "attach" && d.fromEnd).toBe(false);
+  });
+
+  test("skips when already attached (adopt must not reset offset)", () => {
+    expect(decideLateTranscriptAttach({ alreadyAttachedPath: path, candidatePath: path }))
+      .toEqual({ action: "skip" });
+  });
+
+  test("skips when jsonl still missing", () => {
+    expect(decideLateTranscriptAttach({ alreadyAttachedPath: undefined, candidatePath: null }))
+      .toEqual({ action: "skip" });
   });
 });

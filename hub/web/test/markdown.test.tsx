@@ -165,3 +165,20 @@ describe("ask / plan action buttons", () => {
     expect(html).toContain("max-h-80");
   });
 });
+
+describe("Cursor-like tool fold", () => {
+  test("collapsed process header shows merged Read count, not 1250 rows", () => {
+    const html = renderToStaticMarkup(
+      <ChatThread
+        blocks={[
+          { kind: "user", seq: 1, text: "打包" },
+          { kind: "tool", seq: 2, name: "Read", summary: "Read · 552282.txt", count: 1250 },
+        ]}
+      />,
+    );
+    expect(html).toContain("思考过程 · Read · 552282.txt × 1250");
+    expect(html).not.toContain("思考过程 · 1250 步");
+    const reads = html.split("Read · 552282.txt");
+    expect(reads.length).toBe(2);
+  });
+});
