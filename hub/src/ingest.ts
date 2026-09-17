@@ -121,6 +121,9 @@ export function ingestEvent(db: Database, runs: RunService, sse: SseHub, machine
     const bsp = hookSubmitPrompt(msg.payload);
     if (bsp) runs.claimOutbound(runId, bsp, msg.ts ?? Date.now());
   }
+  if (msg.hookEventName === "preToolUse") {
+    runs.tryArmLiveGeneration(runId, msg.hookEventName, msg.payload, cid);
+  }
   if (msg.source === "transcript") {
     const user = transcriptUserPrompt(msg.payload);
     if (user) runs.claimOutbound(runId, user, msg.ts ?? Date.now());

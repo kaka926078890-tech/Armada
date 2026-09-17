@@ -170,7 +170,7 @@ export class RunService {
     this.db.query("UPDATE runs SET deferred_stop=NULL WHERE id=?1").run(runId);
   }
 
-  private writeDeferredStop(runId: string, payload: any, live: string | null): void {
+  private writeDeferredStop(runId: string, payload: any, live: string | null, reason?: string): void {
     const row = this.db.query("SELECT deferred_stop FROM runs WHERE id=?1").get(runId) as { deferred_stop: string | null } | null;
     let drainedAt = Date.now();
     if (row?.deferred_stop) {
@@ -182,21 +182,23 @@ export class RunService {
       } catch { /* keep now */ }
     }
     this.db.query("UPDATE runs SET deferred_stop=?1 WHERE id=?2").run(JSON.stringify({
-      payload, live_generation_id: live, drained_at: drainedAt,
+      payload, live_generation_id: live, drained_at: drainedAt, ...(reason ? { reason } : {}),
     }), runId);
   }
 
   private maybeReplayDeferredStop(runId: string): void {
     if (this.hasOutstandingOutbound(runId)) return;
+    if (this.hasOpenSubagentTranscript(runId)) return;
     const row = this.db.query("SELECT deferred_stop, live_generation_id FROM runs WHERE id=?1").get(runId) as {
       deferred_stop: string | null; live_generation_id: string | null;
     } | null;
     if (!row?.deferred_stop) return;
-    let snap: { payload: any; live_generation_id?: string | null };
+    let snap: { payload: any; live_generation_id?: string | null; reason?: string };
     try { snap = JSON.parse(row.deferred_stop); } catch {
       this.clearDeferredStop(runId);
       return;
     }
+    if (snap.reason === "BG_DRAIN") return;
     if (genOf(row.live_generation_id) !== genOf(snap.live_generation_id)) {
       this.clearDeferredStop(runId);
       return;
@@ -583,6 +585,7 @@ export class RunService {
       return;
     }
     if (d.reason === "already_armed_same") return;
+    if (hookEventName === "preToolUse" && (d.reason === "cid_mismatch" || d.reason === "sidecar_gen")) return;
     this.audit("hub", "GEN_ARMED_SKIP", runId, { reason: d.reason, generation_id: payload?.generation_id ?? null });
   }
 
@@ -602,6 +605,39 @@ export class RunService {
     return !!row;
   }
 
+  private hasOpenSubagentTranscript(runId: string): boolean {
+    const row = this.db.query(
+      `SELECT 1 AS n FROM run_events e
+       WHERE e.run_id=?1 AND e.source='subagent-transcript'
+         AND json_extract(e.payload, '$.__subagent_cid') IS NOT NULL
+         AND json_extract(e.payload, '$.__subagent_cid') != ''
+         AND NOT EXISTS (
+           SELECT 1 FROM run_events t
+           WHERE t.run_id=e.run_id AND t.source='subagent-transcript'
+             AND json_extract(t.payload, '$.__subagent_cid') = json_extract(e.payload, '$.__subagent_cid')
+             AND json_extract(t.payload, '$.type') = 'turn_ended'
+         )
+       LIMIT 1`,
+    ).get(runId) as { n: number } | null;
+    return !!row;
+  }
+
+  private backgroundDrainHold(runId: string, live: string | null): boolean {
+    if (!live) return false;
+    const row = this.db.query("SELECT deferred_stop FROM runs WHERE id=?1").get(runId) as { deferred_stop: string | null } | null;
+    if (!row?.deferred_stop) return false;
+    try {
+      const snap = JSON.parse(row.deferred_stop);
+      return snap?.reason === "BG_DRAIN" && genOf(snap?.live_generation_id) === live;
+    } catch {
+      return false;
+    }
+  }
+
+  private hasOutstandingBackground(runId: string, live: string | null): boolean {
+    return this.hasOpenSubagentTranscript(runId) || this.backgroundDrainHold(runId, live);
+  }
+
   onStopEvent(runId: string, payload: any) {
     const run = this.get(runId);
     if (!run) return;
@@ -619,10 +655,12 @@ export class RunService {
       retired,
       liveTurnSettled: this.liveTurnSettled(runId, live),
       hasOutstandingOutbound: this.hasOutstandingOutbound(runId),
+      hasOutstandingBackground: this.hasOutstandingBackground(runId, live),
       stopStatus: payload?.status,
     });
     if (d.action === "ignore") {
       if (d.audit === "QUEUE_DRAIN") this.writeDeferredStop(runId, payload, live);
+      if (d.audit === "BG_DRAIN") this.writeDeferredStop(runId, payload, live, "BG_DRAIN");
       this.audit("hub", d.audit, runId, { live: run.live_generation_id ?? null, stop: payload?.generation_id ?? null });
       return;
     }
@@ -685,8 +723,9 @@ export class RunService {
       `SELECT id, deferred_stop FROM runs WHERE deferred_stop IS NOT NULL`,
     ).all() as { id: string; deferred_stop: string }[];
     for (const r of drained) {
-      let snap: { drained_at?: number };
+      let snap: { drained_at?: number; reason?: string };
       try { snap = JSON.parse(r.deferred_stop); } catch { continue; }
+      if (snap.reason === "BG_DRAIN") continue;
       if (typeof snap.drained_at !== "number" || now - snap.drained_at < QUEUE_DRAIN_MS) continue;
       this.failQueuedOutbound(r.id);
       this.maybeReplayDeferredStop(r.id);

@@ -43,9 +43,23 @@ export type ArmDecision =
   | { action: "rearm"; gen: string; retire: string }
   | { action: "skip"; reason: string };
 
+const STANDARD_GEN_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function isStandardGenerationId(gen: string): boolean {
+  return STANDARD_GEN_RE.test(gen);
+}
+
 export function decideArm(input: ArmInput): ArmDecision {
-  if (input.hookEventName !== "beforeSubmitPrompt") return { action: "skip", reason: "not_bsp" };
+  const hook = input.hookEventName;
   const gen = genOf(input.generationId);
+  if (hook === "preToolUse") {
+    if (!gen) return { action: "skip", reason: "no_gen" };
+    if (!isStandardGenerationId(gen)) return { action: "skip", reason: "sidecar_gen" };
+  } else if (hook !== "beforeSubmitPrompt") {
+    return { action: "skip", reason: "not_bsp" };
+  } else if (!gen) {
+    return { action: "skip", reason: "no_gen" };
+  }
   if (!gen) return { action: "skip", reason: "no_gen" };
   const cid = typeof input.eventCid === "string" ? input.eventCid : null;
   const owner = input.runConversationId ?? null;
@@ -99,6 +113,11 @@ export function decideStop(input: StopInput): StopDecision {
     const s = input.stopStatus;
     if (s === "aborted" || s === "error") return next;
     return { action: "ignore", audit: "QUEUE_DRAIN" };
+  }
+  if (next.action === "apply" && input.hasOutstandingBackground) {
+    const s = input.stopStatus;
+    if (s === "aborted" || s === "error") return next;
+    return { action: "ignore", audit: "BG_DRAIN" };
   }
   return next;
 }
