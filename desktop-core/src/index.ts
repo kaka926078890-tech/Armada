@@ -6,6 +6,7 @@ export * from "./openRunUri";
 export * from "./lifecycle";
 export * from "./occupancy";
 export * from "./probe";
+export * from "./relayHttpError";
 export * from "./shareIp";
 export * from "./settingsMerge";
 export * from "./shellUi";

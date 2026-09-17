@@ -5,7 +5,7 @@ import {
   boardUrl,
   cdpZombieCopy,
   copiedToast,
-  decideBoardReopen,
+  decideNeedToken,
   defaultDiscoverable,
   defaultLandingMode,
   discoveredRowView,
@@ -17,6 +17,9 @@ import {
   parseBoardSession,
   parseDesktopBoardRequest,
   parsePastedJoin,
+  recreateFleetCopy,
+  restoreHubCopy,
+  isLocalOwnedBoard,
   selectShareCandidate,
   serializeBoardSession,
   shareJoinUri,
@@ -278,19 +281,66 @@ function onNeedToken() {
   if (!lastBoard && typeof sessionStorage !== "undefined") {
     lastBoard = parseBoardSession(sessionStorage.getItem(BOARD_SESSION_KEY));
   }
-  if (!lastBoard) {
-    showToast("鉴权失败，请重新创建或加入舰队", "err");
+  const decision = decideNeedToken({
+    hasSession: !!lastBoard,
+    reopenCount,
+    lastAt: lastReopenAt,
+    now: Date.now(),
+  });
+  if (decision === "recreate") {
+    showToast(recreateFleetCopy(), "err");
     return;
   }
-  const decision = decideBoardReopen({ reopenCount, lastAt: lastReopenAt, now: Date.now() });
   if (decision === "wait") return;
-  if (decision === "give-up") {
-    showToast("鉴权失败，请重新创建或加入舰队", "err");
+  if (decision === "restore-hub") {
+    if (lastBoard && !isLocalOwnedBoard(lastBoard.origin)) {
+      reopenCount = 0;
+      lastReopenAt = Date.now();
+      openBoard(lastBoard.origin, lastBoard.token, true);
+      return;
+    }
+    void restoreOwnedHub({ toast: true });
     return;
   }
+  if (!lastBoard) return;
   reopenCount += 1;
   lastReopenAt = Date.now();
   openBoard(lastBoard.origin, lastBoard.token, true);
+}
+
+let restoringHub = false;
+
+async function restoreOwnedHub(opts?: { toast?: boolean }) {
+  if (restoringHub) return;
+  restoringHub = true;
+  if (opts?.toast) showToast(restoreHubCopy());
+  try {
+    const r = await invoke<CreateFleetResult>("ensure_owned_hub");
+    reopenCount = 0;
+    lastReopenAt = Date.now();
+    rememberShareFromCreate(r.shareCandidates, r.token);
+    openBoard(r.webviewOrigin ?? "127.0.0.1:7380", r.token);
+  } catch (e) {
+    showToast(fleetErrorMessage(String(e)), "err");
+  } finally {
+    restoringHub = false;
+  }
+}
+
+function startHubWatchdog() {
+  window.setInterval(() => {
+    if (!lastBoard) return;
+    if (!document.body.classList.contains("board-open")) return;
+    if (!isLocalOwnedBoard(lastBoard.origin)) return;
+    void invoke<CreateFleetResult>("ensure_owned_hub")
+      .then((r) => {
+        if (r.decision === "spawn") {
+          reopenCount = 0;
+          openBoard(r.webviewOrigin ?? "127.0.0.1:7380", r.token);
+        }
+      })
+      .catch(() => { /* next tick */ });
+  }, 10_000);
 }
 
 type OpenRunPayload = { runId: string; machineId: string; workspaceRoot: string };
@@ -426,6 +476,13 @@ window.addEventListener("DOMContentLoaded", () => {
 
   modeCreate()?.addEventListener("change", () => applyLandingMode("create"));
   modeJoin()?.addEventListener("change", () => applyLandingMode("join"));
+
+  if (canCreate && lastBoard && isLocalOwnedBoard(lastBoard.origin)) {
+    void restoreOwnedHub();
+  } else if (lastBoard) {
+    openBoard(lastBoard.origin, lastBoard.token);
+  }
+  startHubWatchdog();
 
   document.querySelector("#create")?.addEventListener("click", () => {
     setErr("");

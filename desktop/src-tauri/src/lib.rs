@@ -19,6 +19,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             hub::create_fleet,
+            hub::ensure_owned_hub,
             hub::join_fleet,
             hub::quit_owned_hub,
             hub::start_fleet_browse,

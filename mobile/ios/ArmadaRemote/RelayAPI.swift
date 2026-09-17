@@ -182,6 +182,7 @@ enum RelayAPIError: LocalizedError {
         case "CLOSED": return "这条对话已关闭"
         case "PROMPT_COLLISION": return "同一工作区已有相同内容的任务"
         case "HUB_OFFLINE": return "中台离线"
+        case "NET_INTERCEPT": return "当前网络拦截了中转。请关掉 Wi‑Fi 改用蜂窝，或换一个网络后再打开。"
         case "OUTBOUND_LIMIT": return "待消化续发已达上限，等 Cursor 消化后再发"
         case "OUTBOUND_TEXT_ONLY": return "运行中续发暂只支持纯文本"
         case "INVALID_STATE": return "当前状态不能重试"
@@ -192,6 +193,19 @@ enum RelayAPIError: LocalizedError {
         case "WINDOW_BUSY": return "该窗口正忙"
         default: return code
         }
+    }
+
+    /// Keep in sync with desktop-core/src/relayHttpError.ts
+    static func classify(status: Int, data: Data) -> RelayAPIError {
+        if let err = try? JSONDecoder().decode(ErrorBody.self, from: data), let code = err.error, !code.isEmpty {
+            if status == 403 && code == "OPERATOR_REQUIRED" { return .pairInvite }
+            return .http(status, code)
+        }
+        let text = String(data: data, encoding: .utf8) ?? ""
+        if status == 403 || text.range(of: "<html", options: .caseInsensitive) != nil {
+            return .http(status, "NET_INTERCEPT")
+        }
+        return .http(status, "HTTP \(status)")
     }
 }
 
@@ -280,14 +294,8 @@ actor RelayAPI {
         }
         let (data, resp) = try await URLSession.shared.data(for: req)
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-        if code == 403 {
-            if let err = try? JSONDecoder().decode(ErrorBody.self, from: data), err.error == "OPERATOR_REQUIRED" {
-                throw RelayAPIError.pairInvite
-            }
-        }
         if !ok.contains(code) {
-            let msg = (try? JSONDecoder().decode(ErrorBody.self, from: data))?.error ?? "HTTP \(code)"
-            throw RelayAPIError.http(code, msg)
+            throw RelayAPIError.classify(status: code, data: data)
         }
         do {
             return try JSONDecoder().decode(T.self, from: data)

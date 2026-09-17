@@ -72,6 +72,33 @@ export function decideBoardReopen(opts: {
   return "reopen";
 }
 
+export type NeedTokenAction = "reopen" | "wait" | "restore-hub" | "recreate";
+
+export function decideNeedToken(opts: {
+  hasSession: boolean;
+  reopenCount: number;
+  lastAt: number | null;
+  now: number;
+}): NeedTokenAction {
+  if (!opts.hasSession) return "recreate";
+  const d = decideBoardReopen(opts);
+  if (d === "give-up") return "restore-hub";
+  return d;
+}
+
+export function recreateFleetCopy(): string {
+  return "鉴权失败，请重新创建或加入舰队";
+}
+
+export function restoreHubCopy(): string {
+  return "中台进程已退出，正在恢复";
+}
+
+export function isLocalOwnedBoard(origin: string): boolean {
+  const host = origin.split("/")[0].toLowerCase();
+  return host.startsWith("127.0.0.1:") || host.startsWith("localhost:");
+}
+
 export function defaultLandingMode(platform: string): LandingMode {
   return shouldShowCreate(platform) ? "create" : "join";
 }

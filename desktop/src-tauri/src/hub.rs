@@ -501,6 +501,27 @@ fn spawn_hub(resource_dir: Option<&Path>) -> Result<Child, String> {
     cmd.spawn().map_err(|e| format!("spawn-failed:{e}"))
 }
 
+pub fn keep_awake_args(pid: u32) -> Vec<String> {
+    vec!["-i".into(), "-s".into(), "-w".into(), pid.to_string()]
+}
+
+fn keep_awake(pid: u32) {
+    #[cfg(target_os = "macos")]
+    {
+        let args = keep_awake_args(pid);
+        let _ = Command::new("caffeinate")
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn();
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = pid;
+    }
+}
+
 #[allow(dead_code)]
 pub fn pid_alive(pid: u32) -> bool {
     Command::new("kill")
@@ -601,12 +622,18 @@ fn finish_create(
     token: String,
     kind: ApplyKind,
     pid: Option<u32>,
+    require_share: bool,
 ) -> Result<CreateFleetResult, String> {
     let existing = crate::attach::read_existing_hub_url();
     let overwrite = existing.as_deref() != Some("127.0.0.1:7380");
     let attach = crate::attach::run_local_attach(resource, "127.0.0.1:7380", &token, overwrite, None).ok();
     let share_candidates = pick_share_candidates(&list_ifaces());
-    require_share_candidates(&share_candidates).map_err(|e| e.to_string())?;
+    if require_share {
+        require_share_candidates(&share_candidates).map_err(|e| e.to_string())?;
+    }
+    if let Some(pid) = pid {
+        keep_awake(pid);
+    }
     Ok(CreateFleetResult {
         decision: decision_label(kind),
         token,
@@ -619,16 +646,18 @@ fn finish_create(
     })
 }
 
-#[tauri::command]
-pub fn create_fleet(app: tauri::AppHandle, state: tauri::State<'_, HubState>, discoverable: bool) -> Result<CreateFleetResult, String> {
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = (&app, &state, discoverable);
-        return Err("create-macos-only".into());
-    }
+fn apply_owned(
+    app: &tauri::AppHandle,
+    state: &HubState,
+    discoverable: bool,
+    require_share: bool,
+    require_cursor: bool,
+) -> Result<CreateFleetResult, String> {
     require_macos_create(host_os()).map_err(|e| e.to_string())?;
-    require_cursor_app()?;
-    let resource = resource_dir_from(&app);
+    if require_cursor {
+        require_cursor_app()?;
+    }
+    let resource = resource_dir_from(app);
     let mut owned = state.owned.lock().map_err(|_| "lock".to_string())?;
     let alive = owned_alive(&mut owned);
     let port_open = tcp_open("127.0.0.1", HUB_PORT, Duration::from_millis(300));
@@ -651,21 +680,41 @@ pub fn create_fleet(app: tauri::AppHandle, state: tauri::State<'_, HubState>, di
                 "spawn-timeout".to_string()
             })?;
             let pid = owned.as_ref().map(|c| c.id());
-            finish_create(resource.as_deref(), token, kind, pid)?
+            finish_create(resource.as_deref(), token, kind, pid, require_share)?
         }
         ApplyKind::Attach => {
             *owned = None;
             let token = load_token_from_home().ok_or_else(|| "token-missing".to_string())?;
-            finish_create(resource.as_deref(), token, kind, None)?
+            finish_create(resource.as_deref(), token, kind, None, require_share)?
         }
         ApplyKind::ReuseOwned => {
             let token = load_token_from_home().ok_or_else(|| "token-missing".to_string())?;
             let pid = owned.as_ref().map(|c| c.id());
-            finish_create(resource.as_deref(), token, kind, pid)?
+            finish_create(resource.as_deref(), token, kind, pid, require_share)?
         }
     };
     drop(owned);
-    maybe_advertise(result, discoverable, &state)
+    maybe_advertise(result, discoverable, state)
+}
+
+#[tauri::command]
+pub fn create_fleet(app: tauri::AppHandle, state: tauri::State<'_, HubState>, discoverable: bool) -> Result<CreateFleetResult, String> {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (&app, &state, discoverable);
+        return Err("create-macos-only".into());
+    }
+    apply_owned(&app, &*state, discoverable, true, true)
+}
+
+#[tauri::command]
+pub fn ensure_owned_hub(app: tauri::AppHandle, state: tauri::State<'_, HubState>) -> Result<CreateFleetResult, String> {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (&app, &state);
+        return Err("create-macos-only".into());
+    }
+    apply_owned(&app, &*state, false, false, false)
 }
 
 fn maybe_advertise(
@@ -760,6 +809,14 @@ pub fn quit_owned_inner(state: &HubState) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keep_awake_args_hold_idle_and_system_sleep() {
+        assert_eq!(
+            keep_awake_args(39523),
+            vec!["-i", "-s", "-w", "39523"]
+        );
+    }
 
     #[test]
     fn occupancy_matches_desktop_core() {

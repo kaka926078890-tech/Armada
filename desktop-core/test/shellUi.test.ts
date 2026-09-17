@@ -6,11 +6,15 @@ import {
   copiedToast,
   defaultLandingMode,
   decideBoardReopen,
+  decideNeedToken,
   firstArmadaJoinUri,
+  isLocalOwnedBoard,
   noShareIpCopy,
   parseBoardSession,
   parseDesktopBoardRequest,
   parsePastedJoin,
+  recreateFleetCopy,
+  restoreHubCopy,
   serializeBoardSession,
   selectShareCandidate,
   shareJoinUri,
@@ -102,6 +106,27 @@ describe("decideBoardReopen", () => {
     expect(decideBoardReopen({ reopenCount: 1, lastAt: 1000, now: 2000 })).toBe("wait");
     expect(decideBoardReopen({ reopenCount: 1, lastAt: 1000, now: 1000 + 8000 })).toBe("reopen");
     expect(decideBoardReopen({ reopenCount: 2, lastAt: 9000, now: 20000 })).toBe("give-up");
+  });
+});
+
+describe("decideNeedToken", () => {
+  test("no session still asks to recreate", () => {
+    expect(decideNeedToken({ hasSession: false, reopenCount: 0, lastAt: null, now: 0 })).toBe("recreate");
+    expect(recreateFleetCopy()).toMatch(/重新创建或加入/);
+  });
+
+  test("session that exhausted reopens restores the owned hub instead of recreating the fleet", () => {
+    expect(decideNeedToken({ hasSession: true, reopenCount: 0, lastAt: null, now: 1000 })).toBe("reopen");
+    expect(decideNeedToken({ hasSession: true, reopenCount: 1, lastAt: 1000, now: 2000 })).toBe("wait");
+    expect(decideNeedToken({ hasSession: true, reopenCount: 2, lastAt: 9000, now: 20000 })).toBe("restore-hub");
+    expect(restoreHubCopy()).toMatch(/恢复/);
+    expect(restoreHubCopy()).not.toMatch(/重新创建/);
+  });
+
+  test("only loopback boards own the sidecar", () => {
+    expect(isLocalOwnedBoard("127.0.0.1:7380")).toBe(true);
+    expect(isLocalOwnedBoard("localhost:7380")).toBe(true);
+    expect(isLocalOwnedBoard("192.168.1.23:7380")).toBe(false);
   });
 });
 
