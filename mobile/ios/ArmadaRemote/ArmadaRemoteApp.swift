@@ -22,9 +22,12 @@ final class Session: ObservableObject {
     @Published var focusColumn: BoardColumn?
     @Published var pendingOpenRunId: String?
     @Published var watchingId: String?
+    @Published var streamHealthy = false
 
-    private var poll: Task<Void, Never>?
+    private var live: Task<Void, Never>?
+    private var foreground = true
     private var refreshSeq = 0
+    private var lastBadge = -1
     private var pendingArchive = Set<String>()
     private var pendingUnarchive = Set<String>()
     private let readKey = "armada.readAt"
@@ -49,7 +52,7 @@ final class Session: ObservableObject {
            let map = try? JSONDecoder().decode([String: Double].self, from: data) {
             readAt = map
         }
-        if bound { startPolling() }
+        if bound { startLive() }
     }
 
     func bind(uri: String) {
@@ -66,13 +69,13 @@ final class Session: ObservableObject {
             UserDefaults.standard.set(fleet, forKey: "fleet")
             OperatorKeychain.save(token)
             bindError = nil
-            startPolling()
+            startLive()
             requestPush()
         }
     }
 
     func unbind() {
-        poll?.cancel()
+        stopLive()
         let push = UserDefaults.standard.string(forKey: pushTokenKey)
         let relayApi = bound ? self.api() : nil
         relay = ""; fleet = ""; token = ""
@@ -186,8 +189,8 @@ final class Session: ObservableObject {
             let newRuns = try await r
             let newHidden = try await h
             guard seq == refreshSeq else { return }
-            hubOffline = ws.hubOffline
-            workspaces = ws.workspaces
+            if hubOffline != ws.hubOffline { hubOffline = ws.hubOffline }
+            if workspaces != ws.workspaces { workspaces = ws.workspaces }
             adoptFetchedLists(runs: newRuns, hidden: newHidden)
             lastError = nil
             applyBadge()
@@ -224,24 +227,112 @@ final class Session: ObservableObject {
                 }
             }
         }
-        runs = nextRuns
-        hiddenRuns = nextHidden
         pendingArchive = stillArchive
         pendingUnarchive = stillUnarchive
+        if runs != nextRuns { runs = nextRuns }
+        if hiddenRuns != nextHidden { hiddenRuns = nextHidden }
     }
 
     func applyBadge() {
         let n = workspaces.reduce(0) { $0 + unreadCount(in: $1) }
+        if n == lastBadge { return }
+        lastBadge = n
         UIApplication.shared.applicationIconBadgeNumber = n
     }
 
-    func startPolling() {
-        poll?.cancel()
-        poll = Task {
-            await refresh()
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 10_000_000_000)
+    func setForeground(_ active: Bool) {
+        if foreground == active { return }
+        foreground = active
+        guard bound else { return }
+        if active { startLive() } else { stopLive() }
+    }
+
+    func startLive() {
+        live?.cancel()
+        live = Task { await runLive() }
+    }
+
+    func stopLive() {
+        live?.cancel()
+        live = nil
+        streamHealthy = false
+    }
+
+    private func runLive() async {
+        await refresh()
+        var backoff: UInt64 = 2_000_000_000
+        while !Task.isCancelled && bound && foreground {
+            do {
+                try await consumeStream()
+                streamHealthy = false
+                backoff = 2_000_000_000
+            } catch is CancellationError {
+                streamHealthy = false
+                return
+            } catch let urlErr as URLError where urlErr.code == .cancelled {
+                streamHealthy = false
+                return
+            } catch {
+                streamHealthy = false
+                if Task.isCancelled || !bound || !foreground { return }
                 await refresh()
+                do {
+                    try await Task.sleep(nanoseconds: backoff)
+                } catch {
+                    return
+                }
+                backoff = min(backoff * 2, 60_000_000_000)
+            }
+        }
+        streamHealthy = false
+    }
+
+    private func consumeStream() async throws {
+        var first = true
+        let stream = await api().streamEvents()
+        for try await frame in stream {
+            if Task.isCancelled { throw CancellationError() }
+            applyStreamFrame(frame)
+            if first {
+                first = false
+                streamHealthy = true
+            }
+        }
+    }
+
+    private func applyStreamFrame(_ frame: StreamFrame) {
+        if frame.type == "workspaces", let list = frame.workspaces, let offline = frame.hubOffline {
+            if hubOffline != offline { hubOffline = offline }
+            if workspaces != list { workspaces = list }
+            lastError = nil
+            applyBadge()
+            return
+        }
+        if frame.type == "run", let run = frame.run {
+            applyStreamRun(run)
+            lastError = nil
+            applyBadge()
+        }
+    }
+
+    private func applyStreamRun(_ run: RunDTO) {
+        if pendingArchive.contains(run.runId) && !run.isArchived { return }
+        if pendingUnarchive.contains(run.runId) && run.isArchived { return }
+        if pendingArchive.contains(run.runId) && run.isArchived { pendingArchive.remove(run.runId) }
+        if pendingUnarchive.contains(run.runId) && !run.isArchived { pendingUnarchive.remove(run.runId) }
+        if run.isArchived {
+            if let i = runs.firstIndex(where: { $0.runId == run.runId }) { runs.remove(at: i) }
+            if let i = hiddenRuns.firstIndex(where: { $0.runId == run.runId }) {
+                if hiddenRuns[i] != run { hiddenRuns[i] = run }
+            } else {
+                hiddenRuns.insert(run, at: 0)
+            }
+        } else {
+            if let i = hiddenRuns.firstIndex(where: { $0.runId == run.runId }) { hiddenRuns.remove(at: i) }
+            if let i = runs.firstIndex(where: { $0.runId == run.runId }) {
+                if runs[i] != run { runs[i] = run }
+            } else {
+                runs.insert(run, at: 0)
             }
         }
     }
@@ -306,6 +397,7 @@ final class Session: ObservableObject {
 struct ArmadaRemoteApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var session = Session()
+    @Environment(\.scenePhase) private var scenePhase
     var body: some Scene {
         WindowGroup {
             RootView()
@@ -315,6 +407,9 @@ struct ArmadaRemoteApp: App {
                     appDelegate.session = session
                     session.adoptPendingOpen()
                     session.requestPushIfBound()
+                }
+                .onChange(of: scenePhase) { _, phase in
+                    session.setForeground(phase == .active)
                 }
         }
     }

@@ -300,7 +300,7 @@ TestFlight：Bundle ID 建议 `app.armada.remote`（实现时可改，须写进�
 | 阶段 | App 行为 | 中转 | 验收 |
 | --- | --- | --- | --- |
 | **v1** | 前台每 **10s** `GET /mobile/workspaces` + `GET /mobile/runs`；进入详情强制 GET。后台定时器会被系统挂起，**不承诺锁屏更新** | 无 stream 路由 | 模拟器：派发后 ≤15s 内前台能看到状态变化 |
-| **v1.5** | 前台 `GET /mobile/stream`（SSE，`Authorization: Bearer`，禁止 `?token=`）；事件形状与 GET JSON 相同（`workspaces` / `run`）。SSE 失败或后台 → 退回 10s 轮询 | 有 snap 则写 SSE 客户端；断线不丢 run（快照仍在 SQLite） | 前台：hub `snap.run` 后 **p95 < 1s** 列表/详情刷新；拔 SSE 后自动轮询，派发仍成功 |
+| **v1.5** | 前台 `GET /mobile/stream`（SSE，`Authorization: Bearer`，禁止 `?token=`）；事件形状与 GET JSON 相同（`workspaces` / `run`）。SSE 失败或后台 → 退避轮询（2s→60s）；进后台停连接 | 有 snap 则写 SSE 客户端；断线不丢 run（快照仍在 SQLite） | 前台：hub `snap.run` 后 **p95 < 1s** 列表/详情刷新；拔 SSE 后自动轮询，派发仍成功 |
 | **v2** | 注册 device token 到中转（`POST /mobile/push-token`）。Ask 出现或进入终态 → 中转发 **可见** APNs：`alert` + 自定义 `runId` + `kind=ask\|completed\|error\|cancelled`。点通知打开对应详情并 **强制 GET** | 不把 `finalText` / prompt 放入 APNs。投递失败只写 audit，不改变中台 run | 真机锁屏：Ask 与完成能出通知；点进正文与中台「复制正文」逐字节相同 |
 
 **备选不选 v1 就上 SSE：** 模拟器/联调要最短路径；轮询已够证明派发与全文。  
@@ -491,5 +491,6 @@ p95（同区域 VPS，排除 DERP）：`GET /mobile/workspaces` < 400ms；`POST 
 | 2026-09-15 | snap 增加 `outbound` + `queueMessageDefaultBehavior`；`POST /mobile/runs/:id/followup` running → 201；App 运行中可续聊并画队列托盘。不加 protocolVersion（字段向后兼容）。 |
 | 2026-09-15 | Created Plan / Build：CDP 探测 Mac `split-button[data-tone=plan]` 或 Windows `ui-split-button` 上文案 `Build`（不含 Building）+ `element.click()`；`pendingAsk.kind=plan`；plan-writing `stop` 后复开 `running`。App 详情 Build 按钮。Windows Win Destop 2026-09-15 已点通。 |
 | 2026-09-16 | App 可见 APNs 从「v2 以后」落到独立实施基准：[2026-09-16-armada-app-push-design.md](./2026-09-16-armada-app-push-design.md)。本文件 §4.9 原则仍有效（可见推送、不带 `finalText`）。 |
+| 2026-09-17 | v1.5 落地：中转 `GET /mobile/stream`；App 前台 SSE、后台停、断线退避轮询；相同快照不刷新 `@Published`。 |
 
 本文件为远程能力的 **实施基准**。变更绑定字段或完成门禁须改本 spec 并升 `protocolVersion`。

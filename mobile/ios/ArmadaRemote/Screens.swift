@@ -423,6 +423,10 @@ struct RunDetailView: View {
         return session.workspaces.first { $0.machineId == run.machineId && $0.workspaceRoot == run.workspaceRoot }
     }
 
+    private var streamed: RunDTO? {
+        session.runs.first { $0.runId == runId } ?? session.hiddenRuns.first { $0.runId == runId }
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
@@ -543,14 +547,24 @@ struct RunDetailView: View {
                 }
             }
         }
-        .task {
+        .task(id: runId) {
             session.watchingId = runId
             session.markOpened(runId)
             await reload()
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                if session.streamHealthy {
+                    do { try await Task.sleep(nanoseconds: 1_000_000_000) } catch { break }
+                    continue
+                }
+                let busy = run?.isLive == true || run?.pendingAsk != nil
+                if !busy { break }
+                do { try await Task.sleep(nanoseconds: 3_000_000_000) } catch { break }
+                if Task.isCancelled { break }
                 await reload()
             }
+        }
+        .onChange(of: streamed) { _, next in
+            if let next, next != run { run = next }
         }
         .onDisappear {
             if session.watchingId == runId { session.watchingId = nil }

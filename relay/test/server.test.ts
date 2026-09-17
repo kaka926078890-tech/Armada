@@ -18,7 +18,7 @@ function dummyApns(post: ApnsPost): ApnsConfig {
   return { keyPath, keyId: "KEYID", teamId: "LW2A4J4KKG", retryDelays: [], post };
 }
 
-function start(extra?: { home?: string; apns?: ApnsConfig | null }) {
+function start(extra?: { home?: string; apns?: ApnsConfig | null; ssePingMs?: number }) {
   const home = extra?.home ?? mkdtempSync(join(tmpdir(), "armada-relay-"));
   srv = createRelayServer({
     port: 0,
@@ -27,6 +27,7 @@ function start(extra?: { home?: string; apns?: ApnsConfig | null }) {
     publicBase: "http://127.0.0.1:8780",
     adminToken: "adm-test",
     apns: extra?.apns,
+    ssePingMs: extra?.ssePingMs,
   });
   return srv;
 }
@@ -759,5 +760,137 @@ describe("relay APNs", () => {
     });
     expect(gone.status).toBe(204);
     ws.close();
+  });
+});
+
+function openSse(res: Response) {
+  const reader = res.body!.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  const events: object[] = [];
+  const comments: string[] = [];
+  const cancel = async () => { try { await reader.cancel(); } catch { /* closed */ } };
+  const waitUntil = async (until: (ev: object[], c: string[]) => boolean, ms = 2000) => {
+    const deadline = Date.now() + ms;
+    if (until(events, comments)) return { events, comments };
+    while (Date.now() < deadline) {
+      const wait = deadline - Date.now();
+      const chunk = await Promise.race([
+        reader.read(),
+        Bun.sleep(wait).then(() => null),
+      ]);
+      if (!chunk) break;
+      if (chunk.done) break;
+      buf += dec.decode(chunk.value, { stream: true });
+      const parts = buf.split("\n\n");
+      buf = parts.pop() ?? "";
+      for (const block of parts) {
+        const lines = block.split("\n");
+        for (const line of lines) {
+          if (line.startsWith(":")) comments.push(line.slice(1).trim());
+          if (line.startsWith("data:")) events.push(JSON.parse(line.slice(5).trim()) as object);
+        }
+      }
+      if (until(events, comments)) return { events, comments };
+    }
+    throw new Error(`sse timeout events=${JSON.stringify(events)} comments=${JSON.stringify(comments)}`);
+  };
+  return { events, comments, waitUntil, cancel };
+}
+
+describe("mobile stream", () => {
+  test("stream without bearer is 401; query token is ignored", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    expect((await fetch(url(s, "/mobile/stream"))).status).toBe(401);
+    const q = await fetch(url(s, `/mobile/stream?token=${fleet.operatorToken}`));
+    expect(q.status).toBe(401);
+  });
+
+  test("pair secret on stream is 403 OPERATOR_REQUIRED", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const r = await fetch(url(s, "/mobile/stream"), {
+      headers: { authorization: `Bearer ${fleet.hubSecret}` },
+    });
+    expect(r.status).toBe(403);
+    expect(await r.json()).toEqual({ error: "OPERATOR_REQUIRED" });
+  });
+
+  test("op stream is event-stream, dumps workspaces, then snap.run", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    ws.send(JSON.stringify({
+      type: "snap.workspaces",
+      machines: [{ id: "m-1", name: "Mac", display_name: "Mac Intel", os: "darwin", status: "online", open_workspaces: JSON.stringify(["/Users/me/proj"]) }],
+    }));
+    await Bun.sleep(30);
+    const ac = new AbortController();
+    const res = await fetch(url(s, "/mobile/stream"), {
+      headers: { authorization: `Bearer ${fleet.operatorToken}` },
+      signal: ac.signal,
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type") ?? "").toContain("text/event-stream");
+    const sse = openSse(res);
+    await sse.waitUntil((ev) => ev.some((e) => (e as { type?: string }).type === "workspaces"));
+    const wsEv = sse.events.find((e) => (e as { type?: string }).type === "workspaces") as {
+      type: string; hubOffline: boolean; workspaces: { label: string }[];
+    };
+    expect(wsEv.hubOffline).toBe(false);
+    expect(wsEv.workspaces[0]).toMatchObject({ label: "proj" });
+    ws.send(JSON.stringify({
+      type: "snap.run",
+      run: {
+        runId: "r-live",
+        machineId: "m-1",
+        workspaceRoot: "/Users/me/proj",
+        prompt: "hello",
+        status: "running",
+        updatedAt: Date.now(),
+      },
+    }));
+    await sse.waitUntil((ev) => ev.some((e) => (e as { type?: string }).type === "run" && (e as { run?: { runId?: string } }).run?.runId === "r-live"));
+    const runEv = sse.events.find((e) => (e as { run?: { runId?: string } }).run?.runId === "r-live") as { run: { status: string; prompt: string } };
+    expect(runEv.run).toMatchObject({ status: "running", prompt: "hello" });
+    ac.abort();
+    await sse.cancel();
+    ws.close();
+  });
+
+  test("hub close emits workspaces hubOffline", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    const ac = new AbortController();
+    const res = await fetch(url(s, "/mobile/stream"), {
+      headers: { authorization: `Bearer ${fleet.operatorToken}` },
+      signal: ac.signal,
+    });
+    const sse = openSse(res);
+    await sse.waitUntil((ev) => ev.some((e) => (e as { type?: string }).type === "workspaces"));
+    ws.close();
+    await sse.waitUntil((ev) =>
+      ev.some((e) => (e as { type?: string }).type === "workspaces" && (e as { hubOffline?: boolean }).hubOffline === true),
+    );
+    expect(sse.events.some((e) => (e as { hubOffline?: boolean }).hubOffline === true)).toBe(true);
+    ac.abort();
+    await sse.cancel();
+  });
+
+  test("idle ping comment", async () => {
+    const s = start({ ssePingMs: 40 });
+    const fleet = s.createFleet();
+    const ac = new AbortController();
+    const res = await fetch(url(s, "/mobile/stream"), {
+      headers: { authorization: `Bearer ${fleet.operatorToken}` },
+      signal: ac.signal,
+    });
+    const sse = openSse(res);
+    await sse.waitUntil((_e, c) => c.includes("ping"), 500);
+    expect(sse.comments).toContain("ping");
+    ac.abort();
+    await sse.cancel();
   });
 });

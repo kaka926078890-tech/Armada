@@ -13,7 +13,7 @@ alwaysApply: true
 | --- | --- |
 | 状态 / 契约 | `hub/src/runs.ts` 出站字段；`hub/src/relayClient.ts` `runToSnap` |
 | 中转 | `relay/src/server.ts` 快照列；`/mobile/runs*` HTTP 码（running 续发是 **201**） |
-| App | `mobile/ios/ArmadaRemote/{RelayAPI,Screens}.swift`：DTO、按钮、文案、轮询 |
+| App | `mobile/ios/ArmadaRemote/{RelayAPI,Screens}.swift`：DTO、按钮、文案、前台 SSE |
 
 ## 清单（新功能 / 改操作员动作时）
 

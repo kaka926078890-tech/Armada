@@ -221,7 +221,7 @@ RELAY_APNS_KEY_ID=<Key ID>
 RELAY_APNS_TEAM_ID=LW2A4J4KKG
 ```
 
-也可以直接 `export` 上述变量。缺任一项时中转打 `APNS_DISABLED`，前台轮询照常。App ID 打开 Push Notifications 即可，**不要**再配 Push SSL 证书（token 认证用 `.p8`）。打 TestFlight 必须走 `mobile/ios/scripts/archive-testflight.sh`：未签名归档要先 ad-hoc 签上 `aps-environment=production`，否则云签名会打出没有 Push 的包。模拟器没有 device token。**公网中转**（App 连的那台）也要放同一份文件并重启，只放开发机不会给手机推。
+也可以直接 `export` 上述变量。缺任一项时中转打 `APNS_DISABLED`，锁屏无推送；前台仍走 SSE（失败才轮询）。App ID 打开 Push Notifications 即可，**不要**再配 Push SSL 证书（token 认证用 `.p8`）。打 TestFlight 必须走 `mobile/ios/scripts/archive-testflight.sh`：未签名归档要先 ad-hoc 签上 `aps-environment=production`，否则云签名会打出没有 Push 的包。模拟器没有 device token。**公网中转**（App 连的那台）也要放同一份文件并重启，只放开发机不会给手机推。
 
 ### 不要做
 
@@ -581,7 +581,7 @@ hub 静态托管路径相对 `hub/src`，**请从仓库根**执行 `bun run dev:
 | 项 | 打算做 |
 | --- | --- |
 | **中转管理页 / 中台贴 pair** | 现在只有 CLI 与 `relay.json`；看板里还没有粘贴框 |
-| **App 通道** | 前台仍是 10s 轮询；锁屏 Ask/完成由中转代发生产 APNs（无 `.p8` 则 no-op） |
+| **App 通道** | 前台 `GET /mobile/stream` SSE；断线才退避轮询；进后台停；锁屏 Ask/完成由中转代发生产 APNs（无 `.p8` 则 no-op） |
 | **多操作者 / 一部手机多中台** | v1 一条 op 对应一台在线中台；令牌轮换另开闸 |
 | **多机互联 · 团队协作** | 多台机器组成协作网，不只局域网点对点加入：团队共享舰队、一起派发和盯进度 |
 

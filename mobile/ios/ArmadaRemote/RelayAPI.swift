@@ -154,6 +154,13 @@ struct DispatchResponse: Decodable {
     var run: RunDTO
 }
 
+struct StreamFrame: Decodable {
+    var type: String
+    var hubOffline: Bool?
+    var workspaces: [WorkspaceDTO]?
+    var run: RunDTO?
+}
+
 struct EmptyJSON: Decodable {}
 
 struct ErrorBody: Decodable {
@@ -277,6 +284,42 @@ actor RelayAPI {
     func deletePushToken(_ token: String) async throws {
         let body = try JSONSerialization.data(withJSONObject: ["token": token])
         let _: EmptyJSON = try await send("/mobile/push-token", method: "DELETE", body: body, ok: [204], allowEmpty: true)
+    }
+
+    func streamEvents() -> AsyncThrowingStream<StreamFrame, Error> {
+        let base = self.base
+        let token = self.token
+        return AsyncThrowingStream { continuation in
+            let work = Task {
+                do {
+                    guard let url = URL(string: base + "/mobile/stream") else {
+                        throw RelayAPIError.transport("bad url")
+                    }
+                    var req = URLRequest(url: url)
+                    req.httpMethod = "GET"
+                    req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+                    req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+                    req.timeoutInterval = 90
+                    let (bytes, resp) = try await URLSession.shared.bytes(for: req)
+                    let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+                    if code != 200 {
+                        throw RelayAPIError.http(code, code == 404 ? "NO_STREAM" : "HTTP \(code)")
+                    }
+                    for try await line in bytes.lines {
+                        if Task.isCancelled { break }
+                        if line.hasPrefix(":") { continue }
+                        guard line.hasPrefix("data:") else { continue }
+                        let raw = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)
+                        guard let data = raw.data(using: .utf8) else { continue }
+                        continuation.yield(try JSONDecoder().decode(StreamFrame.self, from: data))
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in work.cancel() }
+        }
     }
 
     private func get<T: Decodable>(_ path: String) async throws -> T {

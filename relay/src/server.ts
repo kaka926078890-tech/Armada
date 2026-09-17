@@ -92,6 +92,7 @@ export function createRelayServer(opts: {
   publicBase: string;
   adminToken?: string;
   apns?: ApnsConfig | null;
+  ssePingMs?: number;
 }): RelayServer {
   const home = opts.home ?? join(process.env.HOME!, ".armada-relay");
   mkdirSync(home, { recursive: true });
@@ -106,6 +107,37 @@ export function createRelayServer(opts: {
   if (!apnsSender.enabled) console.warn("armada-relay APNS_DISABLED");
   const runSend = new Map<string, Promise<void>>();
   let fleetInflight = 0;
+  const ssePingMs = Math.max(20, opts.ssePingMs ?? 25_000);
+  type SseClient = { send: (s: string) => void; close: () => void };
+  const sseClients = new Map<string, Set<SseClient>>();
+
+  function sseEvent(obj: object): string {
+    return `data: ${JSON.stringify(obj)}\n\n`;
+  }
+
+  function sseBroadcast(fleetId: string, chunk: string) {
+    for (const client of sseClients.get(fleetId) ?? []) {
+      try { client.send(chunk); } catch { /* closed */ }
+    }
+  }
+
+  function sseAdd(fleetId: string, client: SseClient) {
+    if (!sseClients.has(fleetId)) sseClients.set(fleetId, new Set());
+    sseClients.get(fleetId)!.add(client);
+  }
+
+  function sseRemove(fleetId: string, client: SseClient) {
+    sseClients.get(fleetId)?.delete(client);
+  }
+
+  function sseCloseAll() {
+    for (const set of sseClients.values()) {
+      for (const client of set) {
+        try { client.close(); } catch { /* closed */ }
+      }
+    }
+    sseClients.clear();
+  }
 
   function audit(actor: string, action: string, target?: string, payload?: object) {
     db.query("INSERT INTO audit (ts, actor, action, target, payload) VALUES (?1,?2,?3,?4,?5)")
@@ -223,7 +255,9 @@ export function createRelayServer(opts: {
     db.query("UPDATE runs SET notified_status=?2, notified_ask_id=?3 WHERE id=?1")
       .run(snap.runId, decided.notifiedStatus, decided.notifiedAskId);
     dispatchEdges(fleetId, snap.runId, decided.edges);
-    return db.query("SELECT * FROM runs WHERE id=?1").get(snap.runId);
+    const row = db.query("SELECT * FROM runs WHERE id=?1").get(snap.runId);
+    sseBroadcast(fleetId, sseEvent({ type: "run", run: runToJson(row) }));
+    return row;
   }
 
   function runToJson(row: any) {
@@ -242,6 +276,44 @@ export function createRelayServer(opts: {
       archived: Number(row.archived_at) > 0,
       updatedAt: row.updated_at,
     };
+  }
+
+  function workspacesPayload(fleetId: string): {
+    type: "workspaces";
+    hubOffline: boolean;
+    workspaces: {
+      workspaceId: string;
+      machineId: string;
+      workspaceRoot: string;
+      label: string;
+      machineName: string;
+      os: string;
+      online: boolean;
+    }[];
+  } {
+    const fleet = getFleet(fleetId);
+    const hubOffline = !fleet || fleet.hub_online !== 1;
+    const raw = hubOffline ? [] : JSON.parse(fleet.workspaces || "[]") as WorkspaceSnap[];
+    const workspaces = raw.map((w) => ({
+      workspaceId: encodeWorkspaceId(w.machineId, w.workspaceRoot),
+      machineId: w.machineId,
+      workspaceRoot: w.workspaceRoot,
+      label: w.label || labelOf(w.workspaceRoot),
+      machineName: w.machineName || "",
+      os: w.os || "",
+      online: w.online !== false,
+    }));
+    return { type: "workspaces", hubOffline, workspaces };
+  }
+
+  function emitWorkspaces(fleetId: string) {
+    sseBroadcast(fleetId, sseEvent(workspacesPayload(fleetId)));
+  }
+
+  function streamRuns(fleetId: string): object[] {
+    const open = db.query("SELECT * FROM runs WHERE fleet_id=?1 AND archived_at IS NULL ORDER BY updated_at DESC LIMIT 50").all(fleetId);
+    const hidden = db.query("SELECT * FROM runs WHERE fleet_id=?1 AND archived_at IS NOT NULL ORDER BY updated_at DESC LIMIT 50").all(fleetId);
+    return [...open, ...hidden].map(runToJson);
   }
 
   function sendHub(fleetId: string, msg: object): boolean {
@@ -325,18 +397,8 @@ export function createRelayServer(opts: {
   });
 
   app.get("/mobile/workspaces", (c) => {
-    const fleet = (c as any).get("fleet") as { id: string; hub_online: number; workspaces: string };
-    const hubOffline = fleet.hub_online !== 1;
-    const raw = hubOffline ? [] : JSON.parse(fleet.workspaces || "[]") as WorkspaceSnap[];
-    const workspaces = raw.map((w) => ({
-      workspaceId: encodeWorkspaceId(w.machineId, w.workspaceRoot),
-      machineId: w.machineId,
-      workspaceRoot: w.workspaceRoot,
-      label: w.label || labelOf(w.workspaceRoot),
-      machineName: w.machineName || "",
-      os: w.os || "",
-      online: w.online !== false,
-    }));
+    const fleet = (c as any).get("fleet") as { id: string };
+    const { hubOffline, workspaces } = workspacesPayload(fleet.id);
     return c.json({ hubOffline, workspaces });
   });
 
@@ -371,6 +433,47 @@ export function createRelayServer(opts: {
     db.query("DELETE FROM push_tokens WHERE fleet_id=?1 AND token=?2").run(fleet.id, body.token);
     audit("operator", "push.delete", fleet.id, { token: body.token.slice(-8) });
     return c.body(null, 204);
+  });
+
+  app.get("/mobile/stream", (c) => {
+    const fleet = (c as any).get("fleet") as { id: string };
+    const signal = c.req.raw.signal;
+    const encoder = new TextEncoder();
+    let pingTimer: ReturnType<typeof setInterval> | null = null;
+    let client: SseClient | null = null;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        const send = (chunk: string) => {
+          try { controller.enqueue(encoder.encode(chunk)); } catch { /* closed */ }
+        };
+        const close = () => {
+          if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
+          if (client) { sseRemove(fleet.id, client); client = null; }
+          try { controller.close(); } catch { /* closed */ }
+        };
+        client = { send, close };
+        sseAdd(fleet.id, client);
+        send(sseEvent(workspacesPayload(fleet.id)));
+        for (const run of streamRuns(fleet.id)) send(sseEvent({ type: "run", run }));
+        pingTimer = setInterval(() => send(": ping\n\n"), ssePingMs);
+        const onAbort = () => close();
+        if (signal.aborted) onAbort();
+        else signal.addEventListener("abort", onAbort, { once: true });
+      },
+      cancel() {
+        if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
+        if (client) { sseRemove(fleet.id, client); client = null; }
+      },
+    });
+    return new Response(stream, {
+      status: 200,
+      headers: {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive",
+        "X-Accel-Buffering": "no",
+      },
+    });
   });
 
   app.post("/mobile/runs", async (c) => {
@@ -548,6 +651,7 @@ export function createRelayServer(opts: {
         const id = ws.data.fleetId!;
         hubSockets.set(id, { send: (s) => ws.send(s), ws });
         db.query("UPDATE fleets SET hub_online=1 WHERE id=?1").run(id);
+        emitWorkspaces(id);
       },
       message(ws, data) {
         const fleetId = ws.data.fleetId!;
@@ -572,6 +676,7 @@ export function createRelayServer(opts: {
           }
           }
           db.query("UPDATE fleets SET workspaces=?1 WHERE id=?2").run(JSON.stringify(slots), fleetId);
+          emitWorkspaces(fleetId);
         } else if (msg.type === "snap.run" && msg.run) {
           applyRunSnap(fleetId, msg.run);
         } else if (msg.type === "cmd.result" && msg.requestId) {
@@ -589,6 +694,7 @@ export function createRelayServer(opts: {
         if (cur?.ws !== ws) return;
         hubSockets.delete(id);
         db.query("UPDATE fleets SET hub_online=0 WHERE id=?1").run(id);
+        emitWorkspaces(id);
       },
     },
   });
@@ -599,6 +705,10 @@ export function createRelayServer(opts: {
     adminToken,
     createFleet,
     async flushApns() { await Promise.all([...runSend.values()]); },
-    stop() { server.stop(true); db.close(); },
+    stop() {
+      sseCloseAll();
+      server.stop(true);
+      db.close();
+    },
   };
 }
