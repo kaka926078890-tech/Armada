@@ -49,4 +49,4 @@ Write-Host "  CDP    : 127.0.0.1:$port（只绑本机，不对局域网开放）
 Write-Host "  工作区 : $ws"
 Write-Host "启动后约 15 秒，中台控制台左侧应出现本机绿点 + 该工作区。不要再双击图标开第二个 Cursor。"
 
-& $exe "--remote-debugging-port=$port" @args
+& $exe "--remote-debugging-port=$port" "--remote-debugging-address=127.0.0.1" @args

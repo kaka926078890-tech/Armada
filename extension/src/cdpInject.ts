@@ -1,8 +1,9 @@
 /**
  * CDP 注入:通过 Chromium 远程调试端口操作 composer DOM,实现全自动提交。
  *
- * 前提:Cursor 以 --remote-debugging-port 启动(见 scripts/armada-cursor.sh)。
+ * 前提:Cursor 以 --remote-debugging-port 与 --remote-debugging-address=127.0.0.1 启动(见 scripts/armada-cursor.sh)。
  * 端口只连 127.0.0.1;任何失败都返回 ok=false,由调用方降级到剪贴板+人工回车。
+ * 选窗见 pickCdpPage：文件夹名精确匹配，多窗口失败关闭。
  *
  * 真机实证(Cursor 3.15.19 / Electron 40)结论:
  * - composer 输入框: div.aislash-editor-input[contenteditable="true"](Agents 视图为 div.tiptap)
@@ -14,6 +15,8 @@
  * - 同窗多个 composer 时优先空框(当前对话非空时 els[0] 是旧框,会误跳过回车)。
  * - 草稿匹配认完整 prompt 后缀(剪贴板追加后 prompt 在末尾);禁止 16 字任意位置子串。
  */
+
+import { pickCdpPage } from "./cdpPage";
 
 export interface CdpSubmitResult {
   ok: boolean;
@@ -402,23 +405,16 @@ async function connectWorkspacePage(
 ): Promise<{ ok: true; session: CdpSession } | { ok: false; reason: string }> {
   const fetchJson = deps.fetchJson ?? defaultFetchJson;
   const connect = deps.connect ?? defaultConnect;
-  const log = deps.log ?? (() => {});
   let targets: any[];
   try {
     targets = await fetchJson(`http://127.0.0.1:${deps.port}/json`, 1500);
   } catch {
     return { ok: false, reason: "CDP_UNREACHABLE" };
   }
-  const base = workspaceRoot.split(/[\\/]/).filter(Boolean).pop() ?? workspaceRoot;
-  const pages = targets.filter(
-    (t) => t.type === "page" && typeof t.title === "string" && t.title.includes(base),
-  );
-  if (pages.length === 0) return { ok: false, reason: "WINDOW_TARGET_NOT_FOUND" };
-  if (pages.length > 1) log(`cdp ask: ${pages.length} page targets match "${base}", using first`);
-  const wsUrl = pages[0].webSocketDebuggerUrl;
-  if (typeof wsUrl !== "string" || !wsUrl) return { ok: false, reason: "NO_WS_URL" };
+  const picked = pickCdpPage(targets, workspaceRoot);
+  if (!picked.ok) return picked;
   try {
-    const session = await connect(wsUrl, 2000);
+    const session = await connect(picked.wsUrl, 2000);
     return { ok: true, session };
   } catch (e) {
     return { ok: false, reason: `CDP_CONNECT_FAIL:${String(e)}` };
@@ -531,34 +527,12 @@ export function createAskQuestionDriver(deps: CdpSubmitterDeps) {
 }
 
 export function createCdpSubmitter(deps: CdpSubmitterDeps) {
-  const fetchJson = deps.fetchJson ?? defaultFetchJson;
-  const connect = deps.connect ?? defaultConnect;
   const sleep = deps.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
-  const log = deps.log ?? (() => {});
 
   return async function submit(workspaceRoot: string, prompt: string): Promise<CdpSubmitResult> {
-    let targets: any[];
-    try {
-      targets = await fetchJson(`http://127.0.0.1:${deps.port}/json`, 1500);
-    } catch {
-      return { ok: false, reason: "CDP_UNREACHABLE" };
-    }
-    // 窗口标题含工作区文件夹名(VS Code 默认 window.title 格式),据此找到本窗口的 page target
-    const base = workspaceRoot.split(/[\\/]/).filter(Boolean).pop() ?? workspaceRoot;
-    const pages = targets.filter(
-      (t) => t.type === "page" && typeof t.title === "string" && t.title.includes(base),
-    );
-    if (pages.length === 0) return { ok: false, reason: "WINDOW_TARGET_NOT_FOUND" };
-    if (pages.length > 1) log(`cdp: ${pages.length} page targets match "${base}", using first`);
-    const wsUrl = pages[0].webSocketDebuggerUrl;
-    if (typeof wsUrl !== "string" || !wsUrl) return { ok: false, reason: "NO_WS_URL" };
-
-    let session: CdpSession;
-    try {
-      session = await connect(wsUrl, 2000);
-    } catch (e) {
-      return { ok: false, reason: `CDP_CONNECT_FAIL:${String(e)}` };
-    }
+    const hit = await connectWorkspacePage(deps, workspaceRoot);
+    if (!hit.ok) return hit;
+    const session = hit.session;
 
     try {
       // composer 在 newAgentChat 后异步挂载;同窗已有非空对话时要等到新空框出现,不能立刻 NON_EMPTY 放弃
@@ -616,8 +590,6 @@ export function createCdpSubmitter(deps: CdpSubmitterDeps) {
 export type ImagePasteStep = { bytes: Buffer; mime: string };
 
 export function createImagePaster(deps: CdpSubmitterDeps) {
-  const fetchJson = deps.fetchJson ?? defaultFetchJson;
-  const connect = deps.connect ?? defaultConnect;
   const sleep = deps.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
   const log = deps.log ?? (() => {});
   const meta = process.platform === "win32" ? 2 : 4;
@@ -629,26 +601,9 @@ export function createImagePaster(deps: CdpSubmitterDeps) {
     writeClipboard: (bytes: Buffer, mime: string) => void | Promise<void>,
     autoSubmit: boolean,
   ): Promise<CdpSubmitResult> {
-    let targets: any[];
-    try {
-      targets = await fetchJson(`http://127.0.0.1:${deps.port}/json`, 1500);
-    } catch {
-      return { ok: false, reason: "CDP_UNREACHABLE" };
-    }
-    const base = workspaceRoot.split(/[\\/]/).filter(Boolean).pop() ?? workspaceRoot;
-    const pages = targets.filter(
-      (t) => t.type === "page" && typeof t.title === "string" && t.title.includes(base),
-    );
-    if (pages.length === 0) return { ok: false, reason: "WINDOW_TARGET_NOT_FOUND" };
-    const wsUrl = pages[0].webSocketDebuggerUrl;
-    if (typeof wsUrl !== "string" || !wsUrl) return { ok: false, reason: "NO_WS_URL" };
-
-    let session: CdpSession;
-    try {
-      session = await connect(wsUrl, 2000);
-    } catch (e) {
-      return { ok: false, reason: `CDP_CONNECT_FAIL:${String(e)}` };
-    }
+    const hit = await connectWorkspacePage(deps, workspaceRoot);
+    if (!hit.ok) return hit;
+    const session = hit.session;
 
     try {
       let focused = false;
@@ -715,8 +670,6 @@ export function createImagePaster(deps: CdpSubmitterDeps) {
 }
 
 export function createFileMentionPaster(deps: CdpSubmitterDeps) {
-  const fetchJson = deps.fetchJson ?? defaultFetchJson;
-  const connect = deps.connect ?? defaultConnect;
   const sleep = deps.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
   const log = deps.log ?? (() => {});
 
@@ -724,26 +677,9 @@ export function createFileMentionPaster(deps: CdpSubmitterDeps) {
     workspaceRoot: string,
     needles: string[],
   ): Promise<CdpSubmitResult> {
-    let targets: any[];
-    try {
-      targets = await fetchJson(`http://127.0.0.1:${deps.port}/json`, 1500);
-    } catch {
-      return { ok: false, reason: "CDP_UNREACHABLE" };
-    }
-    const base = workspaceRoot.split(/[\\/]/).filter(Boolean).pop() ?? workspaceRoot;
-    const pages = targets.filter(
-      (t) => t.type === "page" && typeof t.title === "string" && t.title.includes(base),
-    );
-    if (pages.length === 0) return { ok: false, reason: "WINDOW_TARGET_NOT_FOUND" };
-    const wsUrl = pages[0].webSocketDebuggerUrl;
-    if (typeof wsUrl !== "string" || !wsUrl) return { ok: false, reason: "NO_WS_URL" };
-
-    let session: CdpSession;
-    try {
-      session = await connect(wsUrl, 2000);
-    } catch (e) {
-      return { ok: false, reason: `CDP_CONNECT_FAIL:${String(e)}` };
-    }
+    const hit = await connectWorkspacePage(deps, workspaceRoot);
+    if (!hit.ok) return hit;
+    const session = hit.session;
 
     try {
       let focused = false;
@@ -787,8 +723,6 @@ export function createFileMentionPaster(deps: CdpSubmitterDeps) {
 }
 
 export function createComposerFinisher(deps: CdpSubmitterDeps) {
-  const fetchJson = deps.fetchJson ?? defaultFetchJson;
-  const connect = deps.connect ?? defaultConnect;
   const sleep = deps.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
 
   return async function finish(
@@ -796,25 +730,9 @@ export function createComposerFinisher(deps: CdpSubmitterDeps) {
     prompt: string,
     autoSubmit: boolean,
   ): Promise<CdpSubmitResult> {
-    let targets: any[];
-    try {
-      targets = await fetchJson(`http://127.0.0.1:${deps.port}/json`, 1500);
-    } catch {
-      return { ok: false, reason: "CDP_UNREACHABLE" };
-    }
-    const base = workspaceRoot.split(/[\\/]/).filter(Boolean).pop() ?? workspaceRoot;
-    const pages = targets.filter(
-      (t) => t.type === "page" && typeof t.title === "string" && t.title.includes(base),
-    );
-    if (pages.length === 0) return { ok: false, reason: "WINDOW_TARGET_NOT_FOUND" };
-    const wsUrl = pages[0].webSocketDebuggerUrl;
-    if (typeof wsUrl !== "string" || !wsUrl) return { ok: false, reason: "NO_WS_URL" };
-    let session: CdpSession;
-    try {
-      session = await connect(wsUrl, 2000);
-    } catch (e) {
-      return { ok: false, reason: `CDP_CONNECT_FAIL:${String(e)}` };
-    }
+    const hit = await connectWorkspacePage(deps, workspaceRoot);
+    if (!hit.ok) return hit;
+    const session = hit.session;
     try {
       await session.call("Runtime.evaluate", {
         expression: `(${COMPOSER_FOCUS_IMAGE_JS})()`, returnByValue: true,

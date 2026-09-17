@@ -231,6 +231,38 @@ describe("createCdpSubmitter", () => {
     expect(r.reason).toBe("WINDOW_TARGET_NOT_FOUND");
   });
 
+  test("sibling folder title does not steal inject via includes()", async () => {
+    let used = "";
+    const submit = createCdpSubmitter(deps({
+      fetchJson: async () => [
+        { type: "page", title: "b.ts — armada-test-ws", webSocketDebuggerUrl: "ws://wrong" },
+        { type: "page", title: "a.ts — armada", webSocketDebuggerUrl: "ws://right" },
+      ],
+      connect: async (wsUrl) => {
+        used = wsUrl;
+        return mockSession(["OK", "OK", "OK"]);
+      },
+    }));
+    expect((await submit("/Users/x/armada", "hi")).ok).toBe(true);
+    expect(used).toBe("ws://right");
+  });
+
+  test("two windows of the same folder → WINDOW_TARGET_AMBIGUOUS", async () => {
+    let connected = 0;
+    const submit = createCdpSubmitter(deps({
+      fetchJson: async () => [
+        { type: "page", title: "a.ts — armada", webSocketDebuggerUrl: "ws://one" },
+        { type: "page", title: "b.ts — armada", webSocketDebuggerUrl: "ws://two" },
+      ],
+      connect: async () => {
+        connected += 1;
+        return mockSession(["OK", "OK", "OK"]);
+      },
+    }));
+    expect(await submit("/Users/x/armada", "hi")).toEqual({ ok: false, reason: "WINDOW_TARGET_AMBIGUOUS" });
+    expect(connected).toBe(0);
+  });
+
   test("happy path:focus → Input.insertText → 读回校验 → Enter", async () => {
     const log: CallLog[] = [];
     const submit = createCdpSubmitter(deps({ connect: async () => mockSession(["OK", "OK", "OK"], log) }));

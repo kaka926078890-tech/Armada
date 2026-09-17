@@ -24,4 +24,4 @@ if pgrep -x Cursor >/dev/null 2>&1; then
   exit 1
 fi
 
-exec open -na "Cursor" --args --remote-debugging-port="$PORT" "$@"
+exec open -na "Cursor" --args --remote-debugging-port="$PORT" --remote-debugging-address=127.0.0.1 "$@"
