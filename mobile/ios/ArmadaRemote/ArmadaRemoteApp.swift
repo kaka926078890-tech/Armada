@@ -187,7 +187,12 @@ final class Session: ObservableObject {
             async let h = api.runs(archived: true)
             let ws = try await w
             let newRuns = try await r
-            let newHidden = try await h
+            let newHidden: [RunDTO]
+            do {
+                newHidden = try await h
+            } catch {
+                newHidden = hiddenRuns
+            }
             guard seq == refreshSeq else { return }
             if hubOffline != ws.hubOffline { hubOffline = ws.hubOffline }
             if workspaces != ws.workspaces { workspaces = ws.workspaces }

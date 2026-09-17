@@ -515,7 +515,7 @@ export function createRelayServer(opts: {
   app.get("/mobile/runs", (c) => {
     const fleet = (c as any).get("fleet") as { id: string };
     const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 50) || 50, 1), 50);
-    const hidden = c.req.query("archived") === "1";
+    const hidden = c.req.query("view") === "hidden" || c.req.query("archived") === "1";
     const filter = hidden ? "AND archived_at IS NOT NULL" : "AND archived_at IS NULL";
     const rows = db.query(`SELECT * FROM runs WHERE fleet_id=?1 ${filter} ORDER BY updated_at DESC LIMIT ?2`).all(fleet.id, limit);
     return c.json({ runs: rows.map(runToJson) });

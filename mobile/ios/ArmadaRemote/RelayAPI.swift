@@ -234,9 +234,9 @@ actor RelayAPI {
 
     func runs(limit: Int = 50, archived: Bool = false) async throws -> [RunDTO] {
         struct Wrap: Decodable { var runs: [RunDTO] }
-        let q = archived ? "&archived=1" : ""
+        let q = archived ? "&view=hidden" : ""
         let w: Wrap = try await get("/mobile/runs?limit=\(limit)\(q)")
-        return w.runs
+        return archived ? w.runs.filter(\.isArchived) : w.runs.filter { !$0.isArchived }
     }
 
     func run(id: String) async throws -> RunDTO {

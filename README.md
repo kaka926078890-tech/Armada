@@ -535,7 +535,7 @@ Token **仅** query 鉴权；消息体不再带 token。连上后 10s 内必须 
 | --- | --- | --- |
 | GET | `/health` | 中转健康检查（无需令牌） |
 | GET | `/mobile/workspaces` | 已打开的仓；`hubOffline` 时列表为空 |
-| GET | `/mobile/runs` | 快照列表（默认非隐藏；`?archived=1` 仅已隐藏） |
+| GET | `/mobile/runs` | 快照列表（默认非隐藏；`?view=hidden` 仅已隐藏；`?archived=1` 仍兼容） |
 | GET | `/mobile/runs/:id` | 含 `finalText`、`pendingAsk`；已隐藏仍返回 |
 | POST | `/mobile/runs` | 新派发 |
 | POST | `/mobile/runs/:id/followup` | 续聊同一对话 |
