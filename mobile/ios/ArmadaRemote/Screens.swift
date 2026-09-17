@@ -57,6 +57,12 @@ func statusColor(_ status: String) -> Color {
     }
 }
 
+let detailPromptMaxHeight: CGFloat = 180
+
+func detailPromptShownHeight(_ contentHeight: CGFloat, cap: CGFloat = detailPromptMaxHeight) -> CGFloat {
+    min(max(contentHeight, 24), cap)
+}
+
 struct UnreadBadge: View {
     let count: Int
     var body: some View {
@@ -432,6 +438,87 @@ struct DispatchSheet: View {
     }
 }
 
+struct DetailPromptCard: View {
+    let text: String
+    @Binding var contentHeight: CGFloat
+    @State private var expanded = false
+
+    private var overflows: Bool { contentHeight > detailPromptMaxHeight }
+    private var shownHeight: CGFloat {
+        expanded ? max(contentHeight, 24) : detailPromptShownHeight(contentHeight)
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            Color.accentColor.frame(width: 3)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("提示词")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    if overflows {
+                        Button(expanded ? "收起" : "展开") {
+                            withAnimation(.easeInOut(duration: 0.2)) { expanded.toggle() }
+                        }
+                        .font(.caption.weight(.semibold))
+                    }
+                }
+                MarkdownWebView(text: text, height: $contentHeight)
+                    .frame(height: shownHeight, alignment: .top)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .clipped()
+                    .overlay(alignment: .bottom) {
+                        if overflows && !expanded {
+                            LinearGradient(
+                                colors: [
+                                    Color(.secondarySystemBackground).opacity(0),
+                                    Color(.secondarySystemBackground),
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                            .frame(height: 36)
+                            .allowsHitTesting(false)
+                        }
+                    }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .onChange(of: text) { _, _ in expanded = false }
+    }
+}
+
+struct DetailReplyBlock: View {
+    let text: String?
+    let isLive: Bool
+    @Binding var height: CGFloat
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Text("回复")
+                    .font(.subheadline.weight(.semibold))
+                Rectangle()
+                    .fill(Color.primary.opacity(0.12))
+                    .frame(height: 1)
+            }
+            if let text, !text.isEmpty {
+                MarkdownWebView(text: text, height: $height)
+                    .frame(height: max(height, 80))
+            } else if isLive {
+                Text("还没有终态正文").foregroundStyle(.secondary)
+            } else {
+                Text("没有正文").foregroundStyle(.secondary)
+            }
+        }
+        .padding(.top, 8)
+    }
+}
+
 struct RunDetailView: View {
     @EnvironmentObject var session: Session
     let runId: String
@@ -464,17 +551,8 @@ struct RunDetailView: View {
                         .font(.subheadline)
                     Text(run.workspaceRoot).font(.caption).foregroundStyle(.secondary)
                     if let e = run.displayError { Text(e).foregroundStyle(.red) }
-                    MarkdownWebView(text: run.prompt, height: $promptHeight)
-                        .frame(height: max(promptHeight, 24))
-                    Divider()
-                    if let text = run.finalText, !text.isEmpty {
-                        MarkdownWebView(text: text, height: $mdHeight)
-                            .frame(height: max(mdHeight, 80))
-                    } else if run.isLive {
-                        Text("还没有终态正文").foregroundStyle(.secondary)
-                    } else {
-                        Text("没有正文").foregroundStyle(.secondary)
-                    }
+                    DetailPromptCard(text: run.prompt, contentHeight: $promptHeight)
+                    DetailReplyBlock(text: run.finalText, isLive: run.isLive, height: $mdHeight)
                     if let ask = run.pendingAsk {
                         AskView(runId: runId, ask: ask) { await reload() }
                     }
