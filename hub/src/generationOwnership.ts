@@ -68,6 +68,8 @@ export type StopInput = {
   liveTurnSettled?: boolean;
   /** Cursor queue still has unconsumed follow-ups (`run_outbound.state=queued`). */
   hasOutstandingOutbound?: boolean;
+  /** Child jsonl still open (`subagent-transcript` without `turn_ended`). */
+  hasOutstandingBackground?: boolean;
   /** `completed`/`success` may drain; abort/error still apply. */
   stopStatus?: unknown;
 };

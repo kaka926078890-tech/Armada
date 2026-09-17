@@ -62,6 +62,33 @@ describe("decideArm", () => {
       action: "rearm", gen: G, retire: GOLD,
     });
   });
+
+  // r-43b92cc0 17:05:25: protocol resume has no BSP. UUID preToolUse rearms;
+  // afterAgentThought and sidecar suffix gens must not.
+  const G2 = "012de2b6-ebc5-4846-b36b-17c0f54b82df";
+  const G1 = "6da7b38e-c959-461a-bb2d-b97197179771";
+  const SIDECAR = "012de2b6-ebc5-4846-b36b-17c0f54b82df-0-6k9b";
+  const resume = {
+    ...base,
+    generationId: G2,
+    liveGenerationId: G1,
+  };
+  test("owner-cid UUID preToolUse rearms and retires the drained parent gen", () => {
+    expect(decideArm({ ...resume, hookEventName: "preToolUse" })).toEqual({
+      action: "rearm", gen: G2, retire: G1,
+    });
+  });
+  test("afterAgentThought does not arm, even with a UUID gen", () => {
+    const d = decideArm({ ...resume, hookEventName: "afterAgentThought" });
+    expect(d.action).toBe("skip");
+  });
+  test("sidecar suffix preToolUse does not rearm (r-43b92cc0 -0-6k9b)", () => {
+    const d = decideArm({
+      ...resume, hookEventName: "preToolUse", generationId: SIDECAR,
+    });
+    expect(d.action).toBe("skip");
+    expect(d).toMatchObject({ reason: "sidecar_gen" });
+  });
 });
 
 describe("decideStop", () => {
@@ -116,5 +143,16 @@ describe("decideStop", () => {
     expect(decideStop({ ...base, hasOutstandingOutbound: true, stopStatus: "error" })).toEqual({ action: "apply" });
     expect(decideStop({ ...base, hasOutstandingOutbound: true, stopStatus: "completed" }))
       .toEqual({ action: "ignore", audit: "QUEUE_DRAIN" });
+  });
+  test("open child jsonl turns matching completed into BG_DRAIN, including STOP_SESSION_GEN", () => {
+    expect(decideStop({ ...base, hasOutstandingBackground: true }))
+      .toEqual({ action: "ignore", audit: "BG_DRAIN" });
+    const sidecar = { ...base, stopGenerationId: "6ff69bf9-237c-45c6-a7fb-a77b554fb0cb", liveGenerationId: G };
+    expect(decideStop({ ...sidecar, liveTurnSettled: true, hasOutstandingBackground: true }))
+      .toEqual({ action: "ignore", audit: "BG_DRAIN" });
+  });
+  test("open child jsonl does not block aborted or error", () => {
+    expect(decideStop({ ...base, hasOutstandingBackground: true, stopStatus: "aborted" })).toEqual({ action: "apply" });
+    expect(decideStop({ ...base, hasOutstandingBackground: true, stopStatus: "error" })).toEqual({ action: "apply" });
   });
 });

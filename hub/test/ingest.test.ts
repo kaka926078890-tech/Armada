@@ -137,6 +137,118 @@ describe("event ingest", () => {
     ws.close();
   });
 
+  test("r-43b92cc0: matching stop while child jsonl is open stays running", async () => {
+    const { ws, api, runId } = await startBoundRun();
+    const live = "6da7b38e-c959-461a-bb2d-b97197179771";
+    const child = "3bbb8d10-f709-49c6-9e4d-dcca569d5e75";
+    ws.send(JSON.stringify(ev(runId, 1, "beforeSubmitPrompt", {
+      conversation_id: "cid-1", generation_id: live,
+      prompt: "一直使用subagent的方式处理到所有功能完整落地",
+    })));
+    ws.send(JSON.stringify({
+      type: "run.event", runId, source: "subagent-transcript", seq: 2, ts: Date.now(),
+      payload: {
+        __subagent_cid: child,
+        role: "assistant",
+        message: { content: [{ type: "text", text: "landing P3 select" }] },
+      },
+    }));
+    ws.send(JSON.stringify(ev(runId, 3, "stop", {
+      status: "completed", conversation_id: "cid-1", generation_id: live,
+    })));
+    await new Promise((r) => setTimeout(r, 120));
+    const after = (await (await api(`/api/runs/${runId}`)).json()) as any;
+    expect(after.status).toBe("running");
+    expect(after.live_generation_id).toBe(live);
+    ws.close();
+  });
+
+  test("r-43b92cc0: protocol resume rearms UUID preToolUse; G1 stops never complete; G2 stop does", async () => {
+    // Real 17:01–17:05 (cid 967d9a8d): parent turn_ended while child jsonl
+    // still open, Cursor injected the protocol user_query, a second G1 stop
+    // arrived, thought sidecar 012de2b6-…-0-6k9b, then preToolUse 012de2b6.
+    const G1 = "6da7b38e-c959-461a-bb2d-b97197179771";
+    const G2 = "012de2b6-ebc5-4846-b36b-17c0f54b82df";
+    const sidecar = "012de2b6-ebc5-4846-b36b-17c0f54b82df-0-6k9b";
+    const c1 = "3bbb8d10-f709-49c6-9e4d-dcca569d5e75";
+    const c2 = "f5b0c75c-3386-4c94-8817-088291123123";
+    const { ws, api, runId } = await startBoundRun();
+    const snap = async () => (await (await api(`/api/runs/${runId}`)).json()) as any;
+
+    ws.send(JSON.stringify(ev(runId, 1, "beforeSubmitPrompt", {
+      conversation_id: "cid-1", generation_id: G1, prompt: "一直使用subagent的方式",
+    })));
+    ws.send(JSON.stringify({
+      type: "run.event", runId, source: "subagent-transcript", seq: 2, ts: Date.now(),
+      payload: { __subagent_cid: c1, role: "assistant", message: { content: [{ type: "text", text: "P3" }] } },
+    }));
+    ws.send(JSON.stringify({
+      type: "run.event", runId, source: "subagent-transcript", seq: 3, ts: Date.now(),
+      payload: { __subagent_cid: c2, role: "assistant", message: { content: [{ type: "text", text: "P6" }] } },
+    }));
+    ws.send(JSON.stringify(ev(runId, 4, "stop", {
+      status: "completed", conversation_id: "cid-1", generation_id: G1,
+    })));
+    await new Promise((r) => setTimeout(r, 100));
+    expect((await snap()).status).toBe("running");
+
+    ws.send(JSON.stringify({
+      type: "run.event", runId, source: "subagent-transcript", seq: 5, ts: Date.now(),
+      payload: { type: "turn_ended", status: "success", __subagent_cid: c1 },
+    }));
+    ws.send(JSON.stringify({
+      type: "run.event", runId, source: "subagent-transcript", seq: 6, ts: Date.now(),
+      payload: { type: "turn_ended", status: "success", __subagent_cid: c2 },
+    }));
+    ws.send(JSON.stringify({
+      type: "run.event", runId, source: "transcript", seq: 7, ts: Date.now(),
+      payload: {
+        role: "user",
+        message: { content: [{ type: "text", text: "<timestamp>Thursday, Sep 17, 2026, 5:02 PM (UTC+8)</timestamp>\n\n<user_query>Perform any necessary follow-up actions in response to the subagent completion above. If no follow-up work is needed, no further action is required.</user_query>" }] },
+      },
+    }));
+    ws.send(JSON.stringify(ev(runId, 8, "stop", {
+      status: "completed", conversation_id: "cid-1", generation_id: G1,
+    })));
+    await new Promise((r) => setTimeout(r, 120));
+    expect((await snap()).status).toBe("running");
+    expect((await snap()).live_generation_id).toBe(G1);
+
+    ws.send(JSON.stringify(ev(runId, 9, "afterAgentThought", {
+      conversation_id: "cid-1", generation_id: sidecar,
+      text: "Checking whether any follow-up work is needed after the subagent completion.",
+    })));
+    ws.send(JSON.stringify(ev(runId, 10, "afterAgentThought", {
+      conversation_id: "cid-1", generation_id: G2,
+      text: "Checking whether any follow-up work is needed.",
+    })));
+    await new Promise((r) => setTimeout(r, 80));
+    expect((await snap()).live_generation_id).toBe(G1);
+
+    ws.send(JSON.stringify(ev(runId, 11, "preToolUse", {
+      conversation_id: "cid-1", generation_id: G2, tool_name: "Read",
+    })));
+    await new Promise((r) => setTimeout(r, 100));
+    const armed = await snap();
+    expect(armed.status).toBe("running");
+    expect(armed.live_generation_id).toBe(G2);
+
+    ws.send(JSON.stringify(ev(runId, 12, "stop", {
+      status: "completed", conversation_id: "cid-1", generation_id: G1,
+    })));
+    await new Promise((r) => setTimeout(r, 80));
+    expect((await snap()).status).toBe("running");
+
+    ws.send(JSON.stringify(ev(runId, 13, "stop", {
+      status: "completed", conversation_id: "cid-1", generation_id: G2,
+    })));
+    await new Promise((r) => setTimeout(r, 120));
+    const done = await snap();
+    expect(done.status).toBe("completed");
+    expect(done.live_generation_id).toBeNull();
+    ws.close();
+  });
+
   test("after completed stop, later transcript assistant still stores (background Task follow-up)", async () => {
     const { ws, api, runId } = await startBoundRun();
     ws.send(JSON.stringify(ev(runId, 1, "stop", { status: "completed", conversation_id: "cid-1" })));
