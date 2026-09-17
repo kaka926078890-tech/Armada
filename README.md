@@ -90,7 +90,7 @@
 | **desktop-core** | `desktop-core/` | 加入 URI、发现解析、与壳共享的纯逻辑 |
 | **hub** | `hub/` | 鉴权、机器注册、run 状态机、事件 ingest、审计、静态托管看板 |
 | **relay** | `relay/` | 自建中转：签发 pair/op 邀请、缓存仓与 run 快照、把 App 命令转给已连接的中台 |
-| **mobile** | `mobile/ios/` | iOS 遥控器：绑 op、按机器选仓、派发/续聊/答 Ask（不直连 7380） |
+| **mobile** | `mobile/ios/`、`mobile/android/` | iOS / Android 遥控器：绑 op、按机器选仓、派发/续聊/答 Ask（不直连 7380） |
 | **extension** | `extension/` | Cursor 侧 WS 客户端：注册/心跳、注入 prompt、绑定 conversation、上报事件 |
 | **hooks** | `hooks/` | 把 Cursor hook 事件落盘到 spool，供扩展轮询上报 |
 | **web** | `hub/web/` | 看板 UI：机器树、五列看板、详情抽屉、SSE 刷新 |
@@ -163,7 +163,7 @@ App  --HTTPS-->  中转  <--出站 WSS--  中台  <--局域网--  受控 Cursor
 | 邀请 | 给谁 | 令牌 |
 | --- | --- | --- |
 | `armada-relay://pair?relay=…&fleet=…&code=…` | 中台 | 一次性 `code`（24h / 用过即废），兑成 `hub_secret` 后写出 `relay.json` |
-| `armada-relay://op?relay=…&fleet=…&token=…` | iOS App | `token`，调 `/mobile/*` |
+| `armada-relay://op?relay=…&fleet=…&token=…` | iOS / Android App | `token`，调 `/mobile/*` |
 
 两条令牌不能互换。App **只绑中转**，看不到中台局域网 token。谁拿着已兑换的 `hub_secret` 连上，中转就认谁是这支远程舰队的中台（同一 `fleet` 同时只留一条中台连接）。pair 链接里的 `code` 只能兑一次，截图过期后不能冒充中台。公网 `relay` 必须是 **https**（模拟器可用 `http://127.0.0.1`）。不要把 `7380` 用 frp/Funnel 映射到公网。
 
@@ -205,10 +205,11 @@ bun run dev:relay-attach
 
 ### 手机绑 op
 
-1. Xcode 打开 `mobile/ios/ArmadaRemote.xcodeproj`，模拟器或真机跑 **ArmadaRemote**（Bundle ID `app.armada.remote`）。
-2. 粘贴 **op** 邀请（不要贴 pair）。
-3. 舰队页按 **机器 → 工作区**；点仓看五列任务；仓顶栏 **派发** 新开对话，详情 **续聊** 同一对话。绑定后会申请通知权限；锁屏 Ask / 完成 / 失败由中转代发 APNs（点通知进详情强制 GET）。
-4. Agent 选择题在详情里 Continue / Skip。终态正文是这一轮助手回复，不是整段 Cursor 会话。
+1. **iOS：** Xcode 打开 `mobile/ios/ArmadaRemote.xcodeproj`，模拟器或真机跑 **ArmadaRemote**（Bundle ID `app.armada.remote`）。
+2. **Android：** `mobile/android` 打 debug APK（见 [`mobile/android/README.md`](mobile/android/README.md)）；模拟器中转填 `http://10.0.2.2:8780`。
+3. 粘贴 **op** 邀请（不要贴 pair）。
+4. 舰队页按 **机器 → 工作区**；点仓看五列任务；仓顶栏 **派发** 新开对话，详情 **续聊** 同一对话。绑定后会申请通知权限；锁屏 Ask / 完成 / 失败由中转代发 APNs（iOS）或 FCM（Android）（点通知进详情强制 GET）。
+5. Agent 选择题在详情里 Continue / Skip。终态正文是这一轮助手回复，不是整段 Cursor 会话。
 
 一部手机目前只绑一条 op（一台在线中台）。多台受控机只要登记在这台中台上，选不同仓即可分别派。多部手机可贴同一条 op，共用操作者令牌。
 
@@ -222,6 +223,14 @@ RELAY_APNS_TEAM_ID=LW2A4J4KKG
 ```
 
 也可以直接 `export` 上述变量。缺任一项时中转打 `APNS_DISABLED`，锁屏无推送；前台仍走 SSE（失败才轮询）。App ID 打开 Push Notifications 即可，**不要**再配 Push SSL 证书（token 认证用 `.p8`）。打 TestFlight 必须走 `mobile/ios/scripts/archive-testflight.sh`：未签名归档要先 ad-hoc 签上 `aps-environment=production`，否则云签名会打出没有 Push 的包。模拟器没有 device token。**公网中转**（App 连的那台）也要放同一份文件并重启，只放开发机不会给手机推。
+
+Android 锁屏走 **FCM**。中转机另配服务账号 JSON：
+
+```bash
+RELAY_FCM_SERVICE_ACCOUNT_PATH=/Users/you/.armada-relay/fcm-sa.json
+```
+
+缺文件时打 `FCM_DISABLED`，不影响 APNs。客户端 `POST /mobile/push-token` 带 `platform=fcm`。旧 iOS 包不带 `platform` 仍登记为 APNs。
 
 ### 不要做
 
@@ -543,7 +552,7 @@ Token **仅** query 鉴权；消息体不再带 token。连上后 10s 内必须 
 | POST | `/mobile/runs/:id/cancel` | 取消 |
 | POST | `/mobile/runs/:id/archive` | 从列表隐藏（数据保留） |
 | POST | `/mobile/runs/:id/unarchive` | 取消隐藏 |
-| POST | `/mobile/push-token` | 登记 APNs device token（64 hex，`environment=production`）→ 204 |
+| POST | `/mobile/push-token` | 登记推送 token。缺 `platform` 视为 `apns`（64 hex）；`platform=fcm` 为 FCM 注册串 → 204 |
 | DELETE | `/mobile/push-token` | 解绑该 token；不存在也 204 |
 
 常见错误码：`MACHINE_OFFLINE`、`WORKSPACE_NOT_OPEN`、`RUN_LIMIT`、`PROMPT_COLLISION`、`CONVERSATION_BUSY`、`INJECT_SLOT_BUSY`、`OUTBOUND_LIMIT`、`OUTBOUND_TEXT_ONLY`、`WINDOW_BUSY`、`NOT_FOUND`、`INVALID_STATE`、`NO_CONVERSATION`、`IMAGE_PASTE_FAILED`、`FILE_MENTION_FAILED`、`ATTACHMENT_TOO_LARGE`、`ASK_IN_FLIGHT`、`HUB_OFFLINE`、`OPERATOR_REQUIRED`、`HUB_REQUIRED`。
@@ -581,13 +590,14 @@ hub 静态托管路径相对 `hub/src`，**请从仓库根**执行 `bun run dev:
 | 项 | 打算做 |
 | --- | --- |
 | **中转管理页 / 中台贴 pair** | 现在只有 CLI 与 `relay.json`；看板里还没有粘贴框 |
-| **App 通道** | 前台 `GET /mobile/stream` SSE；断线才退避轮询；进后台停；锁屏 Ask/完成由中转代发生产 APNs（无 `.p8` 则 no-op） |
+| **App 通道** | 前台 `GET /mobile/stream` SSE；断线才退避轮询；进后台停；锁屏 Ask/完成由中转代发生产 APNs / FCM（无密钥则 no-op） |
 | **多操作者 / 一部手机多中台** | v1 一条 op 对应一台在线中台；令牌轮换另开闸 |
 | **多机互联 · 团队协作** | 多台机器组成协作网，不只局域网点对点加入：团队共享舰队、一起派发和盯进度 |
 
 ## 设计文档
 
 - 中转 + iOS：[docs/superpowers/specs/2026-09-12-armada-relay-mobile-design.md](docs/superpowers/specs/2026-09-12-armada-relay-mobile-design.md)
+- Android 遥控器：[docs/superpowers/specs/2026-09-17-armada-android-app-design.md](docs/superpowers/specs/2026-09-17-armada-android-app-design.md)
 - App 任务隐藏：[docs/superpowers/specs/2026-09-16-armada-app-run-hide-design.md](docs/superpowers/specs/2026-09-16-armada-app-run-hide-design.md)
 - App 可见 APNs：[docs/superpowers/specs/2026-09-16-armada-app-push-design.md](docs/superpowers/specs/2026-09-16-armada-app-push-design.md)
 - 局域网发现：[docs/superpowers/specs/2026-09-07-armada-lan-fleet-discovery-design.md](docs/superpowers/specs/2026-09-07-armada-lan-fleet-discovery-design.md)

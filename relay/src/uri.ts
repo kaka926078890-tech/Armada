@@ -7,7 +7,7 @@ const FLEET_RE = /^[a-z0-9-]{8,64}$/;
 const HEX64 = /^[a-f0-9]{64}$/;
 
 function isLoopback(hostname: string): boolean {
-  return hostname === "127.0.0.1" || hostname === "localhost";
+  return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "10.0.2.2";
 }
 
 /** Production requires https. Loopback http is allowed so the iOS Simulator can hit a local relay. */

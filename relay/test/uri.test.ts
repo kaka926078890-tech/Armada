@@ -34,6 +34,11 @@ describe("parseRelayUri", () => {
     expect(parseRelayUri(uri)).toMatchObject({ kind: "pair", relay: "http://127.0.0.1:8780", fleet: FLEET });
   });
 
+  test("allows Android emulator host http", () => {
+    const uri = formatOpUri("http://10.0.2.2:8780", FLEET, TOKEN);
+    expect(parseRelayUri(uri)).toMatchObject({ kind: "op", relay: "http://10.0.2.2:8780", fleet: FLEET, token: TOKEN });
+  });
+
   test("rejects missing fields", () => {
     expect(parseRelayUri("armada-relay://pair?relay=https://r.example&fleet=x")).toEqual({ error: "incomplete" });
     expect(parseRelayUri(`armada-relay://op?relay=${encodeURIComponent(RELAY)}&fleet=${FLEET}`)).toEqual({ error: "incomplete" });

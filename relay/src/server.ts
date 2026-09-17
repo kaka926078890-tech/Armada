@@ -5,6 +5,7 @@ import { Hono } from "hono";
 import { openRelayDb } from "./db";
 import { decodeWorkspaceId, encodeWorkspaceId, formatOpUri, formatPairUri } from "./uri";
 import { createApnsSender, type ApnsConfig } from "./apns";
+import { createFcmSender, isFcmToken, type FcmConfig } from "./fcm";
 import { notifyEdges, type NotifyEdge } from "./notifyEdge";
 
 export const PROTOCOL_VERSION = 1;
@@ -92,6 +93,7 @@ export function createRelayServer(opts: {
   publicBase: string;
   adminToken?: string;
   apns?: ApnsConfig | null;
+  fcm?: FcmConfig | null;
   ssePingMs?: number;
 }): RelayServer {
   const home = opts.home ?? join(process.env.HOME!, ".armada-relay");
@@ -105,6 +107,8 @@ export function createRelayServer(opts: {
   let reqSeq = 0;
   const apnsSender = createApnsSender(opts.apns ?? null);
   if (!apnsSender.enabled) console.warn("armada-relay APNS_DISABLED");
+  const fcmSender = createFcmSender(opts.fcm ?? null);
+  if (!fcmSender.enabled) console.warn("armada-relay FCM_DISABLED");
   const runSend = new Map<string, Promise<void>>();
   let fleetInflight = 0;
   const ssePingMs = Math.max(20, opts.ssePingMs ?? 25_000);
@@ -150,23 +154,30 @@ export function createRelayServer(opts: {
   }
 
   function dispatchEdges(fleetId: string, runId: string, edges: NotifyEdge[]) {
-    if (!apnsSender.enabled || edges.length === 0) return;
-    const tokens = db.query("SELECT token FROM push_tokens WHERE fleet_id=?1").all(fleetId) as { token: string }[];
+    if (edges.length === 0) return;
+    if (!apnsSender.enabled && !fcmSender.enabled) return;
+    const tokens = db.query("SELECT token, platform FROM push_tokens WHERE fleet_id=?1").all(fleetId) as { token: string; platform?: string }[];
     if (tokens.length === 0) return;
     enqueueRun(runId, async () => {
       for (const edge of edges) {
-        for (const { token } of tokens) {
+        for (const row of tokens) {
+          const platform = row.platform === "fcm" ? "fcm" : "apns";
+          if (platform === "apns" && !apnsSender.enabled) continue;
+          if (platform === "fcm" && !fcmSender.enabled) continue;
           while (fleetInflight >= 20) await new Promise((r) => setTimeout(r, 20));
           fleetInflight++;
           try {
-            const result = await apnsSender.send(token, runId, edge);
-            const tail = token.slice(-8);
-            if (result === "ok") audit("relay", "apns.ok", runId, { token: tail, kind: edge.kind });
+            const result = platform === "fcm"
+              ? await fcmSender.send(row.token, runId, edge)
+              : await apnsSender.send(row.token, runId, edge);
+            const tail = row.token.slice(-8);
+            const kind = platform === "fcm" ? "fcm" : "apns";
+            if (result === "ok") audit("relay", `${kind}.ok`, runId, { token: tail, kind: edge.kind });
             else if (result === "unregistered") {
-              db.query("DELETE FROM push_tokens WHERE fleet_id=?1 AND token=?2").run(fleetId, token);
-              audit("relay", "apns.unregistered", runId, { token: tail });
-            } else if (result === "too_large") audit("relay", "apns.payload_too_large", runId, { token: tail, kind: edge.kind });
-            else if (result === "fail") audit("relay", "apns.fail", runId, { token: tail, kind: edge.kind });
+              db.query("DELETE FROM push_tokens WHERE fleet_id=?1 AND token=?2").run(fleetId, row.token);
+              audit("relay", `${kind}.unregistered`, runId, { token: tail });
+            } else if (result === "too_large") audit("relay", `${kind}.payload_too_large`, runId, { token: tail, kind: edge.kind });
+            else if (result === "fail") audit("relay", `${kind}.fail`, runId, { token: tail, kind: edge.kind });
           } finally {
             fleetInflight--;
           }
@@ -407,27 +418,29 @@ export function createRelayServer(opts: {
   app.post("/mobile/push-token", async (c) => {
     const fleet = (c as any).get("fleet") as { id: string };
     const body = await c.req.json().catch(() => null);
-    if (!body || typeof body.token !== "string" || !TOKEN_HEX.test(body.token)) {
-      return c.json({ error: "INVALID" }, 400);
-    }
+    if (!body || typeof body.token !== "string") return c.json({ error: "INVALID" }, 400);
     if (body.environment !== "production") return c.json({ error: "INVALID" }, 400);
-    db.query(`INSERT INTO push_tokens (token, fleet_id, environment, updated_at) VALUES (?1,?2,'production',?3)
-      ON CONFLICT(fleet_id, token) DO UPDATE SET updated_at=excluded.updated_at`)
-      .run(body.token, fleet.id, Date.now());
+    const platform = body.platform == null || body.platform === "" ? "apns" : body.platform;
+    if (platform !== "apns" && platform !== "fcm") return c.json({ error: "INVALID" }, 400);
+    if (platform === "apns" && !TOKEN_HEX.test(body.token)) return c.json({ error: "INVALID" }, 400);
+    if (platform === "fcm" && !isFcmToken(body.token)) return c.json({ error: "INVALID" }, 400);
+    db.query(`INSERT INTO push_tokens (token, fleet_id, environment, platform, updated_at) VALUES (?1,?2,'production',?3,?4)
+      ON CONFLICT(fleet_id, token) DO UPDATE SET updated_at=excluded.updated_at, platform=excluded.platform`)
+      .run(body.token, fleet.id, platform, Date.now());
     const extra = db.query("SELECT token FROM push_tokens WHERE fleet_id=?1 ORDER BY updated_at ASC").all(fleet.id) as { token: string }[];
     if (extra.length > 20) {
       for (const row of extra.slice(0, extra.length - 20)) {
         db.query("DELETE FROM push_tokens WHERE fleet_id=?1 AND token=?2").run(fleet.id, row.token);
       }
     }
-    audit("operator", "push.register", fleet.id, { token: body.token.slice(-8) });
+    audit("operator", "push.register", fleet.id, { token: body.token.slice(-8), platform });
     return c.body(null, 204);
   });
 
   app.delete("/mobile/push-token", async (c) => {
     const fleet = (c as any).get("fleet") as { id: string };
     const body = await c.req.json().catch(() => null);
-    if (!body || typeof body.token !== "string" || !TOKEN_HEX.test(body.token)) {
+    if (!body || typeof body.token !== "string" || !(TOKEN_HEX.test(body.token) || isFcmToken(body.token))) {
       return c.json({ error: "INVALID" }, 400);
     }
     db.query("DELETE FROM push_tokens WHERE fleet_id=?1 AND token=?2").run(fleet.id, body.token);

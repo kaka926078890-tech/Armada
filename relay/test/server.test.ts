@@ -6,6 +6,7 @@ import { join } from "path";
 import { createRelayServer, type RelayServer } from "../src/server";
 import { encodeWorkspaceId, parseRelayUri } from "../src/uri";
 import type { ApnsConfig, ApnsPost } from "../src/apns";
+import type { FcmConfig, FcmPost } from "../src/fcm";
 
 let srv: RelayServer | null = null;
 afterEach(() => { srv?.stop(); srv = null; });
@@ -18,7 +19,19 @@ function dummyApns(post: ApnsPost): ApnsConfig {
   return { keyPath, keyId: "KEYID", teamId: "LW2A4J4KKG", retryDelays: [], post };
 }
 
-function start(extra?: { home?: string; apns?: ApnsConfig | null; ssePingMs?: number }) {
+function dummyFcm(post: FcmPost): FcmConfig {
+  const dir = mkdtempSync(join(tmpdir(), "armada-fcm-"));
+  const serviceAccountPath = join(dir, "sa.json");
+  writeFileSync(serviceAccountPath, JSON.stringify({
+    type: "service_account",
+    project_id: "armada-remote",
+    client_email: "relay@armada-remote.iam.gserviceaccount.com",
+    private_key: "-----BEGIN PRIVATE KEY-----\nMIIB\n-----END PRIVATE KEY-----\n",
+  }));
+  return { serviceAccountPath, retryDelays: [], accessToken: "tok", post };
+}
+
+function start(extra?: { home?: string; apns?: ApnsConfig | null; fcm?: FcmConfig | null; ssePingMs?: number }) {
   const home = extra?.home ?? mkdtempSync(join(tmpdir(), "armada-relay-"));
   srv = createRelayServer({
     port: 0,
@@ -27,6 +40,7 @@ function start(extra?: { home?: string; apns?: ApnsConfig | null; ssePingMs?: nu
     publicBase: "http://127.0.0.1:8780",
     adminToken: "adm-test",
     apns: extra?.apns,
+    fcm: extra?.fcm,
     ssePingMs: extra?.ssePingMs,
   });
   return srv;
@@ -765,6 +779,98 @@ describe("relay APNs", () => {
       body: JSON.stringify({ token: TOKEN_A }),
     });
     expect(gone.status).toBe(204);
+    ws.close();
+  });
+});
+
+const FCM_TOKEN = "dGVzdDp0b2tlbi1mb3ItZmNt:APA91bTestToken_abc-123.xyz";
+
+describe("relay FCM", () => {
+  test("push-token: missing platform stays apns; fcm token 204; junk 400", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const headers = { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" };
+    const apns = await fetch(url(s, "/mobile/push-token"), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ token: TOKEN_A, environment: "production" }),
+    });
+    expect(apns.status).toBe(204);
+    const fcm = await fetch(url(s, "/mobile/push-token"), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ token: FCM_TOKEN, environment: "production", platform: "fcm" }),
+    });
+    expect(fcm.status).toBe(204);
+    const junk = await fetch(url(s, "/mobile/push-token"), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ token: "zz", environment: "production", platform: "fcm" }),
+    });
+    expect(junk.status).toBe(400);
+    const hexAsFcmOk = await fetch(url(s, "/mobile/push-token"), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ token: TOKEN_A, environment: "production", platform: "fcm" }),
+    });
+    expect(hexAsFcmOk.status).toBe(204);
+  });
+
+  test("FCM snap hits FCM not APNs and omits finalText", async () => {
+    const apnsPosts: string[] = [];
+    const fcmPosts: string[] = [];
+    const s = start({
+      apns: dummyApns(async (_u, _h, body) => {
+        apnsPosts.push(body);
+        return { status: 200 };
+      }),
+      fcm: dummyFcm(async (_u, _h, body) => {
+        fcmPosts.push(body);
+        return { status: 200 };
+      }),
+    });
+    const fleet = s.createFleet();
+    const headers = { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" };
+    await fetch(url(s, "/mobile/push-token"), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ token: FCM_TOKEN, environment: "production", platform: "fcm" }),
+    });
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    ws.send(JSON.stringify({ type: "snap.run", run: completedRun() }));
+    await Bun.sleep(40);
+    await s.flushApns();
+    expect(apnsPosts).toHaveLength(0);
+    expect(fcmPosts).toHaveLength(1);
+    const parsed = JSON.parse(fcmPosts[0]);
+    expect(parsed.message.data.runId).toBe("r-push");
+    expect(parsed.message.data.kind).toBe("completed");
+    expect(parsed.message.data.finalText).toBeUndefined();
+    expect(JSON.stringify(parsed)).not.toContain("SECRET_BODY_MUST_NOT_LEAVE");
+    ws.close();
+  });
+
+  test("FCM-only enabled still sends when APNs is disabled", async () => {
+    const fcmPosts: string[] = [];
+    const s = start({
+      apns: null,
+      fcm: dummyFcm(async (_u, _h, body) => {
+        fcmPosts.push(body);
+        return { status: 200 };
+      }),
+    });
+    const fleet = s.createFleet();
+    const headers = { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" };
+    await fetch(url(s, "/mobile/push-token"), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ token: FCM_TOKEN, environment: "production", platform: "fcm" }),
+    });
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    ws.send(JSON.stringify({ type: "snap.run", run: completedRun() }));
+    await Bun.sleep(40);
+    await s.flushApns();
+    expect(fcmPosts).toHaveLength(1);
     ws.close();
   });
 });

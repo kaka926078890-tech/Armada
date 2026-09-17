@@ -56,6 +56,7 @@ export function openRelayDb(home: string): Database {
     updated_at INTEGER NOT NULL,
     PRIMARY KEY (fleet_id, token)
   )`);
+  ensureColumn(db, "push_tokens", "platform", "platform TEXT NOT NULL DEFAULT 'apns'");
   db.exec(`CREATE TABLE IF NOT EXISTS pair_codes (
     code TEXT PRIMARY KEY,
     fleet_id TEXT NOT NULL REFERENCES fleets(id),
