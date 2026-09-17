@@ -56,7 +56,7 @@ describe("eventsToChat", () => {
     ]);
     expect(blocks).toEqual([
       { kind: "user", text: "改 hello.txt", seq: 1 },
-      { kind: "assistant", text: "先改文件。", seq: 2 },
+      { kind: "thought", text: "先改文件。", seq: 2 },
       { kind: "tool", name: "StrReplace", summary: "StrReplace · hello.txt", seq: 2 },
       { kind: "assistant", text: "ok", seq: 3 },
     ]);
@@ -384,10 +384,9 @@ describe("eventsToChat", () => {
       ...replay(214),
     ]);
     const assts = blocks.filter((b) => b.kind === "assistant");
-    expect(assts.map((b) => b.kind === "assistant" ? b.text : "")).toEqual([status, body]);
-    expect(assts[0]).toMatchObject({ kind: "assistant", seq: 191 });
-    expect(assts[1]).toMatchObject({ kind: "assistant", seq: 193 });
-    expect(assistantBodyForPrompt(blocks, "继续")).toBe(`${status}\n\n${body}`);
+    expect(assts.map((b) => b.kind === "assistant" ? b.text : "")).toEqual([body]);
+    expect(assts[0]).toMatchObject({ kind: "assistant", seq: 193 });
+    expect(assistantBodyForPrompt(blocks, "继续")).toBe(body);
   });
 
   test("same assistant text in two operator turns stays two bubbles", () => {
@@ -537,7 +536,8 @@ describe("eventsToChat", () => {
         message: { content: [{ type: "text", text: review }] },
       }) }),
     ]);
-    expect(assistantBodyText(blocks)).toBe("先拉审查。");
+    expect(assistantBodyText(blocks)).toBe("");
+    expect(blocks).toContainEqual({ kind: "thought", text: "先拉审查。", seq: 2 });
     expect(assistantBodyText(blocks)).not.toContain("可合并，无 Critical");
     const subs = blocks.filter((b) => b.kind === "subagent");
     expect(subs).toHaveLength(1);
@@ -596,6 +596,69 @@ describe("segmentChat", () => {
     expect(assistantBodyText(blocks)).toContain("旧回复");
     expect(assistantBodyForPrompt(blocks, "那时还没修好？")).toBe("现在修好了。");
     expect(assistantBodyForPrompt(blocks, "未知 prompt")).toBe("现在修好了。");
+  });
+});
+
+describe("Cursor generation rendering", () => {
+  const protocol =
+    "<timestamp>Thursday, Sep 17, 2026, 9:52 AM (UTC+8)</timestamp>\n\n<user_query>Briefly inform the user about the task result and perform any follow-up actions (if needed). If there's no follow-ups needed, don't explicitly say that.</user_query>";
+  const asst = (seq: number, text: string, tools: string[] = []) => ev({
+    seq, source: "transcript",
+    payload: JSON.stringify({
+      role: "assistant",
+      message: {
+        content: [
+          ...(text ? [{ type: "text", text }] : []),
+          ...tools.map((name) => ({ type: "tool_use", name, input: { path: "/ws/a.txt" } })),
+        ],
+      },
+    }),
+  });
+  const ended = (seq: number) => ev({
+    seq, source: "transcript", payload: JSON.stringify({ type: "turn_ended", status: "success" }),
+  });
+  const userLine = (seq: number, text: string) => ev({
+    seq, source: "transcript",
+    payload: JSON.stringify({ role: "user", message: { content: [{ type: "text", text }] } }),
+  });
+
+  test("text on the same jsonl line as tool_use is process, not an assistant bubble", () => {
+    const blocks = eventsToChat([
+      userLine(1, "<user_query>\n改 hello.txt\n</user_query>"),
+      asst(2, "先改文件。", ["StrReplace"]),
+      asst(3, "ok"),
+      ended(4),
+    ]);
+    expect(blocks.map((b) => b.kind)).toEqual(["user", "thought", "tool", "assistant"]);
+    expect(blocks[1]).toMatchObject({ kind: "thought", text: "先改文件。", seq: 2 });
+    expect(blocks[3]).toMatchObject({ kind: "assistant", text: "ok", seq: 3 });
+  });
+
+  test("r-98c03be6: protocol Briefly-inform generations fold; keep first-turn body and last status", () => {
+    const table = "**当时没有。** 上一轮只跑了任务板单测就推了，没走 `--force-build`。\n\n| 项 | 结果 |\n|---|---|\n| cargo | 过了 |";
+    const last = "`--force-build` 拉起的 FDE 已停掉（进程 aborted，跑了约 42 分钟）。";
+    const blocks = eventsToChat([
+      userLine(1, "<user_query>\nForce build验证过了吗\n</user_query>"),
+      asst(2, "没有。我先查入口。", ["Grep"]),
+      asst(3, table),
+      ended(4),
+      userLine(5, protocol),
+      asst(6, "后台 force-build 还在刷日志，我先看最新。", ["Grep"]),
+      asst(7, "还是 FDE 运行中的 `error:` 噪声，不是 force-build 挂了。"),
+      ended(8),
+      userLine(9, protocol),
+      asst(10, last),
+      ended(11),
+    ]);
+    const assts = blocks.filter((b) => b.kind === "assistant");
+    expect(assts.map((b) => b.kind === "assistant" ? b.text : "")).toEqual([table, last]);
+    expect(blocks.filter((b) => b.kind === "user")).toEqual([
+      { kind: "user", text: "Force build验证过了吗", seq: 1 },
+    ]);
+    expect(assistantBodyForPrompt(blocks, "Force build验证过了吗")).toBe(`${table}\n\n${last}`);
+    const segs = segmentChat(blocks);
+    expect(segs.filter((s) => s.kind === "assistant")).toHaveLength(2);
+    expect(segs.filter((s) => s.kind === "process").length).toBeGreaterThan(0);
   });
 });
 

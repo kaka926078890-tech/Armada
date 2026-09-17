@@ -115,7 +115,7 @@ describe("runToSnap", () => {
     ];
     const snap = runToSnap(run, events);
     expect(snap.status).toBe("completed");
-    expect(snap.finalText).toBe(`${status}\n\n${body}`);
+    expect(snap.finalText).toBe(body);
   });
 
   test("running snap carries visible outbound and queue mode", () => {

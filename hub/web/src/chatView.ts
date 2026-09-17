@@ -5,6 +5,7 @@ export type ChatBlock =
   | { kind: "user"; text: string; seq: number }
   | { kind: "assistant"; text: string; seq: number }
   | { kind: "thought"; text: string; seq: number }
+  | { kind: "turn_end"; seq: number }
   | { kind: "tool"; name: string; summary: string; seq: number }
   | { kind: "file"; path: string; seq: number }
   | {
@@ -158,7 +159,7 @@ function toolSummary(name: string, input: Record<string, unknown> | undefined): 
 }
 
 function transcriptBlocks(ev: RunEvent, p: any): ChatBlock[] {
-  if (p?.type === "turn_ended") return [];
+  if (p?.type === "turn_ended") return [{ kind: "turn_end", seq: ev.seq }];
   const role = p?.role;
   const parts: any[] = Array.isArray(p?.message?.content) ? p.message.content : [];
   const out: ChatBlock[] = [];
@@ -168,8 +169,11 @@ function transcriptBlocks(ev: RunEvent, p: any): ChatBlock[] {
     return emitUser(shown, ev.seq);
   }
   if (role === "assistant") {
+    const hasToolUse = parts.some((c) => c?.type === "tool_use" && c.name);
     for (const c of parts) {
-      if (c?.type === "text" && c.text) out.push({ kind: "assistant", text: String(c.text), seq: ev.seq });
+      if (c?.type === "text" && c.text) {
+        out.push({ kind: hasToolUse ? "thought" : "assistant", text: String(c.text), seq: ev.seq });
+      }
       if (c?.type === "tool_use" && c.name === "Task") {
         const input = (c.input ?? {}) as Record<string, unknown>;
         out.push({
@@ -310,10 +314,54 @@ function dedupe(blocks: ChatBlock[]): ChatBlock[] {
   return out;
 }
 
+function lastAssistantBlock(blocks: ChatBlock[]): Extract<ChatBlock, { kind: "assistant" }> | undefined {
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const b = blocks[i];
+    if (b?.kind === "assistant") return b;
+  }
+  return undefined;
+}
+
+/**
+ * Cursor jsonl: one assistant line is one UI unit; turn_ended closes a generation.
+ * Keep the last text-only of the first generation (operator answer) and of the last
+ * generation (latest protocol status). Other assistants become thoughts.
+ */
+function applyCursorGenerations(blocks: ChatBlock[]): ChatBlock[] {
+  const turns = splitChatTurns(blocks);
+  const out: ChatBlock[] = [];
+  for (const turn of turns) {
+    const gens: ChatBlock[][] = [[]];
+    for (const b of turn) {
+      if (b.kind === "turn_end") {
+        gens.push([]);
+        continue;
+      }
+      gens[gens.length - 1]!.push(b);
+    }
+    while (gens.length > 1 && gens[gens.length - 1]!.length === 0) gens.pop();
+    const first = lastAssistantBlock(gens[0] ?? []);
+    const last = lastAssistantBlock(gens[gens.length - 1] ?? []);
+    const keep = new Set<ChatBlock>();
+    if (first) keep.add(first);
+    if (last) keep.add(last);
+    for (const gen of gens) {
+      for (const b of gen) {
+        if (b.kind === "assistant" && !keep.has(b)) {
+          out.push({ kind: "thought", text: b.text, seq: b.seq });
+        } else {
+          out.push(b);
+        }
+      }
+    }
+  }
+  return out;
+}
+
 function finish(blocks: ChatBlock[]): ChatBlock[] {
   const hasSub = blocks.some((b) => b.kind === "subagent");
   const filtered = hasSub ? blocks.filter((b) => !(b.kind === "tool" && b.name === "Task")) : blocks;
-  return dedupe(filtered);
+  return applyCursorGenerations(dedupe(filtered));
 }
 
 /** Stable by seq so same-seq transcript parts keep relative order. */
@@ -382,6 +430,8 @@ function attachChildText(blocks: ChatBlock[], children: Map<string, ChildAcc>): 
  * 子代理卡片来自父 jsonl 的 Task tool_use；Start/Stop 按 subagent_id 或 task 合并；
  * 子代理 jsonl 只填卡片正文，不进父助手骨架。
  * 协议轮用户句隐藏后，同一折里 jsonl 重放的同文助手只留先到的一条（含 A/B/A/B）。
+ * 与 Cursor 一致：同行 text+tool_use 是过程旁白；turn_ended 切 generation；
+ * 操作员折只留第一代最后正文 + 最后一代状态，其余助手进思考。
  */
 export function eventsToChat(events: RunEvent[]): ChatBlock[] {
   const sorted = [...events].sort((a, b) => a.seq - b.seq);
@@ -536,6 +586,7 @@ export function segmentChat(blocks: ChatBlock[]): ChatSegment[] {
       buf.length = 0;
     };
     for (const b of turn) {
+      if (b.kind === "turn_end") continue;
       if (PROCESS.has(b.kind)) buf.push(b);
       else {
         flush();
