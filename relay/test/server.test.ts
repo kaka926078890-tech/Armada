@@ -333,6 +333,7 @@ describe("relay serve", () => {
     const open = await (await fetch(url(s, "/mobile/runs"), { headers })).json() as any;
     expect(open.runs.map((r: any) => r.runId)).toContain("r-1");
     expect(open.runs[0].archived).toBe(false);
+    expect(open.runs[0].finalText).toBeNull();
 
     ws.send(JSON.stringify({ type: "snap.run", run: { ...visible, archived: true } }));
     await Bun.sleep(40);
@@ -341,9 +342,11 @@ describe("relay serve", () => {
     const archived = await (await fetch(url(s, "/mobile/runs?archived=1"), { headers })).json() as any;
     expect(archived.runs.map((r: any) => r.runId)).toContain("r-1");
     expect(archived.runs[0].archived).toBe(true);
+    expect(archived.runs[0].finalText).toBeNull();
     const byView = await (await fetch(url(s, "/mobile/runs?view=hidden"), { headers })).json() as any;
     expect(byView.runs.map((r: any) => r.runId)).toContain("r-1");
     expect(byView.runs[0].archived).toBe(true);
+    expect(byView.runs[0].finalText).toBeNull();
     const got = await (await fetch(url(s, "/mobile/runs/r-1"), { headers })).json() as any;
     expect(got.archived).toBe(true);
     expect(got.finalText).toBe("好了");

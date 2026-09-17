@@ -205,9 +205,19 @@ final class Session: ObservableObject {
         }
     }
 
+    private func keepListBodies(_ incoming: [RunDTO], prior: [RunDTO]) -> [RunDTO] {
+        let old = Dictionary(uniqueKeysWithValues: prior.map { ($0.runId, $0) })
+        return incoming.map { r in
+            guard r.finalText == nil, let prev = old[r.runId]?.finalText, !prev.isEmpty else { return r }
+            var next = r
+            next.finalText = prev
+            return next
+        }
+    }
+
     private func adoptFetchedLists(runs incomingRuns: [RunDTO], hidden incomingHidden: [RunDTO]) {
-        var nextRuns = incomingRuns
-        var nextHidden = incomingHidden
+        var nextRuns = keepListBodies(incomingRuns, prior: runs)
+        var nextHidden = keepListBodies(incomingHidden, prior: hiddenRuns)
         var stillArchive = pendingArchive
         var stillUnarchive = pendingUnarchive
         for id in pendingArchive {

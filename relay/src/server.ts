@@ -260,14 +260,14 @@ export function createRelayServer(opts: {
     return row;
   }
 
-  function runToJson(row: any) {
+  function runToJson(row: any, forList = false) {
     return {
       runId: row.id,
       machineId: row.machine_id,
       workspaceRoot: row.workspace_root,
       prompt: row.prompt,
       status: row.status,
-      finalText: row.final_text,
+      finalText: forList ? null : row.final_text,
       error: row.error,
       pendingAsk: row.pending_ask ? JSON.parse(row.pending_ask) : null,
       outbound: row.outbound ? JSON.parse(row.outbound) : [],
@@ -518,7 +518,7 @@ export function createRelayServer(opts: {
     const hidden = c.req.query("view") === "hidden" || c.req.query("archived") === "1";
     const filter = hidden ? "AND archived_at IS NOT NULL" : "AND archived_at IS NULL";
     const rows = db.query(`SELECT * FROM runs WHERE fleet_id=?1 ${filter} ORDER BY updated_at DESC LIMIT ?2`).all(fleet.id, limit);
-    return c.json({ runs: rows.map(runToJson) });
+    return c.json({ runs: rows.map((row) => runToJson(row, true)) });
   });
 
   app.get("/mobile/runs/:id", (c) => {
