@@ -94,12 +94,20 @@ fun askOptionBody(label: String, text: String): String {
     return t.ifEmpty { label }
 }
 
+fun coalesceFinalText(incoming: RunDto, prior: RunDto?): RunDto {
+    val prev = prior?.finalText
+    return if (incoming.finalText == null && !prev.isNullOrEmpty()) incoming.copy(finalText = prev) else incoming
+}
+
 fun keepListBodies(incoming: List<RunDto>, prior: List<RunDto>): List<RunDto> {
     val old = prior.associateBy { it.runId }
-    return incoming.map { r ->
-        val prev = old[r.runId]?.finalText
-        if (r.finalText == null && !prev.isNullOrEmpty()) r.copy(finalText = prev) else r
-    }
+    return incoming.map { r -> coalesceFinalText(r, old[r.runId]) }
+}
+
+/** 详情在「由忙入闲」时强制 GET /:id；SSE 空正文不能当终态全文。 */
+fun detailShouldReload(local: RunDto?, streamed: RunDto): Boolean {
+    if (local == null || local.runId != streamed.runId) return false
+    return local.isLive && !streamed.isLive
 }
 
 fun stampReadAt(nowMs: Double, activityTs: Long?): Double {

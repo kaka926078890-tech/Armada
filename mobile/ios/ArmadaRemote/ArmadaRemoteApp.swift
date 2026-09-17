@@ -210,12 +210,7 @@ final class Session: ObservableObject {
 
     private func keepListBodies(_ incoming: [RunDTO], prior: [RunDTO]) -> [RunDTO] {
         let old = Dictionary(uniqueKeysWithValues: prior.map { ($0.runId, $0) })
-        return incoming.map { r in
-            guard r.finalText == nil, let prev = old[r.runId]?.finalText, !prev.isEmpty else { return r }
-            var next = r
-            next.finalText = prev
-            return next
-        }
+        return incoming.map { coalesceFinalText($0, prior: old[$0.runId]) }
     }
 
     private func adoptFetchedLists(runs incomingRuns: [RunDTO], hidden incomingHidden: [RunDTO]) {
@@ -342,22 +337,24 @@ final class Session: ObservableObject {
         if pendingUnarchive.contains(run.runId) && run.isArchived { return }
         if pendingArchive.contains(run.runId) && run.isArchived { pendingArchive.remove(run.runId) }
         if pendingUnarchive.contains(run.runId) && !run.isArchived { pendingUnarchive.remove(run.runId) }
-        if run.isArchived {
-            if let i = runs.firstIndex(where: { $0.runId == run.runId }) { runs.remove(at: i) }
-            if let i = hiddenRuns.firstIndex(where: { $0.runId == run.runId }) {
-                if hiddenRuns[i] != run { hiddenRuns[i] = run }
+        let prior = runs.first { $0.runId == run.runId } ?? hiddenRuns.first { $0.runId == run.runId }
+        let adopted = coalesceFinalText(run, prior: prior)
+        if adopted.isArchived {
+            if let i = runs.firstIndex(where: { $0.runId == adopted.runId }) { runs.remove(at: i) }
+            if let i = hiddenRuns.firstIndex(where: { $0.runId == adopted.runId }) {
+                if hiddenRuns[i] != adopted { hiddenRuns[i] = adopted }
             } else {
-                hiddenRuns.insert(run, at: 0)
+                hiddenRuns.insert(adopted, at: 0)
             }
         } else {
-            if let i = hiddenRuns.firstIndex(where: { $0.runId == run.runId }) { hiddenRuns.remove(at: i) }
-            if let i = runs.firstIndex(where: { $0.runId == run.runId }) {
-                if runs[i] != run { runs[i] = run }
+            if let i = hiddenRuns.firstIndex(where: { $0.runId == adopted.runId }) { hiddenRuns.remove(at: i) }
+            if let i = runs.firstIndex(where: { $0.runId == adopted.runId }) {
+                if runs[i] != adopted { runs[i] = adopted }
             } else {
-                runs.insert(run, at: 0)
+                runs.insert(adopted, at: 0)
             }
         }
-        if watchingId == run.runId { markOpened(run.runId) }
+        if watchingId == adopted.runId { markOpened(adopted.runId) }
     }
 
     func runs(in workspace: WorkspaceDTO, archived: Bool = false) -> [RunDTO] {

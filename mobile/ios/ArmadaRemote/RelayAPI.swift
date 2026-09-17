@@ -131,6 +131,20 @@ func stampReadAt(nowMs: Double, activityTs: Int?) -> Double {
     max(nowMs, Double(activityTs ?? 0))
 }
 
+/// SSE / 列表会省略 `finalText`；本地已有正文时不得冲掉。与 Android `coalesceFinalText` 对齐。
+func coalesceFinalText(_ incoming: RunDTO, prior: RunDTO?) -> RunDTO {
+    guard incoming.finalText == nil, let prev = prior?.finalText, !prev.isEmpty else { return incoming }
+    var next = incoming
+    next.finalText = prev
+    return next
+}
+
+/// 由忙入闲时详情强制 GET /:id。与 Android `detailShouldReload` 对齐。
+func detailShouldReload(local: RunDTO?, streamed: RunDTO) -> Bool {
+    guard let local, local.runId == streamed.runId else { return false }
+    return local.isLive && !streamed.isLive
+}
+
 enum BoardColumn: String, CaseIterable, Identifiable {
     case waiting, running, completed, cancelled, error
     var id: String { rawValue }

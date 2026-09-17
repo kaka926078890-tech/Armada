@@ -333,9 +333,12 @@ fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String) {
         vm.setWatching(runId)
         onDispose { if (state.watchingId == runId) vm.setWatching(null) }
     }
+    fun adopt(fetched: RunDto) {
+        run = coalesceFinalText(fetched, run)
+    }
     LaunchedEffect(runId) {
         try {
-            run = vm.api().run(runId)
+            adopt(vm.api().run(runId))
             vm.markOpened(runId)
             err = null
         } catch (e: Exception) {
@@ -346,17 +349,18 @@ fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String) {
                 delay(1000)
                 continue
             }
-            val busy = run?.isLive == true || run?.pendingAsk != null
-            if (!busy) break
             delay(3000)
-            runCatching { run = vm.api().run(runId) }
+            runCatching { adopt(vm.api().run(runId)) }
         }
     }
     val streamed = state.board.runs.find { it.runId == runId } ?: state.board.hidden.find { it.runId == runId }
     LaunchedEffect(streamed) {
-        if (streamed != null) {
-            run = streamed
-            if (state.watchingId == runId) vm.markOpened(runId)
+        val next = streamed ?: return@LaunchedEffect
+        val local = run
+        adopt(next)
+        if (state.watchingId == runId) vm.markOpened(runId)
+        if (detailShouldReload(local, next)) {
+            runCatching { adopt(vm.api().run(runId)) }
         }
     }
     Scaffold(topBar = {
@@ -380,7 +384,7 @@ fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String) {
                 Text("回复", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 12.dp))
                 if (!r.finalText.isNullOrEmpty()) MarkdownBox(r.finalText!!)
                 else Text(if (r.isLive) "还没有终态正文" else "没有正文", color = Color.Gray)
-                r.pendingAsk?.let { AskBlock(vm, runId, it) { runCatching { run = vm.api().run(runId) } } }
+                r.pendingAsk?.let { AskBlock(vm, runId, it) { runCatching { adopt(vm.api().run(runId)) } } }
                 if (r.queuedOutbound.isNotEmpty()) {
                     Text("${r.queuedOutbound.size} 条排队消息", style = MaterialTheme.typography.bodySmall)
                     r.queuedOutbound.forEach { Text(it.prompt) }
@@ -389,8 +393,8 @@ fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String) {
                     val cm = ctx.getSystemService(ClipboardManager::class.java)
                     cm.setPrimaryClip(ClipData.newPlainText("finalText", r.finalText ?: ""))
                 }) { Text("复制正文") }
-                if (r.isLive) OutlinedButton(onClick = { scope.launch { runCatching { vm.api().cancel(runId) }; run = runCatching { vm.api().run(runId) }.getOrNull() ?: run } }) { Text("取消任务") }
-                if (r.showsRetry) Button(onClick = { scope.launch { runCatching { vm.api().retry(runId) }; vm.refresh(); run = runCatching { vm.api().run(runId) }.getOrNull() ?: run } }) { Text("重试") }
+                if (r.isLive) OutlinedButton(onClick = { scope.launch { runCatching { vm.api().cancel(runId) }; runCatching { adopt(vm.api().run(runId)) } } }) { Text("取消任务") }
+                if (r.showsRetry) Button(onClick = { scope.launch { runCatching { vm.api().retry(runId) }; vm.refresh(); runCatching { adopt(vm.api().run(runId)) } } }) { Text("重试") }
                 if (r.isArchived) OutlinedButton(onClick = {
                     vm.hideLocal(runId, false, r)
                     scope.launch {
@@ -420,7 +424,7 @@ fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String) {
             }
         }
     }
-    if (showFollow && slot != null) DispatchSheet(vm, slot, runId) { showFollow = false; scope.launch { vm.refresh(); run = runCatching { vm.api().run(runId) }.getOrNull() ?: run } }
+    if (showFollow && slot != null) DispatchSheet(vm, slot, runId) { showFollow = false; scope.launch { vm.refresh(); runCatching { adopt(vm.api().run(runId)) } } }
 }
 
 @Composable

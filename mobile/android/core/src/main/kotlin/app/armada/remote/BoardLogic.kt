@@ -69,17 +69,20 @@ fun applyStreamRun(state: BoardLists, run: RunDto): BoardLists {
     var pendingU = state.pendingUnarchive
     if (run.runId in pendingA && run.isArchived) pendingA = pendingA - run.runId
     if (run.runId in pendingU && !run.isArchived) pendingU = pendingU - run.runId
-    return if (run.isArchived) {
+    val prior = state.runs.firstOrNull { it.runId == run.runId }
+        ?: state.hidden.firstOrNull { it.runId == run.runId }
+    val adopted = coalesceFinalText(run, prior)
+    return if (adopted.isArchived) {
         state.copy(
             runs = state.runs.filter { it.runId != run.runId },
-            hidden = listOf(run) + state.hidden.filter { it.runId != run.runId },
+            hidden = listOf(adopted) + state.hidden.filter { it.runId != run.runId },
             pendingArchive = pendingA,
             pendingUnarchive = pendingU,
         )
     } else {
         state.copy(
             hidden = state.hidden.filter { it.runId != run.runId },
-            runs = listOf(run) + state.runs.filter { it.runId != run.runId },
+            runs = listOf(adopted) + state.runs.filter { it.runId != run.runId },
             pendingArchive = pendingA,
             pendingUnarchive = pendingU,
         )

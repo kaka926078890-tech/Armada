@@ -658,17 +658,18 @@ struct RunDetailView: View {
                     do { try await Task.sleep(nanoseconds: 1_000_000_000) } catch { break }
                     continue
                 }
-                let busy = run?.isLive == true || run?.pendingAsk != nil
-                if !busy { break }
                 do { try await Task.sleep(nanoseconds: 3_000_000_000) } catch { break }
                 if Task.isCancelled { break }
                 await reload()
             }
         }
         .onChange(of: streamed) { _, next in
-            if let next, next != run {
-                run = next
-                if session.watchingId == runId { session.markOpened(runId) }
+            guard let next else { return }
+            let local = run
+            run = coalesceFinalText(next, prior: local)
+            if session.watchingId == runId { session.markOpened(runId) }
+            if detailShouldReload(local: local, streamed: next) {
+                Task { await reload() }
             }
         }
         .onDisappear {
@@ -679,7 +680,8 @@ struct RunDetailView: View {
 
     private func reload() async {
         do {
-            run = try await session.api().run(id: runId)
+            let fetched = try await session.api().run(id: runId)
+            run = coalesceFinalText(fetched, prior: run)
             session.markOpened(runId)
             err = nil
         } catch {

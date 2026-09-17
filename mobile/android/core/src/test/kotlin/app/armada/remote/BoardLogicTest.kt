@@ -28,4 +28,20 @@ class BoardLogicTest {
         assertEquals(false, back.runs.single().archived)
         assertTrue(back.pendingArchive.isEmpty())
     }
+
+    @Test
+    fun applyStreamRunFollowupKeepsBodyUntilNewFinalText() {
+        val start = BoardLists(
+            listOf(run("r1", false).copy(status = "completed", finalText = "上一折")),
+            emptyList(),
+            emptySet(),
+            emptySet(),
+        )
+        val live = applyStreamRun(start, run("r1", false).copy(status = "running", finalText = null, prompt = "续聊"))
+        assertEquals("上一折", live.runs.single().finalText)
+        assertEquals("running", live.runs.single().status)
+        assertEquals("续聊", live.runs.single().prompt)
+        val done = applyStreamRun(live, run("r1", false).copy(status = "completed", finalText = "新正文"))
+        assertEquals("新正文", done.runs.single().finalText)
+    }
 }

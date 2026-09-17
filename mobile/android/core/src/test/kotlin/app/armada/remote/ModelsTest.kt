@@ -58,6 +58,30 @@ class ModelsTest {
     }
 
     @Test
+    fun coalesceFinalTextKeepsPriorWhenIncomingNull() {
+        val prior = run("completed", finalText = "上一折")
+        val incoming = run("running", finalText = null)
+        assertEquals("上一折", coalesceFinalText(incoming, prior).finalText)
+        assertEquals("running", coalesceFinalText(incoming, prior).status)
+    }
+
+    @Test
+    fun coalesceFinalTextPrefersIncomingBody() {
+        val prior = run("running", finalText = "上一折")
+        val incoming = run("completed", finalText = "新正文")
+        assertEquals("新正文", coalesceFinalText(incoming, prior).finalText)
+    }
+
+    @Test
+    fun detailShouldReloadWhenLiveBecomesTerminal() {
+        assertTrue(detailShouldReload(run("running", finalText = "旧"), run("completed", finalText = "新")))
+        assertTrue(detailShouldReload(run("running", finalText = "旧"), run("completed", finalText = null)))
+        assertFalse(detailShouldReload(run("completed", finalText = "旧"), run("running", finalText = null)))
+        assertFalse(detailShouldReload(run("completed", finalText = "旧"), run("completed", finalText = "旧")))
+        assertFalse(detailShouldReload(null, run("completed", finalText = "新")))
+    }
+
+    @Test
     fun unreadAskAndCompleted() {
         val ask = run("running", ask = PendingAskDto("q"))
         assertTrue(isUnread(ask, emptyMap()))
