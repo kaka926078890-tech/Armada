@@ -492,5 +492,6 @@ p95（同区域 VPS，排除 DERP）：`GET /mobile/workspaces` < 400ms；`POST 
 | 2026-09-15 | Created Plan / Build：CDP 探测 Mac `split-button[data-tone=plan]` 或 Windows `ui-split-button` 上文案 `Build`（不含 Building）+ `element.click()`；`pendingAsk.kind=plan`；plan-writing `stop` 后复开 `running`。App 详情 Build 按钮。Windows Win Destop 2026-09-15 已点通。 |
 | 2026-09-16 | App 可见 APNs 从「v2 以后」落到独立实施基准：[2026-09-16-armada-app-push-design.md](./2026-09-16-armada-app-push-design.md)。本文件 §4.9 原则仍有效（可见推送、不带 `finalText`）。 |
 | 2026-09-17 | v1.5 落地：中转 `GET /mobile/stream`；App 前台 SSE、后台停、断线退避轮询；相同快照不刷新 `@Published`。 |
+| 2026-09-17 | Android 遥控器另开实施基准：[2026-09-17-armada-android-app-design.md](./2026-09-17-armada-android-app-design.md)。本文件协议（`/mobile/*`、邀请 URI、SSE）不变；锁屏 FCM 在 Android spec v1.5。 |
 
 本文件为远程能力的 **实施基准**。变更绑定字段或完成门禁须改本 spec 并升 `protocolVersion`。

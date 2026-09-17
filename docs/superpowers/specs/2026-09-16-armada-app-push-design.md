@@ -442,7 +442,8 @@ P0 与 P1 可同 PR。P2 必须带 Push 的新 build。P3 不能用模拟器。
 | `cancelled` | 不推 |
 | 角标 | APNs 发 `1`；App 刷新后改成未读数 |
 | 多设备 | 同 fleet 全推 |
-| SSE / Android / 本地通知 | 不做 |
+| SSE / 本地通知 | 不做 |
+| Android FCM | 本规格不做；见 [2026-09-17-armada-android-app-design.md](./2026-09-17-armada-android-app-design.md) v1.5 |
 
 无其它未决产品项。
 
@@ -465,3 +466,4 @@ P0 与 P1 可同 PR。P2 必须带 Push 的新 build。P3 不能用模拟器。
 | --- | --- |
 | 2026-09-16 | 初稿并定为实施基准。单通道可见 APNs；生产环境；边沿对齐中台；token 在中转；点进 GET。产品拍板：方案 1；TestFlight；不要轮询本地通知。 |
 | 2026-09-16 | P0–P2 落地：`notifyEdge` / `apns` / `push_tokens` / `POST|DELETE /mobile/push-token` / `applyRunSnap` 挂钩；iOS production entitlements、登记、点开、`willPresent`。无 `.p8` 仍 no-op。P3 真机 A9 待 Auth Key 与新 TestFlight。 |
+| 2026-09-17 | Android 锁屏通道不在本文件扩 APNs。FCM 见 [2026-09-17-armada-android-app-design.md](./2026-09-17-armada-android-app-design.md) §4.5。 |
