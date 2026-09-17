@@ -16,7 +16,7 @@ import { mergeHooks, hooksDriftHash, spoolScriptName, shouldInstallArmadaHooks }
 import { collectTranscriptViews, matchTranscriptToPending, stopPayloadFromTranscriptLine, stopFromTranscriptFileContent, transcriptsDirForWorkspace, isWithinTranscriptBindWindow, FollowupStopGuard, listSubagentTranscripts, childCidFromSubagentPath } from "./transcriptBind";
 import { TranscriptDirWatcher, debounceLeading, watchTranscriptDir, watchFileSize, TRANSCRIPT_WATCHDOG_MS, TRANSCRIPT_WATCH_DEBOUNCE_MS } from "./transcriptWatch";
 import { createExtSeq } from "./extSeq";
-import { hubRunsNeedingTranscriptFollow } from "./adoptRuns";
+import { hubRunsNeedingTranscriptFollow, shouldArmFollowupStopOnAdopt } from "./adoptRuns";
 import { noteOwnerBsp, clearGeneration, synthesizedStopPayload, noteHubGeneration, onFollowupBindGeneration, shouldSynthesizeTranscriptStop } from "./generationStamp";
 import { parseAskInspect, askPollActions } from "./askDetect";
 
@@ -476,7 +476,8 @@ export function activate(context: vscode.ExtensionContext): void {
       if (!Array.isArray(rows)) return;
       const targets = hubRunsNeedingTranscriptFollow(machineId!, rows);
       for (const t of targets) {
-        if (!boundRuns.has(t.runId)) {
+        const alreadyBound = boundRuns.has(t.runId);
+        if (!alreadyBound) {
           claimConversation(boundRuns, t.runId, t.conversationId, t.prompt);
           log(`adopt ${t.runId} cid=${t.conversationId}`);
         }
@@ -484,7 +485,14 @@ export function activate(context: vscode.ExtensionContext): void {
         const path = dir ? join(dir, t.conversationId, `${t.conversationId}.jsonl`) : null;
         if (!path || !existsSync(path) || !transcriptPathBelongsToCid(path, t.conversationId)) continue;
         boundPaths.set(t.runId, path);
-        followupStopGuard.arm(t.runId);
+        let lastRecordIsTurnEnded = false;
+        try { lastRecordIsTurnEnded = stopFromTranscriptFileContent(readFileSync(path, "utf8")) != null; } catch { /* keep false */ }
+        if (shouldArmFollowupStopOnAdopt({ alreadyBound, lastRecordIsTurnEnded })) {
+          followupStopGuard.arm(t.runId);
+          log(`adopt arm stop-guard ${t.runId}`);
+        } else if (alreadyBound) {
+          log(`adopt skip re-arm ${t.runId}`);
+        }
         stopSent.delete(t.runId);
         noteHubGeneration(lastGenerationId, t.runId, t.liveGenerationId);
         tailer.attach(t.runId, path, { fromEnd: true });

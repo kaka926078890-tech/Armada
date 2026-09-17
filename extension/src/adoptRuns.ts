@@ -35,3 +35,20 @@ export function hubRunsNeedingTranscriptFollow(machineId: string, runs: HubRunRo
   }
   return out;
 }
+
+/**
+ * WS reconnect re-runs adopt while the live tail is still in memory.
+ * Re-arming would wait for a user line that was already consumed, then drop
+ * this turn's synthesized stop (card stuck 运行中).
+ *
+ * Fresh adopt (Reload: boundRuns empty) still arms when EOF is already
+ * turn_ended, so maybeCompleteFromDisk does not close a new followup with
+ * the previous turn's stop.
+ */
+export function shouldArmFollowupStopOnAdopt(input: {
+  alreadyBound: boolean;
+  lastRecordIsTurnEnded: boolean;
+}): boolean {
+  if (input.alreadyBound) return false;
+  return input.lastRecordIsTurnEnded;
+}

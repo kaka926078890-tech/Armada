@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { hubRunsNeedingTranscriptFollow } from "../src/adoptRuns";
+import { hubRunsNeedingTranscriptFollow, shouldArmFollowupStopOnAdopt } from "../src/adoptRuns";
+import { FollowupStopGuard } from "../src/transcriptBind";
 
 const mine = "m-win";
 
@@ -14,5 +15,30 @@ describe("hubRunsNeedingTranscriptFollow", () => {
     expect(got).toEqual([
       { runId: "r-live", conversationId: "cid-1", workspaceRoot: "c:\\ws", prompt: "hi", liveGenerationId: "hub-g1" },
     ]);
+  });
+});
+
+describe("shouldArmFollowupStopOnAdopt", () => {
+  // 2026-09-17 r-182f5c19: followup user already tailed, WS 1006, adopt re-armed,
+  // later turn_ended synthesized stop dropped → 运行中.
+  test("reconnect of an already-bound run never re-arms (mid-turn or after turn_ended)", () => {
+    expect(shouldArmFollowupStopOnAdopt({ alreadyBound: true, lastRecordIsTurnEnded: false })).toBe(false);
+    expect(shouldArmFollowupStopOnAdopt({ alreadyBound: true, lastRecordIsTurnEnded: true })).toBe(false);
+  });
+
+  test("fresh adopt arms only when EOF is already turn_ended (stale previous stop)", () => {
+    expect(shouldArmFollowupStopOnAdopt({ alreadyBound: false, lastRecordIsTurnEnded: true })).toBe(true);
+    expect(shouldArmFollowupStopOnAdopt({ alreadyBound: false, lastRecordIsTurnEnded: false })).toBe(false);
+  });
+
+  test("followup user then WS reconnect still emits stop on later turn_ended", () => {
+    const g = new FollowupStopGuard();
+    g.arm("r-182f5c19");
+    g.onUser("r-182f5c19");
+    expect(g.shouldEmitStop("r-182f5c19")).toBe(true);
+    if (shouldArmFollowupStopOnAdopt({ alreadyBound: true, lastRecordIsTurnEnded: false })) {
+      g.arm("r-182f5c19");
+    }
+    expect(g.shouldEmitStop("r-182f5c19")).toBe(true);
   });
 });
