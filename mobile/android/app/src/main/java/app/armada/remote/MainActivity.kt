@@ -49,6 +49,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -288,18 +289,47 @@ fun WorkspaceScreen(vm: SessionVm, state: UiState, workspace: WorkspaceDto, onOp
 fun DispatchSheet(vm: SessionVm, workspace: WorkspaceDto, followupRunId: String?, onDone: (BoardColumn) -> Unit) {
     var prompt by remember { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
+    var listening by remember { mutableStateOf(false) }
     var err by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val speech = remember {
+        PromptSpeech(context, emit = {
+            prompt = dictationPrompt(it)
+            listening = it.listening
+        }, onError = { err = it })
+    }
+    DisposableEffect(Unit) { onDispose { speech.release() } }
+    val micPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) speech.start(prompt) else err = dictationMessage("MIC_DENIED")
+    }
     val trimmed = prompt.trim()
     Column(Modifier.fillMaxWidth().padding(16.dp).verticalScroll(rememberScrollState())) {
         Text(if (followupRunId == null) "派发任务" else "续聊", style = MaterialTheme.typography.titleLarge)
         Text("${workspace.machineName} · ${workspace.label}", style = MaterialTheme.typography.bodySmall)
         if (followupRunId != null) Text("在当前对话里继续，不会新开一条任务", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
-        OutlinedTextField(value = prompt, onValueChange = { prompt = it }, modifier = Modifier.fillMaxWidth().height(220.dp), label = { Text("Prompt") })
-        Text(if (trimmed.isEmpty()) "粘贴后应显示字数" else "${prompt.length} 字", style = MaterialTheme.typography.bodySmall)
+        OutlinedTextField(
+            value = prompt,
+            onValueChange = { prompt = it },
+            modifier = Modifier.fillMaxWidth().height(220.dp),
+            label = { Text("Prompt") },
+            readOnly = listening,
+        )
+        Text(if (trimmed.isEmpty()) "粘贴或语音后应显示字数" else "${prompt.length} 字", style = MaterialTheme.typography.bodySmall)
+        if (listening) Text("正在听…说完点停止，改完再派发", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
         err?.let { Text(it, color = Color.Red) }
+        OutlinedButton(
+            onClick = {
+                if (listening) speech.stop()
+                else if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) speech.start(prompt)
+                else micPerm.launch(Manifest.permission.RECORD_AUDIO)
+            },
+            enabled = !sending,
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+        ) { Text(if (listening) "停止" else "语音") }
         Button(
             onClick = {
+                if (listening) speech.stop()
                 sending = true
                 scope.launch {
                     try {
@@ -313,10 +343,10 @@ fun DispatchSheet(vm: SessionVm, workspace: WorkspaceDto, followupRunId: String?
                     }
                 }
             },
-            enabled = !sending && trimmed.isNotEmpty(),
+            enabled = !sending && !listening && trimmed.isNotEmpty(),
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
         ) { Text(if (sending) "发送中…" else if (followupRunId == null) "派发" else "发送") }
-        OutlinedButton(onClick = { onDone(BoardColumn.Completed) }, modifier = Modifier.fillMaxWidth()) { Text("取消") }
+        OutlinedButton(onClick = { speech.release(); onDone(BoardColumn.Completed) }, modifier = Modifier.fillMaxWidth()) { Text("取消") }
     }
 }
 

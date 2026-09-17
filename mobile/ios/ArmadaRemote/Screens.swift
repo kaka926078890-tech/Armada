@@ -359,16 +359,16 @@ struct DispatchSheet: View {
     let workspace: WorkspaceDTO
     var followupRunId: String? = nil
     var onDone: (BoardColumn) -> Void
-    @State private var prompt = ""
+    @StateObject private var speech = PromptSpeech()
     @State private var sending = false
     @State private var err: String?
     @Environment(\.dismiss) private var dismiss
 
     private var trimmed: String {
-        prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        speech.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private var canSend: Bool { !sending && !trimmed.isEmpty }
+    private var canSend: Bool { !sending && !speech.listening && !trimmed.isEmpty }
 
     var body: some View {
         NavigationStack {
@@ -378,6 +378,11 @@ struct DispatchSheet: View {
                         Text(err).foregroundStyle(.red)
                     }
                 }
+                if let speechErr = speech.error {
+                    Section {
+                        Text(speechErr).foregroundStyle(.red)
+                    }
+                }
                 Section(workspace.machineName.isEmpty ? workspace.label : "\(workspace.machineName) · \(workspace.label)") {
                     Text(workspace.workspaceRoot).font(.caption).foregroundStyle(.secondary)
                     if followupRunId != nil {
@@ -385,12 +390,22 @@ struct DispatchSheet: View {
                     }
                 }
                 Section {
-                    TextEditor(text: $prompt)
+                    TextEditor(text: $speech.prompt)
                         .frame(minHeight: 220)
                         .font(.body)
-                    Text(trimmed.isEmpty ? "粘贴后应显示字数" : "\(prompt.count) 字")
+                        .disabled(speech.listening)
+                    Text(trimmed.isEmpty ? "粘贴或语音后应显示字数" : "\(speech.prompt.count) 字")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    if speech.listening {
+                        Text("正在听…说完点停止，改完再派发")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Button(speech.listening ? "停止" : "语音") {
+                        speech.toggle()
+                    }
+                    .disabled(sending)
                     Button(sending ? "发送中…" : (followupRunId == nil ? "派发" : "发送")) {
                         Task { await send() }
                     }
@@ -398,13 +413,16 @@ struct DispatchSheet: View {
                 } header: {
                     Text("Prompt")
                 } footer: {
-                    Text("长文请用此处按钮发送；导航栏「派发」在键盘弹起时可能点不到。")
+                    Text("语音只写入提示词，不会自动发送。长文请用此处按钮发送；导航栏「派发」在键盘弹起时可能点不到。")
                 }
             }
             .navigationTitle(followupRunId == nil ? "派发任务" : "续聊")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
+                    Button("取消") {
+                        speech.release()
+                        dismiss()
+                    }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(sending ? "发送中…" : (followupRunId == nil ? "派发" : "发送")) {
@@ -413,10 +431,15 @@ struct DispatchSheet: View {
                     .disabled(!canSend)
                 }
             }
+            .onDisappear { speech.release() }
         }
     }
 
     private func send() async {
+        if speech.listening {
+            speech.stop()
+            return
+        }
         let text = trimmed
         guard canSend else { return }
         sending = true

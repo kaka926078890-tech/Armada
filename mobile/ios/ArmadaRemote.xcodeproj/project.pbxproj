@@ -13,6 +13,7 @@
 		A10000000000000000000004 /* Screens.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000014 /* Screens.swift */; };
 		A10000000000000000000005 /* MarkdownView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000016 /* MarkdownView.swift */; };
 		A10000000000000000000007 /* Keychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000019 /* Keychain.swift */; };
+		A10000000000000000000008 /* Dictation.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000001A /* Dictation.swift */; };
 		A10000000000000000000006 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000017 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
@@ -27,6 +28,7 @@
 		A10000000000000000000017 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A10000000000000000000018 /* ArmadaRemote.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ArmadaRemote.entitlements; sourceTree = "<group>"; };
 		A10000000000000000000019 /* Keychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Keychain.swift; sourceTree = "<group>"; };
+		A1000000000000000000001A /* Dictation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Dictation.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -68,6 +70,7 @@
 				A10000000000000000000014 /* Screens.swift */,
 				A10000000000000000000016 /* MarkdownView.swift */,
 				A10000000000000000000019 /* Keychain.swift */,
+				A1000000000000000000001A /* Dictation.swift */,
 				A10000000000000000000015 /* Info.plist */,
 				A10000000000000000000017 /* Assets.xcassets */,
 				A10000000000000000000018 /* ArmadaRemote.entitlements */,
@@ -143,6 +146,7 @@
 				A10000000000000000000004 /* Screens.swift in Sources */,
 				A10000000000000000000005 /* MarkdownView.swift in Sources */,
 				A10000000000000000000007 /* Keychain.swift in Sources */,
+				A10000000000000000000008 /* Dictation.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

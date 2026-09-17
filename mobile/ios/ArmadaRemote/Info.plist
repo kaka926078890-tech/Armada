@@ -40,6 +40,10 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>用于把语音转成派发任务的提示词，发送前你可以修改。</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>用于把语音转成文字填入派发框，不会自动发送。</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>
