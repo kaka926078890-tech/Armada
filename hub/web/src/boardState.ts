@@ -70,6 +70,7 @@ export type WorkspaceSlot = {
   os: string;
   root: string;
   online: boolean;
+  cdpReady: boolean;
 };
 
 export function encodeWorkspaceKey(machineId: string, root: string): string {
@@ -93,7 +94,10 @@ export function machineLabel(m: { name: string; display_name?: string | null }):
 }
 
 /** 中台当前打包的 vsix。落后的被控机看不到 Ask 归属 / Created Plan。 */
-export const REQUIRED_EXTENSION_VERSION = "0.4.21";
+export const REQUIRED_EXTENSION_VERSION = "0.4.23";
+
+export const CDP_NOT_READY_COPY =
+  "Cursor 在线但无法注入。请确认已安装最新 Armada 扩展，并用 Armada 打开工作区。若窗口已开、调试口不通：请完全退出 Cursor（Mac Cmd+Q / Windows 托盘 Exit），不要点 Cursor 图标。";
 
 function parseExtVersion(raw: string | null | undefined): [number, number, number] | null {
   if (typeof raw !== "string") return null;
@@ -118,6 +122,7 @@ export function extensionLagNotice(
 
 export function listWorkspaceSlots(machines: Array<{
   id: string; name: string; os: string; status: string; open_workspaces: string; display_name?: string | null;
+  cdp_ready?: boolean | null;
 }>): WorkspaceSlot[] {
   const out: WorkspaceSlot[] = [];
   for (const m of machines) {
@@ -127,7 +132,11 @@ export function listWorkspaceSlots(machines: Array<{
       if (Array.isArray(parsed)) roots = parsed.filter((x): x is string => typeof x === "string");
     } catch { continue; }
     for (const root of roots) {
-      out.push({ machineId: m.id, machineName: machineLabel(m), os: m.os, root, online: m.status === "online" });
+      out.push({
+        machineId: m.id, machineName: machineLabel(m), os: m.os, root,
+        online: m.status === "online",
+        cdpReady: m.cdp_ready === true,
+      });
     }
   }
   return out;

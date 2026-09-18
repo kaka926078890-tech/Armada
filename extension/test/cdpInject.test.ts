@@ -4,6 +4,7 @@ import {
   createImagePaster,
   createFileMentionPaster,
   createAskQuestionDriver,
+  probeCdpReady,
   COMPOSER_FOCUS_JS,
   COMPOSER_FOCUS_IMAGE_JS,
   COMPOSER_CHIP_COUNT_JS,
@@ -217,6 +218,14 @@ describe("composer picker JS", () => {
   test("FOCUS_IMAGE 优先空且无芯片的框", () => {
     const { els } = runJs0(COMPOSER_FOCUS_IMAGE_JS, ["旧对话", ""], [0, 0]);
     expect(els[1].focused).toBe(true);
+  });
+});
+
+describe("probeCdpReady", () => {
+  test("2xx array is ready; throw or non-array is not", async () => {
+    expect(await probeCdpReady({ port: 9222, fetchJson: async () => [{ type: "page" }] })).toBe(true);
+    expect(await probeCdpReady({ port: 9222, fetchJson: async () => { throw new Error("ECONNREFUSED"); } })).toBe(false);
+    expect(await probeCdpReady({ port: 9222, fetchJson: async () => ({ error: "not array" }) as never })).toBe(false);
   });
 });
 

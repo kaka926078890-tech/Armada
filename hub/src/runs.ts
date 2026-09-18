@@ -22,6 +22,11 @@ import {
 const ACTIVE = ["created", "dispatched", "binding", "running"];
 const DISPATCH_TIMEOUT_MS = 30_000;
 
+function publicRunError(reason: string): string {
+  if (reason === "CDP_UNREACHABLE" || reason.startsWith("CDP_CONNECT_FAIL")) return "CDP_NOT_READY";
+  return reason;
+}
+
 export class RunService {
   private cancelRequested = new Set<string>();
   private promoting = false;
@@ -257,7 +262,7 @@ export class RunService {
   promoteNextQueued(machineId: string): void {
     if (this.promoting) return;
     this.promoting = true;
-    const toFail: string[] = [];
+    const toFail: { id: string; error: string }[] = [];
     try {
       if (this.injectSlotCount(machineId) !== 0) return;
       const rows = this.db.query(
@@ -266,25 +271,29 @@ export class RunService {
       for (const row of rows) {
         const m = this.registry.getMachine(machineId);
         const open = m ? JSON.parse(m.open_workspaces) as string[] : [];
-        const win = this.registry.findWindowForWorkspace(machineId, row.workspace_root);
-        if (!open.includes(row.workspace_root) || !win) {
-          toFail.push(row.id);
+        if (!open.includes(row.workspace_root)) {
+          toFail.push({ id: row.id, error: "WORKSPACE_NOT_OPEN" });
           continue;
         }
-        if (!this.windowCanAcceptStart(machineId, win.windowId)) continue;
+        const routed = this.registry.routeForInject(machineId, row.workspace_root);
+        if (!routed.ok) {
+          toFail.push({ id: row.id, error: routed.error });
+          continue;
+        }
+        if (!this.windowCanAcceptStart(machineId, routed.windowId)) continue;
         const now = Date.now();
         this.db.query(`UPDATE runs SET status='dispatched', queued_at=NULL, started_at=?1 WHERE id=?2`).run(now, row.id);
         this.audit("hub", "run.dispatched", row.id);
         this.sse.broadcast(row.id, { type: "run.status", runId: row.id, status: "dispatched" });
         this.attachHubGenerationIfWindows(row.id, machineId);
         const live = this.get(row.id);
-        this.registry.sendTo(machineId, win.windowId, this.startMessage(live ?? row, now));
+        this.registry.sendTo(machineId, routed.windowId, this.startMessage(live ?? row, now));
         break;
       }
     } finally {
       this.promoting = false;
     }
-    for (const id of toFail) this.setStatus(id, "error", { end_reason: "WORKSPACE_NOT_OPEN" });
+    for (const { id, error } of toFail) this.setStatus(id, "error", { end_reason: error });
   }
 
   private startMessage(row: { id: string; workspace_root: string; prompt: string; attachments?: string; live_generation_id?: string | null }, now: number) {
@@ -324,8 +333,9 @@ export class RunService {
     const m = this.registry.getMachine(machineId);
     if (!m || m.status !== "online") return { error: "MACHINE_OFFLINE" };
     if (!JSON.parse(m.open_workspaces).includes(workspaceRoot)) return { error: "WORKSPACE_NOT_OPEN" };
-    const win = this.registry.findWindowForWorkspace(machineId, workspaceRoot);
-    if (!win) return { error: "WORKSPACE_NOT_OPEN" };
+    const routed = this.registry.routeForInject(machineId, workspaceRoot);
+    if (!routed.ok) return { error: routed.error };
+    const win = { windowId: routed.windowId };
 
     const attachmentIds = opts.attachmentIds ?? [];
     if (this.blobs && attachmentIds.length) {
@@ -476,7 +486,7 @@ export class RunService {
       }
     } else {
       this.pendingFollowupPrompt.delete(run.id);
-      this.setStatus(run.id, "error", { end_reason: msg.reason ?? "REJECTED" }, "extension");
+      this.setStatus(run.id, "error", { end_reason: publicRunError(msg.reason ?? "REJECTED") }, "extension");
       this.promoteNextQueued(machineId);
     }
   }
@@ -855,8 +865,8 @@ export class RunService {
       answers = [{ question_id: qid, option_ids }];
     }
     if (this.askInFlight.has(runId)) return { error: "ASK_IN_FLIGHT" };
-    const windowId = this.liveWindowId(run);
-    if (!windowId) return { error: "WORKSPACE_NOT_OPEN" };
+    const routed = this.registry.routeForInject(run.machine_id, run.workspace_root);
+    if (!routed.ok) return { error: routed.error };
 
     this.askInFlight.add(runId);
     const t = setTimeout(() => {
@@ -867,7 +877,7 @@ export class RunService {
     if (typeof (t as any).unref === "function") (t as any).unref();
     this.askTimers.set(runId, t);
 
-    this.registry.sendTo(run.machine_id, windowId, {
+    this.registry.sendTo(run.machine_id, routed.windowId, {
       type: "run.answerAsk",
       runId,
       conversationId: run.conversation_id,
@@ -924,8 +934,9 @@ export class RunService {
     if (run.status === "running") return this.followupWhileRunning(run, prompt, attachmentIds);
     if ((OCCUPYING_STATUSES as readonly string[]).includes(run.status)) return { error: "CONVERSATION_BUSY" };
     if (this.injectSlotCount(run.machine_id) > 0) return { error: "INJECT_SLOT_BUSY" };
-    const win = this.registry.findWindowForWorkspace(run.machine_id, run.workspace_root);
-    if (!win) return { error: "WORKSPACE_NOT_OPEN" };
+    const routed = this.registry.routeForInject(run.machine_id, run.workspace_root);
+    if (!routed.ok) return { error: routed.error };
+    const win = { windowId: routed.windowId };
 
     if (this.blobs && attachmentIds.length) {
       const checked = this.blobs.metas(attachmentIds);
@@ -975,8 +986,9 @@ export class RunService {
     }
     if (this.hasOutboundCollision(run.id, prompt)) return { error: "PROMPT_COLLISION" };
     if (this.unconsumedOutboundCount(run.id) >= OUTBOUND_LIMIT) return { error: "OUTBOUND_LIMIT" };
-    const win = this.registry.findWindowForWorkspace(run.machine_id, run.workspace_root);
-    if (!win) return { error: "WORKSPACE_NOT_OPEN" };
+    const routed = this.registry.routeForInject(run.machine_id, run.workspace_root);
+    if (!routed.ok) return { error: routed.error };
+    const win = { windowId: routed.windowId };
 
     const expected_mode = queueModeOf(this.registry.getMachine(run.machine_id)?.queue_message_default_behavior);
     const id = `o-${randomUUID()}`;
@@ -1028,8 +1040,9 @@ export class RunService {
     const m = this.registry.getMachine(run.machine_id);
     if (!m || m.status !== "online") return { error: "MACHINE_OFFLINE" };
     if (!JSON.parse(m.open_workspaces).includes(run.workspace_root)) return { error: "WORKSPACE_NOT_OPEN" };
-    const win = this.registry.findWindowForWorkspace(run.machine_id, run.workspace_root);
-    if (!win) return { error: "WORKSPACE_NOT_OPEN" };
+    const routed = this.registry.routeForInject(run.machine_id, run.workspace_root);
+    if (!routed.ok) return { error: routed.error };
+    const win = { windowId: routed.windowId };
     if (!normalizePrompt(run.prompt ?? "") && attachmentIds.length === 0) return { error: "EMPTY_PROMPT" };
     if (this.countOccupying(run.machine_id) >= this.limits.maxPerMachine) return { error: "RUN_LIMIT" };
     if (this.countOccupying(run.machine_id, run.workspace_root) >= this.limits.maxPerWorkspace) return { error: "RUN_LIMIT" };

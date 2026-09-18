@@ -223,6 +223,7 @@ describe("relay serve", () => {
       workspaceId: encodeWorkspaceId("m-1", "/Users/me/proj"),
       label: "proj",
       machineName: "Mac Intel",
+      cdpReady: false,
     });
     const d = await fetch(url(s, "/mobile/runs"), {
       method: "POST",
@@ -234,6 +235,25 @@ describe("relay serve", () => {
     expect(body.run.runId).toBe("r-1");
     expect(body.run.prompt).toBe("hello fleet");
     expect(body.run.status).toBe("dispatched");
+    ws.close();
+  });
+
+  test("snap.workspaces cdp_ready true is injectable on the operator list", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    ws.send(JSON.stringify({
+      type: "snap.workspaces",
+      machines: [{
+        id: "m-1", name: "Mac", os: "darwin", status: "online",
+        open_workspaces: JSON.stringify(["/ws/a"]), cdp_ready: true,
+      }],
+    }));
+    await Bun.sleep(50);
+    const list = await (await fetch(url(s, "/mobile/workspaces"), {
+      headers: { authorization: `Bearer ${fleet.operatorToken}` },
+    })).json() as any;
+    expect(list.workspaces[0].cdpReady).toBe(true);
     ws.close();
   });
 

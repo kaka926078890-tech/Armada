@@ -110,4 +110,38 @@ class ModelsTest {
         val seen = stampReadAt(5.0, done.activityTs)
         assertFalse(isUnread(done, mapOf("r1" to seen)))
     }
+
+    @Test
+    fun canMarkUnreadOnlyWhenReadAndAlertable() {
+        val done = run("completed")
+        assertFalse(canMarkUnread(done, emptyMap()))
+        assertTrue(canMarkUnread(done, mapOf("r1" to 20.0)))
+        val live = run("running")
+        assertFalse(canMarkUnread(live, mapOf("r1" to 20.0)))
+        val cancelled = run("cancelled")
+        assertFalse(canMarkUnread(cancelled, mapOf("r1" to 20.0)))
+        val ask = run("running", ask = PendingAskDto("q"))
+        assertTrue(canMarkUnread(ask, mapOf("r1" to 20.0)))
+        assertFalse(canMarkUnread(ask, emptyMap()))
+    }
+
+    @Test
+    fun markUnreadRemovesStampSoItCountsAgain() {
+        val done = run("completed").copy(updatedAt = 10)
+        val after = readAtAfterMarkUnread(mapOf("r1" to 20.0, "r2" to 3.0), "r1")
+        assertTrue(isUnread(done, after))
+        assertEquals(setOf("r2"), after.keys)
+        assertFalse(shouldStampOpened(setOf("r1"), "r1"))
+        assertTrue(shouldStampOpened(emptySet(), "r1"))
+    }
+
+    @Test
+    fun missingCdpReadyIsNotInjectable() {
+        val omitted = WorkspaceDto("w", "m", "/p", "p")
+        assertFalse(omitted.cdpReady)
+        assertFalse(omitted.canInject)
+        val ready = omitted.copy(cdpReady = true)
+        assertTrue(ready.canInject)
+        assertFalse(ready.copy(online = false).canInject)
+    }
 }

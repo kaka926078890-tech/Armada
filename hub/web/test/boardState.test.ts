@@ -82,6 +82,14 @@ describe("workspace slots and conversation filter", () => {
     ]);
     expect(slots.map((s) => s.root)).toEqual(["/ws/a", "/ws/b"]);
     expect(slots[0].online).toBe(true);
+    expect(slots[0].cdpReady).toBe(false);
+  });
+
+  test("cdp_ready true marks slots injectable", () => {
+    const slots = listWorkspaceSlots([
+      { id: "m-1", name: "a", os: "darwin", status: "online", open_workspaces: '["/ws/a"]', cdp_ready: true },
+    ]);
+    expect(slots[0].cdpReady).toBe(true);
   });
 
   test("groupSlotsByMachine nests workspaces under each computer", () => {
@@ -252,10 +260,10 @@ describe("workspaceHasLiveRun", () => {
 
 describe("resolveSelectedWorkspace", () => {
   const onlineA = {
-    machineId: "m-1", machineName: "A", os: "darwin", root: "/ws/a", online: true,
+    machineId: "m-1", machineName: "A", os: "darwin", root: "/ws/a", online: true, cdpReady: true,
   };
   const onlineB = {
-    machineId: "m-2", machineName: "B", os: "darwin", root: "/ws/b", online: true,
+    machineId: "m-2", machineName: "B", os: "darwin", root: "/ws/b", online: true, cdpReady: true,
   };
   const keyA = encodeWorkspaceKey("m-1", "/ws/a");
   const keyB = encodeWorkspaceKey("m-2", "/ws/b");

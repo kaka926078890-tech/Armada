@@ -49,6 +49,7 @@ describe("defaultLandingMode", () => {
 describe("parseDesktopBoardRequest", () => {
   test("accepts open-workspace and get-share-link from the board iframe", () => {
     expect(parseDesktopBoardRequest({ source: "armada-desktop", type: "open-workspace" })).toEqual({ type: "open-workspace" });
+    expect(parseDesktopBoardRequest({ source: "armada-desktop", type: "repair-cdp" })).toEqual({ type: "repair-cdp" });
     expect(parseDesktopBoardRequest({ source: "armada-desktop", type: "get-share-link" })).toEqual({ type: "get-share-link" });
     expect(parseDesktopBoardRequest({ source: "armada-desktop", type: "leave-fleet" })).toEqual({ type: "leave-fleet" });
     expect(parseDesktopBoardRequest({ source: "armada-desktop", type: "need-token" })).toEqual({ type: "need-token" });

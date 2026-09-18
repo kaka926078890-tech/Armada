@@ -16,7 +16,7 @@ async function startBoundRun() {
   });
   const inbound: any[] = [];
   ws.addEventListener("message", (e) => inbound.push(JSON.parse(String(e.data))));
-  ws.send(JSON.stringify({ type: "register", machineId: "m-1", windowId: "w-1", name: "A", os: "darwin", openWorkspaces: ["/ws/a"] }));
+  ws.send(JSON.stringify({ type: "register", machineId: "m-1", windowId: "w-1", name: "A", os: "darwin", openWorkspaces: ["/ws/a"], cdpReady: true }));
   await new Promise((r) => setTimeout(r, 100));
   const api = (p: string, init?: RequestInit) => fetch(`http://127.0.0.1:${hub!.port}${p}`, {
     ...init, headers: { "content-type": "application/json", authorization: `Bearer ${hub!.token}` },
@@ -412,7 +412,7 @@ describe("event ingest", () => {
       const w = new WebSocket(`ws://127.0.0.1:${hub!.port}/ws?token=${hub!.token}`);
       w.onopen = () => res(w); w.onerror = rej;
     });
-    ws.send(JSON.stringify({ type: "register", machineId: "m-1", windowId: "w-1", name: "A", os: "darwin", openWorkspaces: ["/ws/a"] }));
+    ws.send(JSON.stringify({ type: "register", machineId: "m-1", windowId: "w-1", name: "A", os: "darwin", openWorkspaces: ["/ws/a"], cdpReady: true }));
     await new Promise((r) => setTimeout(r, 100));
     const api = (p: string, init?: RequestInit) => fetch(`http://127.0.0.1:${hub!.port}${p}`, {
       ...init, headers: { "content-type": "application/json", authorization: `Bearer ${hub!.token}` },
@@ -443,7 +443,7 @@ describe("event ingest", () => {
     const winRoot = "c:\\Users\\PC\\Desktop\\work";
     ws.send(JSON.stringify({
       type: "register", machineId: "m-win", windowId: "w-1", name: "W", os: "win32",
-      openWorkspaces: [winRoot],
+      openWorkspaces: [winRoot], cdpReady: true,
     }));
     await new Promise((r) => setTimeout(r, 100));
     const api = (p: string, init?: RequestInit) => fetch(`http://127.0.0.1:${hub!.port}${p}`, {
@@ -476,7 +476,7 @@ describe("event ingest", () => {
       const w = new WebSocket(`ws://127.0.0.1:${hub!.port}/ws?token=${hub!.token}`);
       w.onopen = () => res(w); w.onerror = rej;
     });
-    ws.send(JSON.stringify({ type: "register", machineId: "m-1", windowId: "w-1", name: "A", os: "darwin", openWorkspaces: ["/ws/a"] }));
+    ws.send(JSON.stringify({ type: "register", machineId: "m-1", windowId: "w-1", name: "A", os: "darwin", openWorkspaces: ["/ws/a"], cdpReady: true }));
     await new Promise((r) => setTimeout(r, 100));
     const api = (p: string, init?: RequestInit) => fetch(`http://127.0.0.1:${hub!.port}${p}`, {
       ...init, headers: { "content-type": "application/json", authorization: `Bearer ${hub!.token}` },
@@ -825,7 +825,7 @@ describe("event ingest", () => {
       const w = new WebSocket(`ws://127.0.0.1:${hub!.port}/ws?token=${hub!.token}`);
       w.onopen = () => res(w); w.onerror = rej;
     });
-    ws.send(JSON.stringify({ type: "register", machineId: "m-1", windowId: "w-1", name: "A", os: "darwin", openWorkspaces: ["/ws/a"] }));
+    ws.send(JSON.stringify({ type: "register", machineId: "m-1", windowId: "w-1", name: "A", os: "darwin", openWorkspaces: ["/ws/a"], cdpReady: true }));
     await new Promise((r) => setTimeout(r, 100));
     const api = (p: string, init?: RequestInit) => fetch(`http://127.0.0.1:${hub!.port}${p}`, {
       ...init, headers: { authorization: `Bearer ${hub!.token}`, ...(init?.headers ?? {}) },

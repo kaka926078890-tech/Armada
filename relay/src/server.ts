@@ -21,6 +21,7 @@ export type WorkspaceSnap = {
   machineName?: string;
   os?: string;
   online?: boolean;
+  cdpReady?: boolean;
 };
 
 function machineLabel(m: any): string {
@@ -300,6 +301,7 @@ export function createRelayServer(opts: {
       machineName: string;
       os: string;
       online: boolean;
+      cdpReady: boolean;
     }[];
   } {
     const fleet = getFleet(fleetId);
@@ -313,6 +315,7 @@ export function createRelayServer(opts: {
       machineName: w.machineName || "",
       os: w.os || "",
       online: w.online !== false,
+      cdpReady: w.cdpReady === true,
     }));
     return { type: "workspaces", hubOffline, workspaces };
   }
@@ -354,7 +357,7 @@ export function createRelayServer(opts: {
       "PROMPT_COLLISION", "CONVERSATION_BUSY", "INJECT_SLOT_BUSY", "WINDOW_BUSY",
       "NO_CONVERSATION", "OUTBOUND_TEXT_ONLY", "INVALID_STATE",
     ].includes(err)) return 409;
-    if (err === "WORKSPACE_NOT_OPEN" || err === "MACHINE_OFFLINE" || err === "CLOSED" || err === "EMPTY_PROMPT" || err === "INVALID") {
+    if (err === "WORKSPACE_NOT_OPEN" || err === "MACHINE_OFFLINE" || err === "CLOSED" || err === "EMPTY_PROMPT" || err === "INVALID" || err === "CDP_NOT_READY") {
       return 400;
     }
     return 502;
@@ -684,6 +687,7 @@ export function createRelayServer(opts: {
                 machineName: machineLabel(m),
                 os: typeof m.os === "string" ? m.os : "",
                 online: m.status !== "offline",
+                cdpReady: m.cdp_ready === true,
               });
             }
           }

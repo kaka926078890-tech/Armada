@@ -142,6 +142,46 @@ describe("Registry", () => {
     expect(n).toBe(1);
   });
 
+  test("heartbeat stores cdpReady and notifies when injectability flips", () => {
+    const { reg } = setup();
+    const ws = fakeWs();
+    register(reg, ws, { cdpReady: true });
+    expect(reg.listMachines()[0].cdp_ready).toBe(true);
+    expect(reg.routeForInject("m-1", "/ws/a")).toEqual({ ok: true, windowId: "w-1" });
+    let n = 0;
+    reg.onMachinesChanged = () => { n += 1; };
+    reg.onHeartbeat(ws, { openWorkspaces: ["/ws/a"] });
+    expect(n).toBe(0);
+    expect(reg.routeForInject("m-1", "/ws/a")).toEqual({ ok: true, windowId: "w-1" });
+    reg.onHeartbeat(ws, { openWorkspaces: ["/ws/a"], cdpReady: true });
+    expect(n).toBe(0);
+    reg.onHeartbeat(ws, { openWorkspaces: ["/ws/a"], cdpReady: false });
+    expect(n).toBe(1);
+    expect(reg.listMachines()[0].cdp_ready).toBe(false);
+    expect(reg.routeForInject("m-1", "/ws/a")).toEqual({ ok: false, error: "CDP_NOT_READY" });
+    reg.onHeartbeat(ws, { openWorkspaces: ["/ws/a"] });
+    expect(reg.routeForInject("m-1", "/ws/a")).toEqual({ ok: false, error: "CDP_NOT_READY" });
+  });
+
+  test("missing cdpReady is CDP_NOT_READY; any true window makes machine ready", () => {
+    const { reg } = setup();
+    const a = fakeWs();
+    const b = fakeWs();
+    register(reg, a, { windowId: "w-1", openWorkspaces: ["/ws/a"] });
+    expect(reg.listMachines()[0].cdp_ready).toBe(false);
+    expect(reg.routeForInject("m-1", "/ws/a")).toEqual({ ok: false, error: "CDP_NOT_READY" });
+    expect(reg.routeForInject("m-1", "/nope")).toEqual({ ok: false, error: "WORKSPACE_NOT_OPEN" });
+    register(reg, b, { windowId: "w-2", openWorkspaces: ["/ws/b"], cdpReady: true });
+    expect(reg.listMachines()[0].cdp_ready).toBe(true);
+    expect(reg.routeForInject("m-1", "/ws/b")).toEqual({ ok: true, windowId: "w-2" });
+  });
+
+  test("offline machine has null cdp_ready", () => {
+    const { reg } = setup();
+    reg.upsertMachine(machine);
+    expect(reg.listMachines()[0].cdp_ready).toBeNull();
+  });
+
   test("constructor clears leftover workspaces on already-offline rows", () => {
     const { db } = setup();
     db.query(`

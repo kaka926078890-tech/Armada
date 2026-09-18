@@ -15,7 +15,7 @@ describe("GET /api/runs/:id/events pagination", () => {
       const w = new WebSocket(`ws://127.0.0.1:${hub!.port}/ws?token=${hub!.token}`);
       w.onopen = () => res(w); w.onerror = rej;
     });
-    ws.send(JSON.stringify({ type: "register", machineId: "m-1", windowId: "w-1", name: "A", os: "darwin", openWorkspaces: ["/ws/a"] }));
+    ws.send(JSON.stringify({ type: "register", machineId: "m-1", windowId: "w-1", name: "A", os: "darwin", openWorkspaces: ["/ws/a"], cdpReady: true }));
     await new Promise((r) => setTimeout(r, 80));
     const api = (p: string, init?: RequestInit) => fetch(`http://127.0.0.1:${hub!.port}${p}`, {
       ...init, headers: { "content-type": "application/json", authorization: `Bearer ${hub!.token}` },
@@ -53,7 +53,7 @@ describe("GET /api/runs/:id/events pagination", () => {
       const w = new WebSocket(`ws://127.0.0.1:${hub!.port}/ws?token=${hub!.token}`);
       w.onopen = () => res(w); w.onerror = rej;
     });
-    ws.send(JSON.stringify({ type: "register", machineId: "m-1", windowId: "w-1", name: "A", os: "darwin", openWorkspaces: ["/ws/a"] }));
+    ws.send(JSON.stringify({ type: "register", machineId: "m-1", windowId: "w-1", name: "A", os: "darwin", openWorkspaces: ["/ws/a"], cdpReady: true }));
     await new Promise((r) => setTimeout(r, 80));
     const api = (p: string, init?: RequestInit) => fetch(`http://127.0.0.1:${hub!.port}${p}`, {
       ...init, headers: { "content-type": "application/json", authorization: `Bearer ${hub!.token}` },

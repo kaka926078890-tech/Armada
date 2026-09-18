@@ -374,6 +374,17 @@ struct WorkspaceHome: View {
             .listStyle(.insetGrouped)
         }
         .navigationTitle(workspace.label)
+        .safeAreaInset(edge: .top) {
+            if !workspace.canInject {
+                Text(RelayAPIError.operatorMessage("CDP_NOT_READY"))
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(Color.red.opacity(0.08))
+            }
+        }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 8) {
@@ -384,7 +395,7 @@ struct WorkspaceHome: View {
                         expand: false
                     ) { showArchived.toggle() }
                     if !showArchived {
-                        VolumeButton(title: "派发", compact: true, expand: false) { showDispatch = true }
+                        VolumeButton(title: "派发", compact: true, expand: false, enabled: workspace.canInject) { showDispatch = true }
                     }
                 }
             }
@@ -445,11 +456,16 @@ struct DispatchSheet: View {
         speech.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private var canSend: Bool { !sending && !speech.listening && !trimmed.isEmpty }
+    private var canSend: Bool { workspace.canInject && !sending && !speech.listening && !trimmed.isEmpty }
 
     var body: some View {
         NavigationStack {
             Form {
+                if !workspace.canInject {
+                    Section {
+                        Text(RelayAPIError.operatorMessage("CDP_NOT_READY")).foregroundStyle(.red)
+                    }
+                }
                 if let err {
                     Section {
                         Text(err).foregroundStyle(.red)
@@ -654,7 +670,10 @@ struct RunDetailView: View {
                     Text("\(run.workspace(from: session.workspaces).machineName) · \(run.workspace(from: session.workspaces).label)")
                         .font(.subheadline)
                     Text(run.workspaceRoot).font(.caption).foregroundStyle(.secondary)
-                    if let e = run.displayError { Text(e).foregroundStyle(.red) }
+                    if let e = run.displayError { Text(RelayAPIError.operatorMessage(e)).foregroundStyle(.red) }
+                    if slot?.canInject == false, run.displayError != "CDP_NOT_READY" {
+                        Text(RelayAPIError.operatorMessage("CDP_NOT_READY")).foregroundStyle(.red)
+                    }
                     DetailPromptCard(text: run.prompt, contentHeight: $promptHeight)
                     DetailReplyBlock(text: run.finalText, isLive: run.isLive, height: $mdHeight)
                     if let ask = run.pendingAsk {
@@ -686,7 +705,7 @@ struct RunDetailView: View {
                         }
                     }
                     if run.showsRetry {
-                        VolumeButton(title: "重试") {
+                        VolumeButton(title: "重试", enabled: slot?.canInject ?? false) {
                             Task {
                                 do {
                                     _ = try await session.api().retry(runId: runId)
@@ -747,7 +766,7 @@ struct RunDetailView: View {
                     title: "续聊",
                     compact: true,
                     expand: false,
-                    enabled: slot != nil && (run?.canFollowup ?? false)
+                    enabled: (slot?.canInject ?? false) && (run?.canFollowup ?? false)
                 ) { showDispatch = true }
             }
         }

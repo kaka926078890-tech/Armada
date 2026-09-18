@@ -2,7 +2,7 @@
  * CDP 注入:通过 Chromium 远程调试端口操作 composer DOM,实现全自动提交。
  *
  * 前提:Cursor 以 --remote-debugging-port 与 --remote-debugging-address=127.0.0.1 启动(见 scripts/armada-cursor.sh)。
- * 端口只连 127.0.0.1;任何失败都返回 ok=false,由调用方降级到剪贴板+人工回车。
+ * 端口只连 127.0.0.1;任何失败都返回 ok=false。自动提交时 CDP 不通必须 reject，禁止剪贴板假 ack。
  * 选窗见 pickCdpPage：文件夹名精确匹配，多窗口失败关闭。
  *
  * 真机实证(Cursor 3.15.19 / Electron 40)结论:
@@ -198,6 +198,21 @@ async function defaultFetchJson(url: string, timeoutMs: number): Promise<any[]> 
     return (await r.json()) as any[];
   } finally {
     clearTimeout(t);
+  }
+}
+
+/** 口通不通：GET /json 300ms。不 pick workspace page（残实例是口都不通）。 */
+export async function probeCdpReady(opts: {
+  port: number;
+  fetchJson?: (url: string, timeoutMs: number) => Promise<unknown>;
+  timeoutMs?: number;
+}): Promise<boolean> {
+  const fetchJson = opts.fetchJson ?? defaultFetchJson;
+  try {
+    const body = await fetchJson(`http://127.0.0.1:${opts.port}/json`, opts.timeoutMs ?? 300);
+    return Array.isArray(body);
+  } catch {
+    return false;
   }
 }
 

@@ -4,6 +4,7 @@ fun operatorMessage(code: String): String = when (code) {
     "CONVERSATION_BUSY" -> "该对话仍在排队或绑定，结束后才能续聊"
     "NO_CONVERSATION" -> "还没有绑上 Cursor 对话，不能续聊"
     "INJECT_SLOT_BUSY" -> "这台机器正在注入另一条任务，稍后再试"
+    "CDP_NOT_READY" -> "Cursor 在线但无法注入。请确认已安装最新 Armada 扩展，并用 Armada 打开工作区。若窗口已开、调试口不通：请完全退出 Cursor（Mac Cmd+Q / Windows 托盘 Exit），不要点 Cursor 图标。"
     "WORKSPACE_NOT_OPEN" -> "工作区没有打开"
     "CLOSED" -> "这条对话已关闭"
     "PROMPT_COLLISION" -> "同一工作区已有相同内容的任务"

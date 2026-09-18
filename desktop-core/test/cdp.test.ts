@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   afterOpenWorkspaceFeedback,
+  afterZombieCleared,
   cdpStatusLabel,
   cdpWatchdogCopy,
   cdpZombieCopy,
@@ -39,6 +40,14 @@ describe("afterOpenWorkspaceFeedback", () => {
     expect(afterOpenWorkspaceFeedback("zombie-poll", "zombie")).toBe("continue");
     expect(afterOpenWorkspaceFeedback("zombie-poll", "absent")).toBe("clear");
     expect(afterOpenWorkspaceFeedback("zombie-poll", "ready")).toBe("stop");
+  });
+});
+
+describe("afterZombieCleared", () => {
+  test("wait while zombie, launch when process gone, stop when ready", () => {
+    expect(afterZombieCleared("zombie")).toBe("wait");
+    expect(afterZombieCleared("absent")).toBe("launch");
+    expect(afterZombieCleared("ready")).toBe("ready");
   });
 });
 

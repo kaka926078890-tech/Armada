@@ -3,6 +3,7 @@ export interface Machine {
   cursor_version: string | null; extension_version: string | null;
   open_workspaces: string; status: string; last_seen_at: number | null;
   display_name?: string | null;
+  cdp_ready?: boolean | null;
 }
 export interface RunEvent {
   id: number; run_id: string; seq: number; source: string;

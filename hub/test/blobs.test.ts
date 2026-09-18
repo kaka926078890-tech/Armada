@@ -23,7 +23,7 @@ async function start() {
   ws.addEventListener("message", (e) => inbound.push(JSON.parse(String(e.data))));
   ws.send(JSON.stringify({
     type: "register", machineId: "m-1", windowId: "w-1", name: "Mac-A",
-    os: "darwin-arm64", openWorkspaces: ["/ws/a"], extensionVersion: "0.4.12",
+    os: "darwin-arm64", openWorkspaces: ["/ws/a"], extensionVersion: "0.4.12", cdpReady: true,
   }));
   await new Promise((r) => setTimeout(r, 80));
   inbound.length = 0;

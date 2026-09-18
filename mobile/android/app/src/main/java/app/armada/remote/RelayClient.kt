@@ -130,6 +130,7 @@ fun parseWorkspace(o: JSONObject) = WorkspaceDto(
     machineName = o.optString("machineName"),
     os = o.optString("os"),
     online = if (o.has("online")) o.optBoolean("online") else true,
+    cdpReady = o.optBoolean("cdpReady"),
 )
 
 fun parseRun(o: JSONObject) = RunDto(

@@ -71,9 +71,11 @@ export function attachWithConfig(
     try {
       const machines = await (await hubFetch("/api/machines")).json().catch(() => null);
       if (Array.isArray(machines)) {
-        const fp = JSON.stringify(machines.map((m: any) => [m.id, m.status, m.open_workspaces ?? m.openWorkspaces]));
-        if (fp !== lastMachinesFp) lastMachinesFp = fp;
-        await pushWorkspaces(machines);
+        const fp = JSON.stringify(machines.map((m: any) => [m.id, m.status, m.open_workspaces ?? m.openWorkspaces, m.cdp_ready ?? null]));
+        if (fp !== lastMachinesFp) {
+          lastMachinesFp = fp;
+          await pushWorkspaces(machines);
+        }
       }
       const runs = await (await hubFetch("/api/runs")).json().catch(() => null);
       if (!Array.isArray(runs)) return;

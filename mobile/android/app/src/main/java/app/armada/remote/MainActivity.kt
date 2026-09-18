@@ -298,7 +298,7 @@ fun WorkspaceScreen(vm: SessionVm, state: UiState, workspace: WorkspaceDto, onOp
                 BarButton(if (showArchived) "返回看板" else if (hiddenN > 0) "查看已隐藏 $hiddenN" else "查看已隐藏", compact = true) {
                     showArchived = !showArchived
                 }
-                if (!showArchived) BarButton("派发", filled = true, compact = true) { showDispatch = true }
+                if (!showArchived) BarButton("派发", filled = true, compact = true, enabled = workspace.canInject) { showDispatch = true }
             },
         )
     }) { pad ->
@@ -309,6 +309,7 @@ fun WorkspaceScreen(vm: SessionVm, state: UiState, workspace: WorkspaceDto, onOp
                     FilterChip(selected = tab == col, onClick = { tab = col }, label = { Text(if (n > 0) "${col.title} $n" else col.title) })
                 }
             }
+            if (!workspace.canInject) Text(operatorMessage("CDP_NOT_READY"), color = Color.Red, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall)
             state.lastError?.let { Text(it, color = Color.Red, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall) }
             if (showArchived) Text("已隐藏的任务仍保留，可取消隐藏。", modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall, color = Color.Gray)
             if (filtered.isEmpty()) Text("这一列还没有任务", modifier = Modifier.padding(16.dp), color = Color.Gray)
@@ -395,6 +396,7 @@ fun DispatchSheet(vm: SessionVm, workspace: WorkspaceDto, followupRunId: String?
         Text(if (followupRunId == null) "派发任务" else "续聊", style = MaterialTheme.typography.titleLarge)
         Text("${workspace.machineName} · ${workspace.label}", style = MaterialTheme.typography.bodySmall)
         if (followupRunId != null) Text("在当前对话里继续，不会新开一条任务", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+        if (!workspace.canInject) Text(operatorMessage("CDP_NOT_READY"), color = Color.Red, style = MaterialTheme.typography.bodySmall)
         OutlinedTextField(
             value = prompt,
             onValueChange = { prompt = it },
@@ -430,7 +432,7 @@ fun DispatchSheet(vm: SessionVm, workspace: WorkspaceDto, followupRunId: String?
                     }
                 }
             },
-            enabled = !sending && !listening && trimmed.isNotEmpty(),
+            enabled = workspace.canInject && !sending && !listening && trimmed.isNotEmpty(),
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp).height(48.dp),
         ) { Text(if (sending) "发送中…" else if (followupRunId == null) "派发" else "发送") }
         OutlinedButton(onClick = { speech.release(); onDone(BoardColumn.Completed) }, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("取消") }
@@ -487,7 +489,7 @@ fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String) {
         TopAppBar(
             title = { Text("详情") },
             actions = {
-                BarButton("续聊", filled = true, compact = true, enabled = slot != null && run?.canFollowup == true) { showFollow = true }
+                BarButton("续聊", filled = true, compact = true, enabled = slot?.canInject == true && run?.canFollowup == true) { showFollow = true }
             },
         )
     }) { pad ->
@@ -498,7 +500,8 @@ fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String) {
                 err?.let { Text(it, color = Color.Red) }
                 Text(statusLabel(r.status), style = MaterialTheme.typography.titleMedium)
                 Text("${r.workspaceRoot}", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
-                r.displayError?.let { Text(it, color = Color.Red) }
+                r.displayError?.let { Text(operatorMessage(it), color = Color.Red) }
+                if (slot?.canInject == false && r.displayError != "CDP_NOT_READY") Text(operatorMessage("CDP_NOT_READY"), color = Color.Red)
                 Text("提示词", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 12.dp))
                 MarkdownBox(r.prompt)
                 Text("回复", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 12.dp))
@@ -517,7 +520,7 @@ fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String) {
                     OutlinedButton(onClick = { vm.markUnread(runId, hold = true) }, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("标为未读") }
                 }
                 if (r.isLive) OutlinedButton(onClick = { scope.launch { runCatching { vm.api().cancel(runId) }; runCatching { adopt(vm.api().run(runId)) } } }, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("取消任务") }
-                if (r.showsRetry) Button(onClick = { scope.launch { runCatching { vm.api().retry(runId) }; vm.refresh(); runCatching { adopt(vm.api().run(runId)) } } }, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("重试") }
+                if (r.showsRetry) Button(onClick = { scope.launch { runCatching { vm.api().retry(runId) }; vm.refresh(); runCatching { adopt(vm.api().run(runId)) } } }, enabled = slot?.canInject == true, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("重试") }
                 if (r.isArchived) OutlinedButton(onClick = {
                     vm.hideLocal(runId, false, r)
                     scope.launch {

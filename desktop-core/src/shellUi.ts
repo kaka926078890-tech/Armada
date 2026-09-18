@@ -14,7 +14,7 @@ export type AttachBanner = { kind: "red" | "info" | "none"; lines: string[] };
 
 export const DESKTOP_BOARD_SOURCE = "armada-desktop";
 
-export type DesktopBoardCommand = "open-workspace" | "get-share-link" | "leave-fleet" | "need-token";
+export type DesktopBoardCommand = "open-workspace" | "repair-cdp" | "get-share-link" | "leave-fleet" | "need-token";
 
 export type DesktopRunAlert = {
   type: "run.alert";
@@ -107,7 +107,7 @@ export function parseDesktopBoardRequest(data: unknown): DesktopBoardRequest | n
   if (!data || typeof data !== "object") return null;
   const o = data as Record<string, unknown>;
   if (o.source !== DESKTOP_BOARD_SOURCE) return null;
-  if (o.type === "open-workspace" || o.type === "get-share-link" || o.type === "leave-fleet" || o.type === "need-token") {
+  if (o.type === "open-workspace" || o.type === "repair-cdp" || o.type === "get-share-link" || o.type === "leave-fleet" || o.type === "need-token") {
     return { type: o.type };
   }
   if (o.type !== "run.alert") return null;

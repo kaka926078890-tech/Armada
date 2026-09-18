@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { api, getToken } from "../api";
-import type { RunEvent } from "../types";
-import { workspaceFolderName, runDisplayName, canRetryRun, type RunRow } from "../boardState";
+import type { Machine, RunEvent } from "../types";
+import { workspaceFolderName, runDisplayName, canRetryRun, CDP_NOT_READY_COPY, type RunRow } from "../boardState";
 import ChatThread from "./ChatThread";
 import { eventsToChat, mergePendingAsk, mergeOutboundChat, queuedOutbound, INITIAL_VISIBLE_TURNS, initialHiddenPrefixTurns, recentTurnsWindow } from "../chatView";
 import { collectEventPages, mergeEvents, EVENT_PAGE_SIZE, hasOlderEvents, olderEventsQuery, shouldLoadOlder, prependPreserveScroll } from "../loadEvents";
@@ -75,8 +75,8 @@ function DrawerShell({ children }: { children: ReactNode }) {
   );
 }
 
-export default function RunDetail({ runId, onClose, onChanged }: {
-  runId: string; onClose: () => void; onChanged: () => void;
+export default function RunDetail({ runId, onClose, onChanged, machines = [] }: {
+  runId: string; onClose: () => void; onChanged: () => void; machines?: Machine[];
 }) {
   const [run, setRun] = useState<RunRow | null>(null);
   const [events, setEvents] = useState<RunEvent[]>([]);
@@ -248,9 +248,15 @@ export default function RunDetail({ runId, onClose, onChanged }: {
     if (stickRef.current) el.scrollTop = el.scrollHeight;
   }, [events, runId, hiddenPrefixTurns]);
 
+  const injectReady = run ? machines.find((m) => m.id === run.machine_id)?.cdp_ready === true : false;
+
   const sendFollowup = useCallback((e?: FormEvent) => {
     e?.preventDefault();
     if (!run || (!followup.trim() && followupFiles.length === 0)) return;
+    if (!injectReady) {
+      setFollowupError(CDP_NOT_READY_COPY);
+      return;
+    }
     if (!tryBeginFollowupSend(sendingRef)) return;
     setSending(true);
     setFollowupError("");
@@ -277,6 +283,7 @@ export default function RunDetail({ runId, onClose, onChanged }: {
                 ? "运行中续发暂只支持纯文本。"
                 : r.error === "OUTBOUND_LIMIT"
                   ? "待消化续发已达上限，等 Cursor 消化后再发。"
+                  : r.error === "CDP_NOT_READY" ? CDP_NOT_READY_COPY
                   : r.error);
           return;
         }
@@ -292,7 +299,7 @@ export default function RunDetail({ runId, onClose, onChanged }: {
         }
       }
     })();
-  }, [followup, followupFiles, onChanged, run]);
+  }, [followup, followupFiles, injectReady, onChanged, run]);
 
   if (missing) {
     return (
@@ -380,6 +387,7 @@ export default function RunDetail({ runId, onClose, onChanged }: {
       <div className="px-4 py-2 text-[11px] text-zinc-500 border-b border-zinc-800/80">
         <div className="truncate" title={run.workspace_root}>{workspaceFolderName(run.workspace_root)}</div>
         {titleError && <div className="mt-1 text-red-400">{titleError}</div>}
+        {!injectReady && <div className="mt-1 text-red-400">{CDP_NOT_READY_COPY}</div>}
         <div className="mt-2 flex gap-2">
           {active && <button onClick={() => {
             setCancelError("");
@@ -391,12 +399,13 @@ export default function RunDetail({ runId, onClose, onChanged }: {
             className="px-2 py-1 rounded-md bg-red-950/80 hover:bg-red-900 text-red-200">取消</button>}
           {["error", "unknown"].includes(run.status) && <button onClick={() => api.close(run.id).then(onChanged)}
             className="px-2 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700">人工关闭</button>}
-          {canRetryRun(run) && <button onClick={() => {
+          {canRetryRun(run) && <button disabled={!injectReady} onClick={() => {
             setRetryError("");
             api.retry(run.id).then((r) => {
               if (r?.error) {
                 setRetryError(r.error === "INJECT_SLOT_BUSY"
                   ? "正在把另一条任务打进 Composer，几秒后再试。"
+                  : r.error === "CDP_NOT_READY" ? CDP_NOT_READY_COPY
                   : r.error === "WORKSPACE_NOT_OPEN" ? "工作区没有打开。"
                   : r.error === "MACHINE_OFFLINE" ? "机器离线。"
                   : r.error === "PROMPT_COLLISION" ? "同一工作区已有相同内容的任务。"
@@ -409,7 +418,7 @@ export default function RunDetail({ runId, onClose, onChanged }: {
               onChanged();
             }).catch((err) => setRetryError(String(err)));
           }}
-            className="px-2 py-1 rounded-md bg-sky-800 hover:bg-sky-700 text-sky-100">重试</button>}
+            className="px-2 py-1 rounded-md bg-sky-800 hover:bg-sky-700 text-sky-100 disabled:opacity-40">重试</button>}
           {run.archived_at
             ? <button onClick={() => { api.unarchive(run.id).then((res) => { if (res?.run) setRun(res.run); onChanged(); }); }} className="px-2 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700">取消隐藏</button>
             : ["dispatched", "binding", "running", "created"].includes(run.status) ? null
@@ -498,7 +507,7 @@ export default function RunDetail({ runId, onClose, onChanged }: {
               placeholder={run.pending_ask ? (run.pending_ask.kind === "plan" ? "请先点上方 Build…" : "请先回答上方选择题…") : run.status === "running" ? "Add a follow-up…" : "续聊同一对话…（Enter 发送，Shift+Enter 换行；可粘贴截图）"}
               className="flex-1 min-h-[4.5rem] max-h-48 resize-y px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-[13px] placeholder:text-zinc-600 leading-relaxed"
             />
-            <button type="submit" disabled={sending || (!followup.trim() && followupFiles.length === 0)} className="px-3 py-2 rounded-lg bg-sky-700 hover:bg-sky-600 text-[13px] shrink-0 disabled:opacity-40">发送</button>
+            <button type="submit" disabled={!injectReady || sending || (!followup.trim() && followupFiles.length === 0)} className="px-3 py-2 rounded-lg bg-sky-700 hover:bg-sky-600 text-[13px] shrink-0 disabled:opacity-40">发送</button>
           </div>
           <input type="file" accept={CONSOLE_ACCEPT} multiple onChange={(e) => {
             const picked = [...(e.target.files ?? [])];

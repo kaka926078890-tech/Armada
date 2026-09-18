@@ -684,10 +684,16 @@ fn finish_create(
     kind: ApplyKind,
     pid: Option<u32>,
     require_share: bool,
+    attach_cursor: bool,
 ) -> Result<CreateFleetResult, String> {
     let existing = crate::attach::read_existing_hub_url();
     let overwrite = existing.as_deref() != Some("127.0.0.1:7380");
-    let attach = crate::attach::run_local_attach(resource, "127.0.0.1:7380", &token, overwrite, None).ok();
+    let attach = if attach_cursor {
+        crate::attach::run_local_attach(resource, "127.0.0.1:7380", &token, overwrite, None).ok()
+    } else {
+        let _ = crate::attach::install_vsix(resource);
+        None
+    };
     let share_candidates = pick_share_candidates(&list_ifaces());
     if require_share {
         require_share_candidates(&share_candidates).map_err(|e| e.to_string())?;
@@ -713,6 +719,7 @@ fn apply_owned(
     discoverable: bool,
     require_share: bool,
     require_cursor: bool,
+    attach_cursor: bool,
 ) -> Result<CreateFleetResult, String> {
     require_macos_create(host_os()).map_err(|e| e.to_string())?;
     if require_cursor {
@@ -741,17 +748,17 @@ fn apply_owned(
                 "spawn-timeout".to_string()
             })?;
             let pid = owned.as_ref().map(|c| c.id());
-            finish_create(resource.as_deref(), token, kind, pid, require_share)?
+            finish_create(resource.as_deref(), token, kind, pid, require_share, attach_cursor)?
         }
         ApplyKind::Attach => {
             *owned = None;
             let token = load_token_from_home().ok_or_else(|| "token-missing".to_string())?;
-            finish_create(resource.as_deref(), token, kind, None, require_share)?
+            finish_create(resource.as_deref(), token, kind, None, require_share, attach_cursor)?
         }
         ApplyKind::ReuseOwned => {
             let token = load_token_from_home().ok_or_else(|| "token-missing".to_string())?;
             let pid = owned.as_ref().map(|c| c.id());
-            finish_create(resource.as_deref(), token, kind, pid, require_share)?
+            finish_create(resource.as_deref(), token, kind, pid, require_share, attach_cursor)?
         }
     };
     drop(owned);
@@ -765,7 +772,7 @@ pub fn create_fleet(app: tauri::AppHandle, state: tauri::State<'_, HubState>, di
         let _ = (&app, &state, discoverable);
         return Err("create-macos-only".into());
     }
-    apply_owned(&app, &*state, discoverable, true, true)
+    apply_owned(&app, &*state, discoverable, true, true, true)
 }
 
 #[tauri::command]
@@ -775,7 +782,7 @@ pub fn ensure_owned_hub(app: tauri::AppHandle, state: tauri::State<'_, HubState>
         let _ = (&app, &state);
         return Err("create-macos-only".into());
     }
-    apply_owned(&app, &*state, false, false, false)
+    apply_owned(&app, &*state, false, false, false, false)
 }
 
 fn maybe_advertise(
@@ -876,9 +883,19 @@ pub fn quit_owned_inner(state: &HubState) {
     }
 }
 
+pub fn attach_cursor_on_owned(user_initiated: bool) -> bool {
+    user_initiated
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn create_attaches_cursor_ensure_does_not() {
+        assert!(attach_cursor_on_owned(true));
+        assert!(!attach_cursor_on_owned(false));
+    }
 
     #[test]
     fn keep_awake_args_hold_idle_and_system_sleep() {

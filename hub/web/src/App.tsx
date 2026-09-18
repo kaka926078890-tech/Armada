@@ -437,7 +437,7 @@ export default function App() {
           <button type="button" className="absolute inset-0 bg-black/70 backdrop-blur-[2px]" aria-label="关闭详情" onClick={() => setSelectedRun(null)} />
           <div className="absolute inset-y-0 right-0 flex pointer-events-none">
             <div className="pointer-events-auto h-full min-h-0">
-              <RunDetail runId={selectedRun} onClose={() => setSelectedRun(null)} onChanged={refresh} />
+              <RunDetail runId={selectedRun} machines={machines} onClose={() => setSelectedRun(null)} onChanged={refresh} />
             </div>
           </div>
         </div>

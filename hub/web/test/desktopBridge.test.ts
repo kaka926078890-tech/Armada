@@ -8,6 +8,7 @@ test("requestDesktop posts to parent with the shared source", () => {
   (globalThis as { window: unknown }).window = { parent, postMessage: () => {} };
   try {
     requestDesktop("open-workspace");
+    requestDesktop("repair-cdp");
     requestDesktop("get-share-link");
     requestDesktop("leave-fleet");
     requestDesktop("need-token");
@@ -16,6 +17,7 @@ test("requestDesktop posts to parent with the shared source", () => {
   }
   expect(posted).toEqual([
     { source: DESKTOP_BOARD_SOURCE, type: "open-workspace" },
+    { source: DESKTOP_BOARD_SOURCE, type: "repair-cdp" },
     { source: DESKTOP_BOARD_SOURCE, type: "get-share-link" },
     { source: DESKTOP_BOARD_SOURCE, type: "leave-fleet" },
     { source: DESKTOP_BOARD_SOURCE, type: "need-token" },

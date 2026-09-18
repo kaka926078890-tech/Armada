@@ -13,9 +13,21 @@ export interface MachineRow {
   open_workspaces: string; status: string; last_seen_at: number | null;
   display_name: string | null;
   queue_message_default_behavior?: string | null;
+  cdp_ready?: boolean | null;
 }
 
-type Conn = { ws: ArmadaSocket; machineId: string; windowId: string; openWorkspaces: string[]; extensionVersion: string | null };
+type Conn = {
+  ws: ArmadaSocket; machineId: string; windowId: string; openWorkspaces: string[];
+  extensionVersion: string | null; cdpReady: boolean | null;
+};
+
+export function parseCdpReady(v: unknown): boolean | null {
+  return typeof v === "boolean" ? v : null;
+}
+
+export type InjectRoute =
+  | { ok: true; windowId: string }
+  | { ok: false; error: "WORKSPACE_NOT_OPEN" | "CDP_NOT_READY" };
 
 export function workspaceListChanged(prev: string[], next: string[]): boolean {
   if (prev.length !== next.length) return true;
@@ -51,7 +63,8 @@ export class Registry {
   }
 
   listMachines(): MachineRow[] {
-    return this.db.query("SELECT * FROM machines ORDER BY name").all() as MachineRow[];
+    const rows = this.db.query("SELECT * FROM machines ORDER BY name").all() as MachineRow[];
+    return rows.map((r) => ({ ...r, cdp_ready: this.machineCdpReady(r.id) }));
   }
 
   getMachine(id: string): MachineRow | null {
@@ -95,6 +108,7 @@ export class Registry {
       ws, machineId: msg.machineId, windowId: msg.windowId,
       openWorkspaces: msg.openWorkspaces ?? [],
       extensionVersion: typeof msg.extensionVersion === "string" ? msg.extensionVersion : null,
+      cdpReady: parseCdpReady(msg.cdpReady),
     });
     this.upsertMachine({
       id: msg.machineId, name: msg.name, os: msg.os,
@@ -110,8 +124,14 @@ export class Registry {
     const id = ws.data.machineId;
     if (!id) return;
     const conn = ws.data.connKey ? this.conns.get(ws.data.connKey) : undefined;
-    if (conn && conn.ws === ws) conn.openWorkspaces = msg.openWorkspaces ?? [];
-    if (this.refreshMachineWorkspaces(id)) this.onMachinesChanged();
+    const prevReady = id ? this.machineCdpReady(id) : null;
+    if (conn && conn.ws === ws) {
+      conn.openWorkspaces = msg.openWorkspaces ?? [];
+      if (typeof msg.cdpReady === "boolean") conn.cdpReady = msg.cdpReady;
+    }
+    const wsChanged = this.refreshMachineWorkspaces(id);
+    const readyChanged = this.machineCdpReady(id) !== prevReady;
+    if (wsChanged || readyChanged) this.onMachinesChanged();
     this.db.query(
       "UPDATE machines SET last_seen_at=?1, status='online' WHERE id=?2"
     ).run(Date.now(), id);
@@ -152,9 +172,13 @@ export class Registry {
     if (ws.data.regTimer) { clearTimeout(ws.data.regTimer); ws.data.regTimer = undefined; }
     const key = ws.data.connKey;
     if (key && this.conns.get(key)?.ws === ws) {
+      const mid = ws.data.machineId;
+      const prevReady = mid ? this.machineCdpReady(mid) : null;
       this.conns.delete(key);
-      if (ws.data.machineId && this.refreshMachineWorkspaces(ws.data.machineId)) {
-        this.onMachinesChanged();
+      if (mid) {
+        const wsChanged = this.refreshMachineWorkspaces(mid);
+        const readyChanged = this.machineCdpReady(mid) !== prevReady;
+        if (wsChanged || readyChanged) this.onMachinesChanged();
       }
     }
   }
@@ -188,6 +212,26 @@ export class Registry {
       }
     }
     return null;
+  }
+
+  windowCdpReady(machineId: string, windowId: string): boolean | null {
+    return this.conns.get(`${machineId}:${windowId}`)?.cdpReady ?? null;
+  }
+
+  machineCdpReady(machineId: string): boolean | null {
+    const mine = [...this.conns.values()].filter((c) => c.machineId === machineId);
+    if (mine.length === 0) return null;
+    if (mine.some((c) => c.cdpReady === true)) return true;
+    return false;
+  }
+
+  routeForInject(machineId: string, workspaceRoot: string): InjectRoute {
+    const win = this.findWindowForWorkspace(machineId, workspaceRoot);
+    if (!win) return { ok: false, error: "WORKSPACE_NOT_OPEN" };
+    if (this.windowCdpReady(machineId, win.windowId) !== true) {
+      return { ok: false, error: "CDP_NOT_READY" };
+    }
+    return { ok: true, windowId: win.windowId };
   }
 
   windowExtensionVersion(machineId: string, windowId: string): string | null {

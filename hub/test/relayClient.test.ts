@@ -175,7 +175,7 @@ describe("hub outbound to relay", () => {
       w.onerror = rej;
     });
     ext.send(JSON.stringify({
-      type: "register", machineId: "m-1", windowId: "w-1", name: "A", os: "darwin", openWorkspaces: ["/ws/a"],
+      type: "register", machineId: "m-1", windowId: "w-1", name: "A", os: "darwin", openWorkspaces: ["/ws/a"], cdpReady: true,
     }));
 
     const headers = { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" };
@@ -218,7 +218,7 @@ describe("hub outbound to relay", () => {
     });
     ext.send(JSON.stringify({
       type: "register", machineId: "m-1", windowId: "w-1", name: "A", os: "darwin",
-      extensionVersion: "0.4.0", openWorkspaces: ["/ws/a"],
+      extensionVersion: "0.4.0", openWorkspaces: ["/ws/a"], cdpReady: true,
     }));
 
     const headers = { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" };
@@ -284,7 +284,7 @@ describe("hub outbound to relay", () => {
     });
     ext.send(JSON.stringify({
       type: "register", machineId: "m-1", windowId: "w-1", name: "A", os: "darwin",
-      extensionVersion: "0.4.0", openWorkspaces: ["/ws/a"],
+      extensionVersion: "0.4.0", openWorkspaces: ["/ws/a"], cdpReady: true,
     }));
 
     const headers = { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" };
@@ -341,7 +341,7 @@ describe("hub outbound to relay", () => {
     });
     ext.send(JSON.stringify({
       type: "register", machineId: "m-1", windowId: "w-1", name: "A", os: "darwin",
-      extensionVersion: "0.4.0", openWorkspaces: ["/ws/a"],
+      extensionVersion: "0.4.0", openWorkspaces: ["/ws/a"], cdpReady: true,
     }));
 
     const headers = { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" };

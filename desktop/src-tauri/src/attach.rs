@@ -190,12 +190,59 @@ pub fn find_vsix(roots: &[PathBuf]) -> Option<PathBuf> {
     find_latest_vsix(roots)
 }
 
-pub fn vsix_install_cli_args(vsix: &Path) -> Vec<String> {
-    vec![
+pub fn vsix_install_cli_args(vsix: &Path, force: bool) -> Vec<String> {
+    let mut args = vec![
         "--install-extension".into(),
         vsix.to_string_lossy().into_owned(),
-        "--force".into(),
-    ]
+    ];
+    if force {
+        args.push("--force".into());
+    }
+    args
+}
+
+pub fn installed_armada_agent_semver(extensions_dir: &Path) -> Option<(u64, u64, u64)> {
+    let rd = fs::read_dir(extensions_dir).ok()?;
+    let mut best: Option<(u64, u64, u64)> = None;
+    for ent in rd.filter_map(|e| e.ok()) {
+        let name = ent.file_name();
+        let Some(s) = name.to_str() else { continue };
+        let Some(rest) = s.strip_prefix("armada.armada-agent-") else { continue };
+        let mut parts = rest.split('.');
+        let Some(major) = parts.next()?.parse().ok() else { continue };
+        let Some(minor) = parts.next()?.parse().ok() else { continue };
+        let Some(patch) = parts.next()?.parse().ok() else { continue };
+        if parts.next().is_some() {
+            continue;
+        }
+        let ver = (major, minor, patch);
+        best = Some(match best {
+            None => ver,
+            Some(prev) if ver > prev => ver,
+            Some(prev) => prev,
+        });
+    }
+    best
+}
+
+pub fn vsix_needs_install(
+    bundled: (u64, u64, u64),
+    installed: Option<(u64, u64, u64)>,
+) -> bool {
+    match installed {
+        None => true,
+        Some(v) => v < bundled,
+    }
+}
+
+fn cursor_extensions_dir() -> PathBuf {
+    if let Ok(p) = env::var("ARMADA_CURSOR_EXTENSIONS") {
+        return PathBuf::from(p);
+    }
+    let home = env::var("HOME")
+        .or_else(|_| env::var("USERPROFILE"))
+        .unwrap_or_else(|_| ".".into());
+    PathBuf::from(home).join(".cursor").join("extensions")
 }
 
 pub fn vsix_search_roots(resource_dir: Option<&Path>) -> Vec<PathBuf> {
@@ -228,9 +275,9 @@ fn cursor_cli_candidates() -> Vec<PathBuf> {
     v
 }
 
-fn try_install_vsix(cli: &Path, vsix: &Path) -> Option<(bool, String, String)> {
+fn try_install_vsix(cli: &Path, vsix: &Path, force: bool) -> Option<(bool, String, String)> {
     let out = Command::new(cli)
-        .args(vsix_install_cli_args(vsix))
+        .args(vsix_install_cli_args(vsix, force))
         .output()
         .ok()?;
     Some((
@@ -262,10 +309,27 @@ where
 }
 
 pub fn install_vsix_from_roots(roots: &[PathBuf]) -> (&'static str, Option<String>) {
+    install_vsix_from_roots_in(roots, &cursor_extensions_dir())
+}
+
+pub fn install_vsix_from_roots_in(
+    roots: &[PathBuf],
+    extensions_dir: &Path,
+) -> (&'static str, Option<String>) {
     let Some(vsix) = find_vsix(roots) else {
         return ("manual-path-shown", None);
     };
-    probe_vsix_cli_chain(&vsix, &cursor_cli_candidates(), try_install_vsix)
+    let bundled = vsix_semver(&vsix);
+    let installed = installed_armada_agent_semver(extensions_dir);
+    if let Some(ver) = bundled {
+        if !vsix_needs_install(ver, installed) {
+            return ("skipped-same-version", None);
+        }
+    }
+    let force = matches!(installed, Some(v) if bundled.map(|b| v < b).unwrap_or(false));
+    probe_vsix_cli_chain(&vsix, &cursor_cli_candidates(), |cli, path| {
+        try_install_vsix(cli, path, force)
+    })
 }
 
 pub fn install_vsix(resource_dir: Option<&Path>) -> (&'static str, Option<String>) {
@@ -578,17 +642,39 @@ mod tests {
     }
 
     #[test]
-    fn vsix_install_cli_force_upgrades() {
+    fn vsix_install_cli_force_only_when_requested() {
         let vsix = PathBuf::from("/tmp/armada-agent-0.4.12.vsix");
-        let args = vsix_install_cli_args(&vsix);
         assert_eq!(
-            args,
+            vsix_install_cli_args(&vsix, true),
             [
                 "--install-extension",
                 "/tmp/armada-agent-0.4.12.vsix",
                 "--force"
             ]
         );
+        assert_eq!(
+            vsix_install_cli_args(&vsix, false),
+            ["--install-extension", "/tmp/armada-agent-0.4.12.vsix"]
+        );
+    }
+
+    #[test]
+    fn vsix_skips_cli_when_installed_semver_is_current() {
+        let dir = scratch("exts-current");
+        fs::create_dir_all(dir.join("armada.armada-agent-0.4.23")).unwrap();
+        assert_eq!(
+            installed_armada_agent_semver(&dir),
+            Some((0, 4, 23))
+        );
+        assert!(!vsix_needs_install((0, 4, 23), Some((0, 4, 23))));
+        assert!(vsix_needs_install((0, 4, 23), Some((0, 4, 22))));
+        assert!(vsix_needs_install((0, 4, 23), None));
+        let roots = scratch("vsix-skip");
+        fs::write(roots.join("armada-agent-0.4.23.vsix"), b"x").unwrap();
+        let (status, _) = install_vsix_from_roots_in(&[roots.clone()], &dir);
+        assert_eq!(status, "skipped-same-version");
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&roots);
     }
 
     #[test]

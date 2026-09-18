@@ -8,7 +8,10 @@ data class WorkspaceDto(
     val machineName: String = "",
     val os: String = "",
     val online: Boolean = true,
-)
+    val cdpReady: Boolean = false,
+) {
+    val canInject: Boolean get() = online && cdpReady
+}
 
 data class PendingAskOption(val id: String, val label: String, val text: String)
 
@@ -124,4 +127,18 @@ fun isUnread(run: RunDto, readAt: Map<String, Double>): Boolean {
         return seen == null || run.activityTs.toDouble() > seen
     }
     return false
+}
+
+fun canMarkUnread(run: RunDto, readAt: Map<String, Double>): Boolean {
+    if (isUnread(run, readAt)) return false
+    if (run.pendingAsk != null) return true
+    return run.status in setOf("completed", "error", "unknown", "aborted")
+}
+
+fun readAtAfterMarkUnread(readAt: Map<String, Double>, runId: String): Map<String, Double> {
+    return readAt - runId
+}
+
+fun shouldStampOpened(unreadHold: Set<String>, runId: String): Boolean {
+    return runId !in unreadHold
 }

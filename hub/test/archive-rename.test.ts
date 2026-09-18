@@ -14,7 +14,7 @@ async function startHub() {
     const w = new WebSocket(`ws://127.0.0.1:${hub!.port}/ws?token=${hub!.token}`);
     w.onopen = () => res(w); w.onerror = rej;
   });
-  ws.send(JSON.stringify({ type: "register", machineId: "m-1", windowId: "w-1", name: "A.local", os: "darwin", openWorkspaces: ["/ws/a"] }));
+  ws.send(JSON.stringify({ type: "register", machineId: "m-1", windowId: "w-1", name: "A.local", os: "darwin", openWorkspaces: ["/ws/a"], cdpReady: true }));
   await new Promise((r) => setTimeout(r, 80));
   const api = (p: string, init?: RequestInit) => fetch(`http://127.0.0.1:${hub!.port}${p}`, {
     ...init, headers: { "content-type": "application/json", authorization: `Bearer ${hub!.token}` },
@@ -60,7 +60,7 @@ describe("machine display name", () => {
     expect(renamed.machine.display_name).toBe("办公室 Mac");
     expect(renamed.machine.name).toBe("A.local");
 
-    ws.send(JSON.stringify({ type: "register", machineId: "m-1", windowId: "w-2", name: "A.local", os: "darwin", openWorkspaces: ["/ws/a"] }));
+    ws.send(JSON.stringify({ type: "register", machineId: "m-1", windowId: "w-2", name: "A.local", os: "darwin", openWorkspaces: ["/ws/a"], cdpReady: true }));
     await new Promise((r) => setTimeout(r, 80));
     const list = await (await api("/api/machines")).json() as any[];
     const m = list.find((x) => x.id === "m-1");

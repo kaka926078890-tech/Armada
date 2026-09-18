@@ -33,6 +33,15 @@ export function cdpWatchdogCopy(): string {
 
 export type AfterOpenWorkspaceZombiePoll = "continue" | "clear" | "stop";
 
+export type AfterZombieCleared = "wait" | "launch" | "ready";
+
+/** zombie 修好：等用户退出 → absent 再走 launcher。 */
+export function afterZombieCleared(status: CdpStatus): AfterZombieCleared {
+  if (status === "zombie") return "wait";
+  if (status === "absent") return "launch";
+  return "ready";
+}
+
 /**
  * User-facing error after open_workspace:
  * - watchdog: 10s after success; clear when ready, else watchdog copy.

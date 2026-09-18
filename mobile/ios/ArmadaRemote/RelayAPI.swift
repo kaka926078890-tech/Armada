@@ -8,9 +8,11 @@ struct WorkspaceDTO: Decodable, Identifiable, Hashable {
     var machineName: String
     var os: String
     var online: Bool
+    var cdpReady: Bool
     var id: String { workspaceId }
+    var canInject: Bool { online && cdpReady }
 
-    init(workspaceId: String, machineId: String, workspaceRoot: String, label: String, machineName: String = "", os: String = "", online: Bool = true) {
+    init(workspaceId: String, machineId: String, workspaceRoot: String, label: String, machineName: String = "", os: String = "", online: Bool = true, cdpReady: Bool = false) {
         self.workspaceId = workspaceId
         self.machineId = machineId
         self.workspaceRoot = workspaceRoot
@@ -18,6 +20,7 @@ struct WorkspaceDTO: Decodable, Identifiable, Hashable {
         self.machineName = machineName
         self.os = os
         self.online = online
+        self.cdpReady = cdpReady
     }
 
     init(from decoder: Decoder) throws {
@@ -29,10 +32,11 @@ struct WorkspaceDTO: Decodable, Identifiable, Hashable {
         machineName = try c.decodeIfPresent(String.self, forKey: .machineName) ?? ""
         os = try c.decodeIfPresent(String.self, forKey: .os) ?? ""
         online = try c.decodeIfPresent(Bool.self, forKey: .online) ?? true
+        cdpReady = try c.decodeIfPresent(Bool.self, forKey: .cdpReady) ?? false
     }
 
     enum CodingKeys: String, CodingKey {
-        case workspaceId, machineId, workspaceRoot, label, machineName, os, online
+        case workspaceId, machineId, workspaceRoot, label, machineName, os, online, cdpReady
     }
 }
 
@@ -131,6 +135,16 @@ func stampReadAt(nowMs: Double, activityTs: Int?) -> Double {
     max(nowMs, Double(activityTs ?? 0))
 }
 
+func runAllowsMarkUnread(_ run: RunDTO, readAt: [String: Double], isUnread: (RunDTO) -> Bool) -> Bool {
+    if isUnread(run) { return false }
+    if run.pendingAsk != nil { return true }
+    return ["completed", "error", "unknown", "aborted"].contains(run.status)
+}
+
+func shouldStampOpened(unreadHold: Set<String>, runId: String) -> Bool {
+    !unreadHold.contains(runId)
+}
+
 /// SSE / 列表会省略 `finalText`；本地已有正文时不得冲掉。与 Android `coalesceFinalText` 对齐。
 func coalesceFinalText(_ incoming: RunDTO, prior: RunDTO?) -> RunDTO {
     guard incoming.finalText == nil, let prev = prior?.finalText, !prev.isEmpty else { return incoming }
@@ -203,6 +217,7 @@ enum RelayAPIError: LocalizedError {
         case "CONVERSATION_BUSY": return "该对话仍在排队或绑定，结束后才能续聊"
         case "NO_CONVERSATION": return "还没有绑上 Cursor 对话，不能续聊"
         case "INJECT_SLOT_BUSY": return "这台机器正在注入另一条任务，稍后再试"
+        case "CDP_NOT_READY": return "Cursor 在线但无法注入。请确认已安装最新 Armada 扩展，并用 Armada 打开工作区。若窗口已开、调试口不通：请完全退出 Cursor（Mac Cmd+Q / Windows 托盘 Exit），不要点 Cursor 图标。"
         case "WORKSPACE_NOT_OPEN": return "工作区没有打开"
         case "CLOSED": return "这条对话已关闭"
         case "PROMPT_COLLISION": return "同一工作区已有相同内容的任务"

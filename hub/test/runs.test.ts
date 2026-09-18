@@ -13,6 +13,7 @@ async function startWithExt(opts: {
   openWorkspaces?: string[];
   concurrency?: ConcurrencyLimits;
   os?: string;
+  cdpReady?: boolean | "omit";
 } = {}) {
   const home = mkdtempSync(join(tmpdir(), "armada-runs-"));
   hub = createServer({ port: 0, home, concurrency: opts.concurrency });
@@ -26,6 +27,7 @@ async function startWithExt(opts: {
     type: "register", machineId: "m-1", windowId: "w-1", name: "Mac-A",
     os: opts.os ?? "darwin-arm64", openWorkspaces: opts.openWorkspaces ?? ["/ws/a"],
     extensionVersion: opts.extensionVersion,
+    ...(opts.cdpReady === "omit" ? {} : { cdpReady: opts.cdpReady ?? true }),
   }));
   await new Promise((r) => setTimeout(r, 100));
   inbound.length = 0; // drop "registered"
@@ -49,7 +51,7 @@ async function startTwoWindows() {
     ws.addEventListener("message", (e) => inbound.push(JSON.parse(String(e.data))));
     ws.send(JSON.stringify({
       type: "register", machineId: "m-1", windowId, name: "Mac-A",
-      os: "darwin-arm64", openWorkspaces, extensionVersion: "0.4.0",
+      os: "darwin-arm64", openWorkspaces, extensionVersion: "0.4.0", cdpReady: true,
     }));
     await new Promise((r) => setTimeout(r, 100));
     inbound.length = 0;
@@ -100,6 +102,33 @@ describe("Run dispatch", () => {
     const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/nope", prompt: "x" }) });
     expect(r.status).toBe(400);
     expect(((await r.json()) as any).error).toBe("WORKSPACE_NOT_OPEN");
+  });
+
+  test("rejects cdpReady false (400 CDP_NOT_READY) and does not send run.start", async () => {
+    const { inbound, api } = await startWithExt({ cdpReady: false });
+    const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "x" }) });
+    expect(r.status).toBe(400);
+    expect(((await r.json()) as any).error).toBe("CDP_NOT_READY");
+    expect(inbound.some((m) => m.type === "run.start")).toBe(false);
+  });
+
+  test("rejects missing cdpReady as CDP_NOT_READY", async () => {
+    const { api } = await startWithExt({ cdpReady: "omit" });
+    const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "x" }) });
+    expect(r.status).toBe(400);
+    expect(((await r.json()) as any).error).toBe("CDP_NOT_READY");
+  });
+
+  test("maps rejected CDP_UNREACHABLE ack to end_reason CDP_NOT_READY", async () => {
+    const { ws, api } = await startWithExt();
+    const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "hello" }) });
+    const { run } = await r.json() as any;
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "rejected", reason: "CDP_UNREACHABLE" }));
+    await new Promise((r2) => setTimeout(r2, 80));
+    const after = (await (await api(`/api/runs/${run.id}`)).json()) as any;
+    expect(after.status).toBe("error");
+    expect(after.end_reason).toBe("CDP_NOT_READY");
+    ws.close();
   });
 
   test("second run queues while inject slot occupied, then starts after bind", async () => {
@@ -499,7 +528,7 @@ describe("Run dispatch", () => {
     ws2.addEventListener("message", (e) => inbound2.push(JSON.parse(String(e.data))));
     ws2.send(JSON.stringify({
       type: "register", machineId: "m-1", windowId: "w-2", name: "Mac-A",
-      os: "darwin-arm64", openWorkspaces: ["/ws/a"], extensionVersion: "0.4.0",
+      os: "darwin-arm64", openWorkspaces: ["/ws/a"], extensionVersion: "0.4.0", cdpReady: true,
     }));
     await new Promise((r2) => setTimeout(r2, 100));
     inbound2.length = 0;

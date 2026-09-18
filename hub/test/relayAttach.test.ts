@@ -47,7 +47,7 @@ describe("relay attach (HTTP hub)", () => {
       w.onerror = rej;
     });
     ext.send(JSON.stringify({
-      type: "register", machineId: "m-1", windowId: "w-1", name: "A", os: "darwin", openWorkspaces: ["/ws/a"],
+      type: "register", machineId: "m-1", windowId: "w-1", name: "A", os: "darwin", openWorkspaces: ["/ws/a"], cdpReady: true,
     }));
 
     const headers = { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" };
@@ -121,7 +121,7 @@ describe("relay attach (HTTP hub)", () => {
       w.onerror = rej;
     });
     ext.send(JSON.stringify({
-      type: "register", machineId: "m-1", windowId: "w-1", name: "A", os: "darwin", openWorkspaces: ["/ws/a"],
+      type: "register", machineId: "m-1", windowId: "w-1", name: "A", os: "darwin", openWorkspaces: ["/ws/a"], cdpReady: true,
     }));
 
     const headers = { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" };

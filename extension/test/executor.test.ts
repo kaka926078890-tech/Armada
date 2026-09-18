@@ -219,18 +219,37 @@ describe("Executor dirty composer", () => {
     expect(acks[acks.length - 1]).toEqual({ type: "run.ack", runId: "r1", status: "accepted" });
   });
 
-  test("other CDP failure still clipboard-falls back", async () => {
+  test("CDP_UNREACHABLE rejects startRun without createNew or clipboard", async () => {
     let n = 0;
     const { ex, acks } = makeExec({
+      probeCdp: async () => ({ ok: false, reason: "CDP_UNREACHABLE" }),
       autoSubmit: async () => {
         n += 1;
         return { ok: false, reason: "CDP_UNREACHABLE" };
       },
     });
     await ex.startRun({ runId: "r1", workspaceRoot: "/ws/a", prompt: "hello" });
-    expect(clipboardWrites).toEqual(["hello"]);
-    expect(n).toBe(2);
-    expect(acks[acks.length - 1]).toEqual({ type: "run.ack", runId: "r1", status: "accepted" });
+    expect(clipboardWrites).toEqual([]);
+    expect(n).toBe(0);
+    expect(commands).not.toContain("composer.createNew");
+    expect(acks[acks.length - 1]).toEqual({
+      type: "run.ack", runId: "r1", status: "rejected", reason: "CDP_UNREACHABLE",
+    });
+  });
+
+  test("CDP_UNREACHABLE followup does not openComposer", async () => {
+    const { ex, acks } = makeExec({
+      probeCdp: async () => ({ ok: false, reason: "CDP_UNREACHABLE" }),
+      autoSubmit: async () => ({ ok: false, reason: "CDP_UNREACHABLE" }),
+    });
+    await ex.followup({
+      runId: "r1", conversationId: "c1", prompt: "hello", workspaceRoot: "/ws/a",
+    });
+    expect(clipboardWrites).toEqual([]);
+    expect(commands).not.toContain("composer.openComposer");
+    expect(acks[acks.length - 1]).toEqual({
+      type: "run.ack", runId: "r1", status: "rejected", reason: "CDP_UNREACHABLE",
+    });
   });
 });
 
@@ -251,6 +270,23 @@ describe("Executor answerAsk", () => {
     expect(cdp).toBe(1);
     expect(commands).toContain("composer.openComposer");
     expect(acks[acks.length - 1]).toEqual({ type: "run.ack", runId: "r1", status: "accepted" });
+  });
+
+  test("CDP_UNREACHABLE answerAsk does not openComposer", async () => {
+    let cdp = 0;
+    const { ex, acks } = makeExec({
+      probeCdp: async () => ({ ok: false, reason: "CDP_UNREACHABLE" }),
+      answerAskCdp: async () => { cdp += 1; return { ok: true }; },
+    });
+    await ex.answerAsk({
+      runId: "r1", conversationId: "c1", workspaceRoot: "/ws/a",
+      request_id: "ask-1", action: "skip",
+    });
+    expect(cdp).toBe(0);
+    expect(commands).not.toContain("composer.openComposer");
+    expect(acks[acks.length - 1]).toEqual({
+      type: "run.ack", runId: "r1", status: "rejected", reason: "CDP_UNREACHABLE",
+    });
   });
 
   test("skip does not require a letter", async () => {

@@ -10,7 +10,7 @@ import { SpoolForwarder } from "./spool";
 import { matchHookToPending, claimConversation, eventBelongsToWindow, transcriptPathBelongsToCid, runIdForHook, rememberSubagent, isAmbiguousMatch, dropPendingRuns, type PendingRun, type BindingMatch } from "./binding";
 import { TranscriptTailer, shouldUnfollowOnHookStop } from "./transcript";
 import { Executor, CancelWatcher } from "./executor";
-import { createCdpSubmitter, createImagePaster, createFileMentionPaster, createComposerFinisher, createAskQuestionDriver } from "./cdpInject";
+import { createCdpSubmitter, createImagePaster, createFileMentionPaster, createComposerFinisher, createAskQuestionDriver, probeCdpReady } from "./cdpInject";
 import { createOsClipboardWriter, writeOsImageClipboard } from "./osClipboard";
 import { mergeHooks, hooksDriftHash, spoolScriptName, shouldInstallArmadaHooks } from "./hooksInstall";
 import { collectTranscriptViews, matchTranscriptToPending, stopPayloadFromTranscriptLine, stopFromTranscriptFileContent, transcriptsDirForWorkspace, isWithinTranscriptBindWindow, FollowupStopGuard, listSubagentTranscripts, childCidFromSubagentPath, decideLateTranscriptAttach, transcriptJsonlPath } from "./transcriptBind";
@@ -287,6 +287,10 @@ export function activate(context: vscode.ExtensionContext): void {
       if (i >= 0) pendingRuns.splice(i, 1);
     },
     onInjected: (runId) => cancelWatcher.noteInjection(runId, Date.now()),
+    probeCdp: async () => {
+      const ok = await probeCdpReady({ port: config.cdpPort });
+      return ok ? { ok: true } : { ok: false, reason: "CDP_UNREACHABLE" };
+    },
     bindKnown: ({ runId, conversationId, workspaceRoot }) => {
       const run = pendingRuns.find((r) => r.runId === runId);
       if (!run) return;
@@ -435,11 +439,14 @@ export function activate(context: vscode.ExtensionContext): void {
     try {
       queueMessageDefaultBehavior = vscode.workspace.getConfiguration("cursor.composer").get("queueMessageDefaultBehavior");
     } catch { /* tests / missing config */ }
-    core.enqueue({
-      type: "heartbeat",
-      openWorkspaces: workspaces(),
-      activeRunIds: [...boundRuns.keys()],
-      ...(typeof queueMessageDefaultBehavior === "string" ? { queueMessageDefaultBehavior } : {}),
+    void probeCdpReady({ port: config.cdpPort }).then((cdpReady) => {
+      core.enqueue({
+        type: "heartbeat",
+        openWorkspaces: workspaces(),
+        activeRunIds: [...boundRuns.keys()],
+        cdpReady,
+        ...(typeof queueMessageDefaultBehavior === "string" ? { queueMessageDefaultBehavior } : {}),
+      });
     });
   };
 
@@ -564,11 +571,15 @@ export function activate(context: vscode.ExtensionContext): void {
       if (ws !== sock) return;
       log("ws open, registering");
       core.onOpen();
-      core.sendRegister({
-        type: "register", machineId, windowId,
-        name: hostname(), os: `${process.platform}-${process.arch}`,
-        cursorVersion: vscode.version, extensionVersion: "0.4.22",
-        openWorkspaces: workspaces(),
+      void probeCdpReady({ port: config.cdpPort }).then((cdpReady) => {
+        if (ws !== sock) return;
+        core.sendRegister({
+          type: "register", machineId, windowId,
+          name: hostname(), os: `${process.platform}-${process.arch}`,
+          cursorVersion: vscode.version, extensionVersion: "0.4.23",
+          openWorkspaces: workspaces(),
+          cdpReady,
+        });
       });
     });
     sock.on("message", (data) => {

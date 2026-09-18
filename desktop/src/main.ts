@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import {
   afterOpenWorkspaceFeedback,
+  afterZombieCleared,
   advertiseFailedCopy,
   boardUrl,
   cdpZombieCopy,
@@ -527,6 +528,10 @@ window.addEventListener("DOMContentLoaded", () => {
       onNeedToken();
       return;
     }
+    if (req.type === "open-workspace" || req.type === "repair-cdp") {
+      void openWorkspaceFromBoard();
+      return;
+    }
     if (req.type === "run.alert") {
       void invoke("show_run_alert", {
         runId: req.runId,
@@ -542,7 +547,6 @@ window.addEventListener("DOMContentLoaded", () => {
       }).catch((err) => console.error("show_run_alert", err));
       return;
     }
-    void openWorkspaceFromBoard();
   });
 
   wireDeepLink();
@@ -594,11 +598,16 @@ async function openWorkspaceFromBoard() {
     if (raw.toLowerCase().includes("zombie")) {
       openWsZombiePoll = window.setInterval(() => {
         void invoke<CdpStatus>("cdp_status").then((s) => {
-          const action = afterOpenWorkspaceFeedback("zombie-poll", s);
-          if (action === "continue") return;
+          const next = afterZombieCleared(s);
+          if (next === "wait") return;
           if (openWsZombiePoll !== null) {
             window.clearInterval(openWsZombiePoll);
             openWsZombiePoll = null;
+          }
+          if (next === "launch") {
+            void invoke("open_workspace", { absPath }).catch((err) => {
+              showToast(fleetErrorMessage(String(err)), "err");
+            });
           }
         });
       }, 1000);

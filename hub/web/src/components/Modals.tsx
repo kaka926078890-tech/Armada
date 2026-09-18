@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { api } from "../api";
 import { mergeAttachmentFiles, isConsoleAttachment, CONSOLE_ACCEPT } from "../attachments";
 import { endFollowupSend, isFollowupSendEnter, tryBeginFollowupSend } from "../followupSend";
+import { CDP_NOT_READY_COPY } from "../boardState";
 import type { Machine } from "../types";
 
 const ERR: Record<string, string> = {
@@ -12,6 +13,7 @@ const ERR: Record<string, string> = {
   CONVERSATION_BUSY: "该对话仍在排队、绑定或等待回答选择题",
   WORKSPACE_NOT_OPEN: "工作区未打开",
   MACHINE_OFFLINE: "机器离线",
+  CDP_NOT_READY: CDP_NOT_READY_COPY,
 };
 
 function parseWorkspaces(raw: string | undefined): { workspaces: string[]; parseFailed: boolean } {
@@ -46,10 +48,13 @@ export function DispatchModal({ machines, preset, presetLabel, activeOnWorkspace
   const raw = machineId ? online.find((m) => m.id === machineId)?.open_workspaces : undefined;
   const { workspaces, parseFailed } = machineId ? parseWorkspaces(raw) : { workspaces: [] as string[], parseFailed: false };
   const locked = !!preset;
-  const canDispatch = !!machineId && !!workspace && (!!prompt.trim() || files.length > 0) && !sending;
+  const selectedMachine = machineId ? online.find((m) => m.id === machineId) : undefined;
+  const injectReady = selectedMachine?.cdp_ready === true;
+  const canDispatch = !!machineId && !!workspace && (!!prompt.trim() || files.length > 0) && !sending && injectReady;
 
   const submitDispatch = () => {
     if (!machineId || !workspace || (!prompt.trim() && files.length === 0)) return;
+    if (!injectReady) return;
     if (!tryBeginFollowupSend(sendingLock)) return;
     setSending(true);
     setError("");
@@ -97,6 +102,9 @@ export function DispatchModal({ machines, preset, presetLabel, activeOnWorkspace
           <div className="text-amber-300/90 text-sm">
             该工作区已有 {activeOnWorkspace} 个任务在跑或排队，并行可能争用同一批文件。
           </div>
+        )}
+        {selectedMachine && !injectReady && (
+          <div className="text-red-400 text-sm">{CDP_NOT_READY_COPY}</div>
         )}
         <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={8}
           placeholder="提示词（Markdown 原文；Enter 派发，Shift+Enter 换行）"

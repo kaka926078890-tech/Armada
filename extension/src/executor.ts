@@ -62,9 +62,13 @@ export interface ExecutorDeps {
   /** Our own submit landed. Only such submits may be re-cancelled after run.cancel. */
   onInjected?: (runId: string) => void;
   /**
+   * 注入前探 9222。不通则禁止 createNew / openComposer，也不能用剪贴板冒充已发送。
+   */
+  probeCdp?: () => Promise<{ ok: boolean; reason?: string }>;
+  /**
    * 全自动提交(CDP DOM 注入)。true / `{ ok:true }` 表示已写入并回车。
    * `NON_EMPTY_INPUT*`：框里是别人的草稿/引用芯片，禁止剪贴板往里贴。
-   * 其它失败：降级剪贴板粘贴（无 CDP 时仍靠人工回车）。
+   * `CDP_UNREACHABLE` / `CDP_CONNECT_FAIL*`：口不通，禁止剪贴板假 ack。
    */
   autoSubmit?: (workspaceRoot: string, prompt: string) => Promise<boolean | { ok: boolean; reason?: string }>;
   imagePaste?: boolean;
@@ -106,6 +110,10 @@ function autoSubmitOutcome(r: boolean | { ok: boolean; reason?: string }): { ok:
 
 function isDirtyComposer(reason?: string): boolean {
   return typeof reason === "string" && reason.startsWith("NON_EMPTY_INPUT");
+}
+
+function isCdpDown(reason?: string): boolean {
+  return reason === "CDP_UNREACHABLE" || (typeof reason === "string" && reason.startsWith("CDP_CONNECT_FAIL"));
 }
 
 export class Executor {
@@ -160,6 +168,11 @@ export class Executor {
     }
     let pendingAdded = false;
     try {
+      const down = await this.cdpDownReason();
+      if (down) {
+        this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: down });
+        return;
+      }
       // createNew = 空对话。newAgentChat 会把活动编辑器做成引用芯片（真机
       // NON_EMPTY_INPUT:windows-packaging-self-hosted-）；其前再 focus 编辑器组会把用户挪开的焦点抢回去。
       await vscode.commands.executeCommand("composer.createNew");
@@ -198,6 +211,13 @@ export class Executor {
 
   private noteProgress(runId: string, phase: string): void {
     this.deps.send({ type: "run.progress", runId, phase });
+  }
+
+  private async cdpDownReason(): Promise<string | null> {
+    if (!this.deps.probeCdp) return null;
+    const r = await this.deps.probeCdp();
+    if (r.ok) return null;
+    return r.reason ?? "CDP_UNREACHABLE";
   }
 
   private async injectAttachments(
@@ -275,8 +295,9 @@ export class Executor {
         const first = autoSubmitOutcome(await this.deps.autoSubmit(workspaceRoot, prompt));
         if (first.ok) return { submitted: true };
         if (isDirtyComposer(first.reason)) return { submitted: false, reason: "NON_EMPTY_INPUT" };
+        if (isCdpDown(first.reason)) return { submitted: false, reason: first.reason ?? "CDP_UNREACHABLE" };
       } catch {
-        // CDP threw; clipboard fallback below
+        return { submitted: false, reason: "INJECT_FAILED" };
       }
     }
     await this.sleep(pasteWaitMs);
@@ -287,6 +308,7 @@ export class Executor {
         const second = autoSubmitOutcome(await this.deps.autoSubmit(workspaceRoot, prompt));
         if (second.ok) return { submitted: true };
         if (isDirtyComposer(second.reason)) return { submitted: false, reason: "NON_EMPTY_INPUT" };
+        if (isCdpDown(second.reason)) return { submitted: false, reason: second.reason ?? "CDP_UNREACHABLE" };
       } catch {
         return { submitted: false, reason: "INJECT_FAILED" };
       }
@@ -326,6 +348,11 @@ export class Executor {
       return;
     }
     try {
+      const down = await this.cdpDownReason();
+      if (down) {
+        this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: down });
+        return;
+      }
       this.noteProgress(msg.runId, "inject");
       await vscode.commands.executeCommand("composer.openComposer", msg.conversationId);
       if (attachments.length) {
@@ -384,6 +411,11 @@ export class Executor {
       return;
     }
     try {
+      const down = await this.cdpDownReason();
+      if (down) {
+        this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: down });
+        return;
+      }
       await vscode.commands.executeCommand("composer.openComposer", msg.conversationId);
       const letter = msg.action === "continue" ? msg.answers?.[0]?.option_ids?.[0] : undefined;
       if (msg.action === "continue" && !letter) {

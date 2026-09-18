@@ -41,7 +41,7 @@ function LiveSpinner() {
 
 export default function Sidebar({
   slots, machines, allRuns, selectedKey, onSelectWorkspace, readMap, onDispatch, onRename,
-  showDesktopActions, onOpenWorkspace, onGetShareLink,
+  showDesktopActions, onOpenWorkspace, onRepairCdp, onGetShareLink,
 }: {
   slots: WorkspaceSlot[];
   machines: Machine[];
@@ -53,11 +53,12 @@ export default function Sidebar({
   onRename: (machineId: string, displayName: string) => void;
   showDesktopActions?: boolean;
   onOpenWorkspace?: () => void;
+  onRepairCdp?: () => void;
   onGetShareLink?: () => void;
 }) {
   const groups = groupSlotsByMachine(slots);
   const selected = slots.find((s) => encodeWorkspaceKey(s.machineId, s.root) === selectedKey);
-  const canDispatch = !!selected?.online;
+  const canDispatch = !!selected?.online && selected.cdpReady;
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
 
@@ -79,6 +80,13 @@ export default function Sidebar({
             className="px-3 py-2 rounded-md border border-zinc-700 hover:bg-zinc-900 text-[13px]"
           >
             打开工作区
+          </button>
+          <button
+            type="button"
+            onClick={onRepairCdp}
+            className="px-3 py-2 rounded-md border border-zinc-700 hover:bg-zinc-900 text-[13px]"
+          >
+            修复调试口
           </button>
           <button
             type="button"
