@@ -33,6 +33,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -49,13 +51,16 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
@@ -228,6 +233,22 @@ fun BarButton(
     }
 }
 
+@Composable
+fun ToolbarText(
+    text: String,
+    enabled: Boolean = true,
+    accent: Boolean = false,
+    onClick: () -> Unit,
+) {
+    TextButton(onClick = onClick, enabled = enabled) {
+        Text(
+            text,
+            color = if (!enabled) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f) else if (accent) AccentBlue else MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+        )
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BindScreen(vm: SessionVm, state: UiState) {
@@ -298,10 +319,10 @@ fun FleetScreen(vm: SessionVm, state: UiState, onOpen: (WorkspaceDto) -> Unit, o
     Scaffold(topBar = {
         TopAppBar(
             title = { Text("舰队") },
-            navigationIcon = { BarButton("解绑", compact = true, onClick = { vm.unbind() }) },
+            navigationIcon = { ToolbarText("解绑", onClick = { vm.unbind() }) },
             actions = {
-                BarButton("设置", compact = true, onClick = onSettings)
-                BarButton("刷新", filled = true, compact = true, onClick = onRefresh)
+                ToolbarText("设置", onClick = onSettings)
+                ToolbarText("刷新", accent = true, onClick = onRefresh)
             },
         )
     }) { pad ->
@@ -358,14 +379,18 @@ fun WorkspaceScreen(vm: SessionVm, state: UiState, workspace: WorkspaceDto, onBa
     val boardRuns = src.filter { it.machineId == workspace.machineId && it.workspaceRoot == workspace.workspaceRoot }
     val filtered = boardRuns.filter { it.column == tab }
     val hiddenN = state.board.hidden.count { it.machineId == workspace.machineId && it.workspaceRoot == workspace.workspaceRoot }
-    val hideLabel = if (showArchived) "返回看板" else if (hiddenN > 0) "查看已隐藏 $hiddenN" else "查看已隐藏"
+    val hideLabel = when {
+        showArchived -> "返回看板"
+        hiddenN > 0 -> "已隐藏 $hiddenN"
+        else -> "已隐藏"
+    }
     Scaffold(topBar = {
         TopAppBar(
-            title = { Text(workspace.label) },
-            navigationIcon = { BarButton("返回", compact = true, onClick = onBack) },
+            title = { Text(workspace.label, maxLines = 1) },
+            navigationIcon = { ToolbarText("返回", onClick = onBack) },
             actions = {
-                BarButton(hideLabel, compact = true) { showArchived = !showArchived }
-                if (!showArchived) BarButton("派发", filled = true, compact = true, enabled = workspace.canInject) { showDispatch = true }
+                ToolbarText(hideLabel, onClick = { showArchived = !showArchived })
+                if (!showArchived) ToolbarText("派发", accent = true, enabled = workspace.canInject, onClick = { showDispatch = true })
             },
         )
     }) { pad ->
@@ -390,6 +415,7 @@ fun WorkspaceScreen(vm: SessionVm, state: UiState, workspace: WorkspaceDto, onBa
                         Modifier.clip(RoundedCornerShape(50))
                             .background(if (selected) AccentBlue.copy(alpha = 0.18f) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f))
                             .clickable { tab = col }
+                            .heightIn(min = 36.dp)
                             .padding(horizontal = 12.dp, vertical = 7.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -411,28 +437,36 @@ fun WorkspaceScreen(vm: SessionVm, state: UiState, workspace: WorkspaceDto, onBa
             LazyColumn(Modifier.weight(1f)) {
                 items(filtered, key = { it.runId }) { run ->
                     val unread = vm.isUnread(run)
-                    Column(Modifier.fillMaxWidth().clickable { onOpenRun(run.runId) }.padding(horizontal = 12.dp, vertical = 8.dp)) {
-                        RunRow(run, unread)
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(Modifier.weight(1f).clickable { onOpenRun(run.runId) }) {
+                            RunRow(run, unread)
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
                             if (vm.canMarkUnread(run)) {
-                                BarButton("未读", compact = true) { vm.markUnread(run.runId, hold = false) }
+                                TextButton(onClick = { vm.markUnread(run.runId, hold = false) }) { Text("未读") }
                             }
                             if (run.showsArchive && !showArchived) {
-                                BarButton("隐藏", danger = true, compact = true, onClick = {
-                                    vm.hideLocal(run.runId, true)
-                                    scope.launch {
-                                        try {
-                                            val next = vm.api().archive(run.runId)
-                                            vm.hideLocal(run.runId, true, next)
-                                            vm.refresh()
-                                        } catch (_: Exception) {
-                                            vm.revertHide(run.runId)
+                                TextButton(
+                                    onClick = {
+                                        vm.hideLocal(run.runId, true)
+                                        scope.launch {
+                                            try {
+                                                val next = vm.api().archive(run.runId)
+                                                vm.hideLocal(run.runId, true, next)
+                                                vm.refresh()
+                                            } catch (_: Exception) {
+                                                vm.revertHide(run.runId)
+                                            }
                                         }
-                                    }
-                                })
+                                    },
+                                    colors = ButtonDefaults.textButtonColors(contentColor = StatusRed),
+                                ) { Text("隐藏") }
                             }
                             if (showArchived) {
-                                BarButton("取消隐藏", compact = true, onClick = {
+                                TextButton(onClick = {
                                     vm.hideLocal(run.runId, false)
                                     scope.launch {
                                         try {
@@ -443,15 +477,24 @@ fun WorkspaceScreen(vm: SessionVm, state: UiState, workspace: WorkspaceDto, onBa
                                             vm.revertHide(run.runId)
                                         }
                                     }
-                                })
+                                }) { Text("取消隐藏") }
                             }
                         }
                     }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
                 }
             }
         }
     }
-    if (showDispatch) DispatchSheet(vm, workspace, null) { showDispatch = false; tab = it }
+    if (showDispatch) {
+        DispatchModal(
+            vm = vm,
+            workspace = workspace,
+            followupRunId = null,
+            onSent = { tab = it },
+            onDismiss = { showDispatch = false },
+        )
+    }
 }
 
 @Composable
@@ -485,8 +528,35 @@ fun RunRow(run: RunDto, unread: Boolean) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DispatchSheet(vm: SessionVm, workspace: WorkspaceDto, followupRunId: String?, onDone: (BoardColumn) -> Unit) {
+fun DispatchModal(
+    vm: SessionVm,
+    workspace: WorkspaceDto,
+    followupRunId: String?,
+    onSent: (BoardColumn) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = MaterialTheme.colorScheme.surface,
+    ) {
+        DispatchSheet(
+            vm,
+            workspace,
+            followupRunId,
+            onSent = {
+                onSent(it)
+                onDismiss()
+            },
+            onDismiss = onDismiss,
+        )
+    }
+}
+
+@Composable
+fun DispatchSheet(vm: SessionVm, workspace: WorkspaceDto, followupRunId: String?, onSent: (BoardColumn) -> Unit, onDismiss: () -> Unit) {
     val state by vm.state.collectAsState()
     var prompt by remember { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
@@ -506,7 +576,10 @@ fun DispatchSheet(vm: SessionVm, workspace: WorkspaceDto, followupRunId: String?
         if (granted) speech.start(prompt) else err = dictationMessage("MIC_DENIED")
     }
     val trimmed = prompt.trim()
-    Column(Modifier.fillMaxWidth().padding(16.dp).verticalScroll(rememberScrollState())) {
+    Column(
+        Modifier.fillMaxWidth().navigationBarsPadding().imePadding().verticalScroll(rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
         Text(if (followupRunId == null) "派发任务" else "续聊", style = MaterialTheme.typography.titleLarge)
         Text("${workspace.machineName} · ${workspace.label}", style = MaterialTheme.typography.bodySmall)
         if (followupRunId != null) Text("在当前对话里继续，不会新开一条任务", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
@@ -533,16 +606,16 @@ fun DispatchSheet(vm: SessionVm, workspace: WorkspaceDto, followupRunId: String?
         Text(if (trimmed.isEmpty()) "粘贴或语音后应显示字数" else "${prompt.length} 字", style = MaterialTheme.typography.bodySmall)
         if (listening) Text("正在听…说完点停止，改完再派发", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
         err?.let { Text(it, color = Color.Red) }
-        OutlinedButton(
-            onClick = {
-                if (listening) speech.stop()
-                else if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) speech.start(prompt)
-                else micPerm.launch(Manifest.permission.RECORD_AUDIO)
-            },
-            enabled = !sending,
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp).height(48.dp),
-        ) { Text(if (listening) "停止" else "语音") }
-        Button(
+        BarButton(if (listening) "停止" else "语音", expand = true, enabled = !sending, onClick = {
+            if (listening) speech.stop()
+            else if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) speech.start(prompt)
+            else micPerm.launch(Manifest.permission.RECORD_AUDIO)
+        })
+        BarButton(
+            if (sending) "发送中…" else if (followupRunId == null) "派发" else "发送",
+            filled = true,
+            expand = true,
+            enabled = workspace.canInject && !sending && !listening && trimmed.isNotEmpty(),
             onClick = {
                 if (listening) speech.stop()
                 sending = true
@@ -550,7 +623,7 @@ fun DispatchSheet(vm: SessionVm, workspace: WorkspaceDto, followupRunId: String?
                     try {
                         val run = if (followupRunId != null) vm.api().followup(followupRunId, trimmed) else vm.api().dispatch(workspace.workspaceId, trimmed)
                         vm.refresh()
-                        onDone(run.column)
+                        onSent(run.column)
                     } catch (e: Exception) {
                         err = e.message
                     } finally {
@@ -558,10 +631,8 @@ fun DispatchSheet(vm: SessionVm, workspace: WorkspaceDto, followupRunId: String?
                     }
                 }
             },
-            enabled = workspace.canInject && !sending && !listening && trimmed.isNotEmpty(),
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp).height(48.dp),
-        ) { Text(if (sending) "发送中…" else if (followupRunId == null) "派发" else "发送") }
-        OutlinedButton(onClick = { speech.release(); onDone(BoardColumn.Completed) }, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("取消") }
+        )
+        BarButton("取消", expand = true, onClick = { speech.release(); onDismiss() })
     }
 }
 
@@ -615,9 +686,9 @@ fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String, onBack: () -> 
         topBar = {
             TopAppBar(
                 title = { Text("详情") },
-                navigationIcon = { BarButton("返回", compact = true, onClick = onBack) },
+                navigationIcon = { ToolbarText("返回", onClick = onBack) },
                 actions = {
-                    BarButton("续聊", filled = true, compact = true, enabled = slot?.canInject == true && run?.canFollowup == true) { showFollow = true }
+                    ToolbarText("续聊", accent = true, enabled = slot?.canInject == true && run?.canFollowup == true) { showFollow = true }
                 },
             )
         },
@@ -689,7 +760,17 @@ fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String, onBack: () -> 
             }
         }
     }
-    if (showFollow && slot != null) DispatchSheet(vm, slot, runId) { showFollow = false; scope.launch { vm.refresh(); runCatching { adopt(vm.api().run(runId)) } } }
+    if (showFollow) {
+        slot?.let { ws ->
+            DispatchModal(
+                vm = vm,
+                workspace = ws,
+                followupRunId = runId,
+                onSent = { scope.launch { vm.refresh(); runCatching { adopt(vm.api().run(runId)) } } },
+                onDismiss = { showFollow = false },
+            )
+        }
+    }
 }
 
 @Composable
@@ -941,7 +1022,7 @@ fun SettingsScreen(vm: SessionVm, onBack: () -> Unit) {
     Scaffold(topBar = {
         TopAppBar(
             title = { Text("设置") },
-            navigationIcon = { BarButton("返回", compact = true, onClick = onBack) },
+            navigationIcon = { ToolbarText("返回", onClick = onBack) },
         )
     }) { pad ->
         Column(
