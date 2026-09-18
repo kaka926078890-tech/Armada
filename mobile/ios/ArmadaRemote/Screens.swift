@@ -20,6 +20,16 @@ func askOptionBody(label: String, text: String) -> String {
     return t.isEmpty ? label : t
 }
 
+func appendSnippetBody(_ current: String, _ body: String) -> String {
+    let trimmedEnd = body.replacingOccurrences(
+        of: #"[\t\n\r ]+$"#,
+        with: "",
+        options: .regularExpression
+    )
+    if current.isEmpty { return trimmedEnd }
+    return current.hasSuffix("\n") ? current + trimmedEnd : current + "\n" + trimmedEnd
+}
+
 func runRowChrome(_ run: RunDTO, unread: Bool) -> Color? {
     if run.pendingAsk != nil { return .red }
     if unread && run.status == "completed" { return .green }
@@ -484,6 +494,35 @@ struct WorkspaceHome: View {
     }
 }
 
+struct PromptSnippetChips: View {
+    let snippets: [PromptSnippet]
+    let onAppend: (String) -> Void
+    let onAdd: () -> Void
+
+    private var atLimit: Bool { snippets.count >= 30 }
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(snippets) { snippet in
+                    Button(snippet.title) { onAppend(snippet.body) }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .clipShape(Capsule())
+                }
+                Button(action: onAdd) {
+                    Image(systemName: "plus")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .clipShape(Capsule())
+                .disabled(atLimit)
+                .accessibilityLabel(atLimit ? "最多 30 条快捷提示词" : "添加快捷提示词")
+            }
+        }
+    }
+}
+
 struct DispatchSheet: View {
     @EnvironmentObject var session: Session
     let workspace: WorkspaceDTO
@@ -492,6 +531,11 @@ struct DispatchSheet: View {
     @StateObject private var speech = PromptSpeech()
     @State private var sending = false
     @State private var err: String?
+    @State private var addingSnippet = false
+    @State private var snippetTitle = ""
+    @State private var snippetBody = ""
+    @State private var snippetError: String?
+    @State private var savingSnippet = false
     @Environment(\.dismiss) private var dismiss
 
     private var live: WorkspaceDTO {
@@ -529,6 +573,36 @@ struct DispatchSheet: View {
                     }
                 }
                 Section {
+                    PromptSnippetChips(
+                        snippets: session.snippets,
+                        onAppend: { body in
+                            speech.prompt = appendSnippetBody(speech.prompt, body)
+                        },
+                        onAdd: {
+                            addingSnippet = true
+                            snippetError = nil
+                        }
+                    )
+                    if addingSnippet {
+                        VStack(alignment: .leading, spacing: 8) {
+                            TextField("标题", text: $snippetTitle)
+                            TextEditor(text: $snippetBody)
+                                .frame(minHeight: 90)
+                            if let snippetError {
+                                Text(snippetError).foregroundStyle(.red).font(.caption)
+                            }
+                            HStack {
+                                Spacer()
+                                Button("取消") { resetSnippetForm() }
+                                    .disabled(savingSnippet)
+                                Button(savingSnippet ? "保存中…" : "保存") {
+                                    Task { await addSnippet() }
+                                }
+                                .disabled(savingSnippet)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
                     TextEditor(text: $speech.prompt)
                         .frame(minHeight: 220)
                         .font(.body)
@@ -573,6 +647,31 @@ struct DispatchSheet: View {
                 }
             }
             .onDisappear { speech.release() }
+            .task { await session.loadSnippets() }
+        }
+    }
+
+    private func resetSnippetForm() {
+        addingSnippet = false
+        snippetTitle = ""
+        snippetBody = ""
+        snippetError = nil
+    }
+
+    private func addSnippet() async {
+        guard !savingSnippet else { return }
+        savingSnippet = true
+        defer { savingSnippet = false }
+        let snippet = PromptSnippet(
+            id: UUID().uuidString.lowercased(),
+            title: snippetTitle,
+            body: snippetBody
+        )
+        do {
+            try await session.saveSnippets(session.snippets + [snippet])
+            resetSnippetForm()
+        } catch {
+            snippetError = error.localizedDescription
         }
     }
 
@@ -1080,8 +1179,71 @@ struct AskView: View {
     }
 }
 
+struct PromptSnippetSettingsRow: View {
+    let snippet: PromptSnippet
+    let onSave: (PromptSnippet) async throws -> Void
+    let onDelete: () async throws -> Void
+    @State private var title: String
+    @State private var snippetBody: String
+    @State private var busy = false
+    @State private var rowError: String?
+
+    init(
+        snippet: PromptSnippet,
+        onSave: @escaping (PromptSnippet) async throws -> Void,
+        onDelete: @escaping () async throws -> Void
+    ) {
+        self.snippet = snippet
+        self.onSave = onSave
+        self.onDelete = onDelete
+        _title = State(initialValue: snippet.title)
+        _snippetBody = State(initialValue: snippet.body)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            TextField("标题", text: $title)
+            TextEditor(text: $snippetBody)
+                .frame(minHeight: 90)
+            if let rowError {
+                Text(rowError).foregroundStyle(.red).font(.caption)
+            }
+            HStack {
+                Spacer()
+                Button("保存") {
+                    Task {
+                        await run {
+                            try await onSave(PromptSnippet(id: snippet.id, title: title, body: snippetBody))
+                        }
+                    }
+                }
+                .disabled(busy)
+                Button("删除", role: .destructive) {
+                    Task { await run { try await onDelete() } }
+                }
+                .disabled(busy)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func run(_ operation: () async throws -> Void) async {
+        guard !busy else { return }
+        busy = true
+        rowError = nil
+        defer { busy = false }
+        do {
+            try await operation()
+        } catch {
+            rowError = error.localizedDescription
+        }
+    }
+}
+
 struct SettingsView: View {
     @EnvironmentObject var appearance: Appearance
+    @EnvironmentObject var session: Session
+
     var body: some View {
         List {
             Section("外观") {
@@ -1109,7 +1271,33 @@ struct SettingsView: View {
                 }
                 .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
             }
+            Section("快捷提示词") {
+                if let error = session.lastError {
+                    Text(error).foregroundStyle(.red).font(.caption)
+                }
+                if session.snippets.isEmpty {
+                    Text("还没有快捷提示词，在输入框上方点 + 添加")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(session.snippets) { snippet in
+                        PromptSnippetSettingsRow(
+                            snippet: snippet,
+                            onSave: { next in
+                                try await session.saveSnippets(
+                                    session.snippets.map { $0.id == next.id ? next : $0 }
+                                )
+                            },
+                            onDelete: {
+                                try await session.saveSnippets(
+                                    session.snippets.filter { $0.id != snippet.id }
+                                )
+                            }
+                        )
+                    }
+                }
+            }
         }
         .navigationTitle("设置")
+        .task { await session.loadSnippets() }
     }
 }

@@ -200,6 +200,16 @@ struct StreamFrame: Decodable {
 
 struct EmptyJSON: Decodable {}
 
+struct PromptSnippet: Codable, Equatable, Identifiable {
+    var id: String
+    var title: String
+    var body: String
+}
+
+private struct PromptSnippetsResponse: Codable {
+    var snippets: [PromptSnippet]
+}
+
 struct ErrorBody: Decodable {
     var error: String?
 }
@@ -236,6 +246,10 @@ enum RelayAPIError: LocalizedError {
         case "INVALID_STATE": return "当前状态不能重试"
         case "NOT_FOUND": return "任务不存在"
         case "INVALID": return "推送登记失败"
+        case "SNIPPET_INVALID": return "标题和提示词都不能为空，且不要超长"
+        case "SNIPPET_LIMIT": return "最多 30 条快捷提示词"
+        case "READ_FAIL": return "读取快捷提示词失败"
+        case "WRITE_FAIL": return "保存失败，请重试"
         case "MACHINE_OFFLINE": return "机器离线"
         case "RUN_LIMIT": return "这台机器任务数已满"
         case "WINDOW_BUSY": return "该窗口正忙"
@@ -323,6 +337,17 @@ actor RelayAPI {
     func deletePushToken(_ token: String) async throws {
         let body = try JSONSerialization.data(withJSONObject: ["token": token])
         let _: EmptyJSON = try await send("/mobile/push-token", method: "DELETE", body: body, ok: [204], allowEmpty: true)
+    }
+
+    func promptSnippets() async throws -> [PromptSnippet] {
+        let wrap: PromptSnippetsResponse = try await get("/mobile/prompt-snippets")
+        return wrap.snippets
+    }
+
+    func putPromptSnippets(_ snippets: [PromptSnippet]) async throws -> [PromptSnippet] {
+        let body = try JSONEncoder().encode(PromptSnippetsResponse(snippets: snippets))
+        let wrap: PromptSnippetsResponse = try await send("/mobile/prompt-snippets", method: "PUT", body: body, ok: [200])
+        return wrap.snippets
     }
 
     func streamEvents() -> AsyncThrowingStream<StreamFrame, Error> {

@@ -58,6 +58,7 @@ final class Session: ObservableObject {
     @Published var pendingOpenRunId: String?
     @Published var watchingId: String?
     @Published var streamHealthy = false
+    @Published var snippets: [PromptSnippet] = []
 
     private var live: Task<Void, Never>?
     private var foreground = true
@@ -118,7 +119,7 @@ final class Session: ObservableObject {
         UserDefaults.standard.removeObject(forKey: "fleet")
         UserDefaults.standard.removeObject(forKey: "token")
         OperatorKeychain.delete()
-        workspaces = []; runs = []; hiddenRuns = []
+        workspaces = []; runs = []; hiddenRuns = []; snippets = []
         pendingArchive = []; pendingUnarchive = []
         refreshSeq += 1
         pendingOpenRunId = nil
@@ -136,6 +137,33 @@ final class Session: ObservableObject {
     }
 
     func api() -> RelayAPI { RelayAPI(base: relay, token: token) }
+
+    func loadSnippets() async {
+        guard bound else {
+            snippets = []
+            return
+        }
+        do {
+            snippets = try await api().promptSnippets()
+            lastError = nil
+        } catch {
+            snippets = []
+            lastError = RelayAPIError.operatorMessage("READ_FAIL")
+        }
+    }
+
+    func saveSnippets(_ next: [PromptSnippet]) async throws {
+        let previous = snippets
+        snippets = next
+        do {
+            snippets = try await api().putPromptSnippets(next)
+            lastError = nil
+        } catch {
+            snippets = previous
+            lastError = error.localizedDescription
+            throw error
+        }
+    }
 
     func adoptPendingOpen() {
         guard bound else {
