@@ -108,13 +108,13 @@ function mockDoc(texts: string[], pillCounts: number[] = [], shareBox = false) {
   };
 }
 
-function runJs(src: string, texts: string[], prompt: string, imgCounts?: number[]): { result: string; els: ReturnType<typeof mockDoc>["els"] } {
+function runJs(src: string, texts: string[], prompt: string, imgCounts?: number[], reclaim?: string[]): { result: string; els: ReturnType<typeof mockDoc>["els"] } {
   const document = mockDoc(texts, imgCounts);
   const KeyboardEvent = class {
     constructor(public type: string, public init?: unknown) {}
   };
   const fn = new Function("document", "KeyboardEvent", `return (${src});`)(document, KeyboardEvent);
-  return { result: String(fn(prompt)), els: document.els };
+  return { result: String(fn(prompt, reclaim)), els: document.els };
 }
 
 function runJs0(src: string, texts: string[], pillCounts?: number[], shareBox = false): { result: string; els: ReturnType<typeof mockDoc>["els"] } {
@@ -174,6 +174,39 @@ describe("composer picker JS", () => {
     const { result, els } = runJs(COMPOSER_FOCUS_JS, ["请继续之前的方案讨论", "残留继续"], "继续");
     expect(result).toBe("DRAFT");
     expect(els[1].focused).toBe(true);
+  });
+
+  // 2026-09-18 14:33 真机：cancel 后原文回灌，followup 被 NON_EMPTY_INPUT 拒掉。
+  const cancelled = "findesk feat/in-app-browser-skill 45079948d feat(browser)";
+  const nextFollowup = "帮我进行一下codereview";
+
+  test("取消回灌原文且 reclaim 命中 → OWNED", () => {
+    const { result, els } = runJs(COMPOSER_FOCUS_JS, [cancelled], nextFollowup, undefined, [cancelled]);
+    expect(result).toBe("OWNED");
+    expect(els[0].focused).toBe(true);
+  });
+
+  test("空框优先于 reclaim 残留，不误打进旧对话", () => {
+    const { result, els } = runJs(COMPOSER_FOCUS_JS, [cancelled, ""], nextFollowup, undefined, [cancelled]);
+    expect(result).toBe("OK");
+    expect(els[0].focused).toBe(false);
+    expect(els[1].focused).toBe(true);
+  });
+
+  test("外人草稿不因无关 reclaim 变成 OWNED", () => {
+    expect(runJs(COMPOSER_FOCUS_JS, ["用户自己打的半截"], nextFollowup, undefined, [cancelled]).result)
+      .toBe("NON_EMPTY:用户自己打的半截");
+  });
+
+  test("reclaim 空白折叠：innerText 制表符对得上空格原文", () => {
+    const tabbed = cancelled.replace(" ", "\t");
+    expect(runJs(COMPOSER_FOCUS_JS, [tabbed], nextFollowup, undefined, [cancelled]).result).toBe("OWNED");
+  });
+
+  test("本枪 prompt 相等仍 DRAFT，优先于 OWNED", () => {
+    const { result, els } = runJs(COMPOSER_FOCUS_JS, [nextFollowup], nextFollowup, undefined, [cancelled]);
+    expect(result).toBe("DRAFT");
+    expect(els[0].focused).toBe(true);
   });
 
   test("10:49 追加后 ENTER 打在含 prompt 的框，即使不是以 prompt 开头", () => {
@@ -332,6 +365,32 @@ describe("createCdpSubmitter", () => {
     const r = await submit("/Users/x/armada-test-ws", "hi");
     expect(r.ok).toBe(false);
     expect(r.reason).toContain("VERIFY_FAIL");
+  });
+
+  test("OWNED 残留 → Cmd/Ctrl+A 再 insertText 新 prompt，不 reject", async () => {
+    const log: CallLog[] = [];
+    const submit = createCdpSubmitter(deps({ connect: async () => mockSession(["OWNED", "OK", "OK"], log) }));
+    const r = await submit("/Users/x/armada-test-ws", "续发", { reclaim: ["首轮原文"] });
+    expect(r.ok).toBe(true);
+    const keys = log.filter((c) => c.method === "Input.dispatchKeyEvent");
+    expect(keys).toHaveLength(2);
+    expect(keys[0]?.params?.code).toBe("KeyA");
+    expect(keys[0]?.params?.modifiers).toBe(process.platform === "win32" ? 2 : 4);
+    expect(log.find((c) => c.method === "Input.insertText")?.params?.text).toBe("续发");
+  });
+
+  test("NON_EMPTY 且 reclaim 命中（空白折叠）→ 全选替换", async () => {
+    const log: CallLog[] = [];
+    const leftover = "findesk\tfeat/in-app-browser-skill";
+    const submit = createCdpSubmitter(deps({
+      connect: async () => mockSession([`NON_EMPTY:${leftover}`, "OK", "OK"], log),
+    }));
+    const r = await submit("/Users/x/armada-test-ws", "续发", {
+      reclaim: ["findesk feat/in-app-browser-skill"],
+    });
+    expect(r.ok).toBe(true);
+    expect(log.some((c) => c.method === "Input.insertText")).toBe(true);
+    expect(log.filter((c) => c.method === "Input.dispatchKeyEvent")).toHaveLength(2);
   });
 
   test("WS 连接失败 → CDP_CONNECT_FAIL", async () => {

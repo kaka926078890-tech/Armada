@@ -9,8 +9,10 @@
  * - composer 输入框: div.aislash-editor-input[contenteditable="true"](Agents 视图为 div.tiptap)
  * - 写入必须用 Input.insertText(浏览器真实输入管线);
  *   execCommand('insertText') 在刚挂载的空 composer 上会被编辑器模型对账吞掉(实测 VERIFY_FAIL)。
- * - 不做"清空再写入":selectAllChildren+delete 会被编辑器错误合并(实测内容翻倍)。
- *   composer 非空时:内容等于待注入 prompt(重载恢复的草稿)则直接提交;否则交调用方降级。
+ * - 不做 DOM selectAllChildren+delete(编辑器错误合并,内容翻倍)。
+ *   非空且等于本枪 prompt → 当草稿直接提交。
+ *   非空但是 Armada 自己留下的(取消回灌 / 上次 insertText 未提交)→ Cmd/Ctrl+A + insertText 整框替换。
+ *   外人草稿 → NON_EMPTY_INPUT,调用方不得剪贴板往里贴。
  * - 提交: 派发 keydown/keyup Enter(bubbles+composed),实证可触发 beforeSubmitPrompt。
  * - 同窗多个 composer 时优先空框(当前对话非空时 els[0] 是旧框,会误跳过回车)。
  * - 草稿匹配认完整 prompt 后缀(剪贴板追加后 prompt 在末尾);禁止 16 字任意位置子串。
@@ -41,13 +43,26 @@ const SEL = 'div.aislash-editor-input[contenteditable="true"], div.tiptap[conten
 /**
  * 同窗常有多个可见 composer(当前对话 + newAgentChat 新开的空框)。
  * 取 els[0] 会命中旧对话 → 误报 NON_EMPTY、只粘贴不回车。
- * 优先空框;否则完整 prompt 相等或以其结尾的草稿框(最长优先:残留+续聊长于「请继续」)。
+ * 优先空框;否则完整 prompt 相等或以其结尾的草稿框(最长优先:残留+续聊长于「请继续」);
+ * 再否则 reclaim 命中的 Armada 残留(取消回灌)。
  */
 const VISIBLE_ELS = `Array.prototype.slice.call(document.querySelectorAll(${JSON.stringify(SEL)})).filter(function (e) { return e.offsetWidth > 0 && e.offsetHeight > 0; })`;
 
 const DRAFT_HELPERS = `function armadaDraftHit(t, promptT) {
   if (!promptT) return false;
   return t === promptT || t.endsWith(promptT);
+}
+function armadaNorm(s) {
+  return String(s || "").replace(/\\s+/g, " ").trim();
+}
+function armadaReclaimHit(t, reclaim) {
+  if (!t || !reclaim || !reclaim.length) return false;
+  var n = armadaNorm(t);
+  for (var i = 0; i < reclaim.length; i++) {
+    var r = armadaNorm(reclaim[i]);
+    if (r && n === r) return true;
+  }
+  return false;
 }`;
 
 /** 2026-09-03 P1：芯片是 .ai-input-full-input-box 里的 .context-pill-image（不在 contenteditable，也不在输入框 8 层祖先内）。整页还有 transcript 药丸，必须限定本输入框。 */
@@ -72,19 +87,21 @@ function armadaHasAttach(el) {
 }`;
 
 /** 导出供单测直接 eval(注入 mock document) */
-export const COMPOSER_FOCUS_JS = `function (prompt) {
+export const COMPOSER_FOCUS_JS = `function (prompt, reclaim) {
   ${DRAFT_HELPERS}
   var els = ${VISIBLE_ELS};
   if (!els.length) return "NO_INPUT";
   var promptT = String(prompt || "").trim();
-  var empty = null, matched = null, matchedLen = -1;
+  var empty = null, matched = null, matchedLen = -1, owned = null;
   for (var i = 0; i < els.length; i++) {
     var t = els[i].innerText.trim();
     if (!t) { if (!empty) empty = els[i]; }
     else if (armadaDraftHit(t, promptT) && t.length > matchedLen) { matched = els[i]; matchedLen = t.length; }
+    else if (!owned && armadaReclaimHit(t, reclaim)) { owned = els[i]; }
   }
   if (empty) { empty.focus(); return "OK"; }
   if (matched) { matched.focus(); return "DRAFT"; }
+  if (owned) { owned.focus(); return "OWNED"; }
   return "NON_EMPTY:" + els[0].innerText.trim();
 }`;
 
@@ -541,32 +558,65 @@ export function createAskQuestionDriver(deps: CdpSubmitterDeps) {
   return { inspect, submit };
 }
 
+export type CdpSubmitOpts = { reclaim?: string[] };
+
+function normDraft(s: string): string {
+  return s.replace(/\s+/g, " ").trim();
+}
+
+function reclaimHit(existing: string, reclaim?: string[]): boolean {
+  if (!existing || !reclaim?.length) return false;
+  const n = normDraft(existing);
+  return reclaim.some((r) => {
+    const x = normDraft(r);
+    return !!x && x === n;
+  });
+}
+
+/** 真机 2026-09-18：Cmd/Ctrl+A + Input.insertText 整框替换，不翻倍。禁止 selectAllChildren+delete。 */
+async function selectAllComposer(session: CdpSession): Promise<void> {
+  const meta = process.platform === "win32" ? 2 : 4;
+  await session.call("Input.dispatchKeyEvent", {
+    type: "keyDown", modifiers: meta, key: "a", code: "KeyA", windowsVirtualKeyCode: 65,
+  });
+  await session.call("Input.dispatchKeyEvent", {
+    type: "keyUp", modifiers: meta, key: "a", code: "KeyA", windowsVirtualKeyCode: 65,
+  });
+}
+
 export function createCdpSubmitter(deps: CdpSubmitterDeps) {
   const sleep = deps.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
 
-  return async function submit(workspaceRoot: string, prompt: string): Promise<CdpSubmitResult> {
+  return async function submit(workspaceRoot: string, prompt: string, opts?: CdpSubmitOpts): Promise<CdpSubmitResult> {
     const hit = await connectWorkspacePage(deps, workspaceRoot);
     if (!hit.ok) return hit;
     const session = hit.session;
+    const reclaim = opts?.reclaim ?? [];
 
     try {
       // composer 在 newAgentChat 后异步挂载;同窗已有非空对话时要等到新空框出现,不能立刻 NON_EMPTY 放弃
       let focused = false;
       let draftMatched = false;
+      let owned = false;
       let lastFocus = "NO_INPUT";
-      for (let attempt = 0; attempt < 6 && !focused && !draftMatched; attempt++) {
+      for (let attempt = 0; attempt < 6 && !focused && !draftMatched && !owned; attempt++) {
         const r = String(await session.call("Runtime.evaluate", {
-          expression: `(${COMPOSER_FOCUS_JS})(${JSON.stringify(prompt)})`, returnByValue: true,
+          expression: `(${COMPOSER_FOCUS_JS})(${JSON.stringify(prompt)}, ${JSON.stringify(reclaim)})`,
+          returnByValue: true,
         }).then((x) => x?.result?.value));
         lastFocus = r;
         if (r === "OK") {
           focused = true;
         } else if (r === "DRAFT") {
           draftMatched = true;
+        } else if (r === "OWNED") {
+          owned = true;
         } else if (r.startsWith("NON_EMPTY:")) {
           const existing = r.slice("NON_EMPTY:".length);
           if (existing === prompt.trim()) {
             draftMatched = true;
+          } else if (reclaimHit(existing, reclaim)) {
+            owned = true;
           } else {
             await sleep(800);
           }
@@ -574,14 +624,15 @@ export function createCdpSubmitter(deps: CdpSubmitterDeps) {
           await sleep(800);
         }
       }
-      if (!focused && !draftMatched) {
+      if (!focused && !draftMatched && !owned) {
         if (lastFocus.startsWith("NON_EMPTY:")) {
           return { ok: false, reason: `NON_EMPTY_INPUT:${lastFocus.slice("NON_EMPTY:".length).slice(0, 30)}` };
         }
         return { ok: false, reason: "NO_INPUT_AFTER_RETRY" };
       }
 
-      if (focused) {
+      if (owned || focused) {
+        if (owned) await selectAllComposer(session);
         await session.call("Input.insertText", { text: prompt });
         const v = String(await session.call("Runtime.evaluate", {
           expression: `(${COMPOSER_VERIFY_JS})(${JSON.stringify(prompt)})`, returnByValue: true,

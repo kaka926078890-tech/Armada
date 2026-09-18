@@ -94,7 +94,7 @@ export function machineLabel(m: { name: string; display_name?: string | null }):
 }
 
 /** 中台当前打包的 vsix。落后的被控机看不到 Ask 归属 / Created Plan。 */
-export const REQUIRED_EXTENSION_VERSION = "0.4.24";
+export const REQUIRED_EXTENSION_VERSION = "0.4.25";
 
 export const CDP_NOT_READY_COPY =
   "Cursor 在线但无法注入。请确认已安装最新 Armada 扩展，并用 Armada 打开工作区。若窗口已开、调试口不通：请完全退出 Cursor（Mac Cmd+Q / Windows 托盘 Exit），不要点 Cursor 图标。";

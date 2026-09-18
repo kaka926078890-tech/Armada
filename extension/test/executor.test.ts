@@ -202,6 +202,52 @@ describe("Executor dirty composer", () => {
     });
   });
 
+  test("VERIFY_FAIL does not clipboard-paste and rejects startRun", async () => {
+    const { ex, acks } = makeExec({
+      autoSubmit: async () => ({ ok: false, reason: "VERIFY_FAIL:MISMATCH:garbage" }),
+    });
+    await ex.startRun({ runId: "r1", workspaceRoot: "/ws/a", prompt: "hello" });
+    expect(clipboardWrites).toEqual([]);
+    expect(acks[acks.length - 1]).toEqual({
+      type: "run.ack", runId: "r1", status: "rejected", reason: "VERIFY_FAIL:MISMATCH:garbage",
+    });
+  });
+
+  test("followup reclaims last submitted prompt; new startRun does not", async () => {
+    const seen: { prompt: string; reclaim?: string[] }[] = [];
+    const { ex } = makeExec({
+      autoSubmit: async (_ws, prompt, opts) => {
+        seen.push({ prompt, reclaim: opts?.reclaim });
+        return { ok: true };
+      },
+    });
+    await ex.startRun({ runId: "r1", workspaceRoot: "/ws/a", prompt: "首轮原文" });
+    await ex.followup({
+      runId: "r1", conversationId: "c1", prompt: "续发", workspaceRoot: "/ws/a",
+    });
+    await ex.startRun({ runId: "r2", workspaceRoot: "/ws/a", prompt: "新任务" });
+    expect(seen[1]?.prompt).toBe("续发");
+    expect(seen[1]?.reclaim).toContain("首轮原文");
+    expect(seen[2]?.prompt).toBe("新任务");
+    expect(seen[2]?.reclaim ?? []).not.toContain("首轮原文");
+  });
+
+  test("VERIFY_FAIL leftover is reclaimed on the next startRun", async () => {
+    const seen: { prompt: string; reclaim?: string[] }[] = [];
+    let n = 0;
+    const { ex } = makeExec({
+      autoSubmit: async (_ws, prompt, opts) => {
+        seen.push({ prompt, reclaim: opts?.reclaim });
+        n += 1;
+        if (n === 1) return { ok: false, reason: "VERIFY_FAIL:MISMATCH:x" };
+        return { ok: true };
+      },
+    });
+    await ex.startRun({ runId: "r1", workspaceRoot: "/ws/a", prompt: "半成功" });
+    await ex.startRun({ runId: "r2", workspaceRoot: "/ws/a", prompt: "下一枪" });
+    expect(seen[1]?.reclaim).toContain("半成功");
+  });
+
   test("live followup does not bindKnown or addPending (E1)", async () => {
     let bound = 0;
     let added = 0;

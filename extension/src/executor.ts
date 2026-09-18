@@ -69,8 +69,13 @@ export interface ExecutorDeps {
    * 全自动提交(CDP DOM 注入)。true / `{ ok:true }` 表示已写入并回车。
    * `NON_EMPTY_INPUT*`：框里是别人的草稿/引用芯片，禁止剪贴板往里贴。
    * `CDP_UNREACHABLE` / `CDP_CONNECT_FAIL*`：口不通，禁止剪贴板假 ack。
+   * `reclaim`：Armada 自己留下的原文(取消回灌 / 上次写入未提交)，允许整框替换。
    */
-  autoSubmit?: (workspaceRoot: string, prompt: string) => Promise<boolean | { ok: boolean; reason?: string }>;
+  autoSubmit?: (
+    workspaceRoot: string,
+    prompt: string,
+    opts?: { reclaim?: string[] },
+  ) => Promise<boolean | { ok: boolean; reason?: string }>;
   imagePaste?: boolean;
   fetchBlob?: (id: string) => Promise<{ bytes: Buffer; mime: string }>;
   writeClipboard?: (bytes: Buffer, mime: string) => void;
@@ -118,8 +123,30 @@ function isCdpDown(reason?: string): boolean {
 
 export class Executor {
   private sleep: (ms: number) => Promise<void>;
+  /** 上次成功提交的原文。取消后 Cursor 可能回灌到框里，仅 followup 可认领。 */
+  private lastSubmittedPrompt: string | null = null;
+  /** 上次 insertText 后校验/回车失败，框里可能仍是这句。start 与 followup 都可认领。 */
+  private lastFailedWrite: string | null = null;
   constructor(private deps: ExecutorDeps) {
     this.sleep = deps.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+  }
+
+  private reclaimFor(kind: "start" | "followup"): string[] {
+    const out: string[] = [];
+    if (this.lastFailedWrite) out.push(this.lastFailedWrite);
+    if (kind === "followup" && this.lastSubmittedPrompt) out.push(this.lastSubmittedPrompt);
+    return out;
+  }
+
+  private noteInjectResult(prompt: string, submitted: boolean, reason?: string): void {
+    if (submitted) {
+      this.lastSubmittedPrompt = prompt;
+      this.lastFailedWrite = null;
+      return;
+    }
+    if (reason && (reason.startsWith("VERIFY_FAIL") || reason.startsWith("ENTER_FAIL"))) {
+      this.lastFailedWrite = prompt;
+    }
   }
 
   private authorizedWorkspaces(): string[] {
@@ -184,7 +211,8 @@ export class Executor {
           return;
         }
       } else {
-        const inj = await this.injectPrompt(msg.workspaceRoot, msg.prompt, 1500);
+        const inj = await this.injectPrompt(msg.workspaceRoot, msg.prompt, 1500, this.reclaimFor("start"));
+        this.noteInjectResult(msg.prompt, inj.submitted, inj.reason);
         if (!inj.submitted) {
           this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: inj.reason ?? "INJECT_FAILED" });
           return;
@@ -288,14 +316,16 @@ export class Executor {
     workspaceRoot: string,
     prompt: string,
     pasteWaitMs: number,
+    reclaim: string[] = [],
   ): Promise<{ submitted: boolean; reason?: string }> {
     const vscode = vs();
     if (this.deps.autoSubmit) {
       try {
-        const first = autoSubmitOutcome(await this.deps.autoSubmit(workspaceRoot, prompt));
+        const first = autoSubmitOutcome(await this.deps.autoSubmit(workspaceRoot, prompt, { reclaim }));
         if (first.ok) return { submitted: true };
         if (isDirtyComposer(first.reason)) return { submitted: false, reason: "NON_EMPTY_INPUT" };
         if (isCdpDown(first.reason)) return { submitted: false, reason: first.reason ?? "CDP_UNREACHABLE" };
+        return { submitted: false, reason: first.reason ?? "INJECT_FAILED" };
       } catch {
         return { submitted: false, reason: "INJECT_FAILED" };
       }
@@ -303,16 +333,6 @@ export class Executor {
     await this.sleep(pasteWaitMs);
     await vscode.env.clipboard.writeText(prompt);
     await vscode.commands.executeCommand("editor.action.clipboardPasteAction");
-    if (this.deps.autoSubmit) {
-      try {
-        const second = autoSubmitOutcome(await this.deps.autoSubmit(workspaceRoot, prompt));
-        if (second.ok) return { submitted: true };
-        if (isDirtyComposer(second.reason)) return { submitted: false, reason: "NON_EMPTY_INPUT" };
-        if (isCdpDown(second.reason)) return { submitted: false, reason: second.reason ?? "CDP_UNREACHABLE" };
-      } catch {
-        return { submitted: false, reason: "INJECT_FAILED" };
-      }
-    }
     return { submitted: true };
   }
 
@@ -362,7 +382,8 @@ export class Executor {
           return;
         }
       } else {
-        const inj = await this.injectPrompt(msg.workspaceRoot, msg.prompt, 800);
+        const inj = await this.injectPrompt(msg.workspaceRoot, msg.prompt, 800, this.reclaimFor("followup"));
+        this.noteInjectResult(msg.prompt, inj.submitted, inj.reason);
         if (!inj.submitted) {
           this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: inj.reason ?? "INJECT_FAILED" });
           return;
