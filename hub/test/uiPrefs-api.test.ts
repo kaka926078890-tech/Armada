@@ -19,7 +19,7 @@ describe("GET/PUT /api/ui-prefs", () => {
     const { base, tok } = start();
     const r = await fetch(`${base}/api/ui-prefs`, { headers: { Authorization: `Bearer ${tok}` } });
     expect(r.status).toBe(200);
-    expect(await r.json()).toEqual({ ...UI_PREFS_DEFAULTS, source: "defaults" });
+    expect(await r.json()).toEqual({ ...UI_PREFS_DEFAULTS, promptSnippets: [], source: "defaults" });
   });
 
   test("GET corrupt → 503 READ_FAIL", async () => {

@@ -10,7 +10,7 @@ import { ingestEvent } from "./ingest";
 import { handleWsMessage, type WsData } from "./ws";
 import { limitsFromEnv, httpStatusForRunError, type ConcurrencyLimits } from "./concurrency";
 import { BlobStore } from "./blobs";
-import { readUiPrefs, writeUiPrefs, mergeUiPrefs } from "./uiPrefs";
+import { assertPromptSnippets, fillSnippetIds, readUiPrefs, writeUiPrefs, mergeUiPrefs } from "./uiPrefs";
 import { JoinTickets } from "./joinTickets";
 import { startRelayClient } from "./relayClient";
 
@@ -207,6 +207,42 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
       const next = mergeUiPrefs(cur.prefs, body as Record<string, unknown>);
       writeUiPrefs(home, next);
       return c.json(next);
+    } catch {
+      db.query("INSERT INTO audit (ts, actor, action, target, payload) VALUES (?1,'hub','UI_PREFS_WRITE_FAIL',?2,?3)")
+        .run(Date.now(), home, "{}");
+      return c.json({ error: "WRITE_FAIL" }, 500);
+    }
+  });
+
+  app.get("/api/prompt-snippets", (c) => {
+    const r = readUiPrefs(home);
+    if (!r.ok) {
+      db.query("INSERT INTO audit (ts, actor, action, target, payload) VALUES (?1,'hub','UI_PREFS_READ_FAIL',?2,?3)")
+        .run(Date.now(), home, JSON.stringify({ error: r.error }));
+      return c.json({ error: "READ_FAIL" }, 503);
+    }
+    return c.json({ snippets: r.prefs.promptSnippets });
+  });
+  app.put("/api/prompt-snippets", async (c) => {
+    const body = await c.req.json().catch(() => null);
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return c.json({ error: "SNIPPET_INVALID" }, 400);
+    }
+    const asserted = assertPromptSnippets((body as { snippets?: unknown }).snippets);
+    if (!asserted.ok) return c.json({ error: asserted.error }, 400);
+    const cur = readUiPrefs(home);
+    if (!cur.ok) {
+      db.query("INSERT INTO audit (ts, actor, action, target, payload) VALUES (?1,'hub','UI_PREFS_READ_FAIL',?2,?3)")
+        .run(Date.now(), home, JSON.stringify({ error: cur.error }));
+      return c.json({ error: "READ_FAIL" }, 503);
+    }
+    try {
+      const snippets = fillSnippetIds(asserted.snippets);
+      const next = mergeUiPrefs(cur.prefs, { promptSnippets: snippets });
+      writeUiPrefs(home, next);
+      db.query("INSERT INTO audit (ts, actor, action, target, payload) VALUES (?1,'hub','PROMPT_SNIPPETS_WRITE',?2,?3)")
+        .run(Date.now(), home, JSON.stringify({ count: snippets.length }));
+      return c.json({ snippets: next.promptSnippets });
     } catch {
       db.query("INSERT INTO audit (ts, actor, action, target, payload) VALUES (?1,'hub','UI_PREFS_WRITE_FAIL',?2,?3)")
         .run(Date.now(), home, "{}");
