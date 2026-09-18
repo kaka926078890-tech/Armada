@@ -186,6 +186,23 @@ export function startRelayClient(opts: {
     const requestId = msg.requestId;
     const fail = (error: string) => send({ type: "cmd.result", requestId, ok: false, error });
     try {
+      if (msg.type === "cmd.promptSnippetsGet") {
+        const r = await hubFetch("/api/prompt-snippets");
+        const body = await r.json().catch(() => ({})) as any;
+        if (!r.ok) return fail(body.error ?? "HUB_ERROR");
+        send({ type: "cmd.result", requestId, ok: true, snippets: body.snippets ?? [] });
+        return;
+      }
+      if (msg.type === "cmd.promptSnippetsPut") {
+        const r = await hubFetch("/api/prompt-snippets", {
+          method: "PUT",
+          body: JSON.stringify({ snippets: msg.snippets ?? [] }),
+        });
+        const body = await r.json().catch(() => ({})) as any;
+        if (!r.ok) return fail(body.error ?? "HUB_ERROR");
+        send({ type: "cmd.result", requestId, ok: true, snippets: body.snippets ?? [] });
+        return;
+      }
       if (msg.type === "cmd.dispatch") {
         const decoded = typeof msg.workspaceId === "string" ? decodeWorkspaceId(msg.workspaceId) : null;
         if (!decoded) return fail("INVALID");

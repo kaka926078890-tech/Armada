@@ -54,7 +54,11 @@ export type RunSnap = {
   updatedAt?: number;
 };
 
-type Pending = { resolve: (v: { ok: boolean; error?: string; run?: RunSnap }) => void };
+type PromptSnippet = { id: string; title: string; body: string };
+
+type Pending = {
+  resolve: (v: { ok: boolean; error?: string; run?: RunSnap; snippets?: PromptSnippet[] }) => void;
+};
 
 function hex64(): string {
   return randomBytes(32).toString("hex");
@@ -337,7 +341,7 @@ export function createRelayServer(opts: {
     return true;
   }
 
-  function waitHub(requestId: string): Promise<{ ok: boolean; error?: string; run?: RunSnap }> {
+  function waitHub(requestId: string): Promise<{ ok: boolean; error?: string; run?: RunSnap; snippets?: PromptSnippet[] }> {
     return new Promise((resolve) => {
       const t = setTimeout(() => {
         pending.delete(requestId);
@@ -349,15 +353,16 @@ export function createRelayServer(opts: {
     });
   }
 
-  function hubCmdStatus(err: string): 400 | 404 | 409 | 429 | 502 | 503 {
-    if (err === "HUB_OFFLINE") return 503;
+  function hubCmdStatus(err: string): 400 | 404 | 409 | 429 | 500 | 502 | 503 {
+    if (err === "HUB_OFFLINE" || err === "READ_FAIL") return 503;
+    if (err === "WRITE_FAIL") return 500;
     if (err === "RUN_LIMIT" || err === "RATE_LIMIT" || err === "OUTBOUND_LIMIT") return 429;
     if (err === "NOT_FOUND") return 404;
     if ([
       "PROMPT_COLLISION", "CONVERSATION_BUSY", "INJECT_SLOT_BUSY", "WINDOW_BUSY",
       "NO_CONVERSATION", "OUTBOUND_TEXT_ONLY", "INVALID_STATE",
     ].includes(err)) return 409;
-    if (err === "WORKSPACE_NOT_OPEN" || err === "MACHINE_OFFLINE" || err === "CLOSED" || err === "EMPTY_PROMPT" || err === "INVALID" || err === "CDP_NOT_READY") {
+    if (err === "WORKSPACE_NOT_OPEN" || err === "MACHINE_OFFLINE" || err === "CLOSED" || err === "EMPTY_PROMPT" || err === "INVALID" || err === "CDP_NOT_READY" || err === "SNIPPET_INVALID" || err === "SNIPPET_LIMIT") {
       return 400;
     }
     return 502;
@@ -414,6 +419,39 @@ export function createRelayServer(opts: {
     const fleet = (c as any).get("fleet") as { id: string };
     const { hubOffline, workspaces } = workspacesPayload(fleet.id);
     return c.json({ hubOffline, workspaces });
+  });
+
+  app.get("/mobile/prompt-snippets", async (c) => {
+    const fleet = (c as any).get("fleet") as { id: string; hub_online: number };
+    if (fleet.hub_online !== 1) return c.json({ error: "HUB_OFFLINE" }, 503);
+    const requestId = `r${++reqSeq}`;
+    if (!sendHub(fleet.id, { type: "cmd.promptSnippetsGet", requestId })) {
+      return c.json({ error: "HUB_OFFLINE" }, 503);
+    }
+    const result = await waitHub(requestId);
+    if (!result.ok) {
+      const err = result.error ?? "HUB_TIMEOUT";
+      return c.json({ error: err }, hubCmdStatus(err) as 400);
+    }
+    return c.json({ snippets: result.snippets ?? [] });
+  });
+
+  app.put("/mobile/prompt-snippets", async (c) => {
+    const tok = (c as any).get("opToken") as string;
+    const fleet = (c as any).get("fleet") as { id: string; hub_online: number };
+    if (!checkRate(tok)) return c.json({ error: "RATE_LIMIT" }, 429);
+    if (fleet.hub_online !== 1) return c.json({ error: "HUB_OFFLINE" }, 503);
+    const body = await c.req.json().catch(() => ({})) as { snippets?: unknown };
+    const requestId = `r${++reqSeq}`;
+    if (!sendHub(fleet.id, { type: "cmd.promptSnippetsPut", requestId, snippets: body.snippets })) {
+      return c.json({ error: "HUB_OFFLINE" }, 503);
+    }
+    const result = await waitHub(requestId);
+    if (!result.ok) {
+      const err = result.error ?? "HUB_TIMEOUT";
+      return c.json({ error: err }, hubCmdStatus(err) as 400);
+    }
+    return c.json({ snippets: result.snippets ?? [] });
   });
 
   const TOKEN_HEX = /^[a-fA-F0-9]{64}$/;
@@ -700,7 +738,7 @@ export function createRelayServer(opts: {
           const p = pending.get(msg.requestId);
           if (p) {
             pending.delete(msg.requestId);
-            p.resolve({ ok: !!msg.ok, error: msg.error, run: msg.run });
+            p.resolve({ ok: !!msg.ok, error: msg.error, run: msg.run, snippets: msg.snippets });
           }
         }
       },

@@ -184,6 +184,18 @@ describe("hub outbound to relay", () => {
       return j.hubOffline === false && j.workspaces?.[0]?.workspaceRoot === "/ws/a";
     });
 
+    const snippet = { id: "ok-id-01", title: "常用", body: "检查测试" };
+    const putSnippets = await fetch(`http://127.0.0.1:${relay.port}/mobile/prompt-snippets`, {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ snippets: [snippet] }),
+    });
+    expect(putSnippets.status).toBe(200);
+    expect(await putSnippets.json()).toEqual({ snippets: [snippet] });
+    const getSnippets = await fetch(`http://127.0.0.1:${relay.port}/mobile/prompt-snippets`, { headers });
+    expect(getSnippets.status).toBe(200);
+    expect(await getSnippets.json()).toEqual({ snippets: [snippet] });
+
     const d = await fetch(`http://127.0.0.1:${relay.port}/mobile/runs`, {
       method: "POST",
       headers,

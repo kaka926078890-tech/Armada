@@ -180,6 +180,60 @@ describe("relay serve", () => {
     expect(await d.json()).toEqual({ error: "HUB_OFFLINE" });
   });
 
+  test("prompt-snippets hub offline → 503", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const headers = { authorization: `Bearer ${fleet.operatorToken}` };
+    expect((await fetch(url(s, "/mobile/prompt-snippets"), { headers })).status).toBe(503);
+    const put = await fetch(url(s, "/mobile/prompt-snippets"), {
+      method: "PUT",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({ snippets: [] }),
+    });
+    expect(put.status).toBe(503);
+    expect(await put.json()).toEqual({ error: "HUB_OFFLINE" });
+  });
+
+  test("prompt-snippets get/put round-trip via fake hub", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    ws.addEventListener("message", (e) => {
+      const msg = JSON.parse(String(e.data));
+      if (msg.type === "cmd.promptSnippetsGet") {
+        ws.send(JSON.stringify({
+          type: "cmd.result",
+          requestId: msg.requestId,
+          ok: true,
+          snippets: [{ id: "ok-id-01", title: "t", body: "b" }],
+        }));
+      }
+      if (msg.type === "cmd.promptSnippetsPut") {
+        ws.send(JSON.stringify({
+          type: "cmd.result",
+          requestId: msg.requestId,
+          ok: true,
+          snippets: msg.snippets,
+        }));
+      }
+    });
+    await Bun.sleep(50);
+    const headers = { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" };
+    const get = await fetch(url(s, "/mobile/prompt-snippets"), { headers });
+    expect(get.status).toBe(200);
+    expect(await get.json()).toEqual({ snippets: [{ id: "ok-id-01", title: "t", body: "b" }] });
+    const put = await fetch(url(s, "/mobile/prompt-snippets"), {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ snippets: [{ id: "ok-id-02", title: "x", body: "y" }] }),
+    });
+    expect(put.status).toBe(200);
+    const body = await put.json() as { snippets: unknown[]; run?: unknown };
+    expect(body.snippets[0]).toMatchObject({ id: "ok-id-02" });
+    expect(body.run).toBeUndefined();
+    ws.close();
+  });
+
   test("completed without finalText becomes NO_ASSISTANT_BODY", async () => {
     const s = start();
     const fleet = s.createFleet();
