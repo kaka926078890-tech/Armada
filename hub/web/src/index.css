@@ -1,7 +1,33 @@
 @import "tailwindcss";
 
-html[data-font-scale="large"] { zoom: 1.5; }
-html[data-font-scale="xlarge"] { zoom: 2; }
+html { --armada-text-scale: 1; }
+html[data-font-scale="large"] { --armada-text-scale: 1.5; }
+html[data-font-scale="xlarge"] { --armada-text-scale: 2; }
+
+html[data-font-scale="large"] .text-xs,
+html[data-font-scale="xlarge"] .text-xs { font-size: calc(0.75rem * var(--armada-text-scale)); }
+html[data-font-scale="large"] .text-sm,
+html[data-font-scale="xlarge"] .text-sm { font-size: calc(0.875rem * var(--armada-text-scale)); }
+html[data-font-scale="large"] .text-base,
+html[data-font-scale="xlarge"] .text-base { font-size: calc(1rem * var(--armada-text-scale)); }
+html[data-font-scale="large"] .text-lg,
+html[data-font-scale="xlarge"] .text-lg { font-size: calc(1.125rem * var(--armada-text-scale)); }
+html[data-font-scale="large"] .text-xl,
+html[data-font-scale="xlarge"] .text-xl { font-size: calc(1.25rem * var(--armada-text-scale)); }
+html[data-font-scale="large"] .text-\[10px\],
+html[data-font-scale="xlarge"] .text-\[10px\] { font-size: calc(10px * var(--armada-text-scale)); }
+html[data-font-scale="large"] .text-\[11px\],
+html[data-font-scale="xlarge"] .text-\[11px\] { font-size: calc(11px * var(--armada-text-scale)); }
+html[data-font-scale="large"] .text-\[12px\],
+html[data-font-scale="xlarge"] .text-\[12px\] { font-size: calc(12px * var(--armada-text-scale)); }
+html[data-font-scale="large"] .text-\[13px\],
+html[data-font-scale="xlarge"] .text-\[13px\] { font-size: calc(13px * var(--armada-text-scale)); }
+html[data-font-scale="large"] .text-\[14px\],
+html[data-font-scale="xlarge"] .text-\[14px\] { font-size: calc(14px * var(--armada-text-scale)); }
+html[data-font-scale="large"] .text-\[15px\],
+html[data-font-scale="xlarge"] .text-\[15px\] { font-size: calc(15px * var(--armada-text-scale)); }
+html[data-font-scale="large"] .text-\[16px\],
+html[data-font-scale="xlarge"] .text-\[16px\] { font-size: calc(16px * var(--armada-text-scale)); }
 
 html[data-theme="light"] {
   color-scheme: light;

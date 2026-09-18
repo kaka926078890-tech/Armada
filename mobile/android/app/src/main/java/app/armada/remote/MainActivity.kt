@@ -17,20 +17,12 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.requiredHeight
-import androidx.compose.foundation.layout.requiredWidth
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
-import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.compositionLocalOf
-import androidx.compose.ui.graphics.TransformOrigin
-import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -53,7 +45,11 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -108,7 +104,7 @@ class MainActivity : ComponentActivity() {
 val LocalAppTheme = compositionLocalOf { "dark" }
 val LocalFontScale = compositionLocalOf { "normal" }
 
-fun appearanceZoom(scale: String): Float = when (scale) {
+fun appearanceTextScale(scale: String): Float = when (scale) {
     "large" -> 1.5f
     "xlarge" -> 2f
     else -> 1f
@@ -118,24 +114,15 @@ fun appearanceZoom(scale: String): Float = when (scale) {
 fun AppearanceRoot(vm: SessionVm) {
     val theme by vm.theme.collectAsState()
     val fontScale by vm.fontScale.collectAsState()
-    val zoom = appearanceZoom(fontScale)
+    val textScale = appearanceTextScale(fontScale)
     val scheme = if (theme == "light") lightColorScheme() else darkColorScheme()
+    val density = LocalDensity.current
     MaterialTheme(colorScheme = scheme) {
-        CompositionLocalProvider(LocalAppTheme provides theme, LocalFontScale provides fontScale) {
-            if (zoom == 1f) Root(vm)
-            else BoxWithConstraints(Modifier.fillMaxSize()) {
-                Box(
-                    Modifier
-                        .requiredWidth(maxWidth / zoom)
-                        .requiredHeight(maxHeight / zoom)
-                        .graphicsLayer {
-                            scaleX = zoom
-                            scaleY = zoom
-                            transformOrigin = TransformOrigin(0f, 0f)
-                        },
-                ) { Root(vm) }
-            }
-        }
+        CompositionLocalProvider(
+            LocalAppTheme provides theme,
+            LocalFontScale provides fontScale,
+            LocalDensity provides Density(density = density.density, fontScale = textScale),
+        ) { Root(vm) }
     }
 }
 

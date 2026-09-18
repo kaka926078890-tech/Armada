@@ -13,10 +13,13 @@ describe("settings chrome", () => {
     expect(app).not.toContain('aria-label="切换明亮/黑夜"');
   });
 
-  test("css zoom covers large and xlarge", () => {
+  test("css scales fonts only, not page zoom", () => {
     const css = readFileSync(join(root, "src/index.css"), "utf8");
-    expect(css).toMatch(/data-font-scale="large"[\s\S]{0,80}zoom:\s*1\.5/);
-    expect(css).toMatch(/data-font-scale="xlarge"[\s\S]{0,80}zoom:\s*2/);
+    expect(css).not.toMatch(/data-font-scale="large"[^{]*\{[^}]*zoom\s*:/);
+    expect(css).not.toMatch(/data-font-scale="xlarge"[^{]*\{[^}]*zoom\s*:/);
+    expect(css).toMatch(/--armada-text-scale:\s*1\.5/);
+    expect(css).toMatch(/--armada-text-scale:\s*2/);
+    expect(css).toMatch(/text-\\\[13px\\\][\s\S]{0,200}calc\(13px \* var\(--armada-text-scale/);
   });
 });
 

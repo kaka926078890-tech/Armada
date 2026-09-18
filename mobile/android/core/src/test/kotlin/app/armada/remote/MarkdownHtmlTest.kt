@@ -22,7 +22,9 @@ class MarkdownHtmlTest {
     @Test
     fun largeDarkAppliesZoomAndDarkColor() {
         val html = MarkdownHtml.from("# Title", fontScale = "large", theme = "dark")
-        assertTrue(html.contains("zoom: 1.5"))
+        assertTrue(!html.contains("zoom:"))
+        assertTrue(html.contains("--md-scale: 1.5") || html.contains("--md-scale:1.5"))
+        assertTrue(html.contains("calc(13px * var(--md-scale))") || html.contains("calc(13px*var(--md-scale))"))
         assertTrue(html.contains("color: #e4e4e7") || html.contains("color:#e4e4e7"))
     }
 }

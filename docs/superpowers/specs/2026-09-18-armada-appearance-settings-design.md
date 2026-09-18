@@ -15,7 +15,7 @@
 | 项 | 内容 |
 | --- | --- |
 | 问题 | 中台主题开关裸露在顶栏；无字号。App 跟随系统、详情 Markdown 写死 13px。操作员无法把全局文字（含 Markdown）放到 1.5× / 2×。 |
-| 核心方案 | **方案 A：各端本地偏好 + 整体缩放。** 中台 `ui-prefs.json` + localStorage；App UserDefaults / SharedPreferences。**禁止** App 读写 `/api/ui-prefs`，禁止中转新路由。 |
+| 核心方案 | **方案 A：各端本地偏好 + 只放大字号。** 中台 `ui-prefs.json` + localStorage；App UserDefaults / SharedPreferences。**禁止** App 读写 `/api/ui-prefs`，禁止中转新路由。禁止 `zoom` / 整页 `scaleEffect`。 |
 | 关键约束 | ① 字号三档：`normal=1`、`large=1.5`、`xlarge=2`。② 默认：黑夜 + 正常（= 当前中台观感）。③ 缩放必须覆盖看板/侧栏/派发 **和** 详情 Markdown（含代码块）。④ 解绑不丢外观（本机偏好，不跟 token）。 |
 | 明确不做 | App↔中台同步；跟随系统作为第三档主题；更多字号；只放大聊天；语言/通知；改 `runToSnap`；`/mobile/ui-prefs`。 |
 
@@ -23,8 +23,8 @@
 
 | OS | 是否阻塞 |
 | --- | --- |
-| 中台 Chromium / 打包 Tauri | 本规格；CSS `zoom` |
-| iOS / Android | 本规格；原生字号倍率 + Markdown WebView `zoom` |
+| 中台 Chromium / 打包 Tauri | 本规格；只放大 `font-size`，禁止 `zoom` |
+| iOS / Android | 本规格；原生字号倍率（不缩放布局）+ Markdown `font-size * scale` |
 | 被控 macOS / Windows | 无关；禁止改 hook / CDP / `decideStop` |
 
 ---
@@ -34,7 +34,7 @@
 | # | 原始诉求 | 设计映射 |
 | --- | --- | --- |
 | R1 | 顶部加字号：正常 / 大 1.5× / 超大 2× | 三档枚举 `fontScale`，默认 `normal` |
-| R2 | 全局字体整体放大，含 Md 详情 | 中台根节点 `zoom`；App 原生 `fontScale` + Markdown HTML `zoom` |
+| R2 | 全局字体整体放大，含 Md 详情 | 只放大字号；栏宽/间距不变。中台 `--armada-text-scale`；App `fontScale` / Dynamic Type；Markdown `calc(13px * var(--md-scale))` |
 | R3 | App 加设置页：明亮黑夜 + 字号，先做这两项 | 舰队页「设置」→ 独立页，仅两行 |
 | R4 | 中台也要加；明亮黑夜收进弹窗 | 顶栏「设置」弹窗，去掉裸露「明亮/黑夜」按钮 |
 | R5 | A：不用同步，保存在自己地方 | 中台只写本 hub 文件/本浏览器；App 只写本机。无跨端 API |
@@ -60,10 +60,10 @@
 | 中台主题 | `hub/web/src/theme.ts` `loadTheme` / `applyTheme`；`html[data-theme]` | 弹窗改主题；逻辑不拆第二套 |
 | 中台偏好文件 | `hub/src/uiPrefs.ts` `theme`；`GET/PUT /api/ui-prefs` | **仅中台**增 `fontScale`；App 不碰 |
 | 顶栏 | `hub/web/src/App.tsx` header「明亮/黑夜」 | 换成「设置」，原按钮删除 |
-| 中台 Markdown | `hub/web/src/components/ChatThread.tsx` `text-[13px]` | 不改组件；靠根 `zoom` 放大 |
+| 中台 Markdown | `hub/web/src/components/ChatThread.tsx` `text-[13px]` | 不改组件；`--armada-text-scale` 覆盖该类 |
 | iOS 舰队工具栏 | `Screens.swift` `WorkspaceListView` 解绑/刷新 | 加「设置」 |
 | Android 舰队栏 | `MainActivity.kt` `FleetScreen` TopAppBar | 加「设置」 |
-| iOS Markdown | `MarkdownView.swift` body `font: 13px` | `from(_:scale:theme:)`，根 `zoom` + 显式配色 |
+| iOS Markdown | `MarkdownView.swift` body `font: 13px` | `from(_:scale:theme:)`，`--md-scale` + 显式配色 |
 | Android Markdown | `MarkdownHtml.kt` 同样 13px，无暗色 | 同签名；补暗色 CSS |
 | App 本地存储 | iOS `UserDefaults`；Android `TokenStore` plain prefs | 新 key，不解绑删除 |
 
@@ -73,7 +73,7 @@
 | --- | --- |
 | `fontScale` 归一化 | `hub/src/uiPrefs.ts` + `hub/web/src/uiPrefs.ts` + `theme.ts`（或拆 `appearance.ts`） |
 | 中台设置弹窗 | `hub/web/src/components/SettingsModal.tsx`（名称可同形缩短） |
-| CSS `zoom` | `hub/web/src/index.css` `html[data-font-scale]` |
+| CSS 字号变量 | `hub/web/src/index.css` `--armada-text-scale` 乘 `text-[Npx]` / `text-sm`；禁止 `zoom` |
 | iOS 设置页 + 环境 | `Screens.swift` `SettingsView`；`ArmadaRemoteApp` `preferredColorScheme` |
 | Android 设置页 + theme | `MainActivity.kt` `settings` 路由；`MaterialTheme` 明暗 |
 | Markdown 倍率 | iOS `MarkdownHTML.from`；Android `MarkdownHtml.from` |
@@ -96,7 +96,7 @@
 | P1 | 各端自己的地方 | App 零次请求外观 API。中台 PUT 失败仍应用本机 DOM |
 | P2 | 两项封顶 | 设置 UI 禁止第三项（v1） |
 | P3 | 默认 = 当前中台 | `dark` + `normal`；切到大/超大才偏离现状 |
-| P4 | 缩放一个根，不改 Markdown 渲染器 | 禁止为字号重写 `remark` / 再写一套 px 表（WebView 只加 `zoom` + 主题色） |
+| P4 | 只放大字号，不改 Markdown 渲染器 | 禁止 `zoom` / 整页 scale；WebView 只加 `--md-scale` + 主题色 |
 | P5 | 外观不是 run 状态 | 不进 `RunSnap`、不进 SSE |
 | P6 | 解绑保留 | 外观 key 不在 `unbind()` 清理列表 |
 | P7 | iOS / Android 文案同一套 | 标题「设置」；「外观」「字号」；档位「黑夜/明亮」「正常/大/超大」 |
@@ -196,24 +196,19 @@ sequenceDiagram
 
 1. `document.documentElement.dataset.theme = theme`（已有）
 2. `document.documentElement.dataset.fontScale = fontScale`
-3. CSS：
+3. CSS：`--armada-text-scale` 为 1 / 1.5 / 2；覆盖 `text-[10px]`–`text-[16px]` 与 `text-xs`–`text-xl` 为 `calc(N * var(--armada-text-scale))`。栏宽、padding、`w-56` **不**随倍率变。禁止 `zoom` / `transform: scale`。
 
-```css
-html[data-font-scale="large"] { zoom: 1.5; }
-html[data-font-scale="xlarge"] { zoom: 2; }
-```
-
-`normal` 不设 zoom（或 `zoom: 1`）。冷启动：`main.tsx` 在 render 前 `applyTheme` + `applyFontScale`，避免闪 1× 再跳。
+`normal` 倍率为 1（不覆盖，保持现网 px）。冷启动：`main.tsx` 在 render 前 `applyTheme` + `applyFontScale`，避免闪 1× 再跳。
 
 **缓存：** 无 HTTP 缓存。失效 = 下一次点击或冷启动读盘。  
-**降级：** `zoom` 无效时（非目标浏览器）字号不放大；v1 不写 rem 回退。打包壳是 Chromium/WKWebView，均支持 `zoom`。
+**降级：** 未列出的字号 class 保持原 px；v1 只覆盖中台现用档。
 
 ### 5.2 App apply
 
 | 端 | 主题 | 原生文字 | Markdown |
 | --- | --- | --- | --- |
-| iOS | 根 `preferredColorScheme(.dark/.light)` | 根容器按倍率 `scaleEffect`（宽高先除倍率再乘回，与中台 `zoom` 同形）。禁止改用系统 Dynamic Type 档位冒充 1.5/2。 | `MarkdownHTML.from(text, fontScale, theme)`：根 CSS `zoom` + 显式亮/暗色。禁止只靠 `prefers-color-scheme`（否则设置黑夜、WebView 仍跟系统）。 |
-| Android | `MaterialTheme(colorScheme = dark/light)` 包 `Root` | 根 `Modifier.graphicsLayer { scaleX/Y = m }` 同样先除后乘，或等价 `Density` 使 **测量到的正文 px = 13×m**。禁止只放大 Text 不放大详情 WebView。 | `MarkdownHtml.from(source, fontScale, theme)` 同样 `zoom` + 暗色 CSS |
+| iOS | 根 `preferredColorScheme(.dark/.light)` | `.environment(\.dynamicTypeSize)`：normal→`.large`，large→`.accessibility1`，xlarge→`.accessibility3`。禁止根视图 `scaleEffect`。 | `MarkdownHTML.from`：`--md-scale` + `calc(13px * var(--md-scale))`，禁止 `zoom` |
+| Android | `MaterialTheme` 包 `Root` | `LocalDensity`：**只改 `fontScale`**，`density` 不变。禁止 `graphicsLayer` 整页缩放。 | `MarkdownHtml.from` 同 iOS：`--md-scale`，禁止 `zoom` |
 
 详情打开时用**当前**倍率生成 HTML；改设置后已打开的 WebView 必须 reload 同一 `text`（改 `lastText` 哨兵或显式 `scale` 依赖）。
 
@@ -234,7 +229,7 @@ html[data-font-scale="xlarge"] { zoom: 2; }
 | localStorage 抛错 | 内存 apply 仍执行；刷新可能回默认 |
 | PUT ui-prefs 失败 | 不弹红条、不回滚（与现网 theme 一致） |
 | SharedPreferences apply 失败 | 内存态保留到进程结束 |
-| WebView 未吃到 zoom | 单测锁 HTML 含 `zoom: 1.5`；真机抽查详情正文 |
+| WebView 未吃到字号倍率 | 单测锁 HTML 含 `--md-scale: 1.5` 且无 `zoom:`；真机抽查详情正文 |
 
 回滚：revert 本规格提交；操作员清 localStorage / 卸 App 即回默认。
 
@@ -246,7 +241,7 @@ html[data-font-scale="xlarge"] { zoom: 2; }
 | --- | --- | --- |
 | 偏好当秘密存 encrypted | 不存 token；只用 plain prefs | token 仍只在 Keychain / EncryptedSharedPreferences |
 | `ui-prefs.json` 被读 | 已有 `0o600`；无新增敏感字段 | 文件不含 token |
-| Markdown HTML 注入 | 沿用现网 escape；只加 CSS zoom/颜色 | `MarkdownHtmlTest` 仍禁止裸 `<script>` |
+| Markdown HTML 注入 | 沿用现网 escape；只加字号变量/颜色 | `MarkdownHtmlTest` 仍禁止裸 `<script>` |
 | 设置页误加退出/解绑 | v1 只有两项 | UI 测试：设置页无「解绑」 |
 | 中转暴露 prefs | **不新增** `/mobile/ui-prefs` | grep 无该路径 |
 
@@ -284,7 +279,7 @@ html[data-font-scale="xlarge"] { zoom: 2; }
 | `hub/test/uiPrefs.test.ts` | 非法 `fontScale` clamp；merge 只改字号保留 theme |
 | `hub/web/test/uiPrefs.test.ts` | `fontScale: large` 使 `localDiffersFromDefaults` 为 true |
 | `hub/web` 设置弹窗 | 静态 markup 含「设置」「正常」「超大」，不含顶栏即时「明亮」按钮（header 路径） |
-| iOS Markdown（若现有测试 harness）或 Android `MarkdownHtmlTest` | `from(..., large, dark)` HTML 含 `zoom: 1.5` 且暗色 color |
+| iOS Markdown（若现有测试 harness）或 Android `MarkdownHtmlTest` | `from(..., large, dark)` HTML 含 `--md-scale: 1.5`、无 `zoom:`、且暗色 color |
 
 禁止未红先改生产 CSS。
 
@@ -301,9 +296,10 @@ html[data-font-scale="xlarge"] { zoom: 2; }
 
 | 风险 | 影响 | 应对 | 状态 |
 | --- | --- | --- | --- |
-| CSS `zoom` 放大布局导致顶栏换行 | 2× 下按钮挤 | 顶栏已 `flex`；溢出换行可接受；不为此改信息架构 | 接受 |
+| CSS `zoom` 放大布局导致整页滚动 | 操作员要的是字号不是画布缩放 | 2026-09-18 改为只乘 `font-size`；栏宽不变 | 已修 |
+| 2× 下文案换行增多 | 详情区更长 | 允许纵向滚内容，禁止横向滚整页画布 | 接受 |
 | App 从「跟随系统」改为默认黑夜 | 浅色系统用户第一次升级变黑 | R5/P3；设置里一键明亮 | 接受 |
-| Android 详情 WebView 忽略 zoom | MD 仍 13px | 单测锁 CSS；必要时改 `body { font-size: calc(13px * var(--z)) }` 为 v1 内修复，不另开规格 | 缓解预案 |
+| Android 详情 WebView 忽略字号变量 | MD 仍 13px | 单测锁 `--md-scale` + `calc(13px * var(--md-scale))` | 缓解预案 |
 | 中台 localStorage 与 `ui-prefs.json` 不一致 | 两台浏览器官感不同 | **故意**：那是「自己的地方」。同浏览器以 local 立即生效，PUT 成功后其它打开该 hub 的页面下次 GET 才对齐 | 已决：中台多标签允许短暂不一致 |
 | 2× 手机可用性 | 一屏字少 | 用户点名 2× | 接受 |
 
@@ -328,4 +324,5 @@ html[data-font-scale="xlarge"] { zoom: 2; }
 
 | 日期 | 变更 |
 | --- | --- |
-| 2026-09-18 | 初稿。方案 A：各端本地、不同步；中台弹窗 + App 设置页；`fontScale` 三档；根 `zoom` 覆盖 Markdown。 |
+| 2026-09-18 | 初稿。方案 A：各端本地、不同步；中台弹窗 + App 设置页；`fontScale` 三档。 |
+| 2026-09-18 | 真机反馈：`zoom`/`scaleEffect` 是整页画布放大。改为只乘字号；布局宽高不变。 |

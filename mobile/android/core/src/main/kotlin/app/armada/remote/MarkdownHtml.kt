@@ -3,7 +3,7 @@ package app.armada.remote
 object MarkdownHtml {
     fun from(source: String, fontScale: String = "normal", theme: String = "dark"): String {
         val inner = splitFences(source.replace("\r\n", "\n")).joinToString("") { renderBlock(it) }
-        val zoom = when (fontScale) {
+        val scale = when (fontScale) {
             "large" -> "1.5"
             "xlarge" -> "2"
             else -> "1"
@@ -15,11 +15,13 @@ object MarkdownHtml {
         return """<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <style>
-:root { color-scheme: ${if (dark) "dark" else "light"}; }
-html { zoom: $zoom; }
+:root { color-scheme: ${if (dark) "dark" else "light"}; --md-scale: $scale; }
 html, body { margin: 0; padding: 0; }
-body { font: 13px/1.65 sans-serif; color: $fg; word-wrap: break-word; overflow-wrap: anywhere; }
-pre, code { font-family: ui-monospace, monospace; font-size: 12px; background: $codeBg; color: $codeFg; }
+body { font: calc(13px * var(--md-scale))/1.65 sans-serif; color: $fg; word-wrap: break-word; overflow-wrap: anywhere; }
+h1 { font-size: calc(16px * var(--md-scale)); font-weight: 600; }
+h2 { font-size: calc(15px * var(--md-scale)); font-weight: 600; }
+h3 { font-size: calc(14px * var(--md-scale)); font-weight: 500; }
+pre, code { font-family: ui-monospace, monospace; font-size: calc(12px * var(--md-scale)); background: $codeBg; color: $codeFg; }
 pre { padding: 10px; border-radius: 6px; overflow-x: auto; }
 code { padding: 1px 4px; border-radius: 4px; }
 </style></head><body>$inner</body></html>"""

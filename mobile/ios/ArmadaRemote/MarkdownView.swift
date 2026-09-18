@@ -6,11 +6,11 @@ enum MarkdownHTML {
     static func from(_ source: String, fontScale: String = "normal", theme: String = "dark") -> String {
         let blocks = splitFences(source)
         let inner = blocks.map(renderBlock).joined()
-        let zoom: String
+        let scale: String
         switch fontScale {
-        case "large": zoom = "1.5"
-        case "xlarge": zoom = "2"
-        default: zoom = "1"
+        case "large": scale = "1.5"
+        case "xlarge": scale = "2"
+        default: scale = "1"
         }
         let dark = theme == "dark"
         let fg = dark ? "#e4e4e7" : "#27272a"
@@ -25,18 +25,17 @@ enum MarkdownHTML {
         <!doctype html><html><head><meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
         <style>
-        :root { color-scheme: \(dark ? "dark" : "light"); }
-        html { zoom: \(zoom); }
+        :root { color-scheme: \(dark ? "dark" : "light"); --md-scale: \(scale); }
         html, body { margin: 0; padding: 0; }
         body {
-          font: 13px/1.65 -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif;
+          font: calc(13px * var(--md-scale))/1.65 -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif;
           color: \(fg);
           word-wrap: break-word;
           overflow-wrap: anywhere;
         }
-        h1 { font-size: 16px; font-weight: 600; margin: 12px 0 4px; color: \(heading); }
-        h2 { font-size: 15px; font-weight: 600; margin: 12px 0 4px; color: \(heading); }
-        h3 { font-size: 14px; font-weight: 500; margin: 12px 0 4px; color: \(heading); }
+        h1 { font-size: calc(16px * var(--md-scale)); font-weight: 600; margin: 12px 0 4px; color: \(heading); }
+        h2 { font-size: calc(15px * var(--md-scale)); font-weight: 600; margin: 12px 0 4px; color: \(heading); }
+        h3 { font-size: calc(14px * var(--md-scale)); font-weight: 500; margin: 12px 0 4px; color: \(heading); }
         p { margin: 0 0 8px; }
         ul, ol { margin: 0 0 8px; padding-left: 20px; }
         li { margin: 2px 0; }
@@ -47,15 +46,15 @@ enum MarkdownHTML {
         a { color: \(link); text-decoration: none; }
         pre {
           margin: 0 0 8px; padding: 10px; border-radius: 6px;
-          background: \(codeBg); color: \(codeFg); overflow-x: auto; font-size: 12px;
+          background: \(codeBg); color: \(codeFg); overflow-x: auto; font-size: calc(12px * var(--md-scale));
           font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
         }
-        pre code { background: none; padding: 0; font-size: 12px; }
+        pre code { background: none; padding: 0; font-size: calc(12px * var(--md-scale)); }
         code {
           font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-          font-size: 12px; background: \(codeBg); color: \(codeFg); padding: 1px 4px; border-radius: 4px;
+          font-size: calc(12px * var(--md-scale)); background: \(codeBg); color: \(codeFg); padding: 1px 4px; border-radius: 4px;
         }
-        table { border-collapse: collapse; font-size: 12px; margin: 0 0 8px; width: 100%; }
+        table { border-collapse: collapse; font-size: calc(12px * var(--md-scale)); margin: 0 0 8px; width: 100%; }
         th, td { border: 1px solid \(border); padding: 4px 8px; text-align: left; vertical-align: top; }
         th { font-weight: 600; }
         .wrap { overflow-x: auto; margin: 0 0 8px; }

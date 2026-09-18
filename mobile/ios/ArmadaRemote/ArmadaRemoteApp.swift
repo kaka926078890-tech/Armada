@@ -19,7 +19,7 @@ final class Appearance: ObservableObject {
         didSet { UserDefaults.standard.set(fontScale, forKey: Self.scaleKey) }
     }
 
-    var zoom: CGFloat {
+    var textScale: CGFloat {
         switch fontScale {
         case "large": return 1.5
         case "xlarge": return 2
@@ -27,25 +27,18 @@ final class Appearance: ObservableObject {
         }
     }
 
+    var dynamicTypeSize: DynamicTypeSize {
+        switch fontScale {
+        case "large": return .accessibility1
+        case "xlarge": return .accessibility3
+        default: return .large
+        }
+    }
+
     init() {
         theme = UserDefaults.standard.string(forKey: Self.themeKey) == "light" ? "light" : "dark"
         let scale = UserDefaults.standard.string(forKey: Self.scaleKey)
         fontScale = (scale == "large" || scale == "xlarge") ? scale! : "normal"
-    }
-}
-
-struct FontZoom: ViewModifier {
-    let scale: CGFloat
-    func body(content: Content) -> some View {
-        if scale == 1 {
-            content
-        } else {
-            GeometryReader { geo in
-                content
-                    .frame(width: geo.size.width / scale, height: geo.size.height / scale, alignment: .topLeading)
-                    .scaleEffect(scale, anchor: .topLeading)
-            }
-        }
     }
 }
 
@@ -491,7 +484,7 @@ struct ArmadaRemoteApp: App {
                 .environmentObject(session)
                 .environmentObject(appearance)
                 .preferredColorScheme(appearance.theme == "light" ? .light : .dark)
-                .modifier(FontZoom(scale: appearance.zoom))
+                .environment(\.dynamicTypeSize, appearance.dynamicTypeSize)
                 .onOpenURL { session.bind(uri: $0.absoluteString) }
                 .onAppear {
                     appDelegate.session = session
