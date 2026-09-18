@@ -34,6 +34,10 @@ describe("displayUserText", () => {
     const md = "### 标题\n\n第一行\n第二行\n\n- a\n- b";
     expect(displayUserText(md)).toBe(md);
   });
+
+  test("consecutive blank lines are one paragraph break (simple body)", () => {
+    expect(displayUserText("成对 pin。\n\n\n帮我确定一下")).toBe("成对 pin。\n\n帮我确定一下");
+  });
 });
 
 describe("hasImageMarkers", () => {

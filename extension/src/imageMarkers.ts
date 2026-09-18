@@ -6,9 +6,9 @@ export function stripImageMarkers(s: string): string {
   return normalizePrompt(s.replace(IMAGE_MARKERS, " "));
 }
 
-/** Operator-visible body: drop image wrappers, keep markdown newlines. */
+/** Operator-visible body: drop image wrappers, keep markdown, one blank line is still one paragraph. */
 function displayStrip(s: string): string {
-  return s.replace(IMAGE_MARKERS, "").replace(/\r/g, "").trim();
+  return s.replace(IMAGE_MARKERS, "").replace(/\r/g, "").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 export function hasImageMarkers(s: string): boolean {

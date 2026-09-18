@@ -140,6 +140,32 @@ describe("eventsToChat", () => {
     expect(ua[5]).toMatchObject({ kind: "assistant", text: "已经 push 了，本地与 origin 一致。" });
   });
 
+  test("hub followup and jsonl user_query of the same body are one bubble when jsonl drops a blank line (r-c4b0a986)", () => {
+    // Real shape: hub records the typed prompt; Cursor jsonl stores one fewer blank line.
+    // Display body is simple content, so extraUsers vs transcript compare as the same sentence.
+    const hubPrompt = "成对 pin。\n\n\n帮我确定一下以上review问题存在是否属实？";
+    const jsonlPrompt = "成对 pin。\n\n帮我确定一下以上review问题存在是否属实？";
+    const body = "成对 pin。\n\n帮我确定一下以上review问题存在是否属实？";
+    const blocks = eventsToChat([
+      ev({ seq: 10, source: "transcript", payload: JSON.stringify({
+        role: "user", message: { content: [{ type: "text", text: "<user_query>\nbrowserskill的问题代码提交了么？\n</user_query>" }] },
+      }) }),
+      ev({ seq: 74, source: "transcript", payload: JSON.stringify({
+        role: "assistant", message: { content: [{ type: "text", text: "提交了，但只在功能分支上。" }] },
+      }) }),
+      ev({ seq: 79, source: "hub", hook_event_name: "beforeSubmitPrompt", payload: JSON.stringify({ prompt: hubPrompt }) }),
+      ev({ seq: 80, hook_event_name: "beforeSubmitPrompt", payload: JSON.stringify({ prompt: hubPrompt }) }),
+      ev({ seq: 85, source: "transcript", payload: JSON.stringify({
+        role: "user", message: { content: [{ type: "text", text: `<user_query>\n${jsonlPrompt}\n</user_query>` }] },
+      }) }),
+    ]);
+    const users = blocks.filter((b) => b.kind === "user");
+    expect(users.map((b) => `${b.seq}:${"text" in b ? b.text : ""}`)).toEqual([
+      "10:browserskill的问题代码提交了么？",
+      `85:${body}`,
+    ]);
+  });
+
   test("hub+hook followup BSP of the same text is one extra user until jsonl arrives (r-0f0eadc6)", () => {
     // Real shape: followup writes hub beforeSubmitPrompt then Mac composer hook with
     // the same prompt; transcript user_query is still in-flight. extraUsers must not
