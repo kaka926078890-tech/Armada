@@ -121,3 +121,39 @@ export function decideStop(input: StopInput): StopDecision {
   }
   return next;
 }
+
+/** Cursor `sessionEnd` is session teardown, not turn-complete.
+ *  `final_status=generating` means the agent loop is still running (r-a0bc34a5 18:05:27).
+ *  Non-generating teardown maps onto the documented `stop` contract so hub idle matches Composer. */
+export function stopFromCursorSessionEnd(payload: unknown): {
+  status: string;
+  generation_id: unknown;
+  conversation_id: unknown;
+  error?: string;
+} | null {
+  if (!payload || typeof payload !== "object") return null;
+  const p = payload as Record<string, unknown>;
+  const finalStatus = typeof p.final_status === "string" ? p.final_status : "";
+  if (!finalStatus || finalStatus === "generating") return null;
+  const reason = typeof p.reason === "string" ? p.reason : "";
+  const cid = p.conversation_id ?? p.session_id;
+  const gen = p.generation_id;
+  if (finalStatus === "error" || reason === "error") {
+    return {
+      status: "error",
+      generation_id: gen,
+      conversation_id: cid,
+      error: typeof p.error_message === "string" ? p.error_message : "error",
+    };
+  }
+  if (reason === "aborted" || (finalStatus === "aborted" && reason !== "user_close" && reason !== "window_close")) {
+    return { status: "aborted", generation_id: gen, conversation_id: cid };
+  }
+  if (finalStatus === "completed" || finalStatus === "success" || reason === "completed") {
+    return { status: "completed", generation_id: gen, conversation_id: cid };
+  }
+  if (reason === "user_close" || reason === "window_close") {
+    return { status: "completed", generation_id: gen, conversation_id: cid };
+  }
+  return null;
+}

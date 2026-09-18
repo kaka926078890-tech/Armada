@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseRetiredIds, appendRetired, decideArm, decideStop, isWindowsMachineOs } from "../src/generationOwnership";
+import { parseRetiredIds, appendRetired, decideArm, decideStop, isWindowsMachineOs, stopFromCursorSessionEnd } from "../src/generationOwnership";
 
 const CID = "cid-1";
 const G = "gen-new";
@@ -154,5 +154,53 @@ describe("decideStop", () => {
   test("open child jsonl does not block aborted or error", () => {
     expect(decideStop({ ...base, hasOutstandingBackground: true, stopStatus: "aborted" })).toEqual({ action: "apply" });
     expect(decideStop({ ...base, hasOutstandingBackground: true, stopStatus: "error" })).toEqual({ action: "apply" });
+  });
+});
+
+describe("stopFromCursorSessionEnd", () => {
+  // r-a0bc34a5 18:05:27 / 18:33:10 — real hub.db sessionEnd payloads (Cursor 3.21.9)
+  const CID = "a7b63dc9-1d51-45b7-a9f6-59a10c8bb5d9";
+  const G = "46e45631-22f2-4d0e-aec7-4d9db35db614";
+  const generating = {
+    conversation_id: CID,
+    generation_id: G,
+    reason: "user_close",
+    duration_ms: 545094,
+    is_background_agent: false,
+    final_status: "generating",
+    session_id: CID,
+    hook_event_name: "sessionEnd",
+  };
+  const userCloseAborted = {
+    conversation_id: CID,
+    generation_id: G,
+    reason: "user_close",
+    duration_ms: 0,
+    is_background_agent: false,
+    final_status: "aborted",
+    session_id: CID,
+    hook_event_name: "sessionEnd",
+  };
+
+  test("r-a0bc34a5: final_status=generating is still busy (do not synthesize stop)", () => {
+    expect(stopFromCursorSessionEnd(generating)).toBeNull();
+  });
+
+  test("r-a0bc34a5: user_close + aborted is composer teardown after idle → completed stop", () => {
+    expect(stopFromCursorSessionEnd(userCloseAborted)).toEqual({
+      status: "completed",
+      generation_id: G,
+      conversation_id: CID,
+    });
+  });
+
+  test("explicit cancel stays aborted; error stays error; missing final_status is fail-closed", () => {
+    expect(stopFromCursorSessionEnd({ ...userCloseAborted, reason: "aborted" }))
+      .toEqual({ status: "aborted", generation_id: G, conversation_id: CID });
+    expect(stopFromCursorSessionEnd({
+      conversation_id: CID, generation_id: G, reason: "error", final_status: "error", error_message: "boom",
+    })).toEqual({ status: "error", generation_id: G, conversation_id: CID, error: "boom" });
+    expect(stopFromCursorSessionEnd({ conversation_id: CID, generation_id: G, reason: "user_close" })).toBeNull();
+    expect(stopFromCursorSessionEnd(null)).toBeNull();
   });
 });

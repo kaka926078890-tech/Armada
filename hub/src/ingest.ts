@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite";
 import type { RunService } from "./runs";
 import type { SseHub } from "./sse";
 import { hookSubmitPrompt, transcriptUserPrompt } from "./outboundClaim";
+import { stopFromCursorSessionEnd } from "./generationOwnership";
 
 /** runId → 该任务派出的子代理 conversation_id */
 const subagentCids = new Map<string, Set<string>>();
@@ -142,6 +143,13 @@ export function ingestEvent(db: Database, runs: RunService, sse: SseHub, machine
   if (msg.hookEventName === "stop") {
     runs.onStopEvent(runId, msg.payload);
     if (run.conversation_id && cid === run.conversation_id) subagentCids.delete(runId);
+  }
+  if (msg.hookEventName === "sessionEnd") {
+    const mapped = stopFromCursorSessionEnd(msg.payload);
+    if (mapped) {
+      runs.onStopEvent(runId, mapped);
+      if (run.conversation_id && cid === run.conversation_id) subagentCids.delete(runId);
+    }
   }
   sse.broadcast(runId, { type: "run.event", runId, seq: maxSeq + 1, hookEventName: msg.hookEventName, payload: msg.payload, ts: msg.ts });
   (msg as any).__ack = ack();

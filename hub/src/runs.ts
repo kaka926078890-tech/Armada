@@ -13,7 +13,7 @@ import { workspacePathIn } from "../../extension/src/workspacePath";
 import { BIND_TIMEOUT_MS, WINDOWS_BIND_TIMEOUT_MS } from "../../extension/src/transcriptBind";
 import { collisionKey, hasImageMarkers, stripImageMarkers } from "../../extension/src/imageMarkers";
 import { BlobStore, parseAttachmentIds, type BlobMeta } from "./blobs";
-import { appendRetired, decideArm, decideStop, parseRetiredIds, isWindowsMachineOs, genOf } from "./generationOwnership";
+import { appendRetired, decideArm, decideStop, parseRetiredIds, isWindowsMachineOs, genOf, stopFromCursorSessionEnd } from "./generationOwnership";
 import { parsePendingAsk, continueAllowed, optionInAsk, isPlanAsk, mergePendingAskRecord } from "./pendingAsk";
 import {
   OUTBOUND_LIMIT, QUEUE_DRAIN_MS, queueModeOf,
@@ -740,7 +740,27 @@ export class RunService {
       this.failQueuedOutbound(r.id);
       this.maybeReplayDeferredStop(r.id);
     }
+    this.replayCursorSessionEndStops();
     for (const machineId of machines) this.promoteNextQueued(machineId);
+  }
+
+  /** Latest Cursor sessionEnd on a live run. `generating` stays busy; teardown maps to stop. */
+  private replayCursorSessionEndStops(): void {
+    const live = this.db.query(
+      "SELECT id FROM runs WHERE status IN ('dispatched','binding','running')",
+    ).all() as { id: string }[];
+    for (const r of live) {
+      const row = this.db.query(
+        `SELECT payload FROM run_events
+         WHERE run_id=?1 AND hook_event_name='sessionEnd'
+         ORDER BY seq DESC LIMIT 1`,
+      ).get(r.id) as { payload: string } | null;
+      if (!row) continue;
+      let payload: unknown;
+      try { payload = JSON.parse(row.payload); } catch { continue; }
+      const mapped = stopFromCursorSessionEnd(payload);
+      if (mapped) this.onStopEvent(r.id, mapped);
+    }
   }
 
   onMachineOffline(machineId: string) {

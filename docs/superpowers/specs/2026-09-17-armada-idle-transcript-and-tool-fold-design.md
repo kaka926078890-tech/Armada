@@ -14,7 +14,7 @@
 | 问题 | ① hook 首次 bind 时 jsonl 还不存在 → `transcript_path=null`，之后不补挂，`turn_ended` 进不了 hub，徽章卡在 running。② `segmentChat` 在本轮尚无助手正文时把每个工具平铺，Cursor 则收进折叠。 |
 | 核心方案 | **同一 cid 的 jsonl 一旦出现就 `tailer.attach`(fromEnd=false)**；`decideStop` 决策表不动。详情：无正文也折过程段；连续相同 `name+summary` 合成一行 `× N`。 |
 | 关键约束 | 禁止 `sessionEnd` / AAR 正文当完成闸；禁止 sidecar `stop` 乱配 live gen；late attach 不得 `fromEnd`（否则丢掉第一轮 `turn_ended`）；折叠只改 `eventsToChat`/`segmentChat`/`ChatThread`。 |
-| 明确不做 | 改 `decideStop` 出口码；用 `sessionEnd user_close` 收口；裁 `hub.db`；App 画工具列表（v1 中转仍只推助手正文）。 |
+| 明确不做 | 改 `decideStop` 出口码；用 **`sessionEnd user_close` 且 `final_status=generating`** 收口；裁 `hub.db`；App 画工具列表（v1 中转仍只推助手正文）。非 generating 的 `sessionEnd` 见 `2026-09-18-cursor-sessionend-idle-design.md`。 |
 
 **可行性：** 读路径已有同期 jsonl 与 `run.running transcript_path=null`。写路径是本机 `fs.watch` 到 jsonl 后 attach，不是新 CDP 点击。Mac/Win 共用扩展代码。
 
@@ -181,3 +181,4 @@ sequenceDiagram
 | --- | --- |
 | 2026-09-17 | 初稿。真机 `r-3a334fe3`：bind 无 path + `segmentChat` 无正文平铺。 |
 | 2026-09-18 | `lastGenerationId` 与 hub `decideArm` 同一张表（BSP + 主人 UUID `preToolUse`）。真机 `r-5fb47426`：协议续轮换 gen 后 synth 仍盖退役 BSP → `STOP_GEN_RETIRED`。不改 `decideStop`。 |
+| 2026-09-18 | 非 generating 的 `sessionEnd` 映射为 `stop`（见 `2026-09-18-cursor-sessionend-idle-design.md`）。`user_close` + `generating` 仍禁止收口。 |

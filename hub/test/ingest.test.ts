@@ -1118,4 +1118,84 @@ describe("event ingest", () => {
     expect(run.pending_ask).toBeNull();
     ws.close();
   });
+
+  test("r-a0bc34a5: sessionEnd generating stays running; later user_close+aborted completes", async () => {
+    const CID = "a7b63dc9-1d51-45b7-a9f6-59a10c8bb5d9";
+    const G = "46e45631-22f2-4d0e-aec7-4d9db35db614";
+    const home = mkdtempSync(join(tmpdir(), "armada-ing-"));
+    hub = createServer({ port: 0, home });
+    const ws: WebSocket = await new Promise((res, rej) => {
+      const w = new WebSocket(`ws://127.0.0.1:${hub!.port}/ws?token=${hub!.token}`);
+      w.onopen = () => res(w); w.onerror = rej;
+    });
+    ws.send(JSON.stringify({ type: "register", machineId: "m-1", windowId: "w-1", name: "A", os: "darwin", openWorkspaces: ["/ws/a"], cdpReady: true }));
+    await new Promise((r) => setTimeout(r, 80));
+    const api = (p: string, init?: RequestInit) => fetch(`http://127.0.0.1:${hub!.port}${p}`, {
+      ...init, headers: { "content-type": "application/json", authorization: `Bearer ${hub!.token}` },
+    });
+    const created = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "hi" }) });
+    const { run } = await created.json() as any;
+    const runId = run.id as string;
+    ws.send(JSON.stringify({ type: "run.ack", runId, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId, conversationId: CID, transcriptPath: "/tmp/t.jsonl", promptMatch: true }));
+    await new Promise((r) => setTimeout(r, 80));
+    ws.send(JSON.stringify(ev(runId, 1, "beforeSubmitPrompt", {
+      conversation_id: CID, generation_id: G, prompt: "hi",
+    })));
+    ws.send(JSON.stringify(ev(runId, 2, "sessionEnd", {
+      conversation_id: CID,
+      generation_id: G,
+      reason: "user_close",
+      duration_ms: 545094,
+      is_background_agent: false,
+      final_status: "generating",
+      session_id: CID,
+      hook_event_name: "sessionEnd",
+    })));
+    await new Promise((r) => setTimeout(r, 120));
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).status).toBe("running");
+    ws.send(JSON.stringify(ev(runId, 3, "sessionEnd", {
+      conversation_id: CID,
+      generation_id: G,
+      reason: "user_close",
+      duration_ms: 0,
+      is_background_agent: false,
+      final_status: "aborted",
+      session_id: CID,
+      hook_event_name: "sessionEnd",
+      cursor_version: "3.21.9",
+    })));
+    await new Promise((r) => setTimeout(r, 120));
+    const after = (await (await api(`/api/runs/${runId}`)).json()) as any;
+    expect(after.status).toBe("completed");
+    expect(after.end_reason).toBe("completed");
+    ws.close();
+  });
+
+  test("r-a0bc34a5: already-stored user_close+aborted sessionEnd completes on sweep (old hub replay)", async () => {
+    const G = "46e45631-22f2-4d0e-aec7-4d9db35db614";
+    const { ws, api, runId } = await startBoundRun();
+    ws.send(JSON.stringify(ev(runId, 1, "beforeSubmitPrompt", {
+      conversation_id: "cid-1", generation_id: G, prompt: "hi",
+    })));
+    await new Promise((r) => setTimeout(r, 80));
+    hub!.db.query(
+      `INSERT INTO run_events (run_id, seq, machine_id, ext_seq, source, hook_event_name, payload, ts, post_terminal)
+       VALUES (?1, 2, 'm-1', 90001, 'hook', 'sessionEnd', ?2, ?3, 0)`,
+    ).run(runId, JSON.stringify({
+      conversation_id: "cid-1",
+      generation_id: G,
+      reason: "user_close",
+      duration_ms: 0,
+      is_background_agent: false,
+      final_status: "aborted",
+      session_id: "cid-1",
+      hook_event_name: "sessionEnd",
+    }), Date.now());
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).status).toBe("running");
+    hub!.runs.sweepTimeouts();
+    const after = (await (await api(`/api/runs/${runId}`)).json()) as any;
+    expect(after.status).toBe("completed");
+    ws.close();
+  });
 });
