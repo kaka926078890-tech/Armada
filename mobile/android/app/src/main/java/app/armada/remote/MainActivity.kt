@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -78,6 +79,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.UUID
 
 class MainActivity : ComponentActivity() {
     private val vm: SessionVm by viewModels()
@@ -362,10 +364,16 @@ fun WorkspaceScreen(vm: SessionVm, state: UiState, workspace: WorkspaceDto, onOp
 
 @Composable
 fun DispatchSheet(vm: SessionVm, workspace: WorkspaceDto, followupRunId: String?, onDone: (BoardColumn) -> Unit) {
+    val state by vm.state.collectAsState()
     var prompt by remember { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
     var listening by remember { mutableStateOf(false) }
     var err by remember { mutableStateOf<String?>(null) }
+    var addingSnippet by remember { mutableStateOf(false) }
+    var snippetTitle by remember { mutableStateOf("") }
+    var snippetBody by remember { mutableStateOf("") }
+    var snippetError by remember { mutableStateOf<String?>(null) }
+    var savingSnippet by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val speech = remember {
@@ -375,6 +383,7 @@ fun DispatchSheet(vm: SessionVm, workspace: WorkspaceDto, followupRunId: String?
         }, onError = { err = it })
     }
     DisposableEffect(Unit) { onDispose { speech.release() } }
+    LaunchedEffect(Unit) { vm.loadSnippets() }
     val micPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) speech.start(prompt) else err = dictationMessage("MIC_DENIED")
     }
@@ -384,6 +393,60 @@ fun DispatchSheet(vm: SessionVm, workspace: WorkspaceDto, followupRunId: String?
         Text("${workspace.machineName} · ${workspace.label}", style = MaterialTheme.typography.bodySmall)
         if (followupRunId != null) Text("在当前对话里继续，不会新开一条任务", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
         if (!workspace.canInject) Text(operatorMessage("CDP_NOT_READY"), color = Color.Red, style = MaterialTheme.typography.bodySmall)
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            state.snippets.forEach { snippet ->
+                BarButton(snippet.title, compact = true) {
+                    prompt = appendSnippetBody(prompt, snippet.body)
+                }
+            }
+            BarButton("+", enabled = state.snippets.size < 30, compact = true) {
+                addingSnippet = true
+                snippetError = null
+            }
+        }
+        if (addingSnippet) {
+            OutlinedTextField(
+                value = snippetTitle,
+                onValueChange = { snippetTitle = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("标题") },
+            )
+            OutlinedTextField(
+                value = snippetBody,
+                onValueChange = { snippetBody = it },
+                modifier = Modifier.fillMaxWidth().height(120.dp),
+                label = { Text("提示词") },
+            )
+            snippetError?.let { Text(it, color = Color.Red, style = MaterialTheme.typography.bodySmall) }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
+                BarButton("取消", enabled = !savingSnippet, compact = true) {
+                    addingSnippet = false
+                    snippetTitle = ""
+                    snippetBody = ""
+                    snippetError = null
+                }
+                BarButton(if (savingSnippet) "保存中…" else "保存", enabled = !savingSnippet, filled = true, compact = true) {
+                    savingSnippet = true
+                    scope.launch {
+                        try {
+                            val snippet = PromptSnippet(UUID.randomUUID().toString(), snippetTitle, snippetBody)
+                            vm.saveSnippets(state.snippets + snippet)
+                            addingSnippet = false
+                            snippetTitle = ""
+                            snippetBody = ""
+                            snippetError = null
+                        } catch (e: Exception) {
+                            snippetError = e.message
+                        } finally {
+                            savingSnippet = false
+                        }
+                    }
+                }
+            }
+        }
         OutlinedTextField(
             value = prompt,
             onValueChange = { prompt = it },
@@ -658,15 +721,20 @@ fun MarkdownBox(text: String) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(vm: SessionVm, onBack: () -> Unit) {
+    val state by vm.state.collectAsState()
     val theme by vm.theme.collectAsState()
     val fontScale by vm.fontScale.collectAsState()
+    LaunchedEffect(Unit) { vm.loadSnippets() }
     Scaffold(topBar = {
         TopAppBar(
             title = { Text("设置") },
             navigationIcon = { BarButton("返回", compact = true, onClick = onBack) },
         )
     }) { pad ->
-        Column(Modifier.padding(pad).padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Column(
+            Modifier.padding(pad).padding(16.dp).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
             Text("外观")
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 BarButton("黑夜", filled = theme == "dark", compact = true) { vm.setAppearanceTheme("dark") }
@@ -677,6 +745,83 @@ fun SettingsScreen(vm: SessionVm, onBack: () -> Unit) {
                 BarButton("正常", filled = fontScale == "normal", compact = true) { vm.setAppearanceFontScale("normal") }
                 BarButton("大", filled = fontScale == "large", compact = true) { vm.setAppearanceFontScale("large") }
                 BarButton("超大", filled = fontScale == "xlarge", compact = true) { vm.setAppearanceFontScale("xlarge") }
+            }
+            Text("快捷提示词")
+            state.lastError?.let { Text(it, color = Color.Red, style = MaterialTheme.typography.bodySmall) }
+            if (state.snippets.isEmpty()) {
+                Text("还没有快捷提示词，在输入框上方点 + 添加", color = Color.Gray)
+            } else {
+                state.snippets.forEach { snippet ->
+                    androidx.compose.runtime.key(snippet.id) {
+                        PromptSnippetSettingsRow(
+                            snippet = snippet,
+                            onSave = { next ->
+                                vm.saveSnippets(state.snippets.map { if (it.id == next.id) next else it })
+                            },
+                            onDelete = {
+                                vm.saveSnippets(state.snippets.filter { it.id != snippet.id })
+                            },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun PromptSnippetSettingsRow(
+    snippet: PromptSnippet,
+    onSave: suspend (PromptSnippet) -> Unit,
+    onDelete: suspend () -> Unit,
+) {
+    var title by remember { mutableStateOf(snippet.title) }
+    var body by remember { mutableStateOf(snippet.body) }
+    var busy by remember { mutableStateOf(false) }
+    var rowError by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    Column(
+        Modifier.fillMaxWidth().border(1.dp, Color.Gray, RoundedCornerShape(8.dp)).padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        OutlinedTextField(
+            value = title,
+            onValueChange = { title = it },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("标题") },
+        )
+        OutlinedTextField(
+            value = body,
+            onValueChange = { body = it },
+            modifier = Modifier.fillMaxWidth().height(120.dp),
+            label = { Text("提示词") },
+        )
+        rowError?.let { Text(it, color = Color.Red, style = MaterialTheme.typography.bodySmall) }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
+            BarButton("删除", enabled = !busy, danger = true, compact = true) {
+                busy = true
+                scope.launch {
+                    try {
+                        onDelete()
+                    } catch (e: Exception) {
+                        rowError = e.message
+                    } finally {
+                        busy = false
+                    }
+                }
+            }
+            BarButton(if (busy) "保存中…" else "保存", enabled = !busy, filled = true, compact = true) {
+                busy = true
+                scope.launch {
+                    try {
+                        onSave(snippet.copy(title = title, body = body))
+                        rowError = null
+                    } catch (e: Exception) {
+                        rowError = e.message
+                    } finally {
+                        busy = false
+                    }
+                }
             }
         }
     }

@@ -18,10 +18,20 @@ fun operatorMessage(code: String): String = when (code) {
     "INVALID_STATE" -> "当前状态不能重试"
     "NOT_FOUND" -> "任务不存在"
     "INVALID" -> "推送登记失败"
+    "SNIPPET_INVALID" -> "标题和提示词都不能为空，且不要超长"
+    "SNIPPET_LIMIT" -> "最多 30 条快捷提示词"
+    "READ_FAIL" -> "读取快捷提示词失败"
+    "WRITE_FAIL" -> "保存失败，请重试"
     "MACHINE_OFFLINE" -> "机器离线"
     "RUN_LIMIT" -> "这台机器任务数已满"
     "WINDOW_BUSY" -> "该窗口正忙"
     else -> code
+}
+
+fun appendSnippetBody(current: String, body: String): String {
+    val trimmedEnd = body.trimEnd()
+    if (current.isEmpty()) return trimmedEnd
+    return if (current.endsWith("\n")) current + trimmedEnd else "$current\n$trimmedEnd"
 }
 
 fun hideError(code: String): String =

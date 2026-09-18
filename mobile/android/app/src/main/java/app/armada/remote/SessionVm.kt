@@ -22,6 +22,7 @@ data class UiState(
     val lastError: String? = null,
     val hubOffline: Boolean = false,
     val workspaces: List<WorkspaceDto> = emptyList(),
+    val snippets: List<PromptSnippet> = emptyList(),
     val board: BoardLists = BoardLists(emptyList(), emptyList(), emptySet(), emptySet()),
     val streamHealthy: Boolean = false,
     val pendingOpenRunId: String? = null,
@@ -40,6 +41,7 @@ class SessionVm(app: Application) : AndroidViewModel(app) {
     private var live: Job? = null
     private var source: EventSource? = null
     private var refreshSeq = 0
+    private var snippetsSeq = 0
     private var readAt = store.readAt().toMutableMap()
     private var unreadHold = mutableSetOf<String>()
     private var foreground = true
@@ -73,6 +75,7 @@ class SessionVm(app: Application) : AndroidViewModel(app) {
                     _state.value = _state.value.copy(bindError = "这是中台链接，请粘贴 App 邀请（armada-relay://op）")
                     return
                 }
+                snippetsSeq++
                 store.relay = parsed.invite.relay
                 store.fleet = parsed.invite.fleet
                 store.token = parsed.invite.cred
@@ -91,6 +94,7 @@ class SessionVm(app: Application) : AndroidViewModel(app) {
         val client = if (_state.value.bound) api() else null
         store.clear()
         refreshSeq++
+        snippetsSeq++
         unreadHold.clear()
         _state.value = UiState()
         PushInbox.runId = null
@@ -248,6 +252,40 @@ class SessionVm(app: Application) : AndroidViewModel(app) {
         } catch (e: Exception) {
             if (seq != refreshSeq) return
             _state.value = _state.value.copy(lastError = e.message)
+        }
+    }
+
+    suspend fun loadSnippets() {
+        if (!_state.value.bound) {
+            _state.value = _state.value.copy(snippets = emptyList())
+            return
+        }
+        val seq = snippetsSeq
+        val client = api()
+        try {
+            val snippets = withContext(Dispatchers.IO) { client.promptSnippets() }
+            if (!_state.value.bound || seq != snippetsSeq) return
+            _state.value = _state.value.copy(snippets = snippets, lastError = null)
+        } catch (_: Exception) {
+            if (!_state.value.bound || seq != snippetsSeq) return
+            _state.value = _state.value.copy(snippets = emptyList(), lastError = operatorMessage("READ_FAIL"))
+        }
+    }
+
+    suspend fun saveSnippets(next: List<PromptSnippet>) {
+        if (!_state.value.bound) return
+        val seq = snippetsSeq
+        val client = api()
+        val previous = _state.value.snippets
+        _state.value = _state.value.copy(snippets = next)
+        try {
+            val saved = withContext(Dispatchers.IO) { client.putPromptSnippets(next) }
+            if (!_state.value.bound || seq != snippetsSeq) return
+            _state.value = _state.value.copy(snippets = saved, lastError = null)
+        } catch (e: Exception) {
+            if (!_state.value.bound || seq != snippetsSeq) return
+            _state.value = _state.value.copy(snippets = previous, lastError = e.message ?: operatorMessage("WRITE_FAIL"))
+            throw e
         }
     }
 

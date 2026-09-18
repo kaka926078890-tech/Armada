@@ -13,6 +13,12 @@ data class WorkspaceDto(
     val canInject: Boolean get() = online && cdpReady
 }
 
+data class PromptSnippet(
+    val id: String,
+    val title: String,
+    val body: String,
+)
+
 data class PendingAskOption(val id: String, val label: String, val text: String)
 
 data class PendingAskQuestion(

@@ -15,6 +15,22 @@ class OperatorMessagesTest {
     }
 
     @Test
+    fun snippetErrorsMatchIos() {
+        assertEquals("标题和提示词都不能为空，且不要超长", operatorMessage("SNIPPET_INVALID"))
+        assertEquals("最多 30 条快捷提示词", operatorMessage("SNIPPET_LIMIT"))
+        assertEquals("读取快捷提示词失败", operatorMessage("READ_FAIL"))
+        assertEquals("保存失败，请重试", operatorMessage("WRITE_FAIL"))
+        assertEquals("推送登记失败", operatorMessage("INVALID"))
+    }
+
+    @Test
+    fun appendsSnippetBodyLikeIos() {
+        assertEquals("提示", appendSnippetBody("", "提示 \n"))
+        assertEquals("已有\n提示", appendSnippetBody("已有", "提示 \n"))
+        assertEquals("已有\n提示", appendSnippetBody("已有\n", "提示 \n"))
+    }
+
+    @Test
     fun html403IsNetIntercept() {
         assertEquals("NET_INTERCEPT", classifyHttp(403, "<html>blocked</html>"))
         assertEquals("PAIR_INVITE", classifyHttp(403, """{"error":"OPERATOR_REQUIRED"}"""))

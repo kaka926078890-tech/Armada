@@ -85,6 +85,23 @@ class RelayClient(base: String, private val token: String) {
         send("/mobile/push-token", "DELETE", body.toString(), listOf(204), allowEmpty = true)
     }
 
+    fun promptSnippets(): List<PromptSnippet> =
+        parsePromptSnippets(JSONObject(get("/mobile/prompt-snippets")))
+
+    fun putPromptSnippets(snippets: List<PromptSnippet>): List<PromptSnippet> {
+        val items = JSONArray()
+        snippets.forEach { snippet ->
+            items.put(
+                JSONObject()
+                    .put("id", snippet.id)
+                    .put("title", snippet.title)
+                    .put("body", snippet.body),
+            )
+        }
+        val body = JSONObject().put("snippets", items)
+        return parsePromptSnippets(JSONObject(send("/mobile/prompt-snippets", "PUT", body.toString(), listOf(200))))
+    }
+
     fun stream(onFrame: (JSONObject) -> Unit, onDone: (Throwable?) -> Unit): EventSource {
         val req = Request.Builder()
             .url("$base/mobile/stream")
@@ -118,6 +135,16 @@ class RelayClient(base: String, private val token: String) {
             if (resp.code !in ok) throw RelayException(classifyHttp(resp.code, text))
             if (text.isBlank() && allowEmpty) return "{}"
             return text
+        }
+    }
+}
+
+private fun parsePromptSnippets(o: JSONObject): List<PromptSnippet> {
+    val snippets = o.optJSONArray("snippets") ?: JSONArray()
+    return buildList {
+        for (i in 0 until snippets.length()) {
+            val snippet = snippets.getJSONObject(i)
+            add(PromptSnippet(snippet.getString("id"), snippet.getString("title"), snippet.getString("body")))
         }
     }
 }
