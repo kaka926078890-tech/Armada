@@ -71,7 +71,7 @@ export default function Sidebar({
   };
 
   return (
-    <aside className="w-56 shrink-0 border-r border-zinc-800/80 flex flex-col bg-zinc-950">
+    <aside className="w-[224px] shrink-0 border-r border-zinc-800/80 flex flex-col bg-zinc-950">
       {showDesktopActions ? (
         <div className="mx-3 mt-3 mb-1.5 flex flex-col gap-1.5">
           <button

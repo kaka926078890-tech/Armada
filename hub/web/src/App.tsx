@@ -368,30 +368,30 @@ export default function App() {
       {loadError && (
         <div className="px-4 py-2 text-sm text-red-400 bg-red-950/50 border-b border-red-900/50">{loadError}</div>
       )}
-      <header className="flex items-center gap-3 px-4 py-2 border-b border-zinc-800/80">
-        <span className="font-semibold text-[13px] tracking-wide">Armada</span>
-        <span className="text-zinc-600 text-[12px]">{location.host}</span>
-        <span className="text-[11px] text-emerald-500/90">令牌已连接</span>
+      <header className="flex items-center gap-x-3 gap-y-1.5 px-4 py-2 border-b border-zinc-800/80 flex-wrap">
+        <span className="font-semibold text-[13px] tracking-wide shrink-0 whitespace-nowrap">Armada</span>
+        <span className="text-zinc-600 text-[12px] shrink-0 whitespace-nowrap">{location.host}</span>
+        <span className="text-[11px] text-emerald-500/90 shrink-0 whitespace-nowrap">令牌已连接</span>
         <button
           type="button"
           onClick={() => { setShowArchived((v) => !v); setSelectedRun(null); }}
-          className={`text-[12px] px-2 py-0.5 rounded ${showArchived ? "bg-amber-900/60 text-amber-200" : "text-zinc-400 hover:text-zinc-200"}`}
+          className={`text-[12px] px-2 py-0.5 rounded shrink-0 whitespace-nowrap ${showArchived ? "bg-amber-900/60 text-amber-200" : "text-zinc-400 hover:text-zinc-200"}`}
         >
           {showArchived ? "返回看板" : `查看已隐藏${hiddenRuns.length ? ` ${hiddenRuns.length}` : ""}`}
         </button>
-        <span className="ml-auto flex items-center gap-3 text-[12px] text-zinc-500">
+        <span className="ml-auto flex items-center gap-3 text-[12px] text-zinc-500 shrink-0 whitespace-nowrap">
           在线 {machines.filter((m) => m.status === "online").length}/{machines.length}
           <button
             type="button"
             onClick={() => setSettingsOpen(true)}
-            className="text-zinc-400 hover:text-zinc-100 px-2 py-0.5 rounded border border-zinc-700"
+            className="text-zinc-400 hover:text-zinc-100 px-2 py-0.5 rounded border border-zinc-700 shrink-0 whitespace-nowrap"
           >
             设置
           </button>
           <button
             type="button"
             onClick={leaveFleet}
-            className="text-zinc-400 hover:text-zinc-100 px-2 py-0.5 rounded border border-zinc-700"
+            className="text-zinc-400 hover:text-zinc-100 px-2 py-0.5 rounded border border-zinc-700 shrink-0 whitespace-nowrap"
           >
             退出中台
           </button>

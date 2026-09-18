@@ -1,6 +1,6 @@
 import type { FontScale, ThemeName } from "../theme";
 
-const SEG = "px-2 py-0.5 rounded border text-[12px]";
+const SEG = "px-2 py-0.5 rounded border text-[12px] whitespace-nowrap";
 const ON = "border-sky-600 bg-sky-900/40 text-zinc-100";
 const OFF = "border-zinc-700 text-zinc-400 hover:text-zinc-100";
 

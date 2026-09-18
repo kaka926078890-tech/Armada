@@ -50,7 +50,7 @@ export default function Board({ runs, machines, selected, onSelect, showArchived
   return (
     <main className="flex-1 min-w-0 overflow-x-auto flex gap-2 p-3">
       {(Object.keys(COLUMN_LABELS) as ColumnKey[]).map((col) => (
-        <section key={col} className={`w-60 min-w-60 max-w-60 shrink-0 flex flex-col rounded-lg bg-zinc-900/40 border-t-2 ${COL_ACCENT[col]}`}>
+        <section key={col} className={`w-[240px] min-w-[240px] max-w-[240px] shrink-0 flex flex-col rounded-lg bg-zinc-900/40 border-t-2 ${COL_ACCENT[col]}`}>
           <h2 className="text-[11px] tracking-wide uppercase text-zinc-500 px-2.5 pb-2 pt-2 inline-flex items-center gap-1.5">
             {COLUMN_LABELS[col]} <span className="text-zinc-600 normal-case tracking-normal">{g[col].length}</span>
             {columnHasAlert(runs, col, readMap) ? (

@@ -34,7 +34,7 @@
 | # | 原始诉求 | 设计映射 |
 | --- | --- | --- |
 | R1 | 顶部加字号：正常 / 大 1.5× / 超大 2× | 三档枚举 `fontScale`，默认 `normal` |
-| R2 | 全局字体整体放大，含 Md 详情 | 只放大字号；栏宽/间距不变。中台 `--armada-text-scale`；App `fontScale` / Dynamic Type；Markdown `calc(13px * var(--md-scale))` |
+| R2 | 全局字体整体放大，含 Md 详情 | 只放大字号，禁止 `zoom`。中台 `--armada-text-scale` + root rem 间距；侧栏/列宽钉 px。App `fontScale` / Dynamic Type；Markdown `calc(13px * var(--md-scale))` |
 | R3 | App 加设置页：明亮黑夜 + 字号，先做这两项 | 舰队页「设置」→ 独立页，仅两行 |
 | R4 | 中台也要加；明亮黑夜收进弹窗 | 顶栏「设置」弹窗，去掉裸露「明亮/黑夜」按钮 |
 | R5 | A：不用同步，保存在自己地方 | 中台只写本 hub 文件/本浏览器；App 只写本机。无跨端 API |
@@ -196,7 +196,7 @@ sequenceDiagram
 
 1. `document.documentElement.dataset.theme = theme`（已有）
 2. `document.documentElement.dataset.fontScale = fontScale`
-3. CSS：`--armada-text-scale` 为 1 / 1.5 / 2；覆盖 `text-[10px]`–`text-[16px]` 与 `text-xs`–`text-xl` 为 `calc(N * var(--armada-text-scale))`。栏宽、padding、`w-56` **不**随倍率变。禁止 `zoom` / `transform: scale`。
+3. CSS：`--armada-text-scale` 为 1 / 1.5 / 2。`html { font-size: calc(16px * var(--armada-text-scale)) }` 让 rem 间距跟字号走；`text-[10px]`–`text-[16px]` 仍 `calc(Npx * var(--armada-text-scale))`。侧栏/看板列钉死 `224px` / `240px`，禁止 `zoom`。顶栏 chip `whitespace-nowrap` + `flex-wrap`，禁止中文被挤成竖排单字。桌面窗口默认 1440×900（min 1100×700）。
 
 `normal` 倍率为 1（不覆盖，保持现网 px）。冷启动：`main.tsx` 在 render 前 `applyTheme` + `applyFontScale`，避免闪 1× 再跳。
 
@@ -296,7 +296,8 @@ sequenceDiagram
 
 | 风险 | 影响 | 应对 | 状态 |
 | --- | --- | --- | --- |
-| CSS `zoom` 放大布局导致整页滚动 | 操作员要的是字号不是画布缩放 | 2026-09-18 改为只乘 `font-size`；栏宽不变 | 已修 |
+| CSS `zoom` 放大布局导致整页滚动 | 操作员要的是字号不是画布缩放 | 只乘字号 + 钉死列宽；rem 只放大间距 | 已修 |
+| 大字号顶栏中文竖排 / 800×600 像文档 | 标题「Armada」和按钮挤成单字列 | 顶栏 nowrap+wrap；窗口 1440×900 | 已修 |
 | 2× 下文案换行增多 | 详情区更长 | 允许纵向滚内容，禁止横向滚整页画布 | 接受 |
 | App 从「跟随系统」改为默认黑夜 | 浅色系统用户第一次升级变黑 | R5/P3；设置里一键明亮 | 接受 |
 | Android 详情 WebView 忽略字号变量 | MD 仍 13px | 单测锁 `--md-scale` + `calc(13px * var(--md-scale))` | 缓解预案 |
@@ -326,3 +327,4 @@ sequenceDiagram
 | --- | --- |
 | 2026-09-18 | 初稿。方案 A：各端本地、不同步；中台弹窗 + App 设置页；`fontScale` 三档。 |
 | 2026-09-18 | 真机反馈：`zoom`/`scaleEffect` 是整页画布放大。改为只乘字号；布局宽高不变。 |
+| 2026-09-18 | 真机：大字号顶栏中文竖排、800×600 窗口不协调。改为 root rem 跟字号、列宽钉 px、窗口 1440×900。 |
