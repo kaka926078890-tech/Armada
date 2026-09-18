@@ -79,6 +79,7 @@ struct UnreadBadge: View {
     }
 }
 
+/// 页内主操作。导航栏必须用系统 `Button`，塞进 `ToolbarItem` 会被 iOS 26 玻璃胶囊裁成「源发 / 查看已藏」。
 struct VolumeButton: View {
     enum Kind { case accent, quiet, danger }
     let title: String
@@ -255,19 +256,13 @@ struct WorkspaceListView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 8) {
-                        VolumeButton(title: "设置", kind: .quiet, compact: true, expand: false) {
-                            path.append(AppRoute.settings)
-                        }
-                        VolumeButton(title: "刷新", compact: true, expand: false) {
-                            Task { await session.refresh() }
-                        }
+                    HStack(spacing: 12) {
+                        Button("设置") { path.append(AppRoute.settings) }
+                        Button("刷新") { Task { await session.refresh() } }
                     }
                 }
                 ToolbarItem(placement: .topBarLeading) {
-                    VolumeButton(title: "解绑", kind: .quiet, compact: true, expand: false) {
-                        session.unbind()
-                    }
+                    Button("解绑") { session.unbind() }
                 }
             }
             .refreshable { await session.refresh() }
@@ -293,11 +288,15 @@ struct WorkspaceHome: View {
     @State private var showArchived = false
 
     private var boardRuns: [RunDTO] {
-        session.runs(in: workspace, archived: showArchived)
+        session.runs(in: live, archived: showArchived)
+    }
+
+    private var live: WorkspaceDTO {
+        liveWorkspace(id: workspace.workspaceId, slots: session.workspaces, fallback: workspace)
     }
 
     private var hideLabel: String {
-        let n = session.runs(in: workspace, archived: true).count
+        let n = session.runs(in: live, archived: true).count
         return n > 0 ? "查看已隐藏 \(n)" : "查看已隐藏"
     }
 
@@ -322,11 +321,12 @@ struct WorkspaceHome: View {
                                 }
                             }
                             .font(.subheadline.weight(tab == col ? .semibold : .regular))
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 9)
-                            .frame(minHeight: 36)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 7)
                             .background(tab == col ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.12))
-                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .clipShape(Capsule())
                         }
                         .buttonStyle(.plain)
                     }
@@ -373,9 +373,9 @@ struct WorkspaceHome: View {
             }
             .listStyle(.insetGrouped)
         }
-        .navigationTitle(workspace.label)
+        .navigationTitle(live.label)
         .safeAreaInset(edge: .top) {
-            if !workspace.canInject {
+            if !live.canInject {
                 Text(RelayAPIError.operatorMessage("CDP_NOT_READY"))
                     .font(.caption)
                     .foregroundStyle(.red)
@@ -387,21 +387,17 @@ struct WorkspaceHome: View {
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                HStack(spacing: 8) {
-                    VolumeButton(
-                        title: showArchived ? "返回看板" : hideLabel,
-                        kind: .quiet,
-                        compact: true,
-                        expand: false
-                    ) { showArchived.toggle() }
+                HStack(spacing: 12) {
+                    Button(showArchived ? "返回看板" : hideLabel) { showArchived.toggle() }
                     if !showArchived {
-                        VolumeButton(title: "派发", compact: true, expand: false, enabled: workspace.canInject) { showDispatch = true }
+                        Button("派发") { showDispatch = true }
+                            .disabled(!live.canInject)
                     }
                 }
             }
         }
         .sheet(isPresented: $showDispatch) {
-            DispatchSheet(workspace: workspace) { col in
+            DispatchSheet(workspace: live) { col in
                 showDispatch = false
                 tab = col
             }
@@ -452,16 +448,20 @@ struct DispatchSheet: View {
     @State private var err: String?
     @Environment(\.dismiss) private var dismiss
 
+    private var live: WorkspaceDTO {
+        liveWorkspace(id: workspace.workspaceId, slots: session.workspaces, fallback: workspace)
+    }
+
     private var trimmed: String {
         speech.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private var canSend: Bool { workspace.canInject && !sending && !speech.listening && !trimmed.isEmpty }
+    private var canSend: Bool { live.canInject && !sending && !speech.listening && !trimmed.isEmpty }
 
     var body: some View {
         NavigationStack {
             Form {
-                if !workspace.canInject {
+                if !live.canInject {
                     Section {
                         Text(RelayAPIError.operatorMessage("CDP_NOT_READY")).foregroundStyle(.red)
                     }
@@ -476,8 +476,8 @@ struct DispatchSheet: View {
                         Text(speechErr).foregroundStyle(.red)
                     }
                 }
-                Section(workspace.machineName.isEmpty ? workspace.label : "\(workspace.machineName) · \(workspace.label)") {
-                    Text(workspace.workspaceRoot).font(.caption).foregroundStyle(.secondary)
+                Section(live.machineName.isEmpty ? live.label : "\(live.machineName) · \(live.label)") {
+                    Text(live.workspaceRoot).font(.caption).foregroundStyle(.secondary)
                     if followupRunId != nil {
                         Text("在当前对话里继续，不会新开一条任务").font(.caption).foregroundStyle(.secondary)
                     }
@@ -514,19 +514,16 @@ struct DispatchSheet: View {
             .navigationTitle(followupRunId == nil ? "派发任务" : "续聊")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    VolumeButton(title: "取消", kind: .quiet, compact: true, expand: false) {
+                    Button("取消") {
                         speech.release()
                         dismiss()
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    VolumeButton(
-                        title: sending ? "发送中…" : (followupRunId == nil ? "派发" : "发送"),
-                        compact: true,
-                        expand: false,
-                        enabled: canSend,
-                        busy: sending
-                    ) { Task { await send() } }
+                    Button(sending ? "发送中…" : (followupRunId == nil ? "派发" : "发送")) {
+                        Task { await send() }
+                    }
+                    .disabled(!canSend)
                 }
             }
             .onDisappear { speech.release() }
@@ -547,7 +544,7 @@ struct DispatchSheet: View {
             if let followupRunId {
                 run = try await session.api().followup(runId: followupRunId, prompt: text)
             } else {
-                run = try await session.api().dispatch(workspaceId: workspace.workspaceId, prompt: text)
+                run = try await session.api().dispatch(workspaceId: live.workspaceId, prompt: text)
             }
             err = nil
             await session.refresh()
@@ -762,12 +759,8 @@ struct RunDetailView: View {
         .navigationTitle("详情")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                VolumeButton(
-                    title: "续聊",
-                    compact: true,
-                    expand: false,
-                    enabled: (slot?.canInject ?? false) && (run?.canFollowup ?? false)
-                ) { showDispatch = true }
+                Button("续聊") { showDispatch = true }
+                    .disabled(!((slot?.canInject ?? false) && (run?.canFollowup ?? false)))
             }
         }
         .sheet(isPresented: $showDispatch) {

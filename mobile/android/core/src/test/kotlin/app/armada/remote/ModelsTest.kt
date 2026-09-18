@@ -144,4 +144,13 @@ class ModelsTest {
         assertTrue(ready.canInject)
         assertFalse(ready.copy(online = false).canInject)
     }
+
+    @Test
+    fun liveWorkspacePrefersSessionSlotOverStaleSnapshot() {
+        val stale = WorkspaceDto("w", "m", "/p", "p", online = true, cdpReady = false)
+        val live = stale.copy(cdpReady = true)
+        assertTrue(liveWorkspace("w", listOf(live), stale)!!.canInject)
+        assertFalse(liveWorkspace("w", emptyList(), stale)!!.canInject)
+        assertEquals(null, liveWorkspace("missing", listOf(live)))
+    }
 }

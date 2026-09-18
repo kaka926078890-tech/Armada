@@ -131,6 +131,11 @@ struct RunDTO: Decodable, Identifiable, Hashable {
     }
 }
 
+/// 仓页必须跟 SSE 列表走；导航快照的 `cdpReady` 会过期。与 Android `liveWorkspace` 对齐。
+func liveWorkspace(id: String, slots: [WorkspaceDTO], fallback: WorkspaceDTO) -> WorkspaceDTO {
+    slots.first { $0.workspaceId == id } ?? fallback
+}
+
 func stampReadAt(nowMs: Double, activityTs: Int?) -> Double {
     max(nowMs, Double(activityTs ?? 0))
 }

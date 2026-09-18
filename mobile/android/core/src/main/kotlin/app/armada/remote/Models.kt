@@ -142,3 +142,8 @@ fun readAtAfterMarkUnread(readAt: Map<String, Double>, runId: String): Map<Strin
 fun shouldStampOpened(unreadHold: Set<String>, runId: String): Boolean {
     return runId !in unreadHold
 }
+
+/** 仓页必须跟 SSE 列表走；导航快照的 cdpReady 会过期。 */
+fun liveWorkspace(id: String, slots: List<WorkspaceDto>, fallback: WorkspaceDto? = null): WorkspaceDto? {
+    return slots.firstOrNull { it.workspaceId == id } ?: fallback
+}

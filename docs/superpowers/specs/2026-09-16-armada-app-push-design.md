@@ -225,6 +225,10 @@ Body（未压缩 JSON ≤ 4KB；超限视为实现 bug，不截 `finalText` 来�
 
 角标：APNs 固定 `badge: 1`（中转不知道 App 已读）。App 在 `markOpened`、回前台、`refresh` / SSE 后**每次**用 `UNUserNotificationCenter.setBadgeCount` 写成当前未读和（0 则清零）。禁止用内存 lastBadge 跳过写入：系统推送会在 App 不知情时改图标。盯着详情时，snap 的 `updatedAt` 变新必须再盖 `readAt = max(now, activityTs)`。
 
+操作员可把已读改回未读（纯客户端，不进 hub）：删 `readAt[runId]`。详情里操作时对该 run 设 `unreadHold`，避免盯着详情的 restamp 立刻盖回已读；离开详情清 hold。列表左滑（iOS）/ 行内按钮（Android）`hold: false`。仅当前已读、且 `pendingAsk` 或 status ∈ `{completed, error, unknown, aborted}` 时可点；`cancelled` 不做。
+
+页内主操作禁止纯文本按钮：iOS `VolumeButton`（常规 minHeight 44）、Android `Button`/`OutlinedButton`/`BarButton`（常规 48dp）。**导航栏用系统 `Button`**，禁止把 `VolumeButton` 塞进 `ToolbarItem`（iOS 26 玻璃胶囊会裁成「源发 / 查看已藏」）。系统 swipe / FilterChip 除外。仓页 `canInject` 必须读 SSE 列表的 live slot，不得用进页时冻住的 `WorkspaceDTO`。
+
 ### 4.6 JWT / 环境变量
 
 | 变量 | 必填 | 含义 |
@@ -468,3 +472,5 @@ P0 与 P1 可同 PR。P2 必须带 Push 的新 build。P3 不能用模拟器。
 | 2026-09-16 | P0–P2 落地：`notifyEdge` / `apns` / `push_tokens` / `POST|DELETE /mobile/push-token` / `applyRunSnap` 挂钩；iOS production entitlements、登记、点开、`willPresent`。无 `.p8` 仍 no-op。P3 真机 A9 待 Auth Key 与新 TestFlight。 |
 | 2026-09-17 | Android 锁屏通道不在本文件扩 APNs。FCM 见 [2026-09-17-armada-android-app-design.md](./2026-09-17-armada-android-app-design.md) §4.5。 |
 | 2026-09-17 | iOS 角标：`markOpened` 必写系统角标；禁止 lastBadge 跳过；盯着详情时 `readAt = max(now, activityTs)`。 |
+| 2026-09-18 | App 可把已读改回未读（删 `readAt` + 详情 `unreadHold`）。页内主操作改为有体积按钮；导航栏仍用系统按钮。 |
+| 2026-09-18 | iOS 仓页按 `workspaceId` 回查 live `cdpReady`；导航栏不再放 `VolumeButton`。 |

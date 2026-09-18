@@ -206,7 +206,7 @@ fun FleetNav(vm: SessionVm, state: UiState) {
         composable("settings") { SettingsScreen(vm, onBack = { nav.popBackStack() }) }
         composable("ws/{id}", arguments = listOf(navArgument("id") { type = NavType.StringType })) { entry ->
             val id = entry.arguments?.getString("id").orEmpty()
-            val w = state.workspaces.firstOrNull { it.workspaceId == id } ?: return@composable
+            val w = liveWorkspace(id, state.workspaces) ?: return@composable
             WorkspaceScreen(vm, state, w, onOpenRun = { nav.navigate("run/$it") })
         }
         composable("run/{id}", arguments = listOf(navArgument("id") { type = NavType.StringType })) { entry ->

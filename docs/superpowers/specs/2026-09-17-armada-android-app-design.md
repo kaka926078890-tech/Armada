@@ -67,7 +67,7 @@
 | P21 | `streamEvents` | `Accept: text/event-stream`；忽略 `: ping`；只解析 `data:` | 同 |
 | P22 | 详情轮询 | SSE 健康则 1s 只跟 stream；不健康且 live/Ask 则 3s GET | 同 |
 | P23 | `RelayAPIError` | §4.6 文案逐句相同；403+HTML → `NET_INTERCEPT` | 同句 |
-| P24 | 未读 / 角标 | `isUnread` + 打开 `markOpened`；角标=未读和（系统不显示则忽略） | 同规则 |
+| P24 | 未读 / 角标 | `isUnread` + 打开 `markOpened`；已读可标回未读（删 `readAt`；详情 `unreadHold`）；角标=未读和（系统不显示则忽略） | 同规则 |
 | P25 | 推送登记 | 绑定后登记；解绑 DELETE；token 刷新再 POST | Android：`platform=fcm` |
 | P26 | 锁屏可见通知 | Ask + `completed/error/unknown/aborted`；`cancelled` 不推；载荷无 `finalText` | 同边沿（`notifyEdge`） |
 | P27 | 点通知 | `runId` → 清空栈进详情 → 强制 GET | 同 |
@@ -540,5 +540,6 @@ sequenceDiagram
 | --- | --- |
 | 2026-09-17 | 初稿。曾锁 Compose，并拆 v1（无 FCM）/ v1.5。 |
 | 2026-09-17 | **产品确认：** 技术架构不要求；落地跑到 iOS 完整态（含锁屏推送）；功能必须对齐现网 iOS。取消技术栈否决与「无推送可上线」。§1.1 列为完成定义。 |
+| 2026-09-18 | P24 补已读标回未读（与 iOS 同一套 `readAt` / `unreadHold`）。页内主操作按钮有体积；导航栏用系统/TopAppBar 按钮。仓页按 id 回查 live slot。 |
 
 本文件为 Android 远程入口的 **实施基准**。变更 `/mobile/*` 字段或完成门禁须改《远程》并评估 `protocolVersion`；仅客户端 UI 实现不升协议。
