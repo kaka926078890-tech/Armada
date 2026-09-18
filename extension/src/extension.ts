@@ -5,7 +5,7 @@ import { hostname, homedir } from "os";
 import { readFileSync, openSync, readSync, closeSync, fstatSync, existsSync, mkdirSync, writeFileSync, copyFileSync } from "fs";
 import { join } from "path";
 import { loadConfig } from "./config";
-import { WsClientCore } from "./wsClient";
+import { WS_HEARTBEAT_MS, WsClientCore } from "./wsClient";
 import { SpoolForwarder } from "./spool";
 import { matchHookToPending, claimConversation, eventBelongsToWindow, transcriptPathBelongsToCid, runIdForHook, rememberSubagent, isAmbiguousMatch, dropPendingRuns, type PendingRun, type BindingMatch } from "./binding";
 import { TranscriptTailer, shouldUnfollowOnHookStop } from "./transcript";
@@ -584,6 +584,7 @@ export function activate(context: vscode.ExtensionContext): void {
     });
     sock.on("message", (data) => {
       if (ws !== sock) return;
+      core.noteInbound();
       let msg: any;
       try { msg = JSON.parse(String(data)); } catch { return; }
       log(`<= ${msg.type} ${msg.runId ?? ""}`);
@@ -593,7 +594,15 @@ export function activate(context: vscode.ExtensionContext): void {
           void adoptFromHub();
           if (heartbeat) clearInterval(heartbeat);
           sendHeartbeat();
-          heartbeat = setInterval(sendHeartbeat, 15_000);
+          heartbeat = setInterval(() => {
+            if (core.shouldReconnect()) {
+              log("ws stale, reconnecting");
+              core.onClose();
+              connect();
+              return;
+            }
+            sendHeartbeat();
+          }, WS_HEARTBEAT_MS);
           forwarder.resendUnacked();
           break;
         case "run.start":

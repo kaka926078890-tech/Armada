@@ -64,6 +64,17 @@ describe("WS registry", () => {
     ws.close();
   });
 
+  test("heartbeat is acked so idle windows can detect a dead socket", async () => {
+    const h = start();
+    const ws = await connect(h.port, h.token);
+    ws.send(JSON.stringify(REG));
+    await nextMessage(ws);
+    const ack = nextMessage(ws);
+    ws.send(JSON.stringify({ type: "heartbeat", openWorkspaces: ["/ws/a"], activeRunIds: [] }));
+    expect(await ack).toEqual({ type: "heartbeat.ack" });
+    ws.close();
+  });
+
   test("same connKey reconnect kicks old connection", async () => {
     const h = start();
     const ws1 = await connect(h.port, h.token);

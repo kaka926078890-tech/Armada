@@ -14,6 +14,7 @@ export function handleWsMessage(reg: Registry, ws: ArmadaSocket, raw: string): v
   switch (msg.type) {
     case "heartbeat":
       reg.onHeartbeat(ws, msg);
+      ws.send(JSON.stringify({ type: "heartbeat.ack" }));
       break;
     default:
       reg.dispatchInbound(ws, msg); // Task 4/5 在 Registry 上实现 run.ack/run.bound/run.event 等

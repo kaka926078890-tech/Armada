@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { WsClientCore } from "../src/wsClient";
+import { WS_STALE_MS, WsClientCore } from "../src/wsClient";
 
 describe("WsClientCore register-before-flush", () => {
   test("queued ack is not sent until onRegistered (avoids hub 4001)", () => {
@@ -85,5 +85,35 @@ describe("WsClientCore register-before-flush", () => {
     core.sendRegister({ type: "register" });
     core.onRegistered();
     expect(sent.map((m: any) => m.type)).toEqual(["register", "run.ack"]);
+  });
+});
+
+describe("WsClientCore stale-socket reconnect", () => {
+  test("does not reconnect before registered even if inbound is old", () => {
+    const core = new WsClientCore(() => {});
+    core.onOpen();
+    expect(core.shouldReconnect(1_000_000)).toBe(false);
+  });
+
+  test("reconnects when ready and hub has been silent past stale window", () => {
+    const core = new WsClientCore(() => {});
+    core.onOpen();
+    core.sendRegister({ type: "register" });
+    core.onRegistered();
+    core.noteInbound(10_000);
+    expect(core.shouldReconnect(10_000 + WS_STALE_MS - 1)).toBe(false);
+    expect(core.shouldReconnect(10_000 + WS_STALE_MS)).toBe(true);
+  });
+
+  test("close then register resets stale clock (does not immediately reconnect)", () => {
+    const core = new WsClientCore(() => {});
+    core.onOpen();
+    core.onRegistered();
+    core.noteInbound(1);
+    expect(core.shouldReconnect(1 + WS_STALE_MS)).toBe(true);
+    core.onClose();
+    core.onOpen();
+    core.onRegistered();
+    expect(core.shouldReconnect(1 + WS_STALE_MS)).toBe(false);
   });
 });
