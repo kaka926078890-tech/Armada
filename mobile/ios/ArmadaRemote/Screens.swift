@@ -21,11 +21,13 @@ func askOptionBody(label: String, text: String) -> String {
 }
 
 func appendSnippetBody(_ current: String, _ body: String) -> String {
-    let trimmedEnd = body.replacingOccurrences(
-        of: #"[\t\n\r ]+$"#,
-        with: "",
-        options: .regularExpression
-    )
+    var end = body.endIndex
+    while end > body.startIndex {
+        let previous = body.index(before: end)
+        guard body[previous].isWhitespace else { break }
+        end = previous
+    }
+    let trimmedEnd = String(body[..<end])
     if current.isEmpty { return trimmedEnd }
     return current.hasSuffix("\n") ? current + trimmedEnd : current + "\n" + trimmedEnd
 }
@@ -586,6 +588,9 @@ struct DispatchSheet: View {
                     if addingSnippet {
                         VStack(alignment: .leading, spacing: 8) {
                             TextField("标题", text: $snippetTitle)
+                            Text("提示词")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                             TextEditor(text: $snippetBody)
                                 .frame(minHeight: 90)
                             if let snippetError {

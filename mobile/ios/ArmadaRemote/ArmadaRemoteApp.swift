@@ -63,6 +63,7 @@ final class Session: ObservableObject {
     private var live: Task<Void, Never>?
     private var foreground = true
     private var refreshSeq = 0
+    private var snippetsSeq = 0
     private var pendingArchive = Set<String>()
     private var pendingUnarchive = Set<String>()
     private var unreadHold = Set<String>()
@@ -98,6 +99,7 @@ final class Session: ObservableObject {
         case .success(let inv) where inv.kind == .pair:
             bindError = "这是中台链接，请粘贴 App 邀请（armada-relay://op）"
         case .success(let inv):
+            snippetsSeq += 1
             relay = inv.relay
             fleet = inv.fleet
             token = inv.tokenOrSecret
@@ -122,6 +124,7 @@ final class Session: ObservableObject {
         workspaces = []; runs = []; hiddenRuns = []; snippets = []
         pendingArchive = []; pendingUnarchive = []
         refreshSeq += 1
+        snippetsSeq += 1
         pendingOpenRunId = nil
         watchingId = nil
         unreadHold.removeAll()
@@ -143,22 +146,33 @@ final class Session: ObservableObject {
             snippets = []
             return
         }
+        let seq = snippetsSeq
+        let api = api()
         do {
-            snippets = try await api().promptSnippets()
+            let next = try await api.promptSnippets()
+            guard bound, seq == snippetsSeq else { return }
+            snippets = next
             lastError = nil
         } catch {
+            guard bound, seq == snippetsSeq else { return }
             snippets = []
             lastError = RelayAPIError.operatorMessage("READ_FAIL")
         }
     }
 
     func saveSnippets(_ next: [PromptSnippet]) async throws {
+        guard bound else { return }
+        let seq = snippetsSeq
+        let api = api()
         let previous = snippets
         snippets = next
         do {
-            snippets = try await api().putPromptSnippets(next)
+            let saved = try await api.putPromptSnippets(next)
+            guard bound, seq == snippetsSeq else { return }
+            snippets = saved
             lastError = nil
         } catch {
+            guard bound, seq == snippetsSeq else { return }
             snippets = previous
             lastError = error.localizedDescription
             throw error
