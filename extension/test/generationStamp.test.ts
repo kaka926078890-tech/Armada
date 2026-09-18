@@ -54,4 +54,31 @@ describe("generationStamp", () => {
     expect(shouldSynthesizeTranscriptStop("win32")).toBe(true);
     expect(shouldSynthesizeTranscriptStop("linux")).toBe(true);
   });
+
+  // r-5fb47426 14:40–14:43 (cid fc0d2224): parent BSP b855863b drained on
+  // open child jsonl; Cursor protocol-resumed with UUID preToolUse 02037258
+  // then b89b8455. jsonl turn_ended synth still stamped the retired BSP gen
+  // → hub STOP_GEN_RETIRED, card stuck 运行中.
+  test("owner-cid UUID preToolUse updates stamp so synth stop covers live gen", () => {
+    const G1 = "b855863b-cbb8-4c00-a0ba-23b6c69ddcf0";
+    const G2 = "02037258-5b49-44c1-9d40-30205dc9d3c4";
+    const G3 = "b89b8455-84de-4c1c-823d-4aeba602fdee";
+    const sidecar = "b89b8455-84de-4c1c-823d-4aeba602fdee-4-1092";
+    const cid = "fc0d2224-cecb-40ce-a6a8-c1a486344c3b";
+    const m = new Map<string, string>();
+    noteOwnerBsp(m, "r1", "beforeSubmitPrompt", { generation_id: G1, conversation_id: cid }, cid);
+    noteOwnerBsp(m, "r1", "afterAgentThought", { generation_id: G2, conversation_id: cid }, cid);
+    expect(m.get("r1")).toBe(G1);
+    noteOwnerBsp(m, "r1", "preToolUse", { generation_id: G2, conversation_id: cid }, cid);
+    expect(m.get("r1")).toBe(G2);
+    noteOwnerBsp(m, "r1", "preToolUse", { generation_id: sidecar, conversation_id: cid }, cid);
+    expect(m.get("r1")).toBe(G2);
+    noteOwnerBsp(m, "r1", "preToolUse", { generation_id: G3, conversation_id: cid }, cid);
+    expect(synthesizedStopPayload({ status: "completed" }, m.get("r1"), cid)).toEqual({
+      ok: true,
+      payload: { status: "completed", generation_id: G3, conversation_id: cid },
+    });
+    noteOwnerBsp(m, "r1", "preToolUse", { generation_id: G1, conversation_id: cid }, cid);
+    expect(m.get("r1")).toBe(G3);
+  });
 });

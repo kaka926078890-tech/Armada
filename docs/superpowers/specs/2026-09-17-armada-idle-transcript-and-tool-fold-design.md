@@ -180,3 +180,4 @@ sequenceDiagram
 | 日期 | 变更 |
 | --- | --- |
 | 2026-09-17 | 初稿。真机 `r-3a334fe3`：bind 无 path + `segmentChat` 无正文平铺。 |
+| 2026-09-18 | `lastGenerationId` 与 hub `decideArm` 同一张表（BSP + 主人 UUID `preToolUse`）。真机 `r-5fb47426`：协议续轮换 gen 后 synth 仍盖退役 BSP → `STOP_GEN_RETIRED`。不改 `decideStop`。 |
