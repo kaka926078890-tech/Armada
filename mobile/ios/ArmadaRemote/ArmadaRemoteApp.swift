@@ -8,6 +8,48 @@ enum PushInbox {
 }
 
 @MainActor
+final class Appearance: ObservableObject {
+    static let themeKey = "armada.theme.v1"
+    static let scaleKey = "armada.fontScale.v1"
+
+    @Published var theme: String {
+        didSet { UserDefaults.standard.set(theme, forKey: Self.themeKey) }
+    }
+    @Published var fontScale: String {
+        didSet { UserDefaults.standard.set(fontScale, forKey: Self.scaleKey) }
+    }
+
+    var zoom: CGFloat {
+        switch fontScale {
+        case "large": return 1.5
+        case "xlarge": return 2
+        default: return 1
+        }
+    }
+
+    init() {
+        theme = UserDefaults.standard.string(forKey: Self.themeKey) == "light" ? "light" : "dark"
+        let scale = UserDefaults.standard.string(forKey: Self.scaleKey)
+        fontScale = (scale == "large" || scale == "xlarge") ? scale! : "normal"
+    }
+}
+
+struct FontZoom: ViewModifier {
+    let scale: CGFloat
+    func body(content: Content) -> some View {
+        if scale == 1 {
+            content
+        } else {
+            GeometryReader { geo in
+                content
+                    .frame(width: geo.size.width / scale, height: geo.size.height / scale, alignment: .topLeading)
+                    .scaleEffect(scale, anchor: .topLeading)
+            }
+        }
+    }
+}
+
+@MainActor
 final class Session: ObservableObject {
     @Published var relay: String
     @Published var fleet: String
@@ -29,6 +71,7 @@ final class Session: ObservableObject {
     private var refreshSeq = 0
     private var pendingArchive = Set<String>()
     private var pendingUnarchive = Set<String>()
+    private var unreadHold = Set<String>()
     private let readKey = "armada.readAt"
     private let pushTokenKey = "armada.pushToken"
 
@@ -87,6 +130,7 @@ final class Session: ObservableObject {
         refreshSeq += 1
         pendingOpenRunId = nil
         watchingId = nil
+        unreadHold.removeAll()
         PushInbox.runId = nil
         UNUserNotificationCenter.current().setBadgeCount(0)
         UIApplication.shared.unregisterForRemoteNotifications()
@@ -363,11 +407,30 @@ final class Session: ObservableObject {
     }
 
     func markOpened(_ runId: String) {
+        guard shouldStampOpened(unreadHold: unreadHold, runId: runId) else {
+            applyBadge()
+            return
+        }
         let activity = runs.first { $0.runId == runId }?.activityTs
             ?? hiddenRuns.first { $0.runId == runId }?.activityTs
         readAt[runId] = stampReadAt(nowMs: Date().timeIntervalSince1970 * 1000, activityTs: activity)
         persistRead()
         applyBadge()
+    }
+
+    func markUnread(_ runId: String, hold: Bool) {
+        readAt.removeValue(forKey: runId)
+        if hold { unreadHold.insert(runId) } else { unreadHold.remove(runId) }
+        persistRead()
+        applyBadge()
+    }
+
+    func clearUnreadHold(_ runId: String) {
+        unreadHold.remove(runId)
+    }
+
+    func canMarkUnread(_ run: RunDTO) -> Bool {
+        runAllowsMarkUnread(run, readAt: readAt, isUnread: { isUnread($0) })
     }
 
     func isUnread(_ run: RunDTO) -> Bool {
@@ -420,11 +483,15 @@ final class Session: ObservableObject {
 struct ArmadaRemoteApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var session = Session()
+    @StateObject private var appearance = Appearance()
     @Environment(\.scenePhase) private var scenePhase
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environmentObject(session)
+                .environmentObject(appearance)
+                .preferredColorScheme(appearance.theme == "light" ? .light : .dark)
+                .modifier(FontZoom(scale: appearance.zoom))
                 .onOpenURL { session.bind(uri: $0.absoluteString) }
                 .onAppear {
                     appDelegate.session = session

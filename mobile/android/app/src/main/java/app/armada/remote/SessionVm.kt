@@ -26,20 +26,38 @@ data class UiState(
     val streamHealthy: Boolean = false,
     val pendingOpenRunId: String? = null,
     val watchingId: String? = null,
+    val readRev: Int = 0,
 )
 
 class SessionVm(app: Application) : AndroidViewModel(app) {
     private val store = TokenStore(app)
     private val _state = MutableStateFlow(UiState(bound = store.relay.isNotEmpty() && store.token.isNotEmpty()))
     val state: StateFlow<UiState> = _state
+    private val _theme = MutableStateFlow(store.appearanceTheme)
+    val theme: StateFlow<String> = _theme
+    private val _fontScale = MutableStateFlow(store.appearanceFontScale)
+    val fontScale: StateFlow<String> = _fontScale
     private var live: Job? = null
     private var source: EventSource? = null
     private var refreshSeq = 0
     private var readAt = store.readAt().toMutableMap()
+    private var unreadHold = mutableSetOf<String>()
     private var foreground = true
 
     init {
         if (_state.value.bound) startLive()
+    }
+
+    fun setAppearanceTheme(v: String) {
+        val n = if (v == "light") "light" else "dark"
+        store.appearanceTheme = n
+        _theme.value = n
+    }
+
+    fun setAppearanceFontScale(v: String) {
+        val n = if (v == "large" || v == "xlarge") v else "normal"
+        store.appearanceFontScale = n
+        _fontScale.value = n
     }
 
     fun api(): RelayClient = RelayClient(store.relay, store.token)
@@ -73,6 +91,7 @@ class SessionVm(app: Application) : AndroidViewModel(app) {
         val client = if (_state.value.bound) api() else null
         store.clear()
         refreshSeq++
+        unreadHold.clear()
         _state.value = UiState()
         PushInbox.runId = null
         if (push.isNotEmpty() && client != null) {
@@ -110,11 +129,26 @@ class SessionVm(app: Application) : AndroidViewModel(app) {
     }
 
     fun markOpened(runId: String) {
+        if (!shouldStampOpened(unreadHold, runId)) return
         val activity = _state.value.board.runs.find { it.runId == runId }?.activityTs
             ?: _state.value.board.hidden.find { it.runId == runId }?.activityTs
         readAt[runId] = stampReadAt(System.currentTimeMillis().toDouble(), activity)
         store.saveReadAt(readAt)
+        _state.value = _state.value.copy(readRev = _state.value.readRev + 1)
     }
+
+    fun markUnread(runId: String, hold: Boolean) {
+        readAt.remove(runId)
+        if (hold) unreadHold.add(runId) else unreadHold.remove(runId)
+        store.saveReadAt(readAt)
+        _state.value = _state.value.copy(readRev = _state.value.readRev + 1)
+    }
+
+    fun clearUnreadHold(runId: String) {
+        unreadHold.remove(runId)
+    }
+
+    fun canMarkUnread(run: RunDto) = app.armada.remote.canMarkUnread(run, readAt)
 
     fun isUnread(run: RunDto) = app.armada.remote.isUnread(run, readAt)
 

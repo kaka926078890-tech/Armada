@@ -31,6 +31,20 @@ class TokenStore(ctx: Context) {
         get() = plain.getString("fcm", "").orEmpty()
         set(v) { plain.edit().putString("fcm", v).apply() }
 
+    var appearanceTheme: String
+        get() = if (plain.getString("armada.theme.v1", "dark") == "light") "light" else "dark"
+        set(v) { plain.edit().putString("armada.theme.v1", if (v == "light") "light" else "dark").apply() }
+
+    var appearanceFontScale: String
+        get() {
+            val raw = plain.getString("armada.fontScale.v1", "normal")
+            return if (raw == "large" || raw == "xlarge") raw else "normal"
+        }
+        set(v) {
+            val n = if (v == "large" || v == "xlarge") v else "normal"
+            plain.edit().putString("armada.fontScale.v1", n).apply()
+        }
+
     fun readAt(): Map<String, Double> {
         val raw = plain.getString("readAt", "") ?: return emptyMap()
         return runCatching {

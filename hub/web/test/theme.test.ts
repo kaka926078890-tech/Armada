@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { THEME_KEY, loadTheme, otherTheme, saveTheme } from "../src/theme";
+import {
+  THEME_KEY, FONT_SCALE_KEY,
+  loadTheme, otherTheme, saveTheme,
+  loadFontScale, saveFontScale, zoomForFontScale, applyFontScale,
+} from "../src/theme";
 
 const mem = new Map<string, string>();
 (globalThis as { localStorage: Storage }).localStorage = {
@@ -29,5 +33,34 @@ describe("theme", () => {
   test("otherTheme toggles", () => {
     expect(otherTheme("dark")).toBe("light");
     expect(otherTheme("light")).toBe("dark");
+  });
+});
+
+describe("fontScale", () => {
+  test("unknown or missing storage is normal", () => {
+    localStorage.removeItem(FONT_SCALE_KEY);
+    expect(loadFontScale()).toBe("normal");
+    localStorage.setItem(FONT_SCALE_KEY, "1.5");
+    expect(loadFontScale()).toBe("normal");
+  });
+
+  test("large and xlarge round-trip", () => {
+    saveFontScale("large");
+    expect(loadFontScale()).toBe("large");
+    saveFontScale("xlarge");
+    expect(loadFontScale()).toBe("xlarge");
+  });
+
+  test("zoom is 1 / 1.5 / 2", () => {
+    expect(zoomForFontScale("normal")).toBe(1);
+    expect(zoomForFontScale("large")).toBe(1.5);
+    expect(zoomForFontScale("xlarge")).toBe(2);
+  });
+
+  test("applyFontScale writes data-font-scale", () => {
+    const el = { dataset: {} as Record<string, string> };
+    (globalThis as { document?: { documentElement: typeof el } }).document = { documentElement: el };
+    applyFontScale("large");
+    expect(el.dataset.fontScale).toBe("large");
   });
 });

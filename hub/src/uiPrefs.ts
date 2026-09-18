@@ -2,10 +2,12 @@ import { existsSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 
 export type ThemeName = "dark" | "light";
+export type FontScale = "normal" | "large" | "xlarge";
 
 export type UiPrefs = {
   version: 1;
   theme: ThemeName;
+  fontScale: FontScale;
   selectedWorkspace: string | null;
   readRuns: Record<string, number>;
   readRunsSeeded: boolean;
@@ -17,6 +19,7 @@ export type UiPrefsGetResponse = UiPrefs & { source: "file" | "defaults" };
 export const UI_PREFS_DEFAULTS: UiPrefs = {
   version: 1,
   theme: "dark",
+  fontScale: "normal",
   selectedWorkspace: null,
   readRuns: {},
   readRunsSeeded: false,
@@ -51,6 +54,9 @@ function clampReadRuns(raw: unknown): Record<string, number> {
 export function normalizeUiPrefs(raw: unknown): UiPrefs {
   const o = raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
   const theme = o.theme === "light" || o.theme === "dark" ? o.theme : "dark";
+  const fontScale = o.fontScale === "large" || o.fontScale === "xlarge" || o.fontScale === "normal"
+    ? o.fontScale
+    : "normal";
   const selectedWorkspace = isWorkspaceKey(o.selectedWorkspace) ? o.selectedWorkspace : null;
   const detailWidth = typeof o.detailWidth === "number" && Number.isFinite(o.detailWidth)
     ? Math.min(WIDTH_MAX, Math.max(WIDTH_MIN, Math.round(o.detailWidth)))
@@ -58,6 +64,7 @@ export function normalizeUiPrefs(raw: unknown): UiPrefs {
   return {
     version: 1,
     theme,
+    fontScale,
     selectedWorkspace,
     readRuns: clampReadRuns(o.readRuns),
     readRunsSeeded: o.readRunsSeeded === true,
@@ -90,7 +97,7 @@ export function writeUiPrefs(home: string, prefs: UiPrefs): void {
 }
 
 export function mergeUiPrefs(base: UiPrefs, patch: Record<string, unknown>): UiPrefs {
-  const known = ["theme", "selectedWorkspace", "readRuns", "readRunsSeeded", "detailWidth"] as const;
+  const known = ["theme", "fontScale", "selectedWorkspace", "readRuns", "readRunsSeeded", "detailWidth"] as const;
   const next: Record<string, unknown> = { ...base };
   for (const k of known) {
     if (Object.prototype.hasOwnProperty.call(patch, k)) next[k] = patch[k];

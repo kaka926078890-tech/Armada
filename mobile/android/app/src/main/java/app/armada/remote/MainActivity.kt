@@ -17,9 +17,19 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.requiredHeight
+import androidx.compose.foundation.layout.requiredWidth
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -33,6 +43,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -41,7 +52,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -84,7 +94,7 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             notifPerm.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
-        setContent { MaterialTheme { Root(vm) } }
+        setContent { AppearanceRoot(vm) }
     }
 
     override fun onNewIntent(intent: android.content.Intent) {
@@ -92,6 +102,40 @@ class MainActivity : ComponentActivity() {
         takeRunIdFromIntent(intent.getStringExtra("runId") ?: intent.data?.getQueryParameter("runId"))
         intent.data?.let { vm.bind(it.toString()) }
         vm.adoptPendingOpen()
+    }
+}
+
+val LocalAppTheme = compositionLocalOf { "dark" }
+val LocalFontScale = compositionLocalOf { "normal" }
+
+fun appearanceZoom(scale: String): Float = when (scale) {
+    "large" -> 1.5f
+    "xlarge" -> 2f
+    else -> 1f
+}
+
+@Composable
+fun AppearanceRoot(vm: SessionVm) {
+    val theme by vm.theme.collectAsState()
+    val fontScale by vm.fontScale.collectAsState()
+    val zoom = appearanceZoom(fontScale)
+    val scheme = if (theme == "light") lightColorScheme() else darkColorScheme()
+    MaterialTheme(colorScheme = scheme) {
+        CompositionLocalProvider(LocalAppTheme provides theme, LocalFontScale provides fontScale) {
+            if (zoom == 1f) Root(vm)
+            else BoxWithConstraints(Modifier.fillMaxSize()) {
+                Box(
+                    Modifier
+                        .requiredWidth(maxWidth / zoom)
+                        .requiredHeight(maxHeight / zoom)
+                        .graphicsLayer {
+                            scaleX = zoom
+                            scaleY = zoom
+                            transformOrigin = TransformOrigin(0f, 0f)
+                        },
+                ) { Root(vm) }
+            }
+        }
     }
 }
 
@@ -114,6 +158,33 @@ fun Root(vm: SessionVm) {
     if (!state.bound) BindScreen(vm, state) else FleetNav(vm, state)
 }
 
+@Composable
+fun BarButton(
+    text: String,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    filled: Boolean = false,
+    danger: Boolean = false,
+    compact: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val colors = when {
+        danger -> ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626), contentColor = Color.White)
+        filled -> ButtonDefaults.buttonColors()
+        else -> ButtonDefaults.outlinedButtonColors()
+    }
+    val mod = modifier.height(if (compact) 40.dp else 44.dp)
+    if (filled || danger) {
+        Button(onClick = onClick, enabled = enabled, modifier = mod, colors = colors, contentPadding = PaddingValues(12.dp, 8.dp)) {
+            Text(text)
+        }
+    } else {
+        OutlinedButton(onClick = onClick, enabled = enabled, modifier = mod, contentPadding = PaddingValues(12.dp, 8.dp)) {
+            Text(text)
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BindScreen(vm: SessionVm, state: UiState) {
@@ -127,7 +198,7 @@ fun BindScreen(vm: SessionVm, state: UiState) {
                 modifier = Modifier.fillMaxWidth().height(160.dp),
             )
             Spacer(Modifier.height(12.dp))
-            Button(onClick = { vm.bind(paste) }, enabled = paste.isNotBlank()) { Text("绑定") }
+            Button(onClick = { vm.bind(paste) }, enabled = paste.isNotBlank(), modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("绑定") }
             state.bindError?.let { Text(it, color = Color.Red, modifier = Modifier.padding(top = 8.dp)) }
             Text("绑定后按「机器 → 工作区」选仓。点进仓看任务，顶部派发。", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 16.dp))
         }
@@ -144,7 +215,8 @@ fun FleetNav(vm: SessionVm, state: UiState) {
         vm.consumePendingOpen()
     }
     NavHost(nav, startDestination = "fleet") {
-        composable("fleet") { FleetScreen(vm, state, onOpen = { nav.navigate("ws/${it.workspaceId}") }, onRefresh = { vm.startLive() }) }
+        composable("fleet") { FleetScreen(vm, state, onOpen = { nav.navigate("ws/${it.workspaceId}") }, onRefresh = { vm.startLive() }, onSettings = { nav.navigate("settings") }) }
+        composable("settings") { SettingsScreen(vm, onBack = { nav.popBackStack() }) }
         composable("ws/{id}", arguments = listOf(navArgument("id") { type = NavType.StringType })) { entry ->
             val id = entry.arguments?.getString("id").orEmpty()
             val w = state.workspaces.firstOrNull { it.workspaceId == id } ?: return@composable
@@ -158,13 +230,16 @@ fun FleetNav(vm: SessionVm, state: UiState) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun FleetScreen(vm: SessionVm, state: UiState, onOpen: (WorkspaceDto) -> Unit, onRefresh: () -> Unit) {
+fun FleetScreen(vm: SessionVm, state: UiState, onOpen: (WorkspaceDto) -> Unit, onRefresh: () -> Unit, onSettings: () -> Unit) {
     val groups = state.workspaces.groupBy { it.machineId }
     Scaffold(topBar = {
         TopAppBar(
             title = { Text("舰队") },
-            navigationIcon = { TextButton(onClick = { vm.unbind() }) { Text("解绑") } },
-            actions = { TextButton(onClick = onRefresh) { Text("刷新") } },
+            navigationIcon = { BarButton("解绑", compact = true, onClick = { vm.unbind() }) },
+            actions = {
+                BarButton("设置", compact = true, onClick = onSettings)
+                BarButton("刷新", filled = true, compact = true, onClick = onRefresh)
+            },
         )
     }) { pad ->
         LazyColumn(Modifier.padding(pad)) {
@@ -220,10 +295,10 @@ fun WorkspaceScreen(vm: SessionVm, state: UiState, workspace: WorkspaceDto, onOp
         TopAppBar(
             title = { Text(workspace.label) },
             actions = {
-                TextButton(onClick = { showArchived = !showArchived }) {
-                    Text(if (showArchived) "返回看板" else if (hiddenN > 0) "查看已隐藏 $hiddenN" else "查看已隐藏")
+                BarButton(if (showArchived) "返回看板" else if (hiddenN > 0) "查看已隐藏 $hiddenN" else "查看已隐藏", compact = true) {
+                    showArchived = !showArchived
                 }
-                if (!showArchived) TextButton(onClick = { showDispatch = true }) { Text("派发") }
+                if (!showArchived) BarButton("派发", filled = true, compact = true) { showDispatch = true }
             },
         )
     }) { pad ->
@@ -239,7 +314,8 @@ fun WorkspaceScreen(vm: SessionVm, state: UiState, workspace: WorkspaceDto, onOp
             if (filtered.isEmpty()) Text("这一列还没有任务", modifier = Modifier.padding(16.dp), color = Color.Gray)
             LazyColumn {
                 items(filtered, key = { it.runId }) { run ->
-                    Row(Modifier.fillMaxWidth().clickable { onOpenRun(run.runId) }.padding(12.dp)) {
+                    val unread = vm.isUnread(run)
+                    Row(Modifier.fillMaxWidth().clickable { onOpenRun(run.runId) }.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text(run.prompt, maxLines = 2)
                             val cap = when {
@@ -249,33 +325,44 @@ fun WorkspaceScreen(vm: SessionVm, state: UiState, workspace: WorkspaceDto, onOp
                             }
                             Text(cap, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
                         }
-                        if (run.showsArchive && !showArchived) {
-                            TextButton(onClick = {
-                                vm.hideLocal(run.runId, true)
-                                scope.launch {
-                                    try {
-                                        val next = vm.api().archive(run.runId)
-                                        vm.hideLocal(run.runId, true, next)
-                                        vm.refresh()
-                                    } catch (e: Exception) {
-                                        vm.revertHide(run.runId)
-                                    }
-                                }
-                            }) { Text("隐藏") }
+                        if (unread) {
+                            Box(
+                                Modifier.padding(end = 8.dp).size(8.dp).clip(CircleShape)
+                                    .background(if (run.status == "completed" && run.pendingAsk == null) Color(0xFF22C55E) else Color.Red),
+                            )
                         }
-                        if (showArchived) {
-                            TextButton(onClick = {
-                                vm.hideLocal(run.runId, false)
-                                scope.launch {
-                                    try {
-                                        val next = vm.api().unarchive(run.runId)
-                                        vm.hideLocal(run.runId, false, next)
-                                        vm.refresh()
-                                    } catch (_: Exception) {
-                                        vm.revertHide(run.runId)
+                        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            if (vm.canMarkUnread(run)) {
+                                BarButton("未读") { vm.markUnread(run.runId, hold = false) }
+                            }
+                            if (run.showsArchive && !showArchived) {
+                                BarButton("隐藏", danger = true, onClick = {
+                                    vm.hideLocal(run.runId, true)
+                                    scope.launch {
+                                        try {
+                                            val next = vm.api().archive(run.runId)
+                                            vm.hideLocal(run.runId, true, next)
+                                            vm.refresh()
+                                        } catch (e: Exception) {
+                                            vm.revertHide(run.runId)
+                                        }
                                     }
-                                }
-                            }) { Text("取消隐藏") }
+                                })
+                            }
+                            if (showArchived) {
+                                BarButton("取消隐藏", onClick = {
+                                    vm.hideLocal(run.runId, false)
+                                    scope.launch {
+                                        try {
+                                            val next = vm.api().unarchive(run.runId)
+                                            vm.hideLocal(run.runId, false, next)
+                                            vm.refresh()
+                                        } catch (_: Exception) {
+                                            vm.revertHide(run.runId)
+                                        }
+                                    }
+                                })
+                            }
                         }
                     }
                 }
@@ -325,7 +412,7 @@ fun DispatchSheet(vm: SessionVm, workspace: WorkspaceDto, followupRunId: String?
                 else micPerm.launch(Manifest.permission.RECORD_AUDIO)
             },
             enabled = !sending,
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp).height(48.dp),
         ) { Text(if (listening) "停止" else "语音") }
         Button(
             onClick = {
@@ -344,9 +431,9 @@ fun DispatchSheet(vm: SessionVm, workspace: WorkspaceDto, followupRunId: String?
                 }
             },
             enabled = !sending && !listening && trimmed.isNotEmpty(),
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp).height(48.dp),
         ) { Text(if (sending) "发送中…" else if (followupRunId == null) "派发" else "发送") }
-        OutlinedButton(onClick = { speech.release(); onDone(BoardColumn.Completed) }, modifier = Modifier.fillMaxWidth()) { Text("取消") }
+        OutlinedButton(onClick = { speech.release(); onDone(BoardColumn.Completed) }, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("取消") }
     }
 }
 
@@ -361,7 +448,10 @@ fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String) {
     val slot = run?.let { r -> state.workspaces.firstOrNull { it.machineId == r.machineId && it.workspaceRoot == r.workspaceRoot } }
     DisposableEffect(runId) {
         vm.setWatching(runId)
-        onDispose { if (state.watchingId == runId) vm.setWatching(null) }
+        onDispose {
+            if (state.watchingId == runId) vm.setWatching(null)
+            vm.clearUnreadHold(runId)
+        }
     }
     fun adopt(fetched: RunDto) {
         run = coalesceFinalText(fetched, run)
@@ -397,7 +487,7 @@ fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String) {
         TopAppBar(
             title = { Text("详情") },
             actions = {
-                TextButton(onClick = { showFollow = true }, enabled = slot != null && run?.canFollowup == true) { Text("续聊") }
+                BarButton("续聊", filled = true, compact = true, enabled = slot != null && run?.canFollowup == true) { showFollow = true }
             },
         )
     }) { pad ->
@@ -422,9 +512,12 @@ fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String) {
                 Button(onClick = {
                     val cm = ctx.getSystemService(ClipboardManager::class.java)
                     cm.setPrimaryClip(ClipData.newPlainText("finalText", r.finalText ?: ""))
-                }) { Text("复制正文") }
-                if (r.isLive) OutlinedButton(onClick = { scope.launch { runCatching { vm.api().cancel(runId) }; runCatching { adopt(vm.api().run(runId)) } } }) { Text("取消任务") }
-                if (r.showsRetry) Button(onClick = { scope.launch { runCatching { vm.api().retry(runId) }; vm.refresh(); runCatching { adopt(vm.api().run(runId)) } } }) { Text("重试") }
+                }, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("复制正文") }
+                if (vm.canMarkUnread(r)) {
+                    OutlinedButton(onClick = { vm.markUnread(runId, hold = true) }, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("标为未读") }
+                }
+                if (r.isLive) OutlinedButton(onClick = { scope.launch { runCatching { vm.api().cancel(runId) }; runCatching { adopt(vm.api().run(runId)) } } }, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("取消任务") }
+                if (r.showsRetry) Button(onClick = { scope.launch { runCatching { vm.api().retry(runId) }; vm.refresh(); runCatching { adopt(vm.api().run(runId)) } } }, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("重试") }
                 if (r.isArchived) OutlinedButton(onClick = {
                     vm.hideLocal(runId, false, r)
                     scope.launch {
@@ -437,7 +530,7 @@ fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String) {
                             vm.revertHide(runId)
                         }
                     }
-                }) { Text("取消隐藏") }
+                }, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("取消隐藏") }
                 else if (r.showsArchive) OutlinedButton(onClick = {
                     vm.hideLocal(runId, true, r)
                     scope.launch {
@@ -450,7 +543,7 @@ fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String) {
                             err = hideError((e as? RelayException)?.code ?: "")
                         }
                     }
-                }) { Text("隐藏") }
+                }, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("隐藏") }
             }
         }
     }
@@ -491,7 +584,7 @@ fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend (
                     }
                 },
                 enabled = busy == null,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().height(48.dp),
                 colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Color(0xFFF1B467), contentColor = Color.Black),
             ) { Text(if (busy == "continue") "Building..." else "Build") }
         } else {
@@ -525,7 +618,7 @@ fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend (
                         }
                     },
                     enabled = busy == null,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).height(48.dp),
                 ) { Text(if (busy == "skip") "Skipping..." else "跳过") }
                 Button(
                     onClick = {
@@ -547,7 +640,7 @@ fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend (
                         }
                     },
                     enabled = optionId != null && busy == null,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).height(48.dp),
                     colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Color(0xFF599CE7)),
                 ) { Text(if (busy == "continue") "Continuing..." else "继续") }
             }
@@ -557,6 +650,8 @@ fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend (
 
 @Composable
 fun MarkdownBox(text: String) {
+    val fontScale = LocalFontScale.current
+    val theme = LocalAppTheme.current
     AndroidView(
         factory = { c ->
             WebView(c).apply {
@@ -565,9 +660,36 @@ fun MarkdownBox(text: String) {
                 setBackgroundColor(0)
             }
         },
-        update = { it.loadDataWithBaseURL(null, MarkdownHtml.from(text), "text/html", "utf-8", null) },
+        update = { it.loadDataWithBaseURL(null, MarkdownHtml.from(text, fontScale, theme), "text/html", "utf-8", null) },
         modifier = Modifier.fillMaxWidth().height(180.dp),
     )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SettingsScreen(vm: SessionVm, onBack: () -> Unit) {
+    val theme by vm.theme.collectAsState()
+    val fontScale by vm.fontScale.collectAsState()
+    Scaffold(topBar = {
+        TopAppBar(
+            title = { Text("设置") },
+            navigationIcon = { BarButton("返回", compact = true, onClick = onBack) },
+        )
+    }) { pad ->
+        Column(Modifier.padding(pad).padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Text("外观")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                BarButton("黑夜", filled = theme == "dark", compact = true) { vm.setAppearanceTheme("dark") }
+                BarButton("明亮", filled = theme == "light", compact = true) { vm.setAppearanceTheme("light") }
+            }
+            Text("字号")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                BarButton("正常", filled = fontScale == "normal", compact = true) { vm.setAppearanceFontScale("normal") }
+                BarButton("大", filled = fontScale == "large", compact = true) { vm.setAppearanceFontScale("large") }
+                BarButton("超大", filled = fontScale == "xlarge", compact = true) { vm.setAppearanceFontScale("xlarge") }
+            }
+        }
+    }
 }
 
 fun statusLabel(status: String) = when (status) {

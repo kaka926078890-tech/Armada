@@ -1,8 +1,9 @@
-import { applyTheme, loadTheme, saveTheme, type ThemeName } from "./theme";
+import { applyFontScale, applyTheme, loadFontScale, loadTheme, saveFontScale, saveTheme, type FontScale, type ThemeName } from "./theme";
 
 export type UiPrefs = {
   version: 1;
   theme: ThemeName;
+  fontScale: FontScale;
   selectedWorkspace: string | null;
   readRuns: Record<string, number>;
   readRunsSeeded: boolean;
@@ -14,6 +15,7 @@ export type UiPrefsGetResponse = UiPrefs & { source: "file" | "defaults" };
 export const UI_PREFS_DEFAULTS: UiPrefs = {
   version: 1,
   theme: "dark",
+  fontScale: "normal",
   selectedWorkspace: null,
   readRuns: {},
   readRunsSeeded: false,
@@ -41,6 +43,7 @@ export function loadLocalUiPrefsMirror(): UiPrefs {
   return {
     version: 1,
     theme: loadTheme(),
+    fontScale: loadFontScale(),
     selectedWorkspace,
     readRuns,
     readRunsSeeded,
@@ -51,6 +54,9 @@ export function loadLocalUiPrefsMirror(): UiPrefs {
 export function applyUiPrefsToLocalStorage(p: UiPrefs): void {
   saveTheme(p.theme);
   applyTheme(p.theme);
+  const scale = p.fontScale === "large" || p.fontScale === "xlarge" ? p.fontScale : "normal";
+  saveFontScale(scale);
+  applyFontScale(scale);
   try {
     if (p.selectedWorkspace) localStorage.setItem(WS_KEY, p.selectedWorkspace);
     else localStorage.removeItem(WS_KEY);
@@ -65,6 +71,7 @@ export function applyUiPrefsToLocalStorage(p: UiPrefs): void {
 
 export function localDiffersFromDefaults(local: UiPrefs): boolean {
   if (local.theme !== UI_PREFS_DEFAULTS.theme) return true;
+  if (local.fontScale !== UI_PREFS_DEFAULTS.fontScale) return true;
   if (local.selectedWorkspace !== UI_PREFS_DEFAULTS.selectedWorkspace) return true;
   if (local.readRunsSeeded !== UI_PREFS_DEFAULTS.readRunsSeeded) return true;
   if (local.detailWidth !== UI_PREFS_DEFAULTS.detailWidth) return true;

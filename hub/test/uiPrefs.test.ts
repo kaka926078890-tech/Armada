@@ -33,6 +33,14 @@ describe("isWorkspaceKey / normalizeUiPrefs", () => {
     });
   });
 
+  test("clamps illegal fontScale to normal", () => {
+    expect(normalizeUiPrefs({ fontScale: "neon" }).fontScale).toBe("normal");
+    expect(normalizeUiPrefs({ fontScale: 1.5 }).fontScale).toBe("normal");
+    expect(normalizeUiPrefs({}).fontScale).toBe("normal");
+    expect(normalizeUiPrefs({ fontScale: "large" }).fontScale).toBe("large");
+    expect(normalizeUiPrefs({ fontScale: "xlarge" }).fontScale).toBe("xlarge");
+  });
+
   test("caps readRuns at 5000 keeping newest by value", () => {
     const readRuns: Record<string, number> = {};
     for (let i = 0; i < 5002; i++) readRuns[`r-${i}`] = i;
@@ -69,5 +77,12 @@ describe("readUiPrefs / writeUiPrefs / merge", () => {
     const base = { ...UI_PREFS_DEFAULTS, readRuns: { r1: 9 }, theme: "dark" as const };
     expect(mergeUiPrefs(base, { theme: "light" }).theme).toBe("light");
     expect(mergeUiPrefs(base, { theme: "light" }).readRuns).toEqual({ r1: 9 });
+  });
+
+  test("merge PUT fontScale keeps theme", () => {
+    const base = { ...UI_PREFS_DEFAULTS, theme: "light" as const };
+    const next = mergeUiPrefs(base, { fontScale: "large" });
+    expect(next.fontScale).toBe("large");
+    expect(next.theme).toBe("light");
   });
 });

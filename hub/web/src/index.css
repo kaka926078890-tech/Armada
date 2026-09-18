@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+html[data-font-scale="large"] { zoom: 1.5; }
+html[data-font-scale="xlarge"] { zoom: 2; }
+
 html[data-theme="light"] {
   color-scheme: light;
   --color-zinc-50: #09090b;

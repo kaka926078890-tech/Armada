@@ -1,15 +1,25 @@
 package app.armada.remote
 
 object MarkdownHtml {
-    fun from(source: String): String {
+    fun from(source: String, fontScale: String = "normal", theme: String = "dark"): String {
         val inner = splitFences(source.replace("\r\n", "\n")).joinToString("") { renderBlock(it) }
+        val zoom = when (fontScale) {
+            "large" -> "1.5"
+            "xlarge" -> "2"
+            else -> "1"
+        }
+        val dark = theme == "dark"
+        val fg = if (dark) "#e4e4e7" else "#27272a"
+        val codeBg = if (dark) "#18181b" else "#f4f4f5"
+        val codeFg = if (dark) "#e4e4e7" else "#27272a"
         return """<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <style>
-:root { color-scheme: light dark; }
+:root { color-scheme: ${if (dark) "dark" else "light"}; }
+html { zoom: $zoom; }
 html, body { margin: 0; padding: 0; }
-body { font: 13px/1.65 sans-serif; color: #27272a; word-wrap: break-word; overflow-wrap: anywhere; }
-pre, code { font-family: ui-monospace, monospace; font-size: 12px; background: #f4f4f5; }
+body { font: 13px/1.65 sans-serif; color: $fg; word-wrap: break-word; overflow-wrap: anywhere; }
+pre, code { font-family: ui-monospace, monospace; font-size: 12px; background: $codeBg; color: $codeFg; }
 pre { padding: 10px; border-radius: 6px; overflow-x: auto; }
 code { padding: 1px 4px; border-radius: 4px; }
 </style></head><body>$inner</body></html>"""

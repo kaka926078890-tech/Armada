@@ -15,7 +15,8 @@ import Board from "./components/Board";
 import RunDetail from "./components/RunDetail";
 import { DispatchModal } from "./components/Modals";
 import { alertCompletions, alertNeedInput, ensureNotifyPermission, seedAskStatus, seedRunStatus, stopTitleMarquee, takeNewlyAlertable, takeNewlyNeedInput } from "./completionNotify";
-import { applyTheme, loadTheme, saveTheme, type ThemeName } from "./theme";
+import { applyFontScale, applyTheme, loadFontScale, loadTheme, saveFontScale, saveTheme, type FontScale, type ThemeName } from "./theme";
+import SettingsModal from "./components/SettingsModal";
 import {
   WS_KEY, READ_KEY, READ_SEEDED,
   loadLocalUiPrefsMirror, applyUiPrefsToLocalStorage,
@@ -57,6 +58,8 @@ export default function App() {
   const [loadError, setLoadError] = useState("");
   const [authDenied, setAuthDenied] = useState(false);
   const [theme, setTheme] = useState<ThemeName>(() => loadTheme());
+  const [fontScale, setFontScale] = useState<FontScale>(() => loadFontScale());
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const desktop = isDesktopShell(window.location.search);
   const askedHost = useRef(false);
   const readMapRef = useRef(readMap);
@@ -173,6 +176,7 @@ export default function App() {
         const { source, ...prefs } = remote;
         applyUiPrefsToLocalStorage(prefs);
         setTheme(prefs.theme);
+        setFontScale(loadFontScale());
         setSelectedWs(prefs.selectedWorkspace);
         setReadMap(prefs.readRuns);
         setReadRunsSeeded(prefs.readRunsSeeded);
@@ -180,6 +184,7 @@ export default function App() {
           try {
             const migrated = await api.putUiPrefs({
               theme: local.theme,
+              fontScale: local.fontScale,
               selectedWorkspace: local.selectedWorkspace,
               readRuns: local.readRuns,
               readRunsSeeded: local.readRunsSeeded,
@@ -188,6 +193,7 @@ export default function App() {
             if (cancelled) return;
             applyUiPrefsToLocalStorage(migrated);
             setTheme(migrated.theme);
+            setFontScale(loadFontScale());
             setSelectedWs(migrated.selectedWorkspace);
             setReadMap(migrated.readRuns);
             setReadRunsSeeded(migrated.readRunsSeeded);
@@ -287,6 +293,10 @@ export default function App() {
   }, [theme]);
 
   useEffect(() => {
+    applyFontScale(fontScale);
+  }, [fontScale]);
+
+  useEffect(() => {
     if (!isDesktopShell(window.location.search)) return;
     const onHost = (e: MessageEvent) => {
       const open = parseHostOpenRun(e.data, e.source, window.parent);
@@ -373,16 +383,10 @@ export default function App() {
           在线 {machines.filter((m) => m.status === "online").length}/{machines.length}
           <button
             type="button"
-            aria-label="切换明亮/黑夜"
-            onClick={() => {
-              const next = theme === "dark" ? "light" : "dark";
-              saveTheme(next);
-              setTheme(next);
-              void api.putUiPrefs({ theme: next }).catch(() => {});
-            }}
+            onClick={() => setSettingsOpen(true)}
             className="text-zinc-400 hover:text-zinc-100 px-2 py-0.5 rounded border border-zinc-700"
           >
-            {theme === "dark" ? "明亮" : "黑夜"}
+            设置
           </button>
           <button
             type="button"
@@ -405,6 +409,7 @@ export default function App() {
           onRename={(id, displayName) => { api.renameMachine(id, displayName).then(refresh); }}
           showDesktopActions={desktop}
           onOpenWorkspace={() => requestDesktop("open-workspace")}
+          onRepairCdp={() => requestDesktop("repair-cdp")}
           onGetShareLink={() => requestDesktop("get-share-link")}
         />
         <div className="flex-1 min-w-0 min-h-0 flex flex-col">
@@ -446,6 +451,25 @@ export default function App() {
             .filter((r) => ["queued", "dispatched", "binding", "running"].includes(r.status)).length}
           onClose={() => setDispatchOpen(false)}
           onDone={() => { setDispatchOpen(false); refresh(); }}
+        />
+      )}
+      {settingsOpen && (
+        <SettingsModal
+          theme={theme}
+          fontScale={fontScale}
+          onTheme={(next) => {
+            saveTheme(next);
+            applyTheme(next);
+            setTheme(next);
+            void api.putUiPrefs({ theme: next }).catch(() => {});
+          }}
+          onFontScale={(next) => {
+            saveFontScale(next);
+            applyFontScale(next);
+            setFontScale(next);
+            void api.putUiPrefs({ fontScale: next }).catch(() => {});
+          }}
+          onClose={() => setSettingsOpen(false)}
         />
       )}
     </div>

@@ -3,55 +3,60 @@ import WebKit
 import UIKit
 
 enum MarkdownHTML {
-    static func from(_ source: String) -> String {
+    static func from(_ source: String, fontScale: String = "normal", theme: String = "dark") -> String {
         let blocks = splitFences(source)
         let inner = blocks.map(renderBlock).joined()
+        let zoom: String
+        switch fontScale {
+        case "large": zoom = "1.5"
+        case "xlarge": zoom = "2"
+        default: zoom = "1"
+        }
+        let dark = theme == "dark"
+        let fg = dark ? "#e4e4e7" : "#27272a"
+        let heading = dark ? "#f4f4f5" : "#27272a"
+        let muted = dark ? "#a1a1aa" : "#71717a"
+        let codeBg = dark ? "#18181b" : "#f4f4f5"
+        let codeFg = dark ? "#e4e4e7" : "#27272a"
+        let border = dark ? "#3f3f46" : "#d4d4d8"
+        let link = dark ? "#38bdf8" : "#0284c7"
+        let quote = dark ? "#52525b" : "#d4d4d8"
         return """
         <!doctype html><html><head><meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
         <style>
-        :root { color-scheme: light dark; }
+        :root { color-scheme: \(dark ? "dark" : "light"); }
+        html { zoom: \(zoom); }
         html, body { margin: 0; padding: 0; }
         body {
           font: 13px/1.65 -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif;
-          color: #27272a;
+          color: \(fg);
           word-wrap: break-word;
           overflow-wrap: anywhere;
         }
-        @media (prefers-color-scheme: dark) {
-          body { color: #e4e4e7; }
-          h1, h2, h3 { color: #f4f4f5; }
-          pre, code { background: #18181b; color: #e4e4e7; }
-          code { background: #27272a; }
-          th, td { border-color: #3f3f46; }
-          th { color: #d4d4d8; }
-          blockquote { border-color: #52525b; color: #a1a1aa; }
-          a { color: #38bdf8; }
-          hr { border-color: #27272a; }
-        }
-        h1 { font-size: 16px; font-weight: 600; margin: 12px 0 4px; }
-        h2 { font-size: 15px; font-weight: 600; margin: 12px 0 4px; }
-        h3 { font-size: 14px; font-weight: 500; margin: 12px 0 4px; }
+        h1 { font-size: 16px; font-weight: 600; margin: 12px 0 4px; color: \(heading); }
+        h2 { font-size: 15px; font-weight: 600; margin: 12px 0 4px; color: \(heading); }
+        h3 { font-size: 14px; font-weight: 500; margin: 12px 0 4px; color: \(heading); }
         p { margin: 0 0 8px; }
         ul, ol { margin: 0 0 8px; padding-left: 20px; }
         li { margin: 2px 0; }
         strong { font-weight: 600; }
         em { font-style: italic; }
-        hr { border: none; border-top: 1px solid #e4e4e7; margin: 12px 0; }
-        blockquote { border-left: 2px solid #d4d4d8; padding-left: 12px; color: #71717a; margin: 0 0 8px; }
-        a { color: #0284c7; text-decoration: none; }
+        hr { border: none; border-top: 1px solid \(border); margin: 12px 0; }
+        blockquote { border-left: 2px solid \(quote); padding-left: 12px; color: \(muted); margin: 0 0 8px; }
+        a { color: \(link); text-decoration: none; }
         pre {
           margin: 0 0 8px; padding: 10px; border-radius: 6px;
-          background: #f4f4f5; overflow-x: auto; font-size: 12px;
+          background: \(codeBg); color: \(codeFg); overflow-x: auto; font-size: 12px;
           font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
         }
         pre code { background: none; padding: 0; font-size: 12px; }
         code {
           font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-          font-size: 12px; background: #f4f4f5; padding: 1px 4px; border-radius: 4px;
+          font-size: 12px; background: \(codeBg); color: \(codeFg); padding: 1px 4px; border-radius: 4px;
         }
         table { border-collapse: collapse; font-size: 12px; margin: 0 0 8px; width: 100%; }
-        th, td { border: 1px solid #d4d4d8; padding: 4px 8px; text-align: left; vertical-align: top; }
+        th, td { border: 1px solid \(border); padding: 4px 8px; text-align: left; vertical-align: top; }
         th { font-weight: 600; }
         .wrap { overflow-x: auto; margin: 0 0 8px; }
         </style></head><body>\(inner)</body></html>
@@ -234,6 +239,7 @@ enum MarkdownHTML {
 struct MarkdownWebView: UIViewRepresentable {
     let text: String
     @Binding var height: CGFloat
+    @EnvironmentObject var appearance: Appearance
 
     func makeCoordinator() -> Coord { Coord() }
 
@@ -252,14 +258,15 @@ struct MarkdownWebView: UIViewRepresentable {
 
     func updateUIView(_ webView: WKWebView, context: Context) {
         context.coordinator.height = $height
-        if context.coordinator.lastText != text {
-            context.coordinator.lastText = text
-            webView.loadHTMLString(MarkdownHTML.from(text), baseURL: nil)
+        let key = "\(text)|\(appearance.fontScale)|\(appearance.theme)"
+        if context.coordinator.lastKey != key {
+            context.coordinator.lastKey = key
+            webView.loadHTMLString(MarkdownHTML.from(text, fontScale: appearance.fontScale, theme: appearance.theme), baseURL: nil)
         }
     }
 
     final class Coord: NSObject, WKNavigationDelegate {
-        var lastText = ""
+        var lastKey = ""
         var height: Binding<CGFloat> = .constant(120)
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             webView.evaluateJavaScript("document.documentElement.scrollHeight") { val, _ in

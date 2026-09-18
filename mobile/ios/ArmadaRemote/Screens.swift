@@ -4,6 +4,7 @@ import UIKit
 enum AppRoute: Hashable {
     case workspace(WorkspaceDTO)
     case run(String)
+    case settings
 }
 
 func hideError(_ error: Error) -> String {
@@ -78,6 +79,57 @@ struct UnreadBadge: View {
     }
 }
 
+struct VolumeButton: View {
+    enum Kind { case accent, quiet, danger }
+    let title: String
+    var kind: Kind = .accent
+    var compact: Bool = false
+    var expand: Bool = true
+    var enabled: Bool = true
+    var busy: Bool = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                if busy { ProgressView().controlSize(.small) }
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: expand ? .infinity : nil, minHeight: compact ? 32 : 44)
+            .padding(.horizontal, compact ? 12 : 14)
+            .foregroundStyle(fg)
+            .background(bg, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay {
+                if kind == .quiet {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.18), lineWidth: 1)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled || busy)
+        .opacity(enabled ? 1 : 0.4)
+    }
+
+    private var fg: Color {
+        switch kind {
+        case .accent: return .white
+        case .quiet: return .primary
+        case .danger: return .white
+        }
+    }
+
+    private var bg: Color {
+        switch kind {
+        case .accent: return Color.accentColor
+        case .quiet: return Color(.secondarySystemFill)
+        case .danger: return .red
+        }
+    }
+}
+
 struct RunRow: View {
     let run: RunDTO
     let unread: Bool
@@ -129,8 +181,10 @@ struct BindView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .lineLimit(4...8)
-                    Button("绑定") { session.bind(uri: paste) }
-                    .disabled(paste.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    VolumeButton(
+                        title: "绑定",
+                        enabled: !paste.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ) { session.bind(uri: paste) }
                 }
                 if let err = session.bindError {
                     Section { Text(err).foregroundStyle(.red) }
@@ -195,14 +249,25 @@ struct WorkspaceListView: View {
                     WorkspaceHome(workspace: w)
                 case .run(let id):
                     RunDetailView(runId: id)
+                case .settings:
+                    SettingsView()
                 }
             }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("刷新") { Task { await session.refresh() } }
+                    HStack(spacing: 8) {
+                        VolumeButton(title: "设置", kind: .quiet, compact: true, expand: false) {
+                            path.append(AppRoute.settings)
+                        }
+                        VolumeButton(title: "刷新", compact: true, expand: false) {
+                            Task { await session.refresh() }
+                        }
+                    }
                 }
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("解绑") { session.unbind() }
+                    VolumeButton(title: "解绑", kind: .quiet, compact: true, expand: false) {
+                        session.unbind()
+                    }
                 }
             }
             .refreshable { await session.refresh() }
@@ -257,10 +322,11 @@ struct WorkspaceHome: View {
                                 }
                             }
                             .font(.subheadline.weight(tab == col ? .semibold : .regular))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 7)
-                            .background(tab == col ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.08))
-                            .clipShape(Capsule())
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 9)
+                            .frame(minHeight: 36)
+                            .background(tab == col ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.12))
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                         }
                         .buttonStyle(.plain)
                     }
@@ -282,6 +348,14 @@ struct WorkspaceHome: View {
                     NavigationLink(value: AppRoute.run(run.runId)) {
                         RunRow(run: run, unread: session.isUnread(run))
                     }
+                    .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                        if session.canMarkUnread(run) {
+                            Button("标为未读") {
+                                session.markUnread(run.runId, hold: false)
+                            }
+                            .tint(.orange)
+                        }
+                    }
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                         if showArchived {
                             Button("取消隐藏") {
@@ -302,12 +376,15 @@ struct WorkspaceHome: View {
         .navigationTitle(workspace.label)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                HStack(spacing: 12) {
-                    Button(showArchived ? "返回看板" : hideLabel) {
-                        showArchived.toggle()
-                    }
+                HStack(spacing: 8) {
+                    VolumeButton(
+                        title: showArchived ? "返回看板" : hideLabel,
+                        kind: .quiet,
+                        compact: true,
+                        expand: false
+                    ) { showArchived.toggle() }
                     if !showArchived {
-                        Button("派发") { showDispatch = true }
+                        VolumeButton(title: "派发", compact: true, expand: false) { showDispatch = true }
                     }
                 }
             }
@@ -402,14 +479,16 @@ struct DispatchSheet: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                    Button(speech.listening ? "停止" : "语音") {
-                        speech.toggle()
-                    }
-                    .disabled(sending)
-                    Button(sending ? "发送中…" : (followupRunId == nil ? "派发" : "发送")) {
-                        Task { await send() }
-                    }
-                    .disabled(!canSend)
+                    VolumeButton(
+                        title: speech.listening ? "停止" : "语音",
+                        kind: .quiet,
+                        enabled: !sending
+                    ) { speech.toggle() }
+                    VolumeButton(
+                        title: sending ? "发送中…" : (followupRunId == nil ? "派发" : "发送"),
+                        enabled: canSend,
+                        busy: sending
+                    ) { Task { await send() } }
                 } header: {
                     Text("Prompt")
                 } footer: {
@@ -419,16 +498,19 @@ struct DispatchSheet: View {
             .navigationTitle(followupRunId == nil ? "派发任务" : "续聊")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") {
+                    VolumeButton(title: "取消", kind: .quiet, compact: true, expand: false) {
                         speech.release()
                         dismiss()
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(sending ? "发送中…" : (followupRunId == nil ? "派发" : "发送")) {
-                        Task { await send() }
-                    }
-                    .disabled(!canSend)
+                    VolumeButton(
+                        title: sending ? "发送中…" : (followupRunId == nil ? "派发" : "发送"),
+                        compact: true,
+                        expand: false,
+                        enabled: canSend,
+                        busy: sending
+                    ) { Task { await send() } }
                 }
             }
             .onDisappear { speech.release() }
@@ -481,10 +563,9 @@ struct DetailPromptCard: View {
                         .foregroundStyle(.secondary)
                     Spacer()
                     if overflows {
-                        Button(expanded ? "收起" : "展开") {
+                        VolumeButton(title: expanded ? "收起" : "展开", kind: .quiet, compact: true, expand: false) {
                             withAnimation(.easeInOut(duration: 0.2)) { expanded.toggle() }
                         }
-                        .font(.caption.weight(.semibold))
                     }
                 }
                 MarkdownWebView(text: text, height: $contentHeight)
@@ -587,11 +668,16 @@ struct RunDetailView: View {
                             }
                         }
                     }
-                    Button("复制正文") {
+                    VolumeButton(title: "复制正文", kind: .quiet) {
                         UIPasteboard.general.string = run.finalText ?? ""
                     }
+                    if session.canMarkUnread(run) {
+                        VolumeButton(title: "标为未读", kind: .quiet) {
+                            session.markUnread(runId, hold: true)
+                        }
+                    }
                     if run.isLive {
-                        Button("取消任务", role: .destructive) {
+                        VolumeButton(title: "取消任务", kind: .danger) {
                             Task {
                                 try? await session.api().cancel(runId: runId)
                                 await reload()
@@ -600,7 +686,7 @@ struct RunDetailView: View {
                         }
                     }
                     if run.showsRetry {
-                        Button("重试") {
+                        VolumeButton(title: "重试") {
                             Task {
                                 do {
                                     _ = try await session.api().retry(runId: runId)
@@ -614,7 +700,7 @@ struct RunDetailView: View {
                         }
                     }
                     if run.isArchived {
-                        Button("取消隐藏") {
+                        VolumeButton(title: "取消隐藏", kind: .quiet) {
                             Task {
                                 session.applyLocalArchive(runId, archived: false, snapshot: run)
                                 do {
@@ -630,7 +716,7 @@ struct RunDetailView: View {
                             }
                         }
                     } else if run.showsArchive {
-                        Button("隐藏") {
+                        VolumeButton(title: "隐藏", kind: .quiet) {
                             Task {
                                 session.applyLocalArchive(runId, archived: true, snapshot: run)
                                 do {
@@ -657,8 +743,12 @@ struct RunDetailView: View {
         .navigationTitle("详情")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button("续聊") { showDispatch = true }
-                    .disabled(slot == nil || !(run?.canFollowup ?? false))
+                VolumeButton(
+                    title: "续聊",
+                    compact: true,
+                    expand: false,
+                    enabled: slot != nil && (run?.canFollowup ?? false)
+                ) { showDispatch = true }
             }
         }
         .sheet(isPresented: $showDispatch) {
@@ -697,6 +787,7 @@ struct RunDetailView: View {
         }
         .onDisappear {
             if session.watchingId == runId { session.watchingId = nil }
+            session.clearUnreadHold(runId)
         }
         .refreshable { await reload() }
     }
@@ -876,5 +967,39 @@ struct AskView: View {
             err = error.localizedDescription
             busyAction = nil
         }
+    }
+}
+
+struct SettingsView: View {
+    @EnvironmentObject var appearance: Appearance
+    var body: some View {
+        List {
+            Section("外观") {
+                HStack(spacing: 8) {
+                    VolumeButton(title: "黑夜", kind: appearance.theme == "dark" ? .accent : .quiet, compact: true) {
+                        appearance.theme = "dark"
+                    }
+                    VolumeButton(title: "明亮", kind: appearance.theme == "light" ? .accent : .quiet, compact: true) {
+                        appearance.theme = "light"
+                    }
+                }
+                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+            }
+            Section("字号") {
+                HStack(spacing: 8) {
+                    VolumeButton(title: "正常", kind: appearance.fontScale == "normal" ? .accent : .quiet, compact: true) {
+                        appearance.fontScale = "normal"
+                    }
+                    VolumeButton(title: "大", kind: appearance.fontScale == "large" ? .accent : .quiet, compact: true) {
+                        appearance.fontScale = "large"
+                    }
+                    VolumeButton(title: "超大", kind: appearance.fontScale == "xlarge" ? .accent : .quiet, compact: true) {
+                        appearance.fontScale = "xlarge"
+                    }
+                }
+                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+            }
+        }
+        .navigationTitle("设置")
     }
 }
