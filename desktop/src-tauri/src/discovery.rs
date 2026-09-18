@@ -2,13 +2,20 @@ use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::process::Command;
+use std::sync::mpsc;
 use std::thread;
+use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
 use crate::hub::HubState;
 
 pub const SERVICE_TYPE: &str = "_armada._tcp.local.";
 pub const TXT_VER: &str = "2";
+pub const MDNS_DAEMON_INIT_TIMEOUT: Duration = Duration::from_secs(3);
+
+pub fn mdns_daemon_init_timed_out(elapsed: Duration, limit: Duration) -> bool {
+    elapsed >= limit
+}
 
 #[derive(Default)]
 pub struct DiscoveryState {
@@ -102,12 +109,31 @@ fn computer_name() -> String {
     "Armada".into()
 }
 
+fn new_mdns_daemon() -> Result<ServiceDaemon, String> {
+    let (tx, rx) = mpsc::channel();
+    thread::Builder::new()
+        .name("armada-mdns-init".into())
+        .spawn(move || {
+            let _ = tx.send(ServiceDaemon::new());
+        })
+        .map_err(|_| "advertise-failed".to_string())?;
+    match rx.recv_timeout(MDNS_DAEMON_INIT_TIMEOUT) {
+        Ok(Ok(d)) => Ok(d),
+        _ => Err("advertise-failed".to_string()),
+    }
+}
+
 fn daemon_of(state: &HubState) -> Result<ServiceDaemon, String> {
-    let mut g = state.discovery.lock().map_err(|_| "lock".to_string())?;
+    let g = state.discovery.lock().map_err(|_| "lock".to_string())?;
     if let Some(d) = &g.daemon {
         return Ok(d.clone());
     }
-    let d = ServiceDaemon::new().map_err(|_| "advertise-failed".to_string())?;
+    drop(g);
+    let d = new_mdns_daemon()?;
+    let mut g = state.discovery.lock().map_err(|_| "lock".to_string())?;
+    if let Some(existing) = &g.daemon {
+        return Ok(existing.clone());
+    }
     g.daemon = Some(d.clone());
     Ok(d)
 }
@@ -277,5 +303,17 @@ mod tests {
         assert_eq!(sanitize_instance(" \n "), "Armada");
         assert_eq!(sanitize_instance("Studio\u{7} Mac"), "Studio Mac");
         assert_eq!(instance_from_fullname("Studio._armada._tcp.local."), "Studio");
+    }
+
+    #[test]
+    fn mdns_daemon_init_gives_up_after_limit() {
+        assert!(!mdns_daemon_init_timed_out(
+            Duration::from_millis(2999),
+            MDNS_DAEMON_INIT_TIMEOUT
+        ));
+        assert!(mdns_daemon_init_timed_out(
+            Duration::from_secs(3),
+            MDNS_DAEMON_INIT_TIMEOUT
+        ));
     }
 }

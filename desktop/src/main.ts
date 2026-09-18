@@ -4,20 +4,22 @@ import {
   afterZombieCleared,
   advertiseFailedCopy,
   boardUrl,
-  cdpZombieCopy,
   copiedToast,
   decideNeedToken,
   defaultDiscoverable,
   defaultLandingMode,
   discoveredRowView,
+  canStartJoin,
   firstArmadaJoinUri,
   firstArmadaOpenRun,
+  joinButtonLabel,
   formatOpenRunUri,
   noOpenFleetsCopy,
   noShareIpCopy,
   parseBoardSession,
   parseDesktopBoardRequest,
   parsePastedJoin,
+  fleetErrorCopy,
   recreateFleetCopy,
   restoreHubCopy,
   isLocalOwnedBoard,
@@ -64,6 +66,7 @@ type JoinFleetResult = {
 };
 
 let lastShareUri = "";
+let joinInFlight = false;
 const BOARD_SESSION_KEY = "armada.boardSession";
 let lastBoard = parseBoardSession(
   typeof sessionStorage === "undefined" ? null : sessionStorage.getItem(BOARD_SESSION_KEY),
@@ -103,7 +106,9 @@ function renderDiscovered() {
     sub.className = "fleet-sub";
     sub.textContent = view.subtitle;
     btn.append(title, sub);
+    btn.disabled = !canStartJoin(joinInFlight);
     btn.addEventListener("click", () => {
+      if (!canStartJoin(joinInFlight)) return;
       const found = discovered.get(row.id);
       if (found) joinFromPaste(found.joinUri);
     });
@@ -162,8 +167,11 @@ function setBusy(busy: boolean) {
   }
   if (join) {
     join.disabled = busy;
-    join.textContent = busy ? "正在加入…" : "加入舰队";
+    join.textContent = joinButtonLabel(busy);
   }
+  const input = uriEl();
+  if (input) input.disabled = busy;
+  renderDiscovered();
 }
 
 function showToast(msg: string, kind: "ok" | "err" = "ok") {
@@ -178,33 +186,7 @@ function showToast(msg: string, kind: "ok" | "err" = "ok") {
 }
 
 function fleetErrorMessage(raw: string): string {
-  const blob = raw.toLowerCase();
-  const codes: [string, string][] = [
-    ["incomplete", "链接不完整"],
-    ["invalid", "链接无效"],
-    ["unreachable", "无法连接中台"],
-    ["foreign-armada", "7380 上已有另一份 Armada（令牌不同）"],
-    ["port-busy", "7380 被其他程序占用"],
-    ["join-must-not-spawn", "加入不会在本机启动中台"],
-    ["create-macos-only", "创建舰队仅支持 macOS，请使用加入舰队"],
-    ["no-share-ip", noShareIpCopy()],
-    ["not-authorized", "鉴权失败，未写入 Cursor 设置"],
-    ["spawn-timeout", "中台启动超时"],
-    ["hub-root-missing", "未找到 hub 源码"],
-    ["bun-missing", "未找到 Bun"],
-    ["token-missing", "缺少令牌"],
-    ["zombie", cdpZombieCopy()],
-    ["open-failed", cdpZombieCopy()],
-    ["path-not-absolute", "请选择绝对路径的文件夹"],
-    ["path-not-dir", "路径不是文件夹"],
-    ["launcher-missing", "未找到 Cursor 启动器脚本"],
-    ["cursor-missing", "找不到 Cursor"],
-    ["cancelled", "已取消"],
-  ];
-  for (const [code, msg] of codes) {
-    if (blob.includes(code)) return msg;
-  }
-  return "操作失败";
+  return fleetErrorCopy(raw);
 }
 
 function detectPlatform(): string {
@@ -416,11 +398,13 @@ async function copyShare() {
 }
 
 function joinFromPaste(raw: string) {
+  if (!canStartJoin(joinInFlight)) return;
   const parsed = parsePastedJoin(raw);
   if ("error" in parsed) {
     setErr(parsed.error === "incomplete" ? "链接不完整" : "链接无效");
     return;
   }
+  joinInFlight = true;
   setErr("");
   lastShareUri = parsed.uri;
   setBusy(true);
@@ -430,7 +414,10 @@ function joinFromPaste(raw: string) {
       openBoard(r.webviewOrigin, r.token);
     })
     .catch((e) => setErr(fleetErrorMessage(String(e))))
-    .finally(() => setBusy(false));
+    .finally(() => {
+      joinInFlight = false;
+      setBusy(false);
+    });
 }
 
 function wireDeepLink() {

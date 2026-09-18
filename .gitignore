@@ -10,6 +10,7 @@ _spool_exe_test2/
 .armada/
 desktop/src-tauri/resources/hub/
 desktop/src-tauri/resources/bun
+desktop/src-tauri/resources/bun.exe
 desktop/src-tauri/resources/scripts/
 desktop/src-tauri/resources/hooks/
 desktop/src-tauri/resources/*.vsix

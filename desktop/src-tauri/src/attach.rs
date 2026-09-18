@@ -1,9 +1,12 @@
 use crate::hub;
 use serde::Serialize;
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::env;
+use std::fs;
+use std::io::Read;
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 
 const HUB_PORT: u16 = 7380;
 
@@ -235,6 +238,172 @@ pub fn vsix_needs_install(
     }
 }
 
+pub fn vsix_install_via_unpack(os: &str) -> bool {
+    os == "windows"
+}
+
+pub fn armada_agent_extension_dir(extensions_dir: &Path, ver: (u64, u64, u64)) -> PathBuf {
+    extensions_dir.join(format!(
+        "armada.armada-agent-{}.{}.{}",
+        ver.0, ver.1, ver.2
+    ))
+}
+
+pub fn cursor_extension_file_url(fs_path: &str) -> String {
+    let n = fs_path.replace('\\', "/");
+    if n.len() >= 2 && n.as_bytes()[1] == b':' {
+        let drive = n.as_bytes()[0].to_ascii_lowercase() as char;
+        return format!("file:///{drive}%3A{}", &n[2..]);
+    }
+    if n.starts_with('/') {
+        format!("file://{n}")
+    } else {
+        format!("file:///{n}")
+    }
+}
+
+pub fn upsert_armada_agent_extension_json(
+    raw: &str,
+    version: &str,
+    relative_location: &str,
+    fs_path: &str,
+    now_ms: u64,
+) -> Result<String, String> {
+    let mut arr = if raw.trim().is_empty() {
+        Vec::new()
+    } else {
+        match serde_json::from_str::<serde_json::Value>(raw) {
+            Ok(serde_json::Value::Array(a)) => a,
+            _ => return Err("extensions-json-invalid".into()),
+        }
+    };
+    let posix = {
+        let n = fs_path.replace('\\', "/");
+        if n.len() >= 2 && n.as_bytes()[1] == b':' {
+            format!("/{}{}", n.chars().next().unwrap().to_ascii_lowercase(), &n[1..])
+        } else {
+            n
+        }
+    };
+    let location = serde_json::json!({
+        "$mid": 1,
+        "fsPath": fs_path,
+        "_sep": 1,
+        "external": cursor_extension_file_url(fs_path),
+        "path": posix,
+        "scheme": "file",
+    });
+    let mut found = false;
+    for item in arr.iter_mut() {
+        let id = item
+            .get("identifier")
+            .and_then(|v| v.get("id"))
+            .and_then(|v| v.as_str());
+        if id != Some("armada.armada-agent") {
+            continue;
+        }
+        item["version"] = serde_json::Value::String(version.into());
+        item["relativeLocation"] = serde_json::Value::String(relative_location.into());
+        item["location"] = location.clone();
+        let md = item
+            .as_object_mut()
+            .ok_or("extensions-json-invalid")?
+            .entry("metadata")
+            .or_insert_with(|| serde_json::json!({}));
+        if let Some(obj) = md.as_object_mut() {
+            obj.insert("installedTimestamp".into(), serde_json::json!(now_ms));
+            obj.insert("source".into(), serde_json::json!("vsix"));
+            obj.insert("pinned".into(), serde_json::json!(true));
+        }
+        found = true;
+        break;
+    }
+    if !found {
+        arr.push(serde_json::json!({
+            "identifier": { "id": "armada.armada-agent" },
+            "version": version,
+            "relativeLocation": relative_location,
+            "location": location,
+            "metadata": {
+                "isApplicationScoped": false,
+                "isMachineScoped": false,
+                "isBuiltin": false,
+                "installedTimestamp": now_ms,
+                "pinned": true,
+                "source": "vsix"
+            }
+        }));
+    }
+    serde_json::to_string(&arr).map_err(|e| e.to_string())
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+pub fn unpack_vsix_to_dir(vsix: &Path, dest: &Path) -> Result<(), String> {
+    let file = fs::File::open(vsix).map_err(|e| e.to_string())?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
+    if dest.exists() {
+        fs::remove_dir_all(dest).map_err(|e| e.to_string())?;
+    }
+    fs::create_dir_all(dest).map_err(|e| e.to_string())?;
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
+        if entry.is_dir() {
+            continue;
+        }
+        let name = entry.name().replace('\\', "/");
+        if name.split('/').any(|p| p == "..") {
+            continue;
+        }
+        let out_rel = if name == "extension.vsixmanifest" {
+            PathBuf::from(".vsixmanifest")
+        } else if let Some(rel) = name.strip_prefix("extension/") {
+            if rel.is_empty() {
+                continue;
+            }
+            PathBuf::from(rel)
+        } else {
+            continue;
+        };
+        let out_path = dest.join(out_rel);
+        if let Some(parent) = out_path.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let mut out = fs::File::create(&out_path).map_err(|e| e.to_string())?;
+        std::io::copy(&mut entry, &mut out).map_err(|e| e.to_string())?;
+    }
+    if !dest.join("package.json").is_file() {
+        return Err("vsix-missing-package".into());
+    }
+    Ok(())
+}
+
+pub fn install_vsix_by_unpack(
+    vsix: &Path,
+    extensions_dir: &Path,
+    ver: (u64, u64, u64),
+) -> Result<(), String> {
+    let dest = armada_agent_extension_dir(extensions_dir, ver);
+    unpack_vsix_to_dir(vsix, &dest)?;
+    let json_path = extensions_dir.join("extensions.json");
+    let raw = fs::read_to_string(&json_path).unwrap_or_default();
+    let version = format!("{}.{}.{}", ver.0, ver.1, ver.2);
+    let relative = dest
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("armada.armada-agent")
+        .to_string();
+    let fs_path = dest.to_string_lossy().into_owned();
+    let next = upsert_armada_agent_extension_json(&raw, &version, &relative, &fs_path, now_ms())?;
+    fs::write(&json_path, next).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 fn cursor_extensions_dir() -> PathBuf {
     if let Ok(p) = env::var("ARMADA_CURSOR_EXTENSIONS") {
         return PathBuf::from(p);
@@ -257,6 +426,13 @@ pub fn vsix_search_roots(resource_dir: Option<&Path>) -> Vec<PathBuf> {
     roots
 }
 
+pub fn is_gui_cursor_exe(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|s| s.to_str())
+        .map(|s| s.eq_ignore_ascii_case("Cursor.exe"))
+        .unwrap_or(false)
+}
+
 fn cursor_cli_candidates() -> Vec<PathBuf> {
     let mut v = vec![PathBuf::from("cursor")];
     if let Ok(home) = env::var("HOME") {
@@ -267,24 +443,92 @@ fn cursor_cli_candidates() -> Vec<PathBuf> {
     v.push(PathBuf::from("/Applications/Cursor.app/Contents/Resources/app/bin/cursor"));
     if let Ok(local) = env::var("LOCALAPPDATA") {
         let local = PathBuf::from(local);
-        v.push(local.join("Programs/cursor/Cursor.exe"));
-        v.push(local.join("Programs/Cursor/Cursor.exe"));
         v.push(local.join("Programs/cursor/resources/app/bin/cursor.cmd"));
         v.push(local.join("Programs/Cursor/resources/app/bin/cursor.cmd"));
     }
     v
 }
 
+const HOOKS_INSTALL_TIMEOUT: Duration = Duration::from_secs(8);
+const VSIX_INSTALL_TIMEOUT: Duration = Duration::from_secs(8);
+
+pub fn should_skip_windows_hooks_strip(raw: &str) -> bool {
+    let lower = raw.to_ascii_lowercase();
+    !(lower.contains("armada-spool.ps1")
+        || lower.contains("armada-spool.sh")
+        || lower.contains("armada-spool.exe"))
+}
+
+pub fn apply_gui_child_stdio(cmd: &mut Command) {
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+}
+
+fn apply_gui_child_capture(cmd: &mut Command) {
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+}
+
+fn wait_child(child: &mut Child, timeout: Duration) -> Option<std::process::ExitStatus> {
+    let start = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(st)) => return Some(st),
+            Ok(None) => {
+                if start.elapsed() >= timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return None;
+                }
+                thread::sleep(Duration::from_millis(50));
+            }
+            Err(_) => return None,
+        }
+    }
+}
+
+pub fn run_child_timeout(cmd: &mut Command, timeout: Duration) -> &'static str {
+    apply_gui_child_stdio(cmd);
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(_) => return "failed",
+    };
+    match wait_child(&mut child, timeout) {
+        Some(st) if st.success() => "ok",
+        _ => "failed",
+    }
+}
+
 fn try_install_vsix(cli: &Path, vsix: &Path, force: bool) -> Option<(bool, String, String)> {
-    let out = Command::new(cli)
-        .args(vsix_install_cli_args(vsix, force))
-        .output()
-        .ok()?;
-    Some((
-        out.status.success(),
-        String::from_utf8_lossy(&out.stdout).into_owned(),
-        String::from_utf8_lossy(&out.stderr).into_owned(),
-    ))
+    let mut cmd = Command::new(cli);
+    cmd.args(vsix_install_cli_args(vsix, force));
+    apply_gui_child_capture(&mut cmd);
+    let mut child = cmd.spawn().ok()?;
+    let status = wait_child(&mut child, VSIX_INSTALL_TIMEOUT);
+    let mut stdout = String::new();
+    let mut stderr = String::new();
+    if let Some(mut out) = child.stdout.take() {
+        let _ = out.read_to_string(&mut stdout);
+    }
+    if let Some(mut err) = child.stderr.take() {
+        let _ = err.read_to_string(&mut stderr);
+    }
+    let ok = status.map(|s| s.success()).unwrap_or(false);
+    Some((ok, stdout, stderr))
 }
 
 pub fn probe_vsix_cli_chain<F>(
@@ -297,6 +541,9 @@ where
 {
     let path_s = vsix.display().to_string();
     for cli in clis {
+        if is_gui_cursor_exe(cli) {
+            continue;
+        }
         let Some((ok, stdout, stderr)) = try_one(cli, vsix) else {
             continue;
         };
@@ -324,6 +571,12 @@ pub fn install_vsix_from_roots_in(
     if let Some(ver) = bundled {
         if !vsix_needs_install(ver, installed) {
             return ("skipped-same-version", None);
+        }
+        if vsix_install_via_unpack(std::env::consts::OS) {
+            return match install_vsix_by_unpack(&vsix, extensions_dir, ver) {
+                Ok(()) => ("ok", None),
+                Err(_) => ("manual-path-shown", Some(vsix.display().to_string())),
+            };
         }
     }
     let force = matches!(installed, Some(v) if bundled.map(|b| v < b).unwrap_or(false));
@@ -357,7 +610,20 @@ pub fn resolve_hooks_dir(resource_dir: Option<&Path>) -> Result<PathBuf, String>
     Err("hooks-root-missing".into())
 }
 
+fn windows_hooks_json_path(home: Option<&Path>) -> PathBuf {
+    let base = home.map(Path::to_path_buf).unwrap_or_else(|| {
+        PathBuf::from(env::var("USERPROFILE").unwrap_or_else(|_| ".".into()))
+    });
+    base.join(".cursor").join("hooks.json")
+}
+
 pub fn run_hooks_install(script: &Path, home: Option<&Path>) -> &'static str {
+    if script.extension().and_then(|s| s.to_str()) == Some("ps1") {
+        let raw = fs::read_to_string(windows_hooks_json_path(home)).unwrap_or_default();
+        if should_skip_windows_hooks_strip(&raw) {
+            return "ok";
+        }
+    }
     let mut cmd = if script.extension().and_then(|s| s.to_str()) == Some("ps1") {
         let mut c = Command::new("powershell");
         c.args([
@@ -378,10 +644,12 @@ pub fn run_hooks_install(script: &Path, home: Option<&Path>) -> &'static str {
         cmd.env("HOME", h);
         cmd.env("USERPROFILE", h);
     }
-    match cmd.status() {
-        Ok(s) if s.success() => "ok",
-        _ => "failed",
-    }
+    let timeout = if script.extension().and_then(|s| s.to_str()) == Some("ps1") {
+        HOOKS_INSTALL_TIMEOUT
+    } else {
+        Duration::from_secs(30)
+    };
+    run_child_timeout(&mut cmd, timeout)
 }
 
 fn split_hub(hub_url: &str) -> (String, u16) {
@@ -466,8 +734,12 @@ pub fn run_local_attach(
 }
 
 pub(crate) fn read_existing_hub_url() -> Option<String> {
-    let raw = fs::read_to_string(real_cursor_settings_path()).ok()?;
-    existing_keys(&raw).0
+    read_existing_creds().0
+}
+
+pub(crate) fn read_existing_creds() -> (Option<String>, Option<String>) {
+    let raw = fs::read_to_string(real_cursor_settings_path()).unwrap_or_default();
+    existing_keys(&raw)
 }
 
 #[tauri::command]
@@ -492,6 +764,7 @@ pub fn local_attach(
 mod tests {
     use super::*;
     use crate::hub::{Auth, Probe};
+    use std::io::Write;
 
     fn scratch(label: &str) -> PathBuf {
         let p = env::temp_dir().join(format!(
@@ -504,6 +777,21 @@ mod tests {
         ));
         fs::create_dir_all(&p).unwrap();
         p
+    }
+
+    fn write_minimal_vsix(path: &Path, version: &str) {
+        let file = fs::File::create(path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let opts = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        zip.start_file("extension/package.json", opts).unwrap();
+        zip.write_all(
+            format!(r#"{{"name":"armada-agent","version":"{version}"}}"#).as_bytes(),
+        )
+        .unwrap();
+        zip.start_file("extension.vsixmanifest", opts).unwrap();
+        zip.write_all(b"<PackageManifest/>").unwrap();
+        zip.finish().unwrap();
     }
 
     #[test]
@@ -677,6 +965,25 @@ mod tests {
         let _ = fs::remove_dir_all(&roots);
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn windows_join_unpacks_newer_vsix_without_cli() {
+        let dir = scratch("exts-old-win");
+        fs::create_dir_all(dir.join("armada.armada-agent-0.4.21")).unwrap();
+        let roots = scratch("vsix-new-win");
+        write_minimal_vsix(&roots.join("armada-agent-0.4.23.vsix"), "0.4.23");
+        let (status, path) = install_vsix_from_roots_in(&[roots.clone()], &dir);
+        assert_eq!(status, "ok");
+        assert!(path.is_none());
+        assert!(dir.join("armada.armada-agent-0.4.23/package.json").is_file());
+        let rec: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(dir.join("extensions.json")).unwrap()).unwrap();
+        assert_eq!(rec[0]["version"], "0.4.23");
+        assert_eq!(rec[0]["relativeLocation"], "armada.armada-agent-0.4.23");
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&roots);
+    }
+
     #[test]
     fn missing_vsix_is_manual_path_shown() {
         let dir = scratch("novsix");
@@ -749,6 +1056,80 @@ mod tests {
     }
 
     #[test]
+    fn is_gui_cursor_exe_detects_windows_app() {
+        assert!(is_gui_cursor_exe(Path::new(
+            r"C:\Users\me\AppData\Local\Programs\cursor\Cursor.exe"
+        )));
+        assert!(is_gui_cursor_exe(Path::new(r"C:\Cursor.exe")));
+        assert!(!is_gui_cursor_exe(Path::new("cursor")));
+        assert!(!is_gui_cursor_exe(Path::new(
+            r"C:\Users\me\AppData\Local\Programs\cursor\resources\app\bin\cursor.cmd"
+        )));
+    }
+
+    #[test]
+    fn vsix_install_via_unpack_is_windows_only() {
+        assert!(vsix_install_via_unpack("windows"));
+        assert!(!vsix_install_via_unpack("macos"));
+        assert!(!vsix_install_via_unpack("linux"));
+    }
+
+    #[test]
+    fn upsert_armada_agent_extension_json_updates_existing() {
+        let raw = r#"[{"identifier":{"id":"anysphere.remote-ssh"},"version":"1.0.0"},{"identifier":{"id":"armada.armada-agent"},"version":"0.4.21","relativeLocation":"armada.armada-agent-0.4.21"}]"#;
+        let next = upsert_armada_agent_extension_json(
+            raw,
+            "0.4.23",
+            "armada.armada-agent-0.4.23",
+            r"c:\Users\PC\.cursor\extensions\armada.armada-agent-0.4.23",
+            11,
+        )
+        .unwrap();
+        let v: serde_json::Value = serde_json::from_str(&next).unwrap();
+        assert_eq!(v[0]["identifier"]["id"], "anysphere.remote-ssh");
+        assert_eq!(v[1]["version"], "0.4.23");
+        assert_eq!(v[1]["relativeLocation"], "armada.armada-agent-0.4.23");
+        assert_eq!(v[1]["metadata"]["source"], "vsix");
+        assert_eq!(
+            v[1]["location"]["external"],
+            "file:///c%3A/Users/PC/.cursor/extensions/armada.armada-agent-0.4.23"
+        );
+    }
+
+    #[test]
+    fn unpack_vsix_writes_package_json_and_manifest() {
+        let dir = scratch("unpack-vsix");
+        let vsix = dir.join("armada-agent-0.4.23.vsix");
+        write_minimal_vsix(&vsix, "0.4.23");
+        let dest = dir.join("out");
+        unpack_vsix_to_dir(&vsix, &dest).unwrap();
+        assert_eq!(
+            fs::read_to_string(dest.join("package.json")).unwrap(),
+            r#"{"name":"armada-agent","version":"0.4.23"}"#
+        );
+        assert!(dest.join(".vsixmanifest").is_file());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn probe_vsix_skips_gui_cursor_exe() {
+        let vsix = PathBuf::from("/tmp/real-armada.vsix");
+        let clis = [
+            PathBuf::from(r"C:\Users\me\AppData\Local\Programs\cursor\Cursor.exe"),
+            PathBuf::from(r"C:\Users\me\AppData\Local\Programs\cursor\resources\app\bin\cursor.cmd"),
+        ];
+        let mut seen = Vec::new();
+        let (status, path) = probe_vsix_cli_chain(&vsix, &clis, |cli, _| {
+            seen.push(cli.to_path_buf());
+            Some((true, "successfully installed".into(), String::new()))
+        });
+        assert_eq!(status, "ok");
+        assert!(path.is_none());
+        assert_eq!(seen.len(), 1);
+        assert!(seen[0].ends_with("cursor.cmd"));
+    }
+
+    #[test]
     fn cursor_cli_candidates_follow_spec_order() {
         let displays: Vec<String> = cursor_cli_candidates()
             .iter()
@@ -760,14 +1141,15 @@ mod tests {
             .position(|s| s.contains("Cursor.app/Contents/Resources/app/bin/cursor"));
         assert!(app_i.is_some(), "macOS Cursor.app CLI must be a candidate");
         assert!(app_i.unwrap() > 0);
+        assert!(
+            displays.iter().all(|s| !s.ends_with("Cursor.exe") && !s.ends_with("cursor.exe")),
+            "join must not spawn Cursor GUI: {displays:?}"
+        );
         if let Ok(local) = env::var("LOCALAPPDATA") {
-            let exe = format!("{local}/Programs/cursor/Cursor.exe");
             let cmd = format!("{local}/Programs/cursor/resources/app/bin/cursor.cmd");
-            let exe_i = displays.iter().position(|s| s == &exe || s.ends_with("Cursor.exe"));
             let cmd_i = displays.iter().position(|s| s == &cmd || s.ends_with("cursor.cmd"));
-            assert!(exe_i.is_some() && cmd_i.is_some());
-            assert!(app_i.unwrap() < exe_i.unwrap());
-            assert!(exe_i.unwrap() < cmd_i.unwrap());
+            assert!(cmd_i.is_some(), "windows cursor.cmd must remain a candidate");
+            assert!(app_i.unwrap() < cmd_i.unwrap());
         }
     }
 
@@ -846,6 +1228,43 @@ mod tests {
             health_name: Some("armada-hub".into()),
             auth: Auth::Ok,
         }));
+    }
+
+    #[test]
+    fn windows_hooks_strip_skipped_when_already_clean() {
+        assert!(should_skip_windows_hooks_strip(""));
+        assert!(should_skip_windows_hooks_strip(
+            r#"{"version":1,"hooks":{"stop":[],"sessionStart":[]}}"#,
+        ));
+        assert!(should_skip_windows_hooks_strip(
+            r#"{"hooks":{"stop":[{"command":"other.ps1"}]}}"#,
+        ));
+    }
+
+    #[test]
+    fn windows_hooks_strip_runs_when_spool_command_present() {
+        assert!(!should_skip_windows_hooks_strip(
+            r#"{"hooks":{"stop":[{"command":"C:\\hooks\\armada-spool.ps1"}]}}"#,
+        ));
+        assert!(!should_skip_windows_hooks_strip(
+            r#"{"hooks":{"afterShellExecution":[{"command":"armada-spool.exe"}]}}"#,
+        ));
+    }
+
+    #[test]
+    fn gui_child_wait_times_out_and_kills() {
+        let mut cmd = if cfg!(windows) {
+            let mut c = Command::new("cmd");
+            c.args(["/C", "ping", "-n", "20", "127.0.0.1"]);
+            c
+        } else {
+            let mut c = Command::new("sleep");
+            c.arg("20");
+            c
+        };
+        apply_gui_child_stdio(&mut cmd);
+        let status = run_child_timeout(&mut cmd, Duration::from_millis(400));
+        assert_eq!(status, "failed");
     }
 
     #[test]

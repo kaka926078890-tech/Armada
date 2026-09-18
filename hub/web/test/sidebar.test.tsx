@@ -39,7 +39,7 @@ describe("Sidebar extension lag", () => {
         slots={[slot]}
         machines={[{
           id: "m-win", name: "PF39WTSM", os: "win32", cursor_version: "1.128.0",
-          extension_version: "0.4.23", open_workspaces: "[]", status: "online", last_seen_at: 1,
+          extension_version: REQUIRED_EXTENSION_VERSION, open_workspaces: "[]", status: "online", last_seen_at: 1,
           display_name: "Win Destop",
         }]}
         allRuns={[]}

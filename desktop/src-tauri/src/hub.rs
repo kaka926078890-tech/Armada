@@ -4,6 +4,7 @@ use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use std::{env, thread};
@@ -19,6 +20,19 @@ const DENY_IFACE: &[&str] = &[
 pub struct HubState {
     owned: Mutex<Option<Child>>,
     pub discovery: Mutex<crate::discovery::DiscoveryState>,
+    joining: AtomicBool,
+}
+
+impl HubState {
+    pub fn try_begin_join(&self) -> bool {
+        self.joining
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+    }
+
+    pub fn end_join(&self) {
+        self.joining.store(false, Ordering::SeqCst);
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -391,6 +405,37 @@ pub(crate) fn exchange_join_ticket(host: &str, port: u16, ticket: &str) -> Resul
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string())
         .ok_or_else(|| "unauthorized".to_string())
+}
+
+pub fn is_operator_token(token: &str) -> bool {
+    token.len() == 64 && token.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+pub fn saved_operator_token_for_hub(
+    saved_hub: Option<&str>,
+    saved_token: Option<&str>,
+    host: &str,
+    port: u16,
+) -> Option<String> {
+    let token = saved_token.filter(|t| is_operator_token(t))?;
+    let hub = saved_hub?;
+    let (saved_host, saved_port) = strip_hub(hub);
+    if saved_host == host && saved_port == port {
+        Some(token.to_string())
+    } else {
+        None
+    }
+}
+
+pub fn join_bearer_after_ticket(
+    exchanged: Result<String, String>,
+    saved: Option<String>,
+) -> Result<String, String> {
+    match exchanged {
+        Ok(token) => Ok(token),
+        Err(e) if e == "unauthorized" || e == "unreachable" => saved.ok_or(e),
+        Err(e) => Err(e),
+    }
 }
 
 fn revoke_join_tickets() {
@@ -808,7 +853,7 @@ fn maybe_advertise(
 }
 
 #[tauri::command]
-pub fn start_fleet_browse(app: tauri::AppHandle, state: tauri::State<'_, HubState>) -> Result<(), String> {
+pub async fn start_fleet_browse(app: tauri::AppHandle, state: tauri::State<'_, HubState>) -> Result<(), String> {
     let ips: Vec<String> = pick_share_candidates(&list_ifaces()).into_iter().map(|s| s.ipv4).collect();
     crate::discovery::start_browse(app, &state, ips)
 }
@@ -820,8 +865,21 @@ pub fn stop_fleet_browse(state: tauri::State<'_, HubState>) -> Result<(), String
 }
 
 #[tauri::command]
-pub fn join_fleet(app: tauri::AppHandle, uri: String, _state: tauri::State<'_, HubState>) -> Result<JoinFleetResult, String> {
-    let (host, port, token) = parse_join_uri(&uri).map_err(|e| e.to_string())?;
+pub async fn join_fleet(
+    app: tauri::AppHandle,
+    uri: String,
+    state: tauri::State<'_, HubState>,
+) -> Result<JoinFleetResult, String> {
+    if !state.try_begin_join() {
+        return Err("join-in-flight".into());
+    }
+    let out = join_fleet_inner(&app, &uri);
+    state.end_join();
+    out
+}
+
+fn join_fleet_inner(app: &tauri::AppHandle, uri: &str) -> Result<JoinFleetResult, String> {
+    let (host, port, token) = parse_join_uri(uri).map_err(|e| e.to_string())?;
     let shares = pick_share_candidates(&list_ifaces());
     let local_ips: Vec<String> = shares.iter().map(|s| s.ipv4.clone()).collect();
     let (cursor_hub_url, webview_origin, join_self) = resolve_hub_targets(true, &host, port, &local_ips);
@@ -834,7 +892,17 @@ pub fn join_fleet(app: tauri::AppHandle, uri: String, _state: tauri::State<'_, H
         return Err("unreachable".into());
     }
     let token = if crate::discovery::is_join_ticket(&token) {
-        exchange_join_ticket(probe_host, probe_port, &token).map_err(|e| e)?
+        let saved = crate::attach::read_existing_creds();
+        let fallback = saved_operator_token_for_hub(
+            saved.0.as_deref(),
+            saved.1.as_deref(),
+            probe_host,
+            probe_port,
+        );
+        join_bearer_after_ticket(
+            exchange_join_ticket(probe_host, probe_port, &token),
+            fallback,
+        )?
     } else {
         token
     };
@@ -848,7 +916,7 @@ pub fn join_fleet(app: tauri::AppHandle, uri: String, _state: tauri::State<'_, H
             } else {
                 true
             };
-            let resource = resource_dir_from(&app);
+            let resource = resource_dir_from(app);
             let attach = crate::attach::run_local_attach(
                 resource.as_deref(),
                 &cursor_hub_url,
@@ -890,6 +958,61 @@ pub fn attach_cursor_on_owned(user_initiated: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn join_lock_rejects_a_second_caller_until_released() {
+        let state = HubState::default();
+        assert!(state.try_begin_join());
+        assert!(!state.try_begin_join());
+        state.end_join();
+        assert!(state.try_begin_join());
+        state.end_join();
+    }
+
+    #[test]
+    fn saved_operator_token_matches_lan_hub_only() {
+        let tok = "ab".repeat(32);
+        assert_eq!(
+            saved_operator_token_for_hub(Some("192.168.1.196:7380"), Some(&tok), "192.168.1.196", 7380)
+                .as_deref(),
+            Some(tok.as_str())
+        );
+        assert!(saved_operator_token_for_hub(
+            Some("192.168.1.196:7380"),
+            Some(&tok),
+            "10.0.0.2",
+            7380
+        )
+        .is_none());
+        assert!(saved_operator_token_for_hub(
+            Some("192.168.1.196:7380"),
+            Some("jt_"),
+            "192.168.1.196",
+            7380
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn join_bearer_falls_back_when_ticket_unauthorized() {
+        let saved = "cd".repeat(32);
+        assert_eq!(
+            join_bearer_after_ticket(Ok("fresh".into()), Some(saved.clone())).unwrap(),
+            "fresh"
+        );
+        assert_eq!(
+            join_bearer_after_ticket(Err("unauthorized".into()), Some(saved.clone())).unwrap(),
+            saved
+        );
+        assert_eq!(
+            join_bearer_after_ticket(Err("unauthorized".into()), None).unwrap_err(),
+            "unauthorized"
+        );
+        assert_eq!(
+            join_bearer_after_ticket(Err("lock".into()), Some(saved)).unwrap_err(),
+            "lock"
+        );
+    }
 
     #[test]
     fn create_attaches_cursor_ensure_does_not() {

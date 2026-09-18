@@ -12,6 +12,18 @@ describe("titleMatchesWorkspace", () => {
     expect(titleMatchesWorkspace("b.ts — armada-test-ws", "armada")).toBe(false);
     expect(titleMatchesWorkspace("a.ts — armada", "armada-test-ws")).toBe(false);
   });
+
+  test("matches Windows file - folder - Cursor title (2026-09-18 Win Destop CDP)", () => {
+    expect(titleMatchesWorkspace("logo.png - work - Cursor", "work")).toBe(true);
+    expect(titleMatchesWorkspace("● logo.png - work - Cursor", "work")).toBe(true);
+    expect(titleMatchesWorkspace("work - Cursor", "work")).toBe(true);
+  });
+
+  test("Windows sibling folder still does not match via includes", () => {
+    expect(titleMatchesWorkspace("b.ts - armada-test-ws - Cursor", "armada")).toBe(false);
+    expect(titleMatchesWorkspace("a.ts - armada - Cursor", "armada-test-ws")).toBe(false);
+    expect(titleMatchesWorkspace("logo.png - work - Cursor", "Cursor")).toBe(false);
+  });
 });
 
 describe("pickCdpPage", () => {
@@ -48,5 +60,24 @@ describe("pickCdpPage", () => {
       ok: false,
       reason: "WINDOW_TARGET_NOT_FOUND",
     });
+  });
+
+  test("picks Windows title with trailing Cursor app suffix", () => {
+    const hit = pickCdpPage(
+      [page("logo.png - work - Cursor", "ws://win")],
+      "C:\\Users\\PC\\Desktop\\work",
+    );
+    expect(hit).toEqual({ ok: true, wsUrl: "ws://win" });
+  });
+
+  test("Windows sibling folder still loses to the exact folder page", () => {
+    const hit = pickCdpPage(
+      [
+        page("b.ts - armada-test-ws - Cursor", "ws://wrong"),
+        page("a.ts - armada - Cursor", "ws://right"),
+      ],
+      "C:\\Users\\x\\armada",
+    );
+    expect(hit).toEqual({ ok: true, wsUrl: "ws://right" });
   });
 });

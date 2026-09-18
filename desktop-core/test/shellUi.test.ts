@@ -3,8 +3,10 @@ import { formatJoinUri, parseJoinUri } from "../src/joinUri";
 import {
   attachBanner,
   boardUrl,
+  canStartJoin,
   copiedToast,
   defaultLandingMode,
+  joinButtonLabel,
   decideBoardReopen,
   decideNeedToken,
   firstArmadaJoinUri,
@@ -20,6 +22,7 @@ import {
   shareJoinUri,
   shouldOpenBoardAfterCreate,
   shouldShowCreate,
+  fleetErrorCopy,
 } from "../src/shellUi";
 
 const token = "a".repeat(64);
@@ -174,6 +177,15 @@ describe("copiedToast", () => {
   });
 });
 
+describe("join in-flight", () => {
+  test("second join is ignored while the first is still running", () => {
+    expect(canStartJoin(false)).toBe(true);
+    expect(canStartJoin(true)).toBe(false);
+    expect(joinButtonLabel(false)).toBe("加入舰队");
+    expect(joinButtonLabel(true)).toBe("正在加入…");
+  });
+});
+
 describe("parsePastedJoin", () => {
   test("incomplete and invalid never yield a join uri", () => {
     expect(parsePastedJoin("armada://join?hub=1.2.3.4:7380")).toEqual({ error: "incomplete" });
@@ -185,6 +197,17 @@ describe("parsePastedJoin", () => {
     expect(firstArmadaJoinUri(["https://example", raw])).toBe(raw);
     expect(parsePastedJoin(firstArmadaJoinUri([raw])!)).toEqual({ uri: raw });
     expect(firstArmadaJoinUri(["https://example.com"])).toBeNull();
+  });
+});
+
+describe("fleetErrorCopy", () => {
+  test("maps ticket unauthorized instead of generic failure", () => {
+    expect(fleetErrorCopy("unauthorized")).toBe("加入票据无效或已过期，请让中台重新打开可发现");
+    expect(fleetErrorCopy("Command join_fleet failed: unauthorized")).toBe(
+      "加入票据无效或已过期，请让中台重新打开可发现",
+    );
+    expect(fleetErrorCopy("unreachable")).toBe("无法连接中台");
+    expect(fleetErrorCopy("something-else")).toBe("操作失败");
   });
 });
 

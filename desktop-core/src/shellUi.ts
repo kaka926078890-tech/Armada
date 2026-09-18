@@ -1,3 +1,4 @@
+import { cdpZombieCopy } from "./cdp";
 import { formatJoinUri, parseJoinUri } from "./joinUri";
 
 export type ShareCandidate = { ipv4: string; name: string; maybeUnreachable: boolean };
@@ -152,6 +153,14 @@ export function copiedToast(): string {
   return "已复制分享链接";
 }
 
+export function canStartJoin(inFlight: boolean): boolean {
+  return !inFlight;
+}
+
+export function joinButtonLabel(busy: boolean): string {
+  return busy ? "正在加入…" : "加入舰队";
+}
+
 export function firstArmadaJoinUri(urls: string[]): string | null {
   for (const u of urls) {
     const t = u.trim();
@@ -167,6 +176,38 @@ export function parsePastedJoin(raw: string): { uri: string } | { error: "incomp
   const r = parseJoinUri(trimmed);
   if ("error" in r) return { error: r.error };
   return { uri: trimmed };
+}
+
+export function fleetErrorCopy(raw: string): string {
+  const blob = raw.toLowerCase();
+  const codes: [string, string][] = [
+    ["incomplete", "链接不完整"],
+    ["invalid", "链接无效"],
+    ["unreachable", "无法连接中台"],
+    ["unauthorized", "加入票据无效或已过期，请让中台重新打开可发现"],
+    ["foreign-armada", "7380 上已有另一份 Armada（令牌不同）"],
+    ["port-busy", "7380 被其他程序占用"],
+    ["join-must-not-spawn", "加入不会在本机启动中台"],
+    ["join-in-flight", "正在加入，请稍候"],
+    ["create-macos-only", "创建舰队仅支持 macOS，请使用加入舰队"],
+    ["no-share-ip", noShareIpCopy()],
+    ["not-authorized", "鉴权失败，未写入 Cursor 设置"],
+    ["spawn-timeout", "中台启动超时"],
+    ["hub-root-missing", "未找到 hub 源码"],
+    ["bun-missing", "未找到 Bun"],
+    ["token-missing", "缺少令牌"],
+    ["zombie", cdpZombieCopy()],
+    ["open-failed", cdpZombieCopy()],
+    ["path-not-absolute", "请选择绝对路径的文件夹"],
+    ["path-not-dir", "路径不是文件夹"],
+    ["launcher-missing", "未找到 Cursor 启动器脚本"],
+    ["cursor-missing", "找不到 Cursor"],
+    ["cancelled", "已取消"],
+  ];
+  for (const [code, msg] of codes) {
+    if (blob.includes(code)) return msg;
+  }
+  return "操作失败";
 }
 
 export function attachBanner(attach: LocalAttachView | null | undefined): AttachBanner {
