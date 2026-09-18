@@ -192,12 +192,12 @@ run.generation { runId, generation_id }
 | `steered` / `injecting` / `unknown` | 不挡 | injecting 只占槽；steer 吃当前 gen |
 | 无 `queued` | 现网表 | 不变 |
 
-**QUEUE_DRAIN 闭合（必须）：**
+**QUEUE_DRAIN / BG_DRAIN 闭合（必须）：**
 
-1. ignore 时把本次 stop payload + 当时 `live_generation_id` 写入 `deferred_stop`（覆盖同 gen 的旧快照）。
+1. ignore 时把本次 stop payload + 当时 `live_generation_id` 写入 `deferred_stop`（覆盖同 gen 的旧快照；BG_DRAIN 带 `reason`）。
 2. outstanding `queued` 清零后：若 `deferred_stop` 非空且 live 仍是该 gen 且期间未 rearm / 未 `attachHubGeneration` 新 gen → **同步重放** `onStopEvent(deferred_stop)`，然后清空。
-3. 认领导致 Mac BSP rearm 或 Win `attachHubGeneration` 新 gen → **立刻作废** `deferred_stop`（旧轮 stop 不得盖新 gen）。
-4. 120s 超时 **从第一次 QUEUE_DRAIN 写入 `deferred_stop` 起算**，不得从 inject/`created_at` 起算（长生成会误杀托盘）。超时：仍 `queued` 的条 → `failed`，然后走 2。
+3. 认领导致 Mac BSP rearm、主人 UUID `preToolUse` rearm 或 Win `attachHubGeneration` 新 gen → **立刻作废** `deferred_stop`（旧轮 stop 不得盖新 gen）。
+4. 120s 超时 **从第一次 drain 写入 `deferred_stop` 起算**，不得从 inject/`created_at` 起算。QUEUE_DRAIN 超时：仍 `queued` 的条 → `failed`，然后走 2。BG_DRAIN 同一时钟：子代理 jsonl 仍开着则 `maybeReplay` 直接 return；已收口且 live 未换则重放。不在子代理 `turn_ended` 当下同步重放——协议续轮的 UUID `preToolUse` 可能晚于最后一条 child jsonl（`r-43b92cc0`）。
 
 **备选：** 超时直接 `setStatus(completed)`。不选：没有 matching stop 重放会与 `generation_id` 合同脱节；Win synth 依赖 stamp。
 
@@ -378,3 +378,4 @@ turn_ended(G1) + queued → ignore QUEUE_DRAIN
 | --- | --- |
 | 2026-09-14 | 初稿。方案 1。Mac steer/queue Enter 已点通。Windows 一起实现、未验证。 |
 | 2026-09-14 | v1.1：Grok 4.6 独立评审。闭合 QUEUE_DRAIN（`deferred_stop` + 重放；120s 从 drain 起算）；outstanding 只计 `queued`；unknown 不当 queued；`onRunAck` running 分支；running 禁止 bindKnown/FollowupStopGuard；Win 认领必须 `run.generation`；认领限增量 jsonl；展示不写 hub BSP；v1 只保证焦点卡；`OUTBOUND_LIMIT`；running 纯文本；回滚清 outbound 表。 |
+| 2026-09-18 | BG_DRAIN 与 QUEUE_DRAIN 共用 120s 重放。子代理 jsonl 收口且 live 未换才 apply；不在 child `turn_ended` 当下重放（`r-43b92cc0` 协议续轮）。 |

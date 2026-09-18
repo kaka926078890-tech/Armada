@@ -249,6 +249,77 @@ describe("event ingest", () => {
     ws.close();
   });
 
+  test("BG_DRAIN: children closed and live unchanged → drain timeout replays completed", async () => {
+    // No protocol resume. Parent matching stop drained on open child jsonl;
+    // after turn_ended the latch is gone. Same 120s closure as QUEUE_DRAIN.
+    const live = "b855863b-cbb8-4c00-a0ba-23b6c69ddcf0";
+    const child = "e5a49ca6-853c-443c-8cb9-ae22b9f2dd9d";
+    const { ws, api, runId } = await startBoundRun();
+    ws.send(JSON.stringify(ev(runId, 1, "beforeSubmitPrompt", {
+      conversation_id: "cid-1", generation_id: live, prompt: "hi",
+    })));
+    ws.send(JSON.stringify({
+      type: "run.event", runId, source: "subagent-transcript", seq: 2, ts: Date.now(),
+      payload: { __subagent_cid: child, role: "assistant", message: { content: [{ type: "text", text: "review" }] } },
+    }));
+    ws.send(JSON.stringify(ev(runId, 3, "stop", {
+      status: "completed", conversation_id: "cid-1", generation_id: live,
+    })));
+    await new Promise((r) => setTimeout(r, 80));
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).status).toBe("running");
+
+    ws.send(JSON.stringify({
+      type: "run.event", runId, source: "subagent-transcript", seq: 4, ts: Date.now(),
+      payload: { type: "turn_ended", status: "success", __subagent_cid: child },
+    }));
+    await new Promise((r) => setTimeout(r, 80));
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).status).toBe("running");
+
+    hub!.runs.sweepTimeouts(Date.now() + 121_000);
+    await new Promise((r) => setTimeout(r, 40));
+    const after = (await (await api(`/api/runs/${runId}`)).json()) as any;
+    expect(after.status).toBe("completed");
+    expect(after.live_generation_id).toBeNull();
+    ws.close();
+  });
+
+  test("BG_DRAIN timeout does not complete after UUID preToolUse rearms", async () => {
+    const G1 = "b855863b-cbb8-4c00-a0ba-23b6c69ddcf0";
+    const G2 = "b89b8455-84de-4c1c-823d-4aeba602fdee";
+    const child = "e5a49ca6-853c-443c-8cb9-ae22b9f2dd9d";
+    const { ws, api, runId } = await startBoundRun();
+    ws.send(JSON.stringify(ev(runId, 1, "beforeSubmitPrompt", {
+      conversation_id: "cid-1", generation_id: G1, prompt: "hi",
+    })));
+    ws.send(JSON.stringify({
+      type: "run.event", runId, source: "subagent-transcript", seq: 2, ts: Date.now(),
+      payload: { __subagent_cid: child, role: "assistant", message: { content: [{ type: "text", text: "review" }] } },
+    }));
+    ws.send(JSON.stringify(ev(runId, 3, "stop", {
+      status: "completed", conversation_id: "cid-1", generation_id: G1,
+    })));
+    ws.send(JSON.stringify({
+      type: "run.event", runId, source: "subagent-transcript", seq: 4, ts: Date.now(),
+      payload: { type: "turn_ended", status: "success", __subagent_cid: child },
+    }));
+    ws.send(JSON.stringify(ev(runId, 5, "preToolUse", {
+      conversation_id: "cid-1", generation_id: G2, tool_name: "Read",
+    })));
+    await new Promise((r) => setTimeout(r, 100));
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).live_generation_id).toBe(G2);
+
+    hub!.runs.sweepTimeouts(Date.now() + 121_000);
+    await new Promise((r) => setTimeout(r, 40));
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).status).toBe("running");
+
+    ws.send(JSON.stringify(ev(runId, 6, "stop", {
+      status: "completed", conversation_id: "cid-1", generation_id: G2,
+    })));
+    await new Promise((r) => setTimeout(r, 80));
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).status).toBe("completed");
+    ws.close();
+  });
+
   test("after completed stop, later transcript assistant still stores (background Task follow-up)", async () => {
     const { ws, api, runId } = await startBoundRun();
     ws.send(JSON.stringify(ev(runId, 1, "stop", { status: "completed", conversation_id: "cid-1" })));

@@ -193,6 +193,8 @@ export class RunService {
 
   private maybeReplayDeferredStop(runId: string): void {
     if (this.hasOutstandingOutbound(runId)) return;
+    // Open child jsonl is the BG_DRAIN latch. Do not skip by reason=BG_DRAIN:
+    // protocol resume may still rearm; sweepTimeouts applies the same 120s as QUEUE_DRAIN.
     if (this.hasOpenSubagentTranscript(runId)) return;
     const row = this.db.query("SELECT deferred_stop, live_generation_id FROM runs WHERE id=?1").get(runId) as {
       deferred_stop: string | null; live_generation_id: string | null;
@@ -203,7 +205,6 @@ export class RunService {
       this.clearDeferredStop(runId);
       return;
     }
-    if (snap.reason === "BG_DRAIN") return;
     if (genOf(row.live_generation_id) !== genOf(snap.live_generation_id)) {
       this.clearDeferredStop(runId);
       return;
@@ -735,7 +736,6 @@ export class RunService {
     for (const r of drained) {
       let snap: { drained_at?: number; reason?: string };
       try { snap = JSON.parse(r.deferred_stop); } catch { continue; }
-      if (snap.reason === "BG_DRAIN") continue;
       if (typeof snap.drained_at !== "number" || now - snap.drained_at < QUEUE_DRAIN_MS) continue;
       this.failQueuedOutbound(r.id);
       this.maybeReplayDeferredStop(r.id);
