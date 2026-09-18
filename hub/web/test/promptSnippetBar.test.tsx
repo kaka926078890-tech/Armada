@@ -2,10 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { renderToStaticMarkup } from "react-dom/server";
-import { PromptSnippetBar } from "../src/components/PromptSnippetBar";
+import { AddSnippetDialog, PromptSnippetBar } from "../src/components/PromptSnippetBar";
 import type { PromptSnippet } from "../src/uiPrefs";
 
 const root = join(import.meta.dir, "..");
+const mobile = join(root, "..", "..", "mobile");
 const sample: PromptSnippet = { id: "ok-id-01", title: "规范", body: "先写测试" };
 
 describe("PromptSnippetBar", () => {
@@ -15,10 +16,33 @@ describe("PromptSnippetBar", () => {
     );
     expect(html).toContain("规范");
     expect(html).toContain('aria-label="添加快捷提示词"');
-    expect(html).toContain("+");
+    expect(html).toContain("添加");
+    expect(html).not.toContain('role="dialog"');
     expect(html).not.toContain("删除");
     expect(html).not.toContain("✕");
     expect(html).not.toContain("×");
+  });
+
+  test("add dialog is a dedicated overlay, not an inline nested form", () => {
+    const html = renderToStaticMarkup(
+      <AddSnippetDialog
+        title=""
+        body=""
+        error=""
+        saving={false}
+        onTitle={() => {}}
+        onBody={() => {}}
+        onCancel={() => {}}
+        onSave={() => {}}
+      />,
+    );
+    expect(html).toContain('role="dialog"');
+    expect(html).toContain("添加快捷提示词");
+    expect(html).toContain("例如：代码审查");
+    expect(html).toContain("点标题后追加到输入框末尾");
+    expect(html).toContain("取消");
+    expect(html).toContain("保存");
+    expect(html).toContain("fixed inset-0");
   });
 
   test("disables add at 30 snippets", () => {
@@ -59,5 +83,24 @@ describe("prompt snippet wiring", () => {
     expect(app).toContain("setSnippets(prev)");
     expect(app).not.toContain("putUiPrefs({ promptSnippets");
     expect(app).not.toMatch(/putUiPrefs\(\{[^}]*promptSnippets/);
+  });
+
+  test("app dispatch syncs snippets and does not create", () => {
+    const ios = readFileSync(join(mobile, "ios/ArmadaRemote/Screens.swift"), "utf8");
+    const android = readFileSync(join(mobile, "android/app/src/main/java/app/armada/remote/MainActivity.kt"), "utf8");
+    const iosDispatch = ios.slice(ios.indexOf("struct DispatchSheet"), ios.indexOf("struct DetailPromptCard"));
+    expect(iosDispatch).toContain("loadSnippets");
+    expect(iosDispatch).toContain("appendSnippetBody");
+    expect(iosDispatch).not.toContain("addingSnippet");
+    expect(iosDispatch).not.toContain("saveSnippets");
+    expect(iosDispatch).not.toContain("UUID().uuidString");
+    const androidDispatch = android.slice(android.indexOf("fun DispatchSheet"), android.indexOf("fun RunDetailScreen"));
+    expect(androidDispatch).toContain("loadSnippets");
+    expect(androidDispatch).toContain("appendSnippetBody");
+    expect(androidDispatch).not.toContain("addingSnippet");
+    expect(androidDispatch).not.toContain("saveSnippets");
+    expect(androidDispatch).not.toContain("UUID.randomUUID");
+    expect(ios).toContain("还没有快捷提示词，请在中台添加");
+    expect(android).toContain("还没有快捷提示词，请在中台添加");
   });
 });

@@ -38,24 +38,30 @@ function SnippetRow({
   };
 
   return (
-    <div className="flex flex-col gap-1.5 rounded border border-zinc-800 p-2">
-      <input
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
-        className="px-2 py-1 rounded bg-zinc-950 border border-zinc-700 text-[13px]"
-        aria-label="标题"
-      />
-      <textarea
-        value={body}
-        onChange={(e) => setBody(e.target.value)}
-        rows={3}
-        className="px-2 py-1 rounded bg-zinc-950 border border-zinc-700 text-[13px] resize-y"
-        aria-label="提示词"
-      />
+    <div className="flex flex-col gap-2 rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+      <label className="flex flex-col gap-1">
+        <span className="text-[11px] font-medium text-zinc-500">标题</span>
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          className="h-8 px-2.5 rounded-md bg-zinc-950 border border-zinc-700 text-[13px] outline-none focus:border-sky-500"
+          aria-label="标题"
+        />
+      </label>
+      <label className="flex flex-col gap-1">
+        <span className="text-[11px] font-medium text-zinc-500">提示词</span>
+        <textarea
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          rows={3}
+          className="px-2.5 py-2 rounded-md bg-zinc-950 border border-zinc-700 text-[13px] leading-relaxed resize-y outline-none focus:border-sky-500"
+          aria-label="提示词"
+        />
+      </label>
       {error && <div className="text-red-400 text-sm">{error}</div>}
       <div className="flex justify-end gap-2">
-        <button type="button" disabled={busy} className={`${SEG} ${OFF}`} onClick={() => void run(() => onSave({ ...snippet, title, body }))}>保存</button>
-        <button type="button" disabled={busy} className={`${SEG} ${OFF}`} onClick={() => void run(onDelete)}>删除</button>
+        <button type="button" disabled={busy} className="h-7 px-2.5 rounded-md text-[12px] text-red-300 hover:bg-red-950/40 disabled:opacity-40" onClick={() => void run(onDelete)}>删除</button>
+        <button type="button" disabled={busy} className="h-7 px-2.5 rounded-md text-[12px] bg-sky-600 hover:bg-sky-500 text-white disabled:opacity-40" onClick={() => void run(() => onSave({ ...snippet, title, body }))}>保存</button>
       </div>
     </div>
   );
@@ -111,7 +117,7 @@ export default function SettingsModal({
           <div className="text-[11px] uppercase tracking-wide text-zinc-500 mb-1.5">快捷提示词</div>
           {snippetError && <div className="text-red-400 text-sm mb-1.5">{snippetError}</div>}
           {snippets.length === 0 ? (
-            <div className="text-[12px] text-zinc-500">还没有快捷提示词，在输入框上方点 + 添加</div>
+            <div className="text-[12px] text-zinc-500">还没有快捷提示词，在输入框上方点添加</div>
           ) : (
             <div className="flex flex-col gap-2">
               {snippets.map((s) => (

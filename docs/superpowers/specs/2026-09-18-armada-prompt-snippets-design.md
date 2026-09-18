@@ -16,9 +16,9 @@
 | 项 | 内容 |
 | --- | --- |
 | 问题 | 派发弹窗与任务详情续聊框都是纯 textarea。没有可复用的提示词入口。App 同样没有。 |
-| 核心方案 | **方案 1。** hub 一份 `promptSnippets` 存在 `~/.armada/ui-prefs.json`。读写走独立 `GET/PUT /api/prompt-snippets` 与 `/mobile/prompt-snippets`。输入框上方点标题追加 `body`；`+` 新增；设置页改/删。 |
+| 核心方案 | **方案 1。** hub 一份 `promptSnippets` 存在 `~/.armada/ui-prefs.json`。读写走独立 `GET/PUT /api/prompt-snippets` 与 `/mobile/prompt-snippets`。输入框上方点标题追加 `body`。**新增只在中台**：点「添加」打开覆盖对话框。App **只 GET 同步 + 插入**，派发/续聊不创建。设置页中台与 App 均可改/删。 |
 | 关键约束 | ① 权威只在 hub 文件。② App **禁止** 读写 `/api/ui-prefs`（外观规格不废止）。③ 不进 `RunSnap` / SSE。④ PUT 整表替换，上限 30。⑤ 插入不发送。 |
-| 明确不做 | 按仓分组；拖拽排序；导入导出；默认内置词；点胶囊即发送；中转持久化 snippets 表；冲突 OT；改 hook/CDP/stop。 |
+| 明确不做 | 按仓分组；拖拽排序；导入导出；默认内置词；点胶囊即发送；中转持久化 snippets 表；冲突 OT；改 hook/CDP/stop；**App 派发/续聊创建快捷提示词**。 |
 
 **可行性：** 操作员偏好 CRUD，不是 IDE/CDP 写路径，不触发 `armada-feasibility-before-solution`。被控 Mac / Windows 无差异。
 
@@ -36,11 +36,11 @@
 | # | 原始诉求 | 设计映射 |
 | --- | --- | --- |
 | R1 | 输入框上方可自定义快捷提示词 | 派发弹窗 + 续聊框上方同一条 `PromptSnippetBar` |
-| R2 | 点 `+` 快速添加：标题 + 提示词 | 对话框两字段；PUT 整表，新项 append |
+| R2 | 点「添加」快速添加：标题 + 提示词 | **仅中台**覆盖对话框两字段；PUT 整表，新项 append。App 不创建 |
 | R3 | 点入口把提示词放到输入框**最末尾** | `appendSnippetBody`：空框填入；非空则必要时补 `\n` 再追加 `body` |
-| R4 | 两块都要（派发 + 续聊） | `DispatchModal` 与 `RunDetail` 共用组件；App `DispatchSheet` 派发/续聊同一套 |
-| R5 | App 也需要同一套 | 中转 `/mobile/prompt-snippets` → hub 同文件；禁止各端本地分叉 |
-| R6 | 能加、能改、能删；删除放设置 | 胶囊只插入/`+`；`SettingsModal` / `SettingsView` / `SettingsScreen` 列表编辑+删除 |
+| R4 | 两块都要（派发 + 续聊） | `DispatchModal` 与 `RunDetail` 共用组件；App `DispatchSheet` 派发/续聊同一套插入 |
+| R5 | App 也需要同一套 | 中转 GET `/mobile/prompt-snippets` → hub 同文件；禁止各端本地分叉；App 派发页不 PUT 新建 |
+| R6 | 能加、能改、能删；删除放设置 | 中台胶囊插入 +「添加」；App 胶囊只插入；`SettingsModal` / `SettingsView` / `SettingsScreen` 列表编辑+删除 |
 
 **诉求外、本规格不发明：** 按工作区分词库、云账号、拖拽、内置模板、语音自动带出提示词。
 
@@ -296,13 +296,14 @@ UI 固定文案：
 | 位置 | 文案 |
 | --- | --- |
 | 设置区块标题 | 快捷提示词 |
-| 添加对话框 | 标题 / 提示词 / 保存 / 取消 |
-| 达上限 `+` disabled title | 最多 30 条 |
-| 设置空列表 | 还没有快捷提示词，在输入框上方点 + 添加 |
+| 添加对话框 | 添加快捷提示词 / 标题 / 提示词 / 保存 / 取消 |
+| 达上限「添加」disabled title | 最多 30 条 |
+| 中台设置空列表 | 还没有快捷提示词，在输入框上方点添加 |
+| App 设置空列表 | 还没有快捷提示词，请在中台添加 |
 | 设置删除按钮 | 删除 |
 | 设置每行保存 | 保存 |
 
-设置交互冻结：每一行是「标题单行 + 提示词多行 + 保存 + 删除」。保存/删除都 PUT 整表。添加只在输入框上方 `+`，设置页 v1 不放第二套添加按钮。
+设置交互冻结：每一行是「标题单行 + 提示词多行 + 保存 + 删除」。保存/删除都 PUT 整表。添加只在**中台**输入框上方「添加」覆盖对话框；设置页 v1 不放第二套添加按钮。App 派发/续聊只插入已同步条目。
 
 ---
 
@@ -391,10 +392,10 @@ p95 目标：局域网 GET `< 200ms`（文件读）；中转往返受现网 15s 
 | --- | --- | --- |
 | A1 | hub | 缺文件 GET `{ snippets: [] }`；PUT 两条后 `ui-prefs.json` 含之且 `theme` 仍在 |
 | A2 | hub | 31 条 PUT → 400 `SNIPPET_LIMIT`；空 title → 400 `SNIPPET_INVALID`；文件未改 |
-| A3 | 中台 | 派发弹窗与续聊框上方都有胶囊和 `+`；点胶囊追加到末尾；不自动发送 |
+| A3 | 中台 | 派发弹窗与续聊框上方都有胶囊和「添加」；点添加打开覆盖对话框，不把表单嵌进输入条；点胶囊追加到末尾；不自动发送 |
 | A4 | 中台设置 | 能改标题/正文、能删除；胶囊上无删除叉 |
 | A5 | 中转 | hub 离线 GET/PUT `503 HUB_OFFLINE`；成功 JSON 仅 `snippets` |
-| A6 | iOS | 派发/续聊能插入；设置能删改；`SNIPPET_LIMIT` 中文不是 raw code，也不是「推送登记失败」 |
+| A6 | iOS | 派发/续聊能插入且**无创建表单**；打开 sheet 时 GET 同步；设置能删改；`SNIPPET_LIMIT` 中文不是 raw code，也不是「推送登记失败」 |
 | A7 | Android | 同 A6 |
 | A8 | 回归 | 外观设置原测试仍过；`runToSnap` 无新字段；App 无 `/api/ui-prefs` |
 | A9 | 打包 | 停 7380 源码 hub → overlay Armada.app → 创建舰队 → 设置里加一条 → 派发框能点入（`armada-desktop-packaged-verify`） |
@@ -464,3 +465,4 @@ p95 目标：局域网 GET `< 200ms`（文件读）；中转往返受现网 15s 
 | 2026-09-18 | 初稿。方案 1：`ui-prefs.json.promptSnippets` + 独立 `/api` 与 `/mobile`；胶囊插入/`+`；设置删改；App 同轮。写入时补：`SNIPPET_INVALID` 不得复用 `INVALID`；`relayAttach` 必须同步 cmd；GET 不占中转 rate 桶。 |
 | 2026-09-18 | 自检：禁止中台用带默认空数组的 `putUiPrefs` 覆盖 hub 词库；LS 镜像不算 snippets。 |
 | 2026-09-18 | 对照代码复审：PUT 重复 id / 空 id 为 `SNIPPET_INVALID`；设置行内保存+删除；`GET /api/ui-prefs` 默认体将含 `promptSnippets: []`（现网 `toEqual` 必须改）。状态改为实施基准。 |
+| 2026-09-18 | 产品修订：App 派发/续聊不再创建（只 GET 同步 + 插入）；中台添加改为覆盖对话框，不再把表单嵌进输入条。 |

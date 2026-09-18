@@ -499,27 +499,20 @@ struct WorkspaceHome: View {
 struct PromptSnippetChips: View {
     let snippets: [PromptSnippet]
     let onAppend: (String) -> Void
-    let onAdd: () -> Void
-
-    private var atLimit: Bool { snippets.count >= 30 }
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                ForEach(snippets) { snippet in
-                    Button(snippet.title) { onAppend(snippet.body) }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .clipShape(Capsule())
+        Group {
+            if !snippets.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(snippets) { snippet in
+                            Button(snippet.title) { onAppend(snippet.body) }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                                .clipShape(Capsule())
+                        }
+                    }
                 }
-                Button(action: onAdd) {
-                    Image(systemName: "plus")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .clipShape(Capsule())
-                .disabled(atLimit)
-                .accessibilityLabel(atLimit ? "最多 30 条快捷提示词" : "添加快捷提示词")
             }
         }
     }
@@ -533,11 +526,6 @@ struct DispatchSheet: View {
     @StateObject private var speech = PromptSpeech()
     @State private var sending = false
     @State private var err: String?
-    @State private var addingSnippet = false
-    @State private var snippetTitle = ""
-    @State private var snippetBody = ""
-    @State private var snippetError: String?
-    @State private var savingSnippet = false
     @Environment(\.dismiss) private var dismiss
 
     private var live: WorkspaceDTO {
@@ -579,35 +567,8 @@ struct DispatchSheet: View {
                         snippets: session.snippets,
                         onAppend: { body in
                             speech.prompt = appendSnippetBody(speech.prompt, body)
-                        },
-                        onAdd: {
-                            addingSnippet = true
-                            snippetError = nil
                         }
                     )
-                    if addingSnippet {
-                        VStack(alignment: .leading, spacing: 8) {
-                            TextField("标题", text: $snippetTitle)
-                            Text("提示词")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            TextEditor(text: $snippetBody)
-                                .frame(minHeight: 90)
-                            if let snippetError {
-                                Text(snippetError).foregroundStyle(.red).font(.caption)
-                            }
-                            HStack {
-                                Spacer()
-                                Button("取消") { resetSnippetForm() }
-                                    .disabled(savingSnippet)
-                                Button(savingSnippet ? "保存中…" : "保存") {
-                                    Task { await addSnippet() }
-                                }
-                                .disabled(savingSnippet)
-                            }
-                        }
-                        .padding(.vertical, 4)
-                    }
                     TextEditor(text: $speech.prompt)
                         .frame(minHeight: 220)
                         .font(.body)
@@ -653,30 +614,6 @@ struct DispatchSheet: View {
             }
             .onDisappear { speech.release() }
             .task { await session.loadSnippets() }
-        }
-    }
-
-    private func resetSnippetForm() {
-        addingSnippet = false
-        snippetTitle = ""
-        snippetBody = ""
-        snippetError = nil
-    }
-
-    private func addSnippet() async {
-        guard !savingSnippet else { return }
-        savingSnippet = true
-        defer { savingSnippet = false }
-        let snippet = PromptSnippet(
-            id: UUID().uuidString.lowercased(),
-            title: snippetTitle,
-            body: snippetBody
-        )
-        do {
-            try await session.saveSnippets(session.snippets + [snippet])
-            resetSnippetForm()
-        } catch {
-            snippetError = error.localizedDescription
         }
     }
 
@@ -1283,7 +1220,7 @@ struct SettingsView: View {
                     Text(error).foregroundStyle(.red).font(.caption)
                 }
                 if session.snippets.isEmpty {
-                    Text("还没有快捷提示词，在输入框上方点 + 添加")
+                    Text("还没有快捷提示词，请在中台添加")
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(session.snippets) { snippet in

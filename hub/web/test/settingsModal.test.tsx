@@ -42,7 +42,7 @@ describe("SettingsModal", () => {
     expect(html).toContain("正常");
     expect(html).toContain("超大");
     expect(html).toContain("快捷提示词");
-    expect(html).toContain("还没有快捷提示词，在输入框上方点 + 添加");
+    expect(html).toContain("还没有快捷提示词，在输入框上方点添加");
     expect(html).not.toContain("解绑");
     expect(html).not.toContain("跟随系统");
   });
