@@ -307,7 +307,7 @@ struct WorkspaceListView: View {
                 case .workspace(let w):
                     WorkspaceHome(workspace: w)
                 case .run(let id):
-                    RunDetailView(runId: id)
+                    RunDetailView(runId: id).id(id)
                 case .settings:
                     SettingsView()
                 }
@@ -901,6 +901,8 @@ struct RunDetailView: View {
         }
         .task(id: runId) {
             copied = false
+            mdHeight = 120
+            promptHeight = 40
             session.watchingId = runId
             session.markOpened(runId)
             await reload()

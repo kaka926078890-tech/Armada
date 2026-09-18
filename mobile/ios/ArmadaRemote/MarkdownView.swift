@@ -26,7 +26,7 @@ enum MarkdownHTML {
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
         <style>
         :root { color-scheme: \(dark ? "dark" : "light"); --md-scale: \(scale); }
-        html, body { margin: 0; padding: 0; }
+        html, body { margin: 0; padding: 0; height: auto; min-height: 0; }
         body {
           font: calc(13px * var(--md-scale))/1.65 -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif;
           color: \(fg);
@@ -235,6 +235,13 @@ enum MarkdownHTML {
     }
 }
 
+enum MarkdownHeight {
+    /// `documentElement.scrollHeight` follows the WKWebView frame (viewport), so a
+    /// later short reply keeps the previous long page's height and the outer
+    /// ScrollView overscrolls. `body.offsetHeight` is the content box.
+    static let measureJavaScript = "document.body ? document.body.offsetHeight : 0"
+}
+
 struct MarkdownWebView: UIViewRepresentable {
     let text: String
     @Binding var height: CGFloat
@@ -268,10 +275,10 @@ struct MarkdownWebView: UIViewRepresentable {
         var lastKey = ""
         var height: Binding<CGFloat> = .constant(120)
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            webView.evaluateJavaScript("document.documentElement.scrollHeight") { val, _ in
+            webView.evaluateJavaScript(MarkdownHeight.measureJavaScript) { val, _ in
                 let h = CGFloat((val as? NSNumber)?.doubleValue ?? 0)
                 DispatchQueue.main.async {
-                    if h > 0 { self.height.wrappedValue = h }
+                    self.height.wrappedValue = max(h, 1)
                 }
             }
         }
