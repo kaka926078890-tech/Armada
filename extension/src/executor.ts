@@ -69,6 +69,7 @@ export interface ExecutorDeps {
    * 全自动提交(CDP DOM 注入)。true / `{ ok:true }` 表示已写入并回车。
    * `NON_EMPTY_INPUT*`：框里是别人的草稿/引用芯片，禁止剪贴板往里贴。
    * `CDP_UNREACHABLE` / `CDP_CONNECT_FAIL*`：口不通，禁止剪贴板假 ack。
+   * `WINDOW_TARGET_*` / `NO_WS_URL`：口通但选不中工作区页，同样禁止剪贴板假 ack。
    * `reclaim`：Armada 自己留下的原文(取消回灌 / 上次写入未提交)，允许整框替换。
    */
   autoSubmit?: (
@@ -119,6 +120,14 @@ function isDirtyComposer(reason?: string): boolean {
 
 function isCdpDown(reason?: string): boolean {
   return reason === "CDP_UNREACHABLE" || (typeof reason === "string" && reason.startsWith("CDP_CONNECT_FAIL"));
+}
+
+/** 自动提交时这些失败不能降级成剪贴板 accepted。 */
+function isCdpHardFail(reason?: string): boolean {
+  return isCdpDown(reason)
+    || reason === "WINDOW_TARGET_NOT_FOUND"
+    || reason === "WINDOW_TARGET_AMBIGUOUS"
+    || reason === "NO_WS_URL";
 }
 
 export class Executor {
@@ -324,7 +333,7 @@ export class Executor {
         const first = autoSubmitOutcome(await this.deps.autoSubmit(workspaceRoot, prompt, { reclaim }));
         if (first.ok) return { submitted: true };
         if (isDirtyComposer(first.reason)) return { submitted: false, reason: "NON_EMPTY_INPUT" };
-        if (isCdpDown(first.reason)) return { submitted: false, reason: first.reason ?? "CDP_UNREACHABLE" };
+        if (isCdpHardFail(first.reason)) return { submitted: false, reason: first.reason ?? "CDP_UNREACHABLE" };
         return { submitted: false, reason: first.reason ?? "INJECT_FAILED" };
       } catch {
         return { submitted: false, reason: "INJECT_FAILED" };

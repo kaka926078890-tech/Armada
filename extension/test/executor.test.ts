@@ -297,6 +297,32 @@ describe("Executor dirty composer", () => {
       type: "run.ack", runId: "r1", status: "rejected", reason: "CDP_UNREACHABLE",
     });
   });
+
+  // 2026-09-18 Win Destop: logo.png - work - Cursor → WINDOW_TARGET_NOT_FOUND
+  // 两次 cdp submit failed 后仍 run.ack accepted（剪贴板假成功）。
+  test("WINDOW_TARGET_NOT_FOUND rejects startRun without clipboard fake accepted", async () => {
+    const { ex, acks } = makeExec({
+      autoSubmit: async () => ({ ok: false, reason: "WINDOW_TARGET_NOT_FOUND" }),
+    });
+    await ex.startRun({ runId: "r1", workspaceRoot: "/ws/a", prompt: "hello" });
+    expect(clipboardWrites).toEqual([]);
+    expect(acks[acks.length - 1]).toEqual({
+      type: "run.ack", runId: "r1", status: "rejected", reason: "WINDOW_TARGET_NOT_FOUND",
+    });
+  });
+
+  test("WINDOW_TARGET_AMBIGUOUS rejects followup without clipboard", async () => {
+    const { ex, acks } = makeExec({
+      autoSubmit: async () => ({ ok: false, reason: "WINDOW_TARGET_AMBIGUOUS" }),
+    });
+    await ex.followup({
+      runId: "r1", conversationId: "c1", prompt: "hello", workspaceRoot: "/ws/a",
+    });
+    expect(clipboardWrites).toEqual([]);
+    expect(acks[acks.length - 1]).toEqual({
+      type: "run.ack", runId: "r1", status: "rejected", reason: "WINDOW_TARGET_AMBIGUOUS",
+    });
+  });
 });
 
 describe("Executor answerAsk", () => {

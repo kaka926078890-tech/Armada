@@ -576,7 +576,7 @@ export function activate(context: vscode.ExtensionContext): void {
         core.sendRegister({
           type: "register", machineId, windowId,
           name: hostname(), os: `${process.platform}-${process.arch}`,
-          cursorVersion: vscode.version, extensionVersion: "0.4.25",
+          cursorVersion: vscode.version, extensionVersion: "0.4.26",
           openWorkspaces: workspaces(),
           cdpReady,
         });
