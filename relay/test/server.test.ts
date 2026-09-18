@@ -234,6 +234,34 @@ describe("relay serve", () => {
     ws.close();
   });
 
+  test("prompt-snippets missing array returns SNIPPET_INVALID via fake hub", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    ws.addEventListener("message", (e) => {
+      const msg = JSON.parse(String(e.data));
+      if (msg.type !== "cmd.promptSnippetsPut") return;
+      ws.send(JSON.stringify({
+        type: "cmd.result",
+        requestId: msg.requestId,
+        ok: false,
+        error: Array.isArray(msg.snippets) ? "UNEXPECTED_ARRAY" : "SNIPPET_INVALID",
+      }));
+    });
+    await Bun.sleep(50);
+    const response = await fetch(url(s, "/mobile/prompt-snippets"), {
+      method: "PUT",
+      headers: {
+        authorization: `Bearer ${fleet.operatorToken}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({}),
+    });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "SNIPPET_INVALID" });
+    ws.close();
+  });
+
   test("completed without finalText becomes NO_ASSISTANT_BODY", async () => {
     const s = start();
     const fleet = s.createFleet();

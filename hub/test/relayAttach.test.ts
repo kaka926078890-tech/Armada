@@ -67,6 +67,13 @@ describe("relay attach (HTTP hub)", () => {
     const getSnippets = await fetch(`http://127.0.0.1:${relay.port}/mobile/prompt-snippets`, { headers });
     expect(getSnippets.status).toBe(200);
     expect(await getSnippets.json()).toEqual({ snippets: [snippet] });
+    const invalidSnippets = await fetch(`http://127.0.0.1:${relay.port}/mobile/prompt-snippets`, {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({}),
+    });
+    expect(invalidSnippets.status).toBe(400);
+    expect(await invalidSnippets.json()).toEqual({ error: "SNIPPET_INVALID" });
 
     const d = await fetch(`http://127.0.0.1:${relay.port}/mobile/runs`, {
       method: "POST",

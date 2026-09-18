@@ -121,7 +121,7 @@ export function attachWithConfig(
       if (msg.type === "cmd.promptSnippetsPut") {
         const r = await hubFetch("/api/prompt-snippets", {
           method: "PUT",
-          body: JSON.stringify({ snippets: msg.snippets ?? [] }),
+          body: JSON.stringify({ snippets: msg.snippets }),
         });
         const body = await r.json().catch(() => ({})) as any;
         if (!r.ok) return fail(body.error ?? "HUB_ERROR");
