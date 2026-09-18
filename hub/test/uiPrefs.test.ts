@@ -3,9 +3,9 @@ import { mkdtempSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import {
-  UI_PREFS_DEFAULTS, normalizeUiPrefs, isWorkspaceKey,
+  UI_PREFS_DEFAULTS, normalizeUiPrefs, normalizePromptSnippets, isWorkspaceKey,
   readUiPrefs, writeUiPrefs, mergeUiPrefs,
-  assertPromptSnippets, fillSnippetIds, SNIPPET_ID_RE,
+  assertPromptSnippets, fillSnippetIds, SNIPPET_ID_RE, SNIPPET_MAX,
 } from "../src/uiPrefs";
 
 function tmpHome() { return mkdtempSync(join(tmpdir(), "armada-prefs-")); }
@@ -94,7 +94,7 @@ describe("promptSnippets", () => {
     expect(normalizeUiPrefs({}).promptSnippets).toEqual([]);
   });
 
-  test("read path drops illegal snippets and keeps first 30", () => {
+  test("read path drops illegal snippets", () => {
     const n = normalizeUiPrefs({
       promptSnippets: [
         { id: "bad", title: "x", body: "y" },
@@ -103,6 +103,25 @@ describe("promptSnippets", () => {
       ],
     });
     expect(n.promptSnippets).toEqual([{ id: "ok-id-01", title: "t", body: "b" }]);
+  });
+
+  test("normalize keeps first 30 legal snippets when 31 are stored", () => {
+    const raw = Array.from({ length: 31 }, (_, i) => ({
+      id: `id-${String(i).padStart(6, "0")}`,
+      title: "t",
+      body: "b",
+    }));
+    for (const s of raw) expect(s.id).toMatch(SNIPPET_ID_RE);
+
+    const viaNormalize = normalizePromptSnippets(raw);
+    expect(viaNormalize).toHaveLength(SNIPPET_MAX);
+    expect(viaNormalize.map((s) => s.id)).toEqual(
+      raw.slice(0, SNIPPET_MAX).map((s) => s.id),
+    );
+    expect(viaNormalize.some((s) => s.id === raw[30]!.id)).toBe(false);
+
+    const viaUiPrefs = normalizeUiPrefs({ promptSnippets: raw }).promptSnippets;
+    expect(viaUiPrefs).toEqual(viaNormalize);
   });
 
   test("merge promptSnippets keeps theme", () => {
