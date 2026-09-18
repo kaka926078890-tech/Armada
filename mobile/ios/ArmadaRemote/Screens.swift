@@ -131,6 +131,52 @@ struct VolumeButton: View {
     }
 }
 
+/// 详情页次要动作：复制 / 未读 / 隐藏。横排图标+文案，避免三个全宽描边按钮叠成表单。
+struct DetailActionBar: View {
+    struct Item: Identifiable {
+        let id: String
+        let title: String
+        let systemImage: String
+        let action: () -> Void
+    }
+
+    let items: [Item]
+
+    var body: some View {
+        if !items.isEmpty {
+            HStack(spacing: 0) {
+                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                    if index > 0 {
+                        Divider()
+                            .frame(height: 28)
+                            .opacity(0.5)
+                    }
+                    Button(action: item.action) {
+                        VStack(spacing: 5) {
+                            Image(systemName: item.systemImage)
+                                .font(.body.weight(.semibold))
+                                .symbolRenderingMode(.hierarchical)
+                                .frame(height: 22)
+                            Text(item.title)
+                                .font(.caption.weight(.semibold))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.75)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 52)
+                        .foregroundStyle(Color.accentColor)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(item.title)
+                }
+            }
+            .padding(.vertical, 4)
+            .padding(.horizontal, 4)
+            .background(Color(.secondarySystemFill), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+    }
+}
+
 struct RunRow: View {
     let run: RunDTO
     let unread: Bool
@@ -644,6 +690,7 @@ struct RunDetailView: View {
     @State private var mdHeight: CGFloat = 120
     @State private var promptHeight: CGFloat = 40
     @State private var showDispatch = false
+    @State private var copied = false
     @Environment(\.dismiss) private var dismiss
 
     private var slot: WorkspaceDTO? {
@@ -684,14 +731,6 @@ struct RunDetailView: View {
                             }
                         }
                     }
-                    VolumeButton(title: "复制正文", kind: .quiet) {
-                        UIPasteboard.general.string = run.finalText ?? ""
-                    }
-                    if session.canMarkUnread(run) {
-                        VolumeButton(title: "标为未读", kind: .quiet) {
-                            session.markUnread(runId, hold: true)
-                        }
-                    }
                     if run.isLive {
                         VolumeButton(title: "取消任务", kind: .danger) {
                             Task {
@@ -715,39 +754,6 @@ struct RunDetailView: View {
                             }
                         }
                     }
-                    if run.isArchived {
-                        VolumeButton(title: "取消隐藏", kind: .quiet) {
-                            Task {
-                                session.applyLocalArchive(runId, archived: false, snapshot: run)
-                                do {
-                                    let next = try await session.api().unarchive(runId: runId)
-                                    session.applyLocalArchive(runId, archived: false, snapshot: next)
-                                    err = nil
-                                    await reload()
-                                    await session.refresh()
-                                } catch {
-                                    session.revertLocalArchive(runId)
-                                    err = error.localizedDescription
-                                }
-                            }
-                        }
-                    } else if run.showsArchive {
-                        VolumeButton(title: "隐藏", kind: .quiet) {
-                            Task {
-                                session.applyLocalArchive(runId, archived: true, snapshot: run)
-                                do {
-                                    let next = try await session.api().archive(runId: runId)
-                                    session.applyLocalArchive(runId, archived: true, snapshot: next)
-                                    err = nil
-                                    await session.refresh()
-                                    dismiss()
-                                } catch {
-                                    session.revertLocalArchive(runId)
-                                    err = hideError(error)
-                                }
-                            }
-                        }
-                    }
                 } else if let err {
                     Text(err).foregroundStyle(.red)
                 } else {
@@ -755,6 +761,21 @@ struct RunDetailView: View {
                 }
             }
             .padding()
+        }
+        .safeAreaInset(edge: .bottom) {
+            if let run {
+                DetailActionBar(items: housekeepingItems(run))
+                    .padding(.horizontal, 16)
+                    .padding(.top, 10)
+                    .padding(.bottom, 6)
+                    .frame(maxWidth: .infinity)
+                    .background {
+                        Rectangle()
+                            .fill(.ultraThinMaterial)
+                            .ignoresSafeArea(edges: .bottom)
+                            .overlay(alignment: .top) { Divider() }
+                    }
+            }
         }
         .navigationTitle("详情")
         .toolbar {
@@ -775,6 +796,7 @@ struct RunDetailView: View {
             }
         }
         .task(id: runId) {
+            copied = false
             session.watchingId = runId
             session.markOpened(runId)
             await reload()
@@ -802,6 +824,82 @@ struct RunDetailView: View {
             session.clearUnreadHold(runId)
         }
         .refreshable { await reload() }
+    }
+
+    private func housekeepingItems(_ run: RunDTO) -> [DetailActionBar.Item] {
+        var items = [
+            DetailActionBar.Item(
+                id: "copy",
+                title: copied ? "已复制" : "复制正文",
+                systemImage: copied ? "checkmark" : "doc.on.doc",
+                action: { copyBody(run) }
+            )
+        ]
+        if session.canMarkUnread(run) {
+            items.append(DetailActionBar.Item(
+                id: "unread",
+                title: "标为未读",
+                systemImage: "envelope.badge",
+                action: { session.markUnread(runId, hold: true) }
+            ))
+        }
+        if run.isArchived {
+            items.append(DetailActionBar.Item(
+                id: "unhide",
+                title: "取消隐藏",
+                systemImage: "eye",
+                action: { unhide(run) }
+            ))
+        } else if run.showsArchive {
+            items.append(DetailActionBar.Item(
+                id: "hide",
+                title: "隐藏",
+                systemImage: "eye.slash",
+                action: { hide(run) }
+            ))
+        }
+        return items
+    }
+
+    private func copyBody(_ run: RunDTO) {
+        UIPasteboard.general.string = run.finalText ?? ""
+        copied = true
+        Task {
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            copied = false
+        }
+    }
+
+    private func hide(_ run: RunDTO) {
+        Task {
+            session.applyLocalArchive(runId, archived: true, snapshot: run)
+            do {
+                let next = try await session.api().archive(runId: runId)
+                session.applyLocalArchive(runId, archived: true, snapshot: next)
+                err = nil
+                await session.refresh()
+                dismiss()
+            } catch {
+                session.revertLocalArchive(runId)
+                err = hideError(error)
+            }
+        }
+    }
+
+    private func unhide(_ run: RunDTO) {
+        Task {
+            session.applyLocalArchive(runId, archived: false, snapshot: run)
+            do {
+                let next = try await session.api().unarchive(runId: runId)
+                session.applyLocalArchive(runId, archived: false, snapshot: next)
+                err = nil
+                await reload()
+                await session.refresh()
+            } catch {
+                session.revertLocalArchive(runId)
+                err = error.localizedDescription
+            }
+        }
     }
 
     private func reload() async {
