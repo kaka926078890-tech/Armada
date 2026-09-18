@@ -24,7 +24,7 @@ describe("settings chrome", () => {
 });
 
 describe("SettingsModal", () => {
-  test("offers theme and three font scales only", () => {
+  test("offers theme, font scales, and prompt snippets", () => {
     const html = renderToStaticMarkup(
       <SettingsModal
         theme="dark"
@@ -32,6 +32,8 @@ describe("SettingsModal", () => {
         onTheme={() => {}}
         onFontScale={() => {}}
         onClose={() => {}}
+        snippets={[]}
+        saveSnippets={async () => {}}
       />,
     );
     expect(html).toContain("设置");
@@ -39,7 +41,28 @@ describe("SettingsModal", () => {
     expect(html).toContain("明亮");
     expect(html).toContain("正常");
     expect(html).toContain("超大");
+    expect(html).toContain("快捷提示词");
+    expect(html).toContain("还没有快捷提示词，在输入框上方点 + 添加");
     expect(html).not.toContain("解绑");
     expect(html).not.toContain("跟随系统");
+  });
+
+  test("edits each snippet with title, body, save, and delete", () => {
+    const html = renderToStaticMarkup(
+      <SettingsModal
+        theme="dark"
+        fontScale="normal"
+        onTheme={() => {}}
+        onFontScale={() => {}}
+        onClose={() => {}}
+        snippets={[{ id: "ok-id-01", title: "规范", body: "先写测试" }]}
+        saveSnippets={async () => {}}
+      />,
+    );
+    expect(html).toContain("快捷提示词");
+    expect(html).toContain("规范");
+    expect(html).toContain("先写测试");
+    expect(html).toContain("保存");
+    expect(html).toContain("删除");
   });
 });

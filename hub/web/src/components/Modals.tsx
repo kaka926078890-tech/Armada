@@ -1,9 +1,12 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { mergeAttachmentFiles, isConsoleAttachment, CONSOLE_ACCEPT } from "../attachments";
 import { endFollowupSend, isFollowupSendEnter, tryBeginFollowupSend } from "../followupSend";
 import { CDP_NOT_READY_COPY } from "../boardState";
+import { appendSnippetBody } from "../promptSnippets";
+import type { PromptSnippet } from "../uiPrefs";
 import type { Machine } from "../types";
+import { PromptSnippetBar } from "./PromptSnippetBar";
 
 const ERR: Record<string, string> = {
   RUN_LIMIT: "已达该机或该工作区并行上限",
@@ -29,13 +32,19 @@ function parseWorkspaces(raw: string | undefined): { workspaces: string[]; parse
   }
 }
 
-export function DispatchModal({ machines, preset, presetLabel, activeOnWorkspace, onClose, onDone }: {
+export function DispatchModal({
+  machines, preset, presetLabel, activeOnWorkspace, onClose, onDone,
+  snippets = [], saveSnippets, reloadSnippets,
+}: {
   machines: Machine[];
   preset?: { machineId: string; workspaceRoot: string };
   presetLabel?: string;
   activeOnWorkspace: number;
   onClose: () => void;
   onDone: () => void;
+  snippets?: PromptSnippet[];
+  saveSnippets?: (next: PromptSnippet[]) => Promise<void>;
+  reloadSnippets?: () => void;
 }) {
   const online = machines.filter((m) => m.status === "online");
   const [machineId, setMachineId] = useState(preset?.machineId ?? online[0]?.id ?? "");
@@ -45,6 +54,7 @@ export function DispatchModal({ machines, preset, presetLabel, activeOnWorkspace
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
   const sendingLock = useRef(false);
+  useEffect(() => { reloadSnippets?.(); }, [reloadSnippets]);
   const raw = machineId ? online.find((m) => m.id === machineId)?.open_workspaces : undefined;
   const { workspaces, parseFailed } = machineId ? parseWorkspaces(raw) : { workspaces: [] as string[], parseFailed: false };
   const locked = !!preset;
@@ -106,6 +116,14 @@ export function DispatchModal({ machines, preset, presetLabel, activeOnWorkspace
         {selectedMachine && !injectReady && (
           <div className="text-red-400 text-sm">{CDP_NOT_READY_COPY}</div>
         )}
+        <PromptSnippetBar
+          snippets={snippets}
+          onAppend={(body) => setPrompt(appendSnippetBody(prompt, body))}
+          onAdd={async (title, body) => {
+            if (!saveSnippets) return;
+            await saveSnippets([...snippets, { id: crypto.randomUUID(), title, body }]);
+          }}
+        />
         <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={8}
           placeholder="提示词（Markdown 原文；Enter 派发，Shift+Enter 换行）"
           className="px-2 py-1.5 rounded bg-zinc-950 border border-zinc-700 font-mono text-[13px] leading-relaxed min-h-[8rem] resize-y"

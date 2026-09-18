@@ -1,3 +1,5 @@
+import type { PromptSnippet } from "./uiPrefs";
+
 export function getToken(): string { return localStorage.getItem("armada.token") ?? ""; }
 export function setToken(t: string): void { localStorage.setItem("armada.token", t); }
 export function clearToken(): void { localStorage.removeItem("armada.token"); }
@@ -56,6 +58,17 @@ export const api = {
     req("/api/ui-prefs", { method: "PUT", body: JSON.stringify(partial) }).then(async (r) => {
       if (!r.ok) throw new Error(`ui-prefs put ${r.status}`);
       return r.json();
+    }),
+  getPromptSnippets: () => req("/api/prompt-snippets").then(async (r) => {
+    if (r.status === 503) throw new Error("READ_FAIL");
+    if (!r.ok) throw new Error(`prompt-snippets ${r.status}`);
+    return r.json() as Promise<{ snippets: PromptSnippet[] }>;
+  }),
+  putPromptSnippets: (snippets: PromptSnippet[]) =>
+    req("/api/prompt-snippets", { method: "PUT", body: JSON.stringify({ snippets }) }).then(async (r) => {
+      const j = await r.json().catch(() => ({})) as { error?: string; snippets?: PromptSnippet[] };
+      if (!r.ok) throw new Error(j.error ?? `prompt-snippets put ${r.status}`);
+      return j as { snippets: PromptSnippet[] };
     }),
   streamUrl: (id: string) => `/api/runs/${id}/stream?token=${encodeURIComponent(getToken())}`,
 };

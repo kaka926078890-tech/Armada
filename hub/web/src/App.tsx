@@ -21,8 +21,9 @@ import {
   WS_KEY, READ_KEY, READ_SEEDED,
   loadLocalUiPrefsMirror, applyUiPrefsToLocalStorage,
   shouldMigrateLocal, shouldSeedReadRuns,
-  type UiPrefs, type UiPrefsGetResponse,
+  type UiPrefs, type UiPrefsGetResponse, type PromptSnippet,
 } from "./uiPrefs";
+import { snippetOperatorMessage } from "./promptSnippets";
 
 function bootstrapTokenFromQuery(): string {
   const current = getToken();
@@ -60,6 +61,8 @@ export default function App() {
   const [theme, setTheme] = useState<ThemeName>(() => loadTheme());
   const [fontScale, setFontScale] = useState<FontScale>(() => loadFontScale());
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [snippets, setSnippets] = useState<PromptSnippet[]>([]);
+  const [snippetError, setSnippetError] = useState("");
   const desktop = isDesktopShell(window.location.search);
   const askedHost = useRef(false);
   const readMapRef = useRef(readMap);
@@ -95,6 +98,33 @@ export default function App() {
       void api.putUiPrefs({ readRuns: readMapRef.current }).catch(() => {});
     }, 300);
   }, []);
+
+  const reloadSnippets = useCallback(() => {
+    void api.getPromptSnippets()
+      .then((r) => {
+        setSnippets(Array.isArray(r.snippets) ? r.snippets : []);
+        setSnippetError("");
+      })
+      .catch(() => {
+        setSnippets([]);
+        setSnippetError(snippetOperatorMessage("READ_FAIL"));
+      });
+  }, []);
+
+  const saveSnippets = useCallback(async (next: PromptSnippet[]) => {
+    const prev = snippets;
+    setSnippets(next);
+    try {
+      const r = await api.putPromptSnippets(next);
+      setSnippets(Array.isArray(r.snippets) ? r.snippets : next);
+      setSnippetError("");
+    } catch (e) {
+      setSnippets(prev);
+      throw e;
+    }
+  }, [snippets]);
+
+  useEffect(() => { if (authed) reloadSnippets(); }, [authed, reloadSnippets]);
 
   const selectWorkspace = useCallback((key: string) => {
     setSelectedWs(key);
@@ -383,7 +413,7 @@ export default function App() {
           在线 {machines.filter((m) => m.status === "online").length}/{machines.length}
           <button
             type="button"
-            onClick={() => setSettingsOpen(true)}
+            onClick={() => { reloadSnippets(); setSettingsOpen(true); }}
             className="text-zinc-400 hover:text-zinc-100 px-2 py-0.5 rounded border border-zinc-700 shrink-0 whitespace-nowrap"
           >
             设置
@@ -405,7 +435,7 @@ export default function App() {
           selectedKey={resolvedWs}
           onSelectWorkspace={selectWorkspace}
           readMap={readMap}
-          onDispatch={() => { if (preset) setDispatchOpen(true); }}
+          onDispatch={() => { if (preset) { reloadSnippets(); setDispatchOpen(true); } }}
           onRename={(id, displayName) => { api.renameMachine(id, displayName).then(refresh); }}
           showDesktopActions={desktop}
           onOpenWorkspace={() => requestDesktop("open-workspace")}
@@ -437,7 +467,15 @@ export default function App() {
           <button type="button" className="absolute inset-0 bg-black/70 backdrop-blur-[2px]" aria-label="关闭详情" onClick={() => setSelectedRun(null)} />
           <div className="absolute inset-y-0 right-0 flex pointer-events-none">
             <div className="pointer-events-auto h-full min-h-0">
-              <RunDetail runId={selectedRun} machines={machines} onClose={() => setSelectedRun(null)} onChanged={refresh} />
+              <RunDetail
+                runId={selectedRun}
+                machines={machines}
+                onClose={() => setSelectedRun(null)}
+                onChanged={refresh}
+                snippets={snippets}
+                saveSnippets={saveSnippets}
+                reloadSnippets={reloadSnippets}
+              />
             </div>
           </div>
         </div>
@@ -449,6 +487,9 @@ export default function App() {
           presetLabel={`${presetSlot?.machineName ?? preset.machineId} · ${workspaceFolderName(preset.workspaceRoot)}`}
           activeOnWorkspace={filterRunsByWorkspace(runs, preset.machineId, preset.workspaceRoot)
             .filter((r) => ["queued", "dispatched", "binding", "running"].includes(r.status)).length}
+          snippets={snippets}
+          saveSnippets={saveSnippets}
+          reloadSnippets={reloadSnippets}
           onClose={() => setDispatchOpen(false)}
           onDone={() => { setDispatchOpen(false); refresh(); }}
         />
@@ -457,6 +498,10 @@ export default function App() {
         <SettingsModal
           theme={theme}
           fontScale={fontScale}
+          snippets={snippets}
+          saveSnippets={saveSnippets}
+          reloadSnippets={reloadSnippets}
+          snippetError={snippetError}
           onTheme={(next) => {
             saveTheme(next);
             applyTheme(next);

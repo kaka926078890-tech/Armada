@@ -7,7 +7,9 @@ import { eventsToChat, mergePendingAsk, mergeOutboundChat, queuedOutbound, INITI
 import { collectEventPages, mergeEvents, EVENT_PAGE_SIZE, hasOlderEvents, olderEventsQuery, shouldLoadOlder, prependPreserveScroll } from "../loadEvents";
 import { mergeAttachmentFiles, isConsoleAttachment, CONSOLE_ACCEPT } from "../attachments";
 import { endFollowupSend, isFollowupSendEnter, tryBeginFollowupSend } from "../followupSend";
-import { WIDTH_KEY } from "../uiPrefs";
+import { WIDTH_KEY, type PromptSnippet } from "../uiPrefs";
+import { appendSnippetBody } from "../promptSnippets";
+import { PromptSnippetBar } from "./PromptSnippetBar";
 
 const DEFAULT_W = 576;
 const MIN_W = 400;
@@ -75,8 +77,14 @@ function DrawerShell({ children }: { children: ReactNode }) {
   );
 }
 
-export default function RunDetail({ runId, onClose, onChanged, machines = [] }: {
+export default function RunDetail({
+  runId, onClose, onChanged, machines = [],
+  snippets = [], saveSnippets, reloadSnippets,
+}: {
   runId: string; onClose: () => void; onChanged: () => void; machines?: Machine[];
+  snippets?: PromptSnippet[];
+  saveSnippets?: (next: PromptSnippet[]) => Promise<void>;
+  reloadSnippets?: () => void;
 }) {
   const [run, setRun] = useState<RunRow | null>(null);
   const [events, setEvents] = useState<RunEvent[]>([]);
@@ -106,6 +114,8 @@ export default function RunDetail({ runId, onClose, onChanged, machines = [] }: 
   const preserveRef = useRef<{ scrollTop: number; scrollHeight: number } | null>(null);
   const eventsRef = useRef<RunEvent[]>([]);
   const hiddenPrefixRef = useRef(0);
+
+  useEffect(() => { reloadSnippets?.(); }, [runId, reloadSnippets]);
 
   useEffect(() => {
     jumpedRef.current = null;
@@ -484,7 +494,16 @@ export default function RunDetail({ runId, onClose, onChanged, machines = [] }: 
         )}
       </div>
       {run.conversation_id && (
-        <form className="p-3 border-t border-zinc-800/80 flex flex-col gap-2" onSubmit={sendFollowup}>
+        <div className="p-3 border-t border-zinc-800/80 flex flex-col gap-2">
+          <PromptSnippetBar
+            snippets={snippets}
+            onAppend={(body) => setFollowup(appendSnippetBody(followup, body))}
+            onAdd={async (title, body) => {
+              if (!saveSnippets) return;
+              await saveSnippets([...snippets, { id: crypto.randomUUID(), title, body }]);
+            }}
+          />
+          <form className="flex flex-col gap-2" onSubmit={sendFollowup}>
           <div className="flex gap-2 items-end">
             <textarea
               value={followup}
@@ -527,6 +546,7 @@ export default function RunDetail({ runId, onClose, onChanged, machines = [] }: 
             </div>
           )}
         </form>
+        </div>
       )}
     </DrawerShell>
   );

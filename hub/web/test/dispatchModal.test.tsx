@@ -39,4 +39,24 @@ describe("DispatchModal prompt", () => {
     expect(html).toContain(CDP_NOT_READY_COPY);
     expect(html).toContain("disabled");
   });
+
+  test("shows prompt snippet bar above the textarea without submitting", () => {
+    const html = renderToStaticMarkup(
+      <DispatchModal
+        machines={[machine]}
+        preset={{ machineId: "m-1", workspaceRoot: "C:/ws" }}
+        activeOnWorkspace={0}
+        snippets={[{ id: "ok-id-01", title: "规范", body: "先写测试" }]}
+        saveSnippets={async () => {}}
+        onClose={() => {}}
+        onDone={() => {}}
+      />,
+    );
+    expect(html).toContain('aria-label="添加快捷提示词"');
+    expect(html).toContain("规范");
+    const addAt = html.indexOf('aria-label="添加快捷提示词"');
+    const taAt = html.indexOf("提示词（Markdown 原文");
+    expect(addAt).toBeGreaterThan(-1);
+    expect(taAt).toBeGreaterThan(addAt);
+  });
 });
