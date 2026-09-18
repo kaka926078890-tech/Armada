@@ -5,6 +5,7 @@ import { join } from "path";
 import {
   UI_PREFS_DEFAULTS, normalizeUiPrefs, isWorkspaceKey,
   readUiPrefs, writeUiPrefs, mergeUiPrefs,
+  assertPromptSnippets, fillSnippetIds, SNIPPET_ID_RE,
 } from "../src/uiPrefs";
 
 function tmpHome() { return mkdtempSync(join(tmpdir(), "armada-prefs-")); }
@@ -84,5 +85,56 @@ describe("readUiPrefs / writeUiPrefs / merge", () => {
     const next = mergeUiPrefs(base, { fontScale: "large" });
     expect(next.fontScale).toBe("large");
     expect(next.theme).toBe("light");
+  });
+});
+
+describe("promptSnippets", () => {
+  test("defaults include empty promptSnippets", () => {
+    expect(UI_PREFS_DEFAULTS.promptSnippets).toEqual([]);
+    expect(normalizeUiPrefs({}).promptSnippets).toEqual([]);
+  });
+
+  test("read path drops illegal snippets and keeps first 30", () => {
+    const n = normalizeUiPrefs({
+      promptSnippets: [
+        { id: "bad", title: "x", body: "y" },
+        { id: "ok-id-01", title: "t", body: "b" },
+        { id: "ok-id-02", title: "", body: "b" },
+      ],
+    });
+    expect(n.promptSnippets).toEqual([{ id: "ok-id-01", title: "t", body: "b" }]);
+  });
+
+  test("merge promptSnippets keeps theme", () => {
+    const base = { ...UI_PREFS_DEFAULTS, theme: "light" as const };
+    const next = mergeUiPrefs(base, { promptSnippets: [{ id: "ok-id-01", title: "t", body: "b" }] });
+    expect(next.theme).toBe("light");
+    expect(next.promptSnippets).toHaveLength(1);
+  });
+
+  test("assert rejects over 30, empty title, duplicate ids, empty id", () => {
+    expect(assertPromptSnippets("x").ok).toBe(false);
+    if (!assertPromptSnippets("x").ok) expect(assertPromptSnippets("x").error).toBe("SNIPPET_INVALID");
+    const tooMany = Array.from({ length: 31 }, (_, i) => ({
+      id: `id-${String(i).padStart(6, "0")}`, title: "t", body: "b",
+    }));
+    const lim = assertPromptSnippets(tooMany);
+    expect(lim.ok).toBe(false);
+    if (!lim.ok) expect(lim.error).toBe("SNIPPET_LIMIT");
+    expect(assertPromptSnippets([{ title: "  ", body: "b" }]).ok).toBe(false);
+    expect(assertPromptSnippets([
+      { id: "ok-id-01", title: "a", body: "b" },
+      { id: "ok-id-01", title: "c", body: "d" },
+    ]).ok).toBe(false);
+    expect(assertPromptSnippets([{ id: "", title: "a", body: "b" }]).ok).toBe(false);
+  });
+
+  test("assert allows omitted id; fillSnippetIds assigns uuid", () => {
+    const a = assertPromptSnippets([{ title: "a", body: "b" }]);
+    expect(a.ok).toBe(true);
+    if (!a.ok) return;
+    const filled = fillSnippetIds(a.snippets);
+    expect(filled[0]!.id).toMatch(SNIPPET_ID_RE);
+    expect(filled[0]!.title).toBe("a");
   });
 });

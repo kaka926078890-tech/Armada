@@ -4,6 +4,12 @@ import { join } from "path";
 export type ThemeName = "dark" | "light";
 export type FontScale = "normal" | "large" | "xlarge";
 
+export type PromptSnippet = { id: string; title: string; body: string };
+export const SNIPPET_MAX = 30;
+export const SNIPPET_TITLE_MAX = 40;
+export const SNIPPET_BODY_MAX = 8000;
+export const SNIPPET_ID_RE = /^[a-z0-9-]{8,64}$/;
+
 export type UiPrefs = {
   version: 1;
   theme: ThemeName;
@@ -12,6 +18,7 @@ export type UiPrefs = {
   readRuns: Record<string, number>;
   readRunsSeeded: boolean;
   detailWidth: number;
+  promptSnippets: PromptSnippet[];
 };
 
 export type UiPrefsGetResponse = UiPrefs & { source: "file" | "defaults" };
@@ -24,7 +31,62 @@ export const UI_PREFS_DEFAULTS: UiPrefs = {
   readRuns: {},
   readRunsSeeded: false,
   detailWidth: 576,
+  promptSnippets: [],
 };
+
+function asSnippetItem(raw: unknown): { id?: string; title: string; body: string } | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const o = raw as Record<string, unknown>;
+  if (typeof o.title !== "string" || typeof o.body !== "string") return null;
+  const title = o.title.trim();
+  const body = o.body.trim();
+  if (title.length < 1 || title.length > SNIPPET_TITLE_MAX) return null;
+  if (body.length < 1 || body.length > SNIPPET_BODY_MAX) return null;
+  if (o.id === undefined || o.id === null) return { title, body };
+  if (typeof o.id !== "string" || !SNIPPET_ID_RE.test(o.id)) return null;
+  return { id: o.id, title, body };
+}
+
+export function normalizePromptSnippets(raw: unknown): PromptSnippet[] {
+  if (!Array.isArray(raw)) return [];
+  const out: PromptSnippet[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    const s = asSnippetItem(item);
+    if (!s?.id || seen.has(s.id)) continue;
+    seen.add(s.id);
+    out.push({ id: s.id, title: s.title, body: s.body });
+    if (out.length >= SNIPPET_MAX) break;
+  }
+  return out;
+}
+
+export function assertPromptSnippets(raw: unknown):
+  { ok: true; snippets: Array<{ id?: string; title: string; body: string }> } |
+  { ok: false; error: "SNIPPET_INVALID" | "SNIPPET_LIMIT" } {
+  if (!Array.isArray(raw)) return { ok: false, error: "SNIPPET_INVALID" };
+  if (raw.length > SNIPPET_MAX) return { ok: false, error: "SNIPPET_LIMIT" };
+  const snippets: Array<{ id?: string; title: string; body: string }> = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    const s = asSnippetItem(item);
+    if (!s) return { ok: false, error: "SNIPPET_INVALID" };
+    if (s.id) {
+      if (seen.has(s.id)) return { ok: false, error: "SNIPPET_INVALID" };
+      seen.add(s.id);
+    }
+    snippets.push(s);
+  }
+  return { ok: true, snippets };
+}
+
+export function fillSnippetIds(items: Array<{ id?: string; title: string; body: string }>): PromptSnippet[] {
+  return items.map((s) => ({
+    id: s.id && SNIPPET_ID_RE.test(s.id) ? s.id : crypto.randomUUID(),
+    title: s.title,
+    body: s.body,
+  }));
+}
 
 const READ_RUNS_CAP = 5000;
 const WIDTH_MIN = 400;
@@ -69,6 +131,7 @@ export function normalizeUiPrefs(raw: unknown): UiPrefs {
     readRuns: clampReadRuns(o.readRuns),
     readRunsSeeded: o.readRunsSeeded === true,
     detailWidth,
+    promptSnippets: normalizePromptSnippets(o.promptSnippets),
   };
 }
 
@@ -97,7 +160,7 @@ export function writeUiPrefs(home: string, prefs: UiPrefs): void {
 }
 
 export function mergeUiPrefs(base: UiPrefs, patch: Record<string, unknown>): UiPrefs {
-  const known = ["theme", "fontScale", "selectedWorkspace", "readRuns", "readRunsSeeded", "detailWidth"] as const;
+  const known = ["theme", "fontScale", "selectedWorkspace", "readRuns", "readRunsSeeded", "detailWidth", "promptSnippets"] as const;
   const next: Record<string, unknown> = { ...base };
   for (const k of known) {
     if (Object.prototype.hasOwnProperty.call(patch, k)) next[k] = patch[k];

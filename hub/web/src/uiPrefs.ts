@@ -1,5 +1,7 @@
 import { applyFontScale, applyTheme, loadFontScale, loadTheme, saveFontScale, saveTheme, type FontScale, type ThemeName } from "./theme";
 
+export type PromptSnippet = { id: string; title: string; body: string };
+
 export type UiPrefs = {
   version: 1;
   theme: ThemeName;
@@ -8,6 +10,7 @@ export type UiPrefs = {
   readRuns: Record<string, number>;
   readRunsSeeded: boolean;
   detailWidth: number;
+  promptSnippets: PromptSnippet[];
 };
 
 export type UiPrefsGetResponse = UiPrefs & { source: "file" | "defaults" };
@@ -20,6 +23,7 @@ export const UI_PREFS_DEFAULTS: UiPrefs = {
   readRuns: {},
   readRunsSeeded: false,
   detailWidth: 576,
+  promptSnippets: [],
 };
 
 export const WS_KEY = "armada.selectedWorkspace.v1";
@@ -48,6 +52,7 @@ export function loadLocalUiPrefsMirror(): UiPrefs {
     readRuns,
     readRunsSeeded,
     detailWidth,
+    promptSnippets: [],
   };
 }
 
