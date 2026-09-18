@@ -27,4 +27,32 @@ class MarkdownHtmlTest {
         assertTrue(html.contains("calc(13px * var(--md-scale))") || html.contains("calc(13px*var(--md-scale))"))
         assertTrue(html.contains("color: #e4e4e7") || html.contains("color:#e4e4e7"))
     }
+
+    @Test
+    fun tableBlockquoteLinkAndHrMatchIos() {
+        val src = """
+            | 项 | 内容 |
+            | --- | --- |
+            | 根因 | 路由 |
+
+            > quote
+
+            ---
+
+            1. one
+            2. two
+
+            [docs](https://example.com)
+        """.trimIndent()
+        val html = MarkdownHtml.from(src, theme = "dark")
+        assertTrue(html.contains("<table>"), html)
+        assertTrue(html.contains("<th>项</th>"), html)
+        assertTrue(html.contains("<td>根因</td>"), html)
+        assertTrue(html.contains("<blockquote>quote</blockquote>"), html)
+        assertTrue(html.contains("<hr>"), html)
+        assertTrue(html.contains("<ol>"), html)
+        assertTrue(html.contains("<a href=\"https://example.com\">docs</a>"), html)
+        assertTrue(html.contains("blockquote {"), html)
+        assertTrue(html.contains("table {"), html)
+    }
 }

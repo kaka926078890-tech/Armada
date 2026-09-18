@@ -3,9 +3,13 @@ package app.armada.remote
 import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.view.MotionEvent
+import android.view.View
+import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
@@ -23,8 +27,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -39,7 +47,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -55,6 +63,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.runtime.remember
@@ -62,7 +71,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -105,10 +116,39 @@ class MainActivity : ComponentActivity() {
 val LocalAppTheme = compositionLocalOf { "dark" }
 val LocalFontScale = compositionLocalOf { "normal" }
 
+val AccentBlue = Color(0xFF599CE7)
+val PlanYellow = Color(0xFFF1B467)
+val StatusGreen = Color(0xFF22C55E)
+val StatusRed = Color(0xFFDC2626)
+val StatusBlue = Color(0xFF3B82F6)
+val StatusGray = Color(0xFF9CA3AF)
+val StatusOrange = Color(0xFFF59E0B)
+
 fun appearanceTextScale(scale: String): Float = when (scale) {
     "large" -> 1.25f
     "xlarge" -> 1.5f
     else -> 1f
+}
+
+fun armadaColorScheme(dark: Boolean) = (if (dark) darkColorScheme() else lightColorScheme()).copy(
+    primary = AccentBlue,
+    onPrimary = Color.White,
+    secondary = AccentBlue,
+    tertiary = AccentBlue,
+)
+
+fun statusColor(status: String) = when (statusTint(status)) {
+    "green" -> StatusGreen
+    "blue" -> StatusBlue
+    "red" -> StatusRed
+    "gray" -> StatusGray
+    else -> StatusOrange
+}
+
+fun rowChromeColor(chrome: RowChrome) = when (chrome) {
+    RowChrome.Red -> StatusRed
+    RowChrome.Green -> StatusGreen
+    RowChrome.None -> Color.Transparent
 }
 
 @Composable
@@ -116,7 +156,7 @@ fun AppearanceRoot(vm: SessionVm) {
     val theme by vm.theme.collectAsState()
     val fontScale by vm.fontScale.collectAsState()
     val textScale = appearanceTextScale(fontScale)
-    val scheme = if (theme == "light") lightColorScheme() else darkColorScheme()
+    val scheme = armadaColorScheme(theme != "light")
     val density = LocalDensity.current
     MaterialTheme(colorScheme = scheme) {
         CompositionLocalProvider(
@@ -154,22 +194,37 @@ fun BarButton(
     filled: Boolean = false,
     danger: Boolean = false,
     compact: Boolean = false,
+    expand: Boolean = false,
+    fillColor: Color? = null,
+    textColor: Color? = null,
     onClick: () -> Unit,
 ) {
-    val colors = when {
-        danger -> ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626), contentColor = Color.White)
-        filled -> ButtonDefaults.buttonColors()
-        else -> ButtonDefaults.outlinedButtonColors()
+    val fg = textColor ?: when {
+        danger || filled -> Color.White
+        else -> MaterialTheme.colorScheme.onSurface
     }
-    val mod = modifier.height(if (compact) 40.dp else 44.dp)
-    if (filled || danger) {
-        Button(onClick = onClick, enabled = enabled, modifier = mod, colors = colors, contentPadding = PaddingValues(12.dp, 8.dp)) {
-            Text(text)
-        }
-    } else {
-        OutlinedButton(onClick = onClick, enabled = enabled, modifier = mod, contentPadding = PaddingValues(12.dp, 8.dp)) {
-            Text(text)
-        }
+    val bg = fillColor ?: when {
+        danger -> StatusRed
+        filled -> AccentBlue
+        else -> MaterialTheme.colorScheme.surfaceVariant
+    }
+    val shape = RoundedCornerShape(10.dp)
+    Box(
+        modifier
+            .then(if (expand) Modifier.fillMaxWidth() else Modifier)
+            .heightIn(min = if (compact) 32.dp else 44.dp)
+            .alpha(if (enabled) 1f else 0.4f)
+            .clip(shape)
+            .background(bg)
+            .then(
+                if (!filled && !danger) Modifier.border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.18f), shape)
+                else Modifier,
+            )
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = if (compact) 12.dp else 14.dp, vertical = 8.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(text, color = fg, style = MaterialTheme.typography.labelLarge, maxLines = 1)
     }
 }
 
@@ -186,7 +241,7 @@ fun BindScreen(vm: SessionVm, state: UiState) {
                 modifier = Modifier.fillMaxWidth().height(160.dp),
             )
             Spacer(Modifier.height(12.dp))
-            Button(onClick = { vm.bind(paste) }, enabled = paste.isNotBlank(), modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("绑定") }
+            Button(onClick = { vm.bind(paste) }, enabled = paste.isNotBlank(), modifier = Modifier.fillMaxWidth().height(48.dp), colors = ButtonDefaults.buttonColors(containerColor = AccentBlue, contentColor = Color.White)) { Text("绑定") }
             state.bindError?.let { Text(it, color = Color.Red, modifier = Modifier.padding(top = 8.dp)) }
             Text("绑定后按「机器 → 工作区」选仓。点进仓看任务，顶部派发。", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 16.dp))
         }
@@ -199,19 +254,39 @@ fun FleetNav(vm: SessionVm, state: UiState) {
     val nav = rememberNavController()
     LaunchedEffect(state.pendingOpenRunId) {
         val id = state.pendingOpenRunId ?: return@LaunchedEffect
-        nav.navigate("run/$id") { popUpTo("fleet") }
+        nav.navigate(runNavRoute(id)) { popUpTo("fleet") }
         vm.consumePendingOpen()
     }
     NavHost(nav, startDestination = "fleet") {
-        composable("fleet") { FleetScreen(vm, state, onOpen = { nav.navigate("ws/${it.workspaceId}") }, onRefresh = { vm.startLive() }, onSettings = { nav.navigate("settings") }) }
+        composable("fleet") {
+            FleetScreen(
+                vm,
+                state,
+                onOpen = { nav.navigate(workspaceNavRoute(it.workspaceId)) },
+                onRefresh = { vm.startLive() },
+                onSettings = { nav.navigate("settings") },
+            )
+        }
         composable("settings") { SettingsScreen(vm, onBack = { nav.popBackStack() }) }
-        composable("ws/{id}", arguments = listOf(navArgument("id") { type = NavType.StringType })) { entry ->
+        composable(
+            "ws?id={id}",
+            arguments = listOf(navArgument("id") { type = NavType.StringType }),
+        ) { entry ->
             val id = entry.arguments?.getString("id").orEmpty()
             val w = liveWorkspace(id, state.workspaces) ?: return@composable
-            WorkspaceScreen(vm, state, w, onOpenRun = { nav.navigate("run/$it") })
+            WorkspaceScreen(
+                vm,
+                state,
+                w,
+                onBack = { nav.popBackStack() },
+                onOpenRun = { nav.navigate(runNavRoute(it)) },
+            )
         }
-        composable("run/{id}", arguments = listOf(navArgument("id") { type = NavType.StringType })) { entry ->
-            RunDetailScreen(vm, state, entry.arguments?.getString("id").orEmpty())
+        composable(
+            "run?id={id}",
+            arguments = listOf(navArgument("id") { type = NavType.StringType }),
+        ) { entry ->
+            RunDetailScreen(vm, state, entry.arguments?.getString("id").orEmpty(), onBack = { nav.popBackStack() })
         }
     }
 }
@@ -237,7 +312,7 @@ fun FleetScreen(vm: SessionVm, state: UiState, onOpen: (WorkspaceDto) -> Unit, o
                     val name = slots.firstOrNull { it.machineName.isNotEmpty() }?.machineName ?: mid
                     val online = slots.any { it.online }
                     Row(Modifier.padding(16.dp, 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(8.dp).clip(CircleShape).background(if (online) Color(0xFF22C55E) else Color.Gray))
+                        Box(Modifier.size(8.dp).clip(CircleShape).background(if (online) StatusGreen else StatusGray))
                         Spacer(Modifier.width(8.dp))
                         Text(name, style = MaterialTheme.typography.titleSmall)
                     }
@@ -257,7 +332,11 @@ fun FleetScreen(vm: SessionVm, state: UiState, onOpen: (WorkspaceDto) -> Unit, o
                             Text(w.workspaceRoot, style = MaterialTheme.typography.bodySmall, color = Color.Gray, maxLines = 1)
                         }
                         if (unread > 0) {
-                            Box(Modifier.background(Color.Red, RoundedCornerShape(10.dp)).padding(6.dp, 2.dp)) {
+                            Box(
+                                Modifier.background(StatusRed, RoundedCornerShape(10.dp)).padding(horizontal = 5.dp, vertical = 2.dp)
+                                    .heightIn(min = 18.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
                                 Text(if (unread > 99) "99+" else "$unread", color = Color.White, style = MaterialTheme.typography.labelSmall)
                             }
                         }
@@ -270,7 +349,7 @@ fun FleetScreen(vm: SessionVm, state: UiState, onOpen: (WorkspaceDto) -> Unit, o
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun WorkspaceScreen(vm: SessionVm, state: UiState, workspace: WorkspaceDto, onOpenRun: (String) -> Unit) {
+fun WorkspaceScreen(vm: SessionVm, state: UiState, workspace: WorkspaceDto, onBack: () -> Unit, onOpenRun: (String) -> Unit) {
     var tab by remember { mutableStateOf(BoardColumn.Completed) }
     var showArchived by remember { mutableStateOf(false) }
     var showDispatch by remember { mutableStateOf(false) }
@@ -279,67 +358,81 @@ fun WorkspaceScreen(vm: SessionVm, state: UiState, workspace: WorkspaceDto, onOp
     val boardRuns = src.filter { it.machineId == workspace.machineId && it.workspaceRoot == workspace.workspaceRoot }
     val filtered = boardRuns.filter { it.column == tab }
     val hiddenN = state.board.hidden.count { it.machineId == workspace.machineId && it.workspaceRoot == workspace.workspaceRoot }
+    val hideLabel = if (showArchived) "返回看板" else if (hiddenN > 0) "查看已隐藏 $hiddenN" else "查看已隐藏"
     Scaffold(topBar = {
         TopAppBar(
             title = { Text(workspace.label) },
+            navigationIcon = { BarButton("返回", compact = true, onClick = onBack) },
             actions = {
-                BarButton(if (showArchived) "返回看板" else if (hiddenN > 0) "查看已隐藏 $hiddenN" else "查看已隐藏", compact = true) {
-                    showArchived = !showArchived
-                }
+                BarButton(hideLabel, compact = true) { showArchived = !showArchived }
                 if (!showArchived) BarButton("派发", filled = true, compact = true, enabled = workspace.canInject) { showDispatch = true }
             },
         )
     }) { pad ->
-        Column(Modifier.padding(pad)) {
-            Row(Modifier.padding(8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Column(Modifier.padding(pad).fillMaxSize()) {
+            if (!workspace.canInject) {
+                Text(
+                    operatorMessage("CDP_NOT_READY"),
+                    color = StatusRed,
+                    modifier = Modifier.fillMaxWidth().background(StatusRed.copy(alpha = 0.08f)).padding(16.dp, 8.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            Row(
+                Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 BoardColumn.entries.forEach { col ->
                     val n = boardRuns.count { it.column == col }
-                    FilterChip(selected = tab == col, onClick = { tab = col }, label = { Text(if (n > 0) "${col.title} $n" else col.title) })
+                    val selected = tab == col
+                    val alert = columnHasAlert(boardRuns, col) { vm.isUnread(it) }
+                    Row(
+                        Modifier.clip(RoundedCornerShape(50))
+                            .background(if (selected) AccentBlue.copy(alpha = 0.18f) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f))
+                            .clickable { tab = col }
+                            .padding(horizontal = 12.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(col.title, style = if (selected) MaterialTheme.typography.labelLarge else MaterialTheme.typography.bodyMedium, maxLines = 1)
+                        if (n > 0) {
+                            Spacer(Modifier.width(4.dp))
+                            Text("$n", style = MaterialTheme.typography.labelSmall)
+                        }
+                        if (alert) {
+                            Spacer(Modifier.width(4.dp))
+                            Box(Modifier.size(7.dp).clip(CircleShape).background(StatusRed))
+                        }
+                    }
                 }
             }
-            if (!workspace.canInject) Text(operatorMessage("CDP_NOT_READY"), color = Color.Red, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall)
-            state.lastError?.let { Text(it, color = Color.Red, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall) }
-            if (showArchived) Text("已隐藏的任务仍保留，可取消隐藏。", modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall, color = Color.Gray)
-            if (filtered.isEmpty()) Text("这一列还没有任务", modifier = Modifier.padding(16.dp), color = Color.Gray)
-            LazyColumn {
+            state.lastError?.let { Text(it, color = StatusRed, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall) }
+            if (showArchived) Text("已隐藏的任务仍保留，可取消隐藏。", modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+            if (filtered.isEmpty()) Text("这一列还没有任务", modifier = Modifier.padding(16.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+            LazyColumn(Modifier.weight(1f)) {
                 items(filtered, key = { it.runId }) { run ->
                     val unread = vm.isUnread(run)
-                    Row(Modifier.fillMaxWidth().clickable { onOpenRun(run.runId) }.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(run.prompt, maxLines = 2)
-                            val cap = when {
-                                run.pendingAsk != null && run.status == "running" -> "待处理"
-                                run.queuedOutbound.isNotEmpty() -> "队列 ${run.queuedOutbound.size}"
-                                else -> statusLabel(run.status)
-                            }
-                            Text(cap, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
-                        }
-                        if (unread) {
-                            Box(
-                                Modifier.padding(end = 8.dp).size(8.dp).clip(CircleShape)
-                                    .background(if (run.status == "completed" && run.pendingAsk == null) Color(0xFF22C55E) else Color.Red),
-                            )
-                        }
-                        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Column(Modifier.fillMaxWidth().clickable { onOpenRun(run.runId) }.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                        RunRow(run, unread)
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
                             if (vm.canMarkUnread(run)) {
-                                BarButton("未读") { vm.markUnread(run.runId, hold = false) }
+                                BarButton("未读", compact = true) { vm.markUnread(run.runId, hold = false) }
                             }
                             if (run.showsArchive && !showArchived) {
-                                BarButton("隐藏", danger = true, onClick = {
+                                BarButton("隐藏", danger = true, compact = true, onClick = {
                                     vm.hideLocal(run.runId, true)
                                     scope.launch {
                                         try {
                                             val next = vm.api().archive(run.runId)
                                             vm.hideLocal(run.runId, true, next)
                                             vm.refresh()
-                                        } catch (e: Exception) {
+                                        } catch (_: Exception) {
                                             vm.revertHide(run.runId)
                                         }
                                     }
                                 })
                             }
                             if (showArchived) {
-                                BarButton("取消隐藏", onClick = {
+                                BarButton("取消隐藏", compact = true, onClick = {
                                     vm.hideLocal(run.runId, false)
                                     scope.launch {
                                         try {
@@ -359,6 +452,37 @@ fun WorkspaceScreen(vm: SessionVm, state: UiState, workspace: WorkspaceDto, onOp
         }
     }
     if (showDispatch) DispatchSheet(vm, workspace, null) { showDispatch = false; tab = it }
+}
+
+@Composable
+fun RunRow(run: RunDto, unread: Boolean) {
+    val cap = when {
+        run.pendingAsk != null && run.status == "running" -> "待处理"
+        run.queuedOutbound.isNotEmpty() -> "队列 ${run.queuedOutbound.size}"
+        else -> statusLabel(run.status)
+    }
+    val captionColor = when {
+        run.pendingAsk != null -> StatusRed
+        unread && run.status == "completed" -> StatusGreen
+        unread && run.status in setOf("error", "aborted", "unknown") -> StatusRed
+        else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+    }
+    Row(verticalAlignment = Alignment.Top) {
+        Box(Modifier.width(3.dp).height(36.dp).clip(RoundedCornerShape(1.5.dp)).background(rowChromeColor(runRowChrome(run, unread))))
+        Spacer(Modifier.width(10.dp))
+        Box(Modifier.padding(top = 6.dp).size(8.dp).clip(CircleShape).background(statusColor(run.status)))
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(run.prompt, maxLines = 2)
+            Text(cap, style = MaterialTheme.typography.bodySmall, color = captionColor)
+        }
+        if (unread) {
+            Box(
+                Modifier.padding(top = 8.dp).size(7.dp).clip(CircleShape)
+                    .background(if (run.status == "completed" && run.pendingAsk == null) StatusGreen else StatusRed),
+            )
+        }
+    }
 }
 
 @Composable
@@ -443,7 +567,7 @@ fun DispatchSheet(vm: SessionVm, workspace: WorkspaceDto, followupRunId: String?
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String) {
+fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String, onBack: () -> Unit) {
     var run by remember { mutableStateOf(state.board.runs.find { it.runId == runId } ?: state.board.hidden.find { it.runId == runId }) }
     var err by remember { mutableStateOf<String?>(null) }
     var showFollow by remember { mutableStateOf(false) }
@@ -487,72 +611,160 @@ fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String) {
             runCatching { adopt(vm.api().run(runId)) }
         }
     }
-    Scaffold(topBar = {
-        TopAppBar(
-            title = { Text("详情") },
-            actions = {
-                BarButton("续聊", filled = true, compact = true, enabled = slot?.canInject == true && run?.canFollowup == true) { showFollow = true }
-            },
-        )
-    }) { pad ->
-        Column(Modifier.padding(pad).padding(16.dp).verticalScroll(rememberScrollState())) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("详情") },
+                navigationIcon = { BarButton("返回", compact = true, onClick = onBack) },
+                actions = {
+                    BarButton("续聊", filled = true, compact = true, enabled = slot?.canInject == true && run?.canFollowup == true) { showFollow = true }
+                },
+            )
+        },
+        bottomBar = bar@{
+            val r = run ?: return@bar
+            DetailActionBar(
+                copy = {
+                    val cm = ctx.getSystemService(ClipboardManager::class.java)
+                    cm.setPrimaryClip(ClipData.newPlainText("finalText", r.finalText ?: ""))
+                },
+                unread = if (vm.canMarkUnread(r)) ({ vm.markUnread(runId, hold = true) }) else null,
+                hide = if (r.isArchived) {
+                    {
+                        vm.hideLocal(runId, false, r)
+                        scope.launch {
+                            try {
+                                val next = vm.api().unarchive(runId)
+                                vm.hideLocal(runId, false, next)
+                                vm.refresh()
+                                run = next
+                            } catch (_: Exception) {
+                                vm.revertHide(runId)
+                            }
+                        }
+                    }
+                } else if (r.showsArchive) {
+                    {
+                        vm.hideLocal(runId, true, r)
+                        scope.launch {
+                            try {
+                                val next = vm.api().archive(runId)
+                                vm.hideLocal(runId, true, next)
+                                vm.refresh()
+                            } catch (e: Exception) {
+                                vm.revertHide(runId)
+                                err = hideError((e as? RelayException)?.code ?: "")
+                            }
+                        }
+                    }
+                } else null,
+                hideTitle = if (r.isArchived) "取消隐藏" else "隐藏",
+            )
+        },
+    ) { pad ->
+        Column(Modifier.padding(pad).padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             val r = run
             if (r == null) CircularProgressIndicator()
             else {
-                err?.let { Text(it, color = Color.Red) }
-                Text(statusLabel(r.status), style = MaterialTheme.typography.titleMedium)
-                Text("${r.workspaceRoot}", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
-                r.displayError?.let { Text(operatorMessage(it), color = Color.Red) }
-                if (slot?.canInject == false && r.displayError != "CDP_NOT_READY") Text(operatorMessage("CDP_NOT_READY"), color = Color.Red)
-                Text("提示词", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 12.dp))
-                MarkdownBox(r.prompt)
-                Text("回复", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 12.dp))
-                if (!r.finalText.isNullOrEmpty()) MarkdownBox(r.finalText!!)
-                else Text(if (r.isLive) "还没有终态正文" else "没有正文", color = Color.Gray)
+                err?.let { Text(it, color = StatusRed) }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(10.dp).clip(CircleShape).background(statusColor(r.status)))
+                    Spacer(Modifier.width(8.dp))
+                    Text(statusLabel(r.status), style = MaterialTheme.typography.titleMedium)
+                }
+                val ws = r.let { runDto -> state.workspaces.firstOrNull { it.machineId == runDto.machineId && it.workspaceRoot == runDto.workspaceRoot } }
+                Text("${ws?.machineName.orEmpty()} · ${ws?.label ?: r.workspaceRoot}", style = MaterialTheme.typography.bodyMedium)
+                Text(r.workspaceRoot, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                r.displayError?.let { Text(operatorMessage(it), color = StatusRed) }
+                if (slot?.canInject == false && r.displayError != "CDP_NOT_READY") Text(operatorMessage("CDP_NOT_READY"), color = StatusRed)
+                DetailPromptCard(r.prompt)
+                DetailReplyBlock(r.finalText, r.isLive)
                 r.pendingAsk?.let { AskBlock(vm, runId, it) { runCatching { adopt(vm.api().run(runId)) } } }
                 if (r.queuedOutbound.isNotEmpty()) {
                     Text("${r.queuedOutbound.size} 条排队消息", style = MaterialTheme.typography.bodySmall)
                     r.queuedOutbound.forEach { Text(it.prompt) }
                 }
-                Button(onClick = {
-                    val cm = ctx.getSystemService(ClipboardManager::class.java)
-                    cm.setPrimaryClip(ClipData.newPlainText("finalText", r.finalText ?: ""))
-                }, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("复制正文") }
-                if (vm.canMarkUnread(r)) {
-                    OutlinedButton(onClick = { vm.markUnread(runId, hold = true) }, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("标为未读") }
-                }
-                if (r.isLive) OutlinedButton(onClick = { scope.launch { runCatching { vm.api().cancel(runId) }; runCatching { adopt(vm.api().run(runId)) } } }, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("取消任务") }
-                if (r.showsRetry) Button(onClick = { scope.launch { runCatching { vm.api().retry(runId) }; vm.refresh(); runCatching { adopt(vm.api().run(runId)) } } }, enabled = slot?.canInject == true, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("重试") }
-                if (r.isArchived) OutlinedButton(onClick = {
-                    vm.hideLocal(runId, false, r)
-                    scope.launch {
-                        try {
-                            val next = vm.api().unarchive(runId)
-                            vm.hideLocal(runId, false, next)
-                            vm.refresh()
-                            run = next
-                        } catch (_: Exception) {
-                            vm.revertHide(runId)
-                        }
-                    }
-                }, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("取消隐藏") }
-                else if (r.showsArchive) OutlinedButton(onClick = {
-                    vm.hideLocal(runId, true, r)
-                    scope.launch {
-                        try {
-                            val next = vm.api().archive(runId)
-                            vm.hideLocal(runId, true, next)
-                            vm.refresh()
-                        } catch (e: Exception) {
-                            vm.revertHide(runId)
-                            err = hideError((e as? RelayException)?.code ?: "")
-                        }
-                    }
-                }, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("隐藏") }
+                if (r.isLive) BarButton("取消任务", danger = true, expand = true, onClick = { scope.launch { runCatching { vm.api().cancel(runId) }; runCatching { adopt(vm.api().run(runId)) } } })
+                if (r.showsRetry) BarButton("重试", filled = true, expand = true, enabled = slot?.canInject == true, onClick = { scope.launch { runCatching { vm.api().retry(runId) }; vm.refresh(); runCatching { adopt(vm.api().run(runId)) } } })
             }
         }
     }
     if (showFollow && slot != null) DispatchSheet(vm, slot, runId) { showFollow = false; scope.launch { vm.refresh(); runCatching { adopt(vm.api().run(runId)) } } }
+}
+
+@Composable
+fun DetailPromptCard(text: String) {
+    var contentH by remember(text) { mutableFloatStateOf(40f) }
+    var expanded by remember(text) { mutableStateOf(false) }
+    val overflows = contentH > DETAIL_PROMPT_MAX_HEIGHT
+    val shown = if (expanded) maxOf(contentH, 24f) else detailPromptShownHeight(contentH)
+    val card = MaterialTheme.colorScheme.surfaceVariant
+    Row(
+        Modifier.fillMaxWidth().height(IntrinsicSize.Min).clip(RoundedCornerShape(12.dp)).background(card),
+    ) {
+        Box(Modifier.width(3.dp).fillMaxHeight().background(AccentBlue))
+        Column(Modifier.weight(1f).padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("提示词", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                Spacer(Modifier.weight(1f))
+                if (overflows) BarButton(if (expanded) "收起" else "展开", compact = true) { expanded = !expanded }
+            }
+            Box(Modifier.fillMaxWidth().height(shown.dp).clip(RoundedCornerShape(4.dp))) {
+                MarkdownFrame(text, heightDp = maxOf(contentH, 24f), onHeight = { contentH = it })
+                if (overflows && !expanded) {
+                    Box(
+                        Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(36.dp)
+                            .background(Brush.verticalGradient(listOf(card.copy(alpha = 0f), card))),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun DetailReplyBlock(text: String?, isLive: Boolean) {
+    var height by remember(text) { mutableFloatStateOf(80f) }
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("回复", style = MaterialTheme.typography.titleSmall)
+            Spacer(Modifier.width(8.dp))
+            Box(Modifier.weight(1f).height(1.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)))
+        }
+        if (!text.isNullOrEmpty()) {
+            MarkdownFrame(text, heightDp = detailReplyShownHeight(height), onHeight = { height = it })
+        } else {
+            Text(if (isLive) "还没有终态正文" else "没有正文", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+        }
+    }
+}
+
+@Composable
+fun DetailActionBar(copy: () -> Unit, unread: (() -> Unit)?, hide: (() -> Unit)?, hideTitle: String) {
+    val items = buildList {
+        add("复制正文" to copy)
+        if (unread != null) add("标为未读" to unread)
+        if (hide != null) add(hideTitle to hide)
+    }
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        items.forEachIndexed { index, (title, action) ->
+            if (index > 0) {
+                Box(Modifier.width(1.dp).height(28.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f)))
+            }
+            Box(
+                Modifier.weight(1f).heightIn(min = 52.dp).clickable(onClick = action),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(title, color = AccentBlue, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+            }
+        }
+    }
 }
 
 @Composable
@@ -562,17 +774,29 @@ fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend (
     var busy by remember { mutableStateOf<String?>(null) }
     var err by remember { mutableStateOf<String?>(null) }
     val plan = isPlanAsk(ask)
-    Column(Modifier.fillMaxWidth().padding(vertical = 8.dp).background(Color(0xFFF4F4F5), RoundedCornerShape(12.dp)).padding(14.dp)) {
-        if (plan) {
-            Text("Created Plan", style = MaterialTheme.typography.titleMedium)
-            Text(ask.questions.firstOrNull()?.prompt.orEmpty())
-            val overview = ask.questions.firstOrNull()?.options?.firstOrNull()?.text
-            if (!overview.isNullOrEmpty() && overview != "Build") MarkdownBox(overview)
-            err?.let { Text(it, color = Color.Red) }
-            Button(
-                onClick = {
-                    val q = ask.questions.firstOrNull() ?: return@Button
-                    val opt = q.options.firstOrNull() ?: return@Button
+    Box(Modifier.fillMaxWidth().height(IntrinsicSize.Min).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant)) {
+        Box(
+            Modifier.align(Alignment.CenterStart).padding(vertical = 10.dp, horizontal = 4.dp)
+                .width(4.dp).fillMaxHeight().clip(RoundedCornerShape(1.5.dp))
+                .background(if (plan) PlanYellow else AccentBlue),
+        )
+        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (plan) {
+                Text("Created Plan", style = MaterialTheme.typography.titleMedium)
+                Text(ask.questions.firstOrNull()?.prompt.orEmpty())
+                val overview = ask.questions.firstOrNull()?.options?.firstOrNull()?.text
+                if (!overview.isNullOrEmpty() && overview != "Build") MarkdownFrame(overview)
+                err?.let { Text(it, color = StatusRed) }
+                BarButton(
+                    if (busy == "continue") "Building..." else "Build",
+                    filled = true,
+                    expand = true,
+                    enabled = busy == null,
+                    fillColor = PlanYellow,
+                    textColor = Color.Black,
+                    onClick = click@{
+                    val q = ask.questions.firstOrNull() ?: return@click
+                    val opt = q.options.firstOrNull() ?: return@click
                     busy = "continue"
                     scope.launch {
                         try {
@@ -587,30 +811,30 @@ fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend (
                             busy = null
                         }
                     }
-                },
-                enabled = busy == null,
-                modifier = Modifier.fillMaxWidth().height(48.dp),
-                colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Color(0xFFF1B467), contentColor = Color.Black),
-            ) { Text(if (busy == "continue") "Building..." else "Build") }
-        } else {
-            Text("需要选择", style = MaterialTheme.typography.titleMedium)
-            ask.questions.forEach { q ->
-                Text(q.prompt)
-                q.options.forEach { o ->
-                    val selected = optionId == o.id
-                    Row(
-                        Modifier.fillMaxWidth().padding(vertical = 4.dp).border(if (selected) 2.dp else 1.dp, if (selected) Color(0xFF599CE7) else Color.LightGray, RoundedCornerShape(10.dp)).clickable { optionId = o.id }.padding(12.dp),
-                    ) {
-                        Text(o.label.ifEmpty { o.id.uppercase() }, color = Color.Gray)
-                        Spacer(Modifier.width(8.dp))
-                        Text(askOptionBody(o.label, o.text))
+                })
+            } else {
+                Text("需要选择", style = MaterialTheme.typography.titleMedium)
+                ask.questions.forEach { q ->
+                    Text(q.prompt)
+                    q.options.forEach { o ->
+                        val selected = optionId == o.id
+                        Row(
+                            Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (selected) AccentBlue.copy(alpha = 0.12f) else Color.Transparent)
+                                .border(if (selected) 2.dp else 1.dp, if (selected) AccentBlue else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+                                .clickable(enabled = busy == null) { optionId = o.id }
+                                .padding(12.dp),
+                        ) {
+                            Text(o.label.ifEmpty { o.id.uppercase() }, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                            Spacer(Modifier.width(8.dp))
+                            Text(askOptionBody(o.label, o.text))
+                        }
                     }
                 }
-            }
-            err?.let { Text(it, color = Color.Red) }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(
-                    onClick = {
+                err?.let { Text(it, color = StatusRed) }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    BarButton(if (busy == "skip") "Skipping..." else "跳过", compact = true, modifier = Modifier.weight(1f), enabled = busy == null, onClick = {
                         busy = "skip"
                         scope.launch {
                             try {
@@ -621,14 +845,10 @@ fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend (
                                 busy = null
                             }
                         }
-                    },
-                    enabled = busy == null,
-                    modifier = Modifier.weight(1f).height(48.dp),
-                ) { Text(if (busy == "skip") "Skipping..." else "跳过") }
-                Button(
-                    onClick = {
-                        val q = ask.questions.firstOrNull() ?: return@Button
-                        val oid = optionId ?: return@Button
+                    })
+                    BarButton(if (busy == "continue") "Continuing..." else "继续", filled = true, compact = true, modifier = Modifier.weight(1f), enabled = optionId != null && busy == null, onClick = click@{
+                        val q = ask.questions.firstOrNull() ?: return@click
+                        val oid = optionId ?: return@click
                         busy = "continue"
                         scope.launch {
                             try {
@@ -643,30 +863,71 @@ fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend (
                                 busy = null
                             }
                         }
-                    },
-                    enabled = optionId != null && busy == null,
-                    modifier = Modifier.weight(1f).height(48.dp),
-                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Color(0xFF599CE7)),
-                ) { Text(if (busy == "continue") "Continuing..." else "继续") }
+                    })
+                }
             }
         }
     }
 }
 
+private class MarkdownHolder {
+    var lastKey = ""
+    var onHeight: (Float) -> Unit = {}
+}
+
 @Composable
-fun MarkdownBox(text: String) {
+fun MarkdownFrame(text: String, heightDp: Float? = null, onHeight: ((Float) -> Unit)? = null) {
     val fontScale = LocalFontScale.current
     val theme = LocalAppTheme.current
+    var measured by remember(text, fontScale, theme) { mutableFloatStateOf(heightDp ?: 80f) }
+    val holder = remember { MarkdownHolder() }
+    holder.onHeight = { h ->
+        measured = h
+        onHeight?.invoke(h)
+    }
+    val shown = heightDp ?: maxOf(measured, 80f)
     AndroidView(
         factory = { c ->
             WebView(c).apply {
-                webViewClient = WebViewClient()
-                settings.javaScriptEnabled = false
-                setBackgroundColor(0)
+                settings.javaScriptEnabled = true
+                isVerticalScrollBarEnabled = false
+                isHorizontalScrollBarEnabled = false
+                isNestedScrollingEnabled = false
+                overScrollMode = View.OVER_SCROLL_NEVER
+                setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                setOnTouchListener { v, event ->
+                    if (event.actionMasked == MotionEvent.ACTION_MOVE) {
+                        v.parent?.requestDisallowInterceptTouchEvent(false)
+                    }
+                    event.actionMasked == MotionEvent.ACTION_MOVE
+                }
+                webViewClient = object : WebViewClient() {
+                    override fun onPageFinished(view: WebView, url: String?) {
+                        view.evaluateJavascript(MarkdownHtml.MEASURE_JS) { raw ->
+                            val h = raw?.trim('"')?.toFloatOrNull() ?: return@evaluateJavascript
+                            holder.onHeight(maxOf(h, 1f))
+                        }
+                    }
+                    override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                        val uri = request.url
+                        val scheme = uri.scheme ?: return false
+                        if (scheme == "http" || scheme == "https") {
+                            runCatching { view.context.startActivity(Intent(Intent.ACTION_VIEW, uri)) }
+                            return true
+                        }
+                        return false
+                    }
+                }
             }
         },
-        update = { it.loadDataWithBaseURL(null, MarkdownHtml.from(text, fontScale, theme), "text/html", "utf-8", null) },
-        modifier = Modifier.fillMaxWidth().height(180.dp),
+        update = { web ->
+            val key = "$text|$fontScale|$theme"
+            if (holder.lastKey != key) {
+                holder.lastKey = key
+                web.loadDataWithBaseURL(null, MarkdownHtml.from(text, fontScale, theme), "text/html", "utf-8", null)
+            }
+        },
+        modifier = Modifier.fillMaxWidth().height(shown.dp),
     )
 }
 
