@@ -4,8 +4,8 @@ object MarkdownHtml {
     fun from(source: String, fontScale: String = "normal", theme: String = "dark"): String {
         val inner = splitFences(source.replace("\r\n", "\n")).joinToString("") { renderBlock(it) }
         val scale = when (fontScale) {
-            "large" -> "1.5"
-            "xlarge" -> "2"
+            "large" -> "1.25"
+            "xlarge" -> "1.5"
             else -> "1"
         }
         val dark = theme == "dark"

@@ -14,9 +14,9 @@
 
 | 项 | 内容 |
 | --- | --- |
-| 问题 | 中台主题开关裸露在顶栏；无字号。App 跟随系统、详情 Markdown 写死 13px。操作员无法把全局文字（含 Markdown）放到 1.5× / 2×。 |
-| 核心方案 | **方案 A：各端本地偏好 + 只放大字号。** 中台 `ui-prefs.json` + localStorage；App UserDefaults / SharedPreferences。**禁止** App 读写 `/api/ui-prefs`，禁止中转新路由。禁止 `zoom` / 整页 `scaleEffect`。 |
-| 关键约束 | ① 字号三档：`normal=1`、`large=1.5`、`xlarge=2`。② 默认：黑夜 + 正常（= 当前中台观感）。③ 缩放必须覆盖看板/侧栏/派发 **和** 详情 Markdown（含代码块）。④ 解绑不丢外观（本机偏好，不跟 token）。 |
+| 问题 | 中台主题开关裸露在顶栏；无字号。App 跟随系统、详情 Markdown 写死 13px。操作员无法把全局文字（含 Markdown）放大。 |
+| 核心方案 | **方案 A：各端本地偏好 + 只放大字号。** 中台 `ui-prefs.json` + localStorage；App UserDefaults / SharedPreferences。**禁止** App 读写 `/api/ui-prefs`，禁止中转新路由。禁止 `zoom` / 整页 `scaleEffect`。禁止把 root rem 跟着字号乘——间距膨胀会把 240px 看板挤成竖排单字。 |
+| 关键约束 | ① 字号三档：`normal=1`、`large=1.25`、`xlarge=1.5`。② 默认：黑夜 + 正常（= 当前中台观感）。③ 缩放必须覆盖看板/侧栏/派发 **和** 详情 Markdown（含代码块）。④ 解绑不丢外观（本机偏好，不跟 token）。 |
 | 明确不做 | App↔中台同步；跟随系统作为第三档主题；更多字号；只放大聊天；语言/通知；改 `runToSnap`；`/mobile/ui-prefs`。 |
 
 **可行性：** 纯本机 UI 偏好，不是 IDE/CDP 写路径，不触发 `armada-feasibility-before-solution`。
@@ -33,8 +33,8 @@
 
 | # | 原始诉求 | 设计映射 |
 | --- | --- | --- |
-| R1 | 顶部加字号：正常 / 大 1.5× / 超大 2× | 三档枚举 `fontScale`，默认 `normal` |
-| R2 | 全局字体整体放大，含 Md 详情 | 只放大字号，禁止 `zoom`。中台 `--armada-text-scale` + root rem 间距；侧栏/列宽钉 px。App `fontScale` / Dynamic Type；Markdown `calc(13px * var(--md-scale))` |
+| R1 | 顶部加字号：正常 / 大 / 超大 | 三档枚举 `fontScale`，默认 `normal`；倍率 1 / 1.25 / 1.5（2× 在 240px 看板不可排） |
+| R2 | 全局字体整体放大，含 Md 详情 | 只放大字号，禁止 `zoom`，禁止 root rem 跟倍率走。中台 `--armada-text-scale` 只乘 `font-size`。看板列 `min-w-[240px]` 可伸。App `fontScale` / Dynamic Type；Markdown `calc(13px * var(--md-scale))` |
 | R3 | App 加设置页：明亮黑夜 + 字号，先做这两项 | 舰队页「设置」→ 独立页，仅两行 |
 | R4 | 中台也要加；明亮黑夜收进弹窗 | 顶栏「设置」弹窗，去掉裸露「明亮/黑夜」按钮 |
 | R5 | A：不用同步，保存在自己地方 | 中台只写本 hub 文件/本浏览器；App 只写本机。无跨端 API |
@@ -110,7 +110,7 @@
 | 字段 | 合法值 | 倍率 | UI 文案 | 默认 |
 | --- | --- | --- | --- | --- |
 | `theme` | `dark` \| `light` | — | 黑夜 / 明亮 | `dark` |
-| `fontScale` | `normal` \| `large` \| `xlarge` | 1 / 1.5 / 2 | 正常 / 大 / 超大 | `normal` |
+| `fontScale` | `normal` \| `large` \| `xlarge` | 1 / 1.25 / 1.5 | 正常 / 大 / 超大 | `normal` |
 
 非法值（缺省、`"neon"`、`1.5`、`null`）→ 默认。**禁止**存数字倍率；只存档位名。
 
@@ -196,7 +196,7 @@ sequenceDiagram
 
 1. `document.documentElement.dataset.theme = theme`（已有）
 2. `document.documentElement.dataset.fontScale = fontScale`
-3. CSS：`--armada-text-scale` 为 1 / 1.5 / 2。`html { font-size: calc(16px * var(--armada-text-scale)) }` 让 rem 间距跟字号走；`text-[10px]`–`text-[16px]` 仍 `calc(Npx * var(--armada-text-scale))`。侧栏/看板列钉死 `224px` / `240px`，禁止 `zoom`。顶栏 chip `whitespace-nowrap` + `flex-wrap`，禁止中文被挤成竖排单字。桌面窗口默认 1440×900（min 1100×700）。
+3. CSS：`--armada-text-scale` 为 1 / 1.25 / 1.5。`html { font-size: 16px }` 钉死 rem，间距不跟字号膨胀；`text-[10px]`–`text-[16px]` / `text-xs` / `text-sm` 仍 `calc(... * var(--armada-text-scale))`。侧栏 `224px`；看板列 `min-w-[240px]` 可随窗口伸，禁止 `max-w-[240px]`，禁止 `zoom`。卡片标题 `break-words line-clamp-3`，禁止 `break-all`。顶栏 chip `whitespace-nowrap` + `flex-wrap`。桌面窗口默认 1440×900（min 1100×700）。
 
 `normal` 倍率为 1（不覆盖，保持现网 px）。冷启动：`main.tsx` 在 render 前 `applyTheme` + `applyFontScale`，避免闪 1× 再跳。
 
@@ -207,7 +207,7 @@ sequenceDiagram
 
 | 端 | 主题 | 原生文字 | Markdown |
 | --- | --- | --- | --- |
-| iOS | 根 `preferredColorScheme(.dark/.light)` | `.environment(\.dynamicTypeSize)`：normal→`.large`，large→`.accessibility1`，xlarge→`.accessibility3`。禁止根视图 `scaleEffect`。 | `MarkdownHTML.from`：`--md-scale` + `calc(13px * var(--md-scale))`，禁止 `zoom` |
+| iOS | 根 `preferredColorScheme(.dark/.light)` | `.environment(\.dynamicTypeSize)`：normal→`.large`，large→`.xxLarge`，xlarge→`.accessibility1`。禁止根视图 `scaleEffect`。 | `MarkdownHTML.from`：`--md-scale` + `calc(13px * var(--md-scale))`，禁止 `zoom` |
 | Android | `MaterialTheme` 包 `Root` | `LocalDensity`：**只改 `fontScale`**，`density` 不变。禁止 `graphicsLayer` 整页缩放。 | `MarkdownHtml.from` 同 iOS：`--md-scale`，禁止 `zoom` |
 
 详情打开时用**当前**倍率生成 HTML；改设置后已打开的 WebView 必须 reload 同一 `text`（改 `lastText` 哨兵或显式 `scale` 依赖）。
@@ -229,7 +229,7 @@ sequenceDiagram
 | localStorage 抛错 | 内存 apply 仍执行；刷新可能回默认 |
 | PUT ui-prefs 失败 | 不弹红条、不回滚（与现网 theme 一致） |
 | SharedPreferences apply 失败 | 内存态保留到进程结束 |
-| WebView 未吃到字号倍率 | 单测锁 HTML 含 `--md-scale: 1.5` 且无 `zoom:`；真机抽查详情正文 |
+| WebView 未吃到字号倍率 | 单测锁 HTML 含 `--md-scale: 1.25` 且无 `zoom:`；真机抽查详情正文 |
 
 回滚：revert 本规格提交；操作员清 localStorage / 卸 App 即回默认。
 
@@ -264,8 +264,8 @@ sequenceDiagram
 | ID | 面 | 条件 |
 | --- | --- | --- |
 | A1 | 中台 | 顶栏无「明亮/黑夜」裸按钮；有「设置」 |
-| A2 | 中台 | 弹窗仅外观+字号；选「大」后看板标题与详情 Markdown 计算字号约为原 1.5 倍（13px → ~19.5px） |
-| A3 | 中台 | 「超大」→ 2 倍；刷新后仍是超大 |
+| A2 | 中台 | 弹窗仅外观+字号；选「大」后看板标题与详情 Markdown 计算字号约为原 1.25 倍（13px → ~16.25px）；卡片标题按词换行且最多 3 行，不是竖排单字 |
+| A3 | 中台 | 「超大」→ 1.5 倍（13px → ~19.5px）；刷新后仍是超大；看板列仍可并排阅读 |
 | A4 | 中台 | PUT 失败（断 hub）本机仍保持所选档 |
 | A5 | iOS | 舰队→设置；两项；Markdown 详情随档位；解绑再绑定仍在 |
 | A6 | Android | 同 A5；暗色主题下 Markdown 不是黑字配深底 |
@@ -279,7 +279,7 @@ sequenceDiagram
 | `hub/test/uiPrefs.test.ts` | 非法 `fontScale` clamp；merge 只改字号保留 theme |
 | `hub/web/test/uiPrefs.test.ts` | `fontScale: large` 使 `localDiffersFromDefaults` 为 true |
 | `hub/web` 设置弹窗 | 静态 markup 含「设置」「正常」「超大」，不含顶栏即时「明亮」按钮（header 路径） |
-| iOS Markdown（若现有测试 harness）或 Android `MarkdownHtmlTest` | `from(..., large, dark)` HTML 含 `--md-scale: 1.5`、无 `zoom:`、且暗色 color |
+| iOS Markdown（若现有测试 harness）或 Android `MarkdownHtmlTest` | `from(..., large, dark)` HTML 含 `--md-scale: 1.25`、无 `zoom:`、且暗色 color |
 
 禁止未红先改生产 CSS。
 
@@ -296,13 +296,15 @@ sequenceDiagram
 
 | 风险 | 影响 | 应对 | 状态 |
 | --- | --- | --- | --- |
-| CSS `zoom` 放大布局导致整页滚动 | 操作员要的是字号不是画布缩放 | 只乘字号 + 钉死列宽；rem 只放大间距 | 已修 |
+| CSS `zoom` 放大布局导致整页滚动 | 操作员要的是字号不是画布缩放 | 只乘字号；禁止 `zoom` | 已修 |
+| root rem 跟字号走 + 列宽钉 240px | `pr-16` 变成 96–128px，标题只剩 4～6 个汉字 | rem 钉 16px；标题 `break-words line-clamp-3`；列可伸 | 已修 |
+| 1.5× / 2× 字号对 240px 看板过大 | 即使用冻结 rem，2× 的 26px 汉字一行只挤约 6 字 | 档位改为 1.25 / 1.5 | 已修 |
 | 大字号顶栏中文竖排 / 800×600 像文档 | 标题「Armada」和按钮挤成单字列 | 顶栏 nowrap+wrap；窗口 1440×900 | 已修 |
-| 2× 下文案换行增多 | 详情区更长 | 允许纵向滚内容，禁止横向滚整页画布 | 接受 |
+| 1.5× 下文案换行增多 | 详情区更长 | 允许纵向滚内容，禁止横向滚整页画布 | 接受 |
 | App 从「跟随系统」改为默认黑夜 | 浅色系统用户第一次升级变黑 | R5/P3；设置里一键明亮 | 接受 |
 | Android 详情 WebView 忽略字号变量 | MD 仍 13px | 单测锁 `--md-scale` + `calc(13px * var(--md-scale))` | 缓解预案 |
 | 中台 localStorage 与 `ui-prefs.json` 不一致 | 两台浏览器官感不同 | **故意**：那是「自己的地方」。同浏览器以 local 立即生效，PUT 成功后其它打开该 hub 的页面下次 GET 才对齐 | 已决：中台多标签允许短暂不一致 |
-| 2× 手机可用性 | 一屏字少 | 用户点名 2× | 接受 |
+| 1.5× 手机可用性 | 一屏字少 | 超大封顶 1.5；不再提供 2× | 已修 |
 
 **阻塞项：** 无。不依赖中转、不依赖被控机、不依赖新权限。
 
@@ -328,3 +330,4 @@ sequenceDiagram
 | 2026-09-18 | 初稿。方案 A：各端本地、不同步；中台弹窗 + App 设置页；`fontScale` 三档。 |
 | 2026-09-18 | 真机反馈：`zoom`/`scaleEffect` 是整页画布放大。改为只乘字号；布局宽高不变。 |
 | 2026-09-18 | 真机：大字号顶栏中文竖排、800×600 窗口不协调。改为 root rem 跟字号、列宽钉 px、窗口 1440×900。 |
+| 2026-09-18 | 真机：rem 跟字号走后 240px 卡片标题竖排。改回 rem=16px；倍率 1.25 / 1.5；标题 clamp；列可伸。 |

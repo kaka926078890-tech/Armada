@@ -37,8 +37,8 @@ export function saveFontScale(scale: FontScale): void {
 }
 
 export function zoomForFontScale(scale: FontScale): number {
-  if (scale === "large") return 1.5;
-  if (scale === "xlarge") return 2;
+  if (scale === "large") return 1.25;
+  if (scale === "xlarge") return 1.5;
   return 1;
 }
 

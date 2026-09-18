@@ -51,10 +51,10 @@ describe("fontScale", () => {
     expect(loadFontScale()).toBe("xlarge");
   });
 
-  test("zoom is 1 / 1.5 / 2", () => {
+  test("zoom is 1 / 1.25 / 1.5", () => {
     expect(zoomForFontScale("normal")).toBe(1);
-    expect(zoomForFontScale("large")).toBe(1.5);
-    expect(zoomForFontScale("xlarge")).toBe(2);
+    expect(zoomForFontScale("large")).toBe(1.25);
+    expect(zoomForFontScale("xlarge")).toBe(1.5);
   });
 
   test("applyFontScale writes data-font-scale", () => {

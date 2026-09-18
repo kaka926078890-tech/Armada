@@ -105,8 +105,8 @@ val LocalAppTheme = compositionLocalOf { "dark" }
 val LocalFontScale = compositionLocalOf { "normal" }
 
 fun appearanceTextScale(scale: String): Float = when (scale) {
-    "large" -> 1.5f
-    "xlarge" -> 2f
+    "large" -> 1.25f
+    "xlarge" -> 1.5f
     else -> 1f
 }
 

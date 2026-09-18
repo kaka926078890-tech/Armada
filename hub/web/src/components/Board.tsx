@@ -50,8 +50,8 @@ export default function Board({ runs, machines, selected, onSelect, showArchived
   return (
     <main className="flex-1 min-w-0 overflow-x-auto flex gap-2 p-3">
       {(Object.keys(COLUMN_LABELS) as ColumnKey[]).map((col) => (
-        <section key={col} className={`w-[240px] min-w-[240px] max-w-[240px] shrink-0 flex flex-col rounded-lg bg-zinc-900/40 border-t-2 ${COL_ACCENT[col]}`}>
-          <h2 className="text-[11px] tracking-wide uppercase text-zinc-500 px-2.5 pb-2 pt-2 inline-flex items-center gap-1.5">
+        <section key={col} className={`flex-1 min-w-[240px] shrink-0 flex flex-col rounded-lg bg-zinc-900/40 border-t-2 ${COL_ACCENT[col]}`}>
+          <h2 className="text-[11px] tracking-wide uppercase text-zinc-500 px-2.5 pb-2 pt-2 inline-flex items-center gap-1.5 whitespace-nowrap">
             {COLUMN_LABELS[col]} <span className="text-zinc-600 normal-case tracking-normal">{g[col].length}</span>
             {columnHasAlert(runs, col, readMap) ? (
               <span className="size-1.5 shrink-0 rounded-full bg-red-400" data-col-alert={col} title="待处理或未读异常" />
@@ -85,7 +85,7 @@ export default function Board({ runs, machines, selected, onSelect, showArchived
                     </div>
                   ) : (
                     <button onClick={() => onSelect(r.id)} className="w-full min-w-0 text-left px-2.5 py-2">
-                      <div className="text-[13px] font-medium leading-snug text-zinc-100 pr-16 break-all">{v.title}</div>
+                      <div className="text-[13px] font-medium leading-snug text-zinc-100 pr-16 break-words line-clamp-3">{v.title}</div>
                       <div className="text-[11px] text-zinc-500 mt-1 truncate">{nameOf(r.machine_id)} · {workspaceFolderName(r.workspace_root)}</div>
                       {lag ? (
                         <div className="text-[11px] text-amber-400 mt-1 leading-snug">{lag}</div>
@@ -96,12 +96,12 @@ export default function Board({ runs, machines, selected, onSelect, showArchived
                       {(r.status === "dispatched" || r.status === "created") && (
                         <div className="text-[11px] text-amber-500/80 mt-1">已预填,待本机回车</div>
                       )}
-                      <div className="text-[11px] text-zinc-500 mt-1 flex justify-between items-center">
-                        <span className={`inline-flex items-center gap-1.5 ${BADGE_COLOR[col]}`}>
+                      <div className="text-[11px] text-zinc-500 mt-1 flex justify-between items-center gap-2">
+                        <span className={`inline-flex items-center gap-1.5 whitespace-nowrap ${BADGE_COLOR[col]}`}>
                           {unread ? <span className={`size-1.5 shrink-0 rounded-full ${chrome === "done" ? "bg-emerald-400" : "bg-red-400"}`} title={chrome === "need" ? "待处理" : chrome === "fail" ? "异常未读" : "未读"} /> : null}
                           {v.badge}
                         </span>
-                        <span className="text-zinc-600">{v.elapsed}</span>
+                        <span className="text-zinc-600 whitespace-nowrap shrink-0">{v.elapsed}</span>
                       </div>
                     </button>
                   )}

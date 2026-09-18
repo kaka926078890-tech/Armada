@@ -17,8 +17,8 @@ describe("settings chrome", () => {
     const css = readFileSync(join(root, "src/index.css"), "utf8");
     expect(css).not.toMatch(/data-font-scale="large"[^{]*\{[^}]*zoom\s*:/);
     expect(css).not.toMatch(/data-font-scale="xlarge"[^{]*\{[^}]*zoom\s*:/);
+    expect(css).toMatch(/--armada-text-scale:\s*1\.25/);
     expect(css).toMatch(/--armada-text-scale:\s*1\.5/);
-    expect(css).toMatch(/--armada-text-scale:\s*2/);
     expect(css).toMatch(/text-\\\[13px\\\][\s\S]{0,200}calc\(13px \* var\(--armada-text-scale/);
   });
 });

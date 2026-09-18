@@ -21,16 +21,16 @@ final class Appearance: ObservableObject {
 
     var textScale: CGFloat {
         switch fontScale {
-        case "large": return 1.5
-        case "xlarge": return 2
+        case "large": return 1.25
+        case "xlarge": return 1.5
         default: return 1
         }
     }
 
     var dynamicTypeSize: DynamicTypeSize {
         switch fontScale {
-        case "large": return .accessibility1
-        case "xlarge": return .accessibility3
+        case "large": return .xxLarge
+        case "xlarge": return .accessibility1
         default: return .large
         }
     }

@@ -77,21 +77,21 @@ export default function Sidebar({
           <button
             type="button"
             onClick={onOpenWorkspace}
-            className="px-3 py-2 rounded-md border border-zinc-700 hover:bg-zinc-900 text-[13px]"
+            className="px-3 py-2 rounded-md border border-zinc-700 hover:bg-zinc-900 text-[13px] whitespace-nowrap"
           >
             打开工作区
           </button>
           <button
             type="button"
             onClick={onRepairCdp}
-            className="px-3 py-2 rounded-md border border-zinc-700 hover:bg-zinc-900 text-[13px]"
+            className="px-3 py-2 rounded-md border border-zinc-700 hover:bg-zinc-900 text-[13px] whitespace-nowrap"
           >
             修复调试口
           </button>
           <button
             type="button"
             onClick={onGetShareLink}
-            className="px-3 py-2 rounded-md border border-zinc-700 hover:bg-zinc-900 text-[13px]"
+            className="px-3 py-2 rounded-md border border-zinc-700 hover:bg-zinc-900 text-[13px] whitespace-nowrap"
           >
             获取分享链接
           </button>
@@ -101,7 +101,7 @@ export default function Sidebar({
         type="button"
         disabled={!canDispatch}
         onClick={onDispatch}
-        className={`mx-3 mb-1 px-3 py-2 rounded-md bg-sky-700 hover:bg-sky-600 text-[13px] disabled:opacity-40 disabled:hover:bg-sky-700 ${showDesktopActions ? "mt-0" : "mt-3"}`}
+        className={`mx-3 mb-1 px-3 py-2 rounded-md bg-sky-700 hover:bg-sky-600 text-[13px] whitespace-nowrap disabled:opacity-40 disabled:hover:bg-sky-700 ${showDesktopActions ? "mt-0" : "mt-3"}`}
       >
         + 派发任务
       </button>

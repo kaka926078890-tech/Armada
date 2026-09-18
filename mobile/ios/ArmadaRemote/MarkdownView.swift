@@ -8,8 +8,8 @@ enum MarkdownHTML {
         let inner = blocks.map(renderBlock).joined()
         let scale: String
         switch fontScale {
-        case "large": scale = "1.5"
-        case "xlarge": scale = "2"
+        case "large": scale = "1.25"
+        case "xlarge": scale = "1.5"
         default: scale = "1"
         }
         let dark = theme == "dark"
