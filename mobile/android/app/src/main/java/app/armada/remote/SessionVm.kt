@@ -12,6 +12,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.sse.EventSource
 import org.json.JSONObject
@@ -42,6 +44,7 @@ class SessionVm(app: Application) : AndroidViewModel(app) {
     private var source: EventSource? = null
     private var refreshSeq = 0
     private var snippetsSeq = 0
+    private val saveSnippetsMutex = Mutex()
     private var readAt = store.readAt().toMutableMap()
     private var unreadHold = mutableSetOf<String>()
     private var foreground = true
@@ -273,19 +276,21 @@ class SessionVm(app: Application) : AndroidViewModel(app) {
     }
 
     suspend fun saveSnippets(next: List<PromptSnippet>) {
-        if (!_state.value.bound) return
-        val seq = snippetsSeq
-        val client = api()
-        val previous = _state.value.snippets
-        _state.value = _state.value.copy(snippets = next)
-        try {
-            val saved = withContext(Dispatchers.IO) { client.putPromptSnippets(next) }
-            if (!_state.value.bound || seq != snippetsSeq) return
-            _state.value = _state.value.copy(snippets = saved, lastError = null)
-        } catch (e: Exception) {
-            if (!_state.value.bound || seq != snippetsSeq) return
-            _state.value = _state.value.copy(snippets = previous, lastError = e.message ?: operatorMessage("WRITE_FAIL"))
-            throw e
+        saveSnippetsMutex.withLock {
+            if (!_state.value.bound) return
+            val seq = snippetsSeq
+            val client = api()
+            val previous = _state.value.snippets
+            _state.value = _state.value.copy(snippets = next)
+            try {
+                val saved = withContext(Dispatchers.IO) { client.putPromptSnippets(next) }
+                if (!_state.value.bound || seq != snippetsSeq) return
+                _state.value = _state.value.copy(snippets = saved, lastError = null)
+            } catch (e: Exception) {
+                if (!_state.value.bound || seq != snippetsSeq) return
+                _state.value = _state.value.copy(snippets = previous, lastError = e.message ?: operatorMessage("WRITE_FAIL"))
+                throw e
+            }
         }
     }
 
