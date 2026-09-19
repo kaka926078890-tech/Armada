@@ -8,7 +8,7 @@ import { RunService } from "./runs";
 import { SseHub } from "./sse";
 import { ingestEvent } from "./ingest";
 import { handleWsMessage, type WsData } from "./ws";
-import { limitsFromEnv, httpStatusForRunError, type ConcurrencyLimits } from "./concurrency";
+import { limitsFromEnv, httpStatusForRunError, followupOutcome, type ConcurrencyLimits } from "./concurrency";
 import { BlobStore, MAX_BLOB_BYTES, isInlineRenderMime, responseContentType } from "./blobs";
 import { assertPromptSnippets, fillSnippetIds, readUiPrefs, writeUiPrefs, mergeUiPrefs } from "./uiPrefs";
 import { JoinTickets } from "./joinTickets";
@@ -306,7 +306,8 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
     const attachmentIds = Array.isArray(rawIds) ? rawIds.filter((x: unknown) => typeof x === "string") : [];
     const { run, error } = runs.followup(parent.id, typeof prompt === "string" ? prompt : "", attachmentIds);
     if (error) return c.json({ error }, httpStatusForRunError(error));
-    return c.json({ run }, run.status === "running" ? 201 : 200);
+    const outcome = followupOutcome(run.status);
+    return c.json({ run, outcome }, outcome === "queued" ? 201 : 200);
   });
   app.post("/api/runs/:id/retry", (c) => {
     const { run, error } = runs.retry(c.req.param("id"));

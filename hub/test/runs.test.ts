@@ -598,7 +598,9 @@ describe("Run dispatch", () => {
     inbound.length = 0;
     const f = await api(`/api/runs/${run.id}/followup`, { method: "POST", body: JSON.stringify({ prompt: "续" }) });
     expect(f.status).toBe(201);
-    const { run: again } = await f.json() as any;
+    const againBody = await f.json() as any;
+    const { run: again } = againBody;
+    expect(againBody.outcome).toBe("queued");
     expect(again.status).toBe("running");
     expect(again.outbound?.[0]).toMatchObject({ prompt: "续", state: "injecting" });
     await new Promise((r2) => setTimeout(r2, 80));
@@ -620,7 +622,9 @@ describe("Run dispatch", () => {
     inbound.length = 0;
     const f = await api(`/api/runs/${run.id}/followup`, { method: "POST", body: JSON.stringify({ prompt: "继续" }) });
     expect(f.status).toBe(200);
-    const { run: again } = await f.json() as any;
+    const againBody = await f.json() as any;
+    const { run: again } = againBody;
+    expect(againBody.outcome).toBe("injected");
     expect(again.id).toBe(run.id);
     expect(again.status).toBe("dispatched");
     expect(again.ended_at).toBeNull();

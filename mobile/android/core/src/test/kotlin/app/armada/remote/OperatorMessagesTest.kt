@@ -30,6 +30,8 @@ class OperatorMessagesTest {
         assertEquals("当前没有待回答的问题", operatorMessage("NO_PENDING_ASK"))
         assertEquals("问题已更新，请刷新后再答", operatorMessage("ASK_MISMATCH"))
         assertEquals("任务已完成，正文尚未生成", operatorMessage("NO_ASSISTANT_BODY"))
+        assertEquals("先写回复，或不选选项去点上面的答案", operatorMessage("ASK_TEXT_EMPTY"))
+        assertEquals("回复太长，请缩短后再发", operatorMessage("ASK_TEXT_TOO_LONG"))
     }
 
     @Test

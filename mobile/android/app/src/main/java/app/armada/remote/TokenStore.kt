@@ -7,7 +7,7 @@ import androidx.security.crypto.MasterKey
 
 class TokenStore(ctx: Context) {
     private val plain: SharedPreferences = ctx.getSharedPreferences("armada", Context.MODE_PRIVATE)
-    private val secret: SharedPreferences = runCatching {
+    private val secret: SharedPreferences = openSecretStore {
         val master = MasterKey.Builder(ctx).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
         EncryptedSharedPreferences.create(
             ctx,
@@ -16,7 +16,7 @@ class TokenStore(ctx: Context) {
             EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
             EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
         )
-    }.getOrElse { plain }
+    }
 
     var relay: String
         get() = plain.getString("relay", "").orEmpty()

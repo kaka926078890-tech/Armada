@@ -7,7 +7,7 @@ import { decodeWorkspaceId, encodeWorkspaceId, formatOpUri, formatPairUri } from
 import { createApnsSender, type ApnsConfig } from "./apns";
 import { createFcmSender, isFcmToken, type FcmConfig } from "./fcm";
 import { notifyEdges, type NotifyEdge } from "./notifyEdge";
-import { httpStatusForRunError } from "../../hub/src/concurrency";
+import { followupOutcome, httpStatusForRunError } from "../../hub/src/concurrency";
 
 export const PROTOCOL_VERSION = 1;
 const MAX_BODY = 20 * 1024 * 1024;
@@ -710,7 +710,8 @@ export function createRelayServer(opts: {
     if (result.run) applyRunSnap(fleet.id, result.run);
     audit("operator", "run.followup", runId, { fleet: fleet.id });
     const next = db.query("SELECT * FROM runs WHERE id=?1 AND fleet_id=?2").get(runId, fleet.id) as { status?: string } | undefined;
-    return c.json({ run: runToJson(next) }, next?.status === "running" ? 201 : 200);
+    const outcome = followupOutcome(String(next?.status ?? ""));
+    return c.json({ run: runToJson(next), outcome }, outcome === "queued" ? 201 : 200);
   });
 
   app.post("/mobile/runs/:id/retry", async (c) => {
@@ -739,11 +740,19 @@ export function createRelayServer(opts: {
   });
 
   app.post("/mobile/runs/:id/answer", async (c) => {
+    const tok = (c as any).get("opToken") as string;
     const fleet = (c as any).get("fleet") as { id: string; hub_online: number };
+    if (!checkRate(tok)) {
+      audit("operator", "run.rate_limit", fleet.id);
+      return c.json({ error: "RATE_LIMIT" }, 429);
+    }
     if (fleet.hub_online !== 1) return c.json({ error: "HUB_OFFLINE" }, 503);
+    const runId = c.req.param("id");
+    const row = db.query("SELECT id FROM runs WHERE id=?1 AND fleet_id=?2").get(runId, fleet.id);
+    if (!row) return c.json({ error: "NOT_FOUND" }, 404);
     const body = await c.req.json().catch(() => ({}));
     const requestId = `r${++reqSeq}`;
-    const sent = sendHub(fleet.id, { type: "cmd.answer", requestId, runId: c.req.param("id"), body });
+    const sent = sendHub(fleet.id, { type: "cmd.answer", requestId, runId, body });
     if (!sent) return c.json({ error: "HUB_OFFLINE" }, 503);
     const result = await waitHub(requestId);
     if (!result.ok) {
@@ -755,10 +764,18 @@ export function createRelayServer(opts: {
   });
 
   app.post("/mobile/runs/:id/cancel", async (c) => {
+    const tok = (c as any).get("opToken") as string;
     const fleet = (c as any).get("fleet") as { id: string; hub_online: number };
+    if (!checkRate(tok)) {
+      audit("operator", "run.rate_limit", fleet.id);
+      return c.json({ error: "RATE_LIMIT" }, 429);
+    }
     if (fleet.hub_online !== 1) return c.json({ error: "HUB_OFFLINE" }, 503);
+    const runId = c.req.param("id");
+    const row = db.query("SELECT id FROM runs WHERE id=?1 AND fleet_id=?2").get(runId, fleet.id);
+    if (!row) return c.json({ error: "NOT_FOUND" }, 404);
     const requestId = `r${++reqSeq}`;
-    const sent = sendHub(fleet.id, { type: "cmd.cancel", requestId, runId: c.req.param("id") });
+    const sent = sendHub(fleet.id, { type: "cmd.cancel", requestId, runId });
     if (!sent) return c.json({ error: "HUB_OFFLINE" }, 503);
     const result = await waitHub(requestId);
     if (!result.ok) {

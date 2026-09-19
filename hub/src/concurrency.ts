@@ -12,6 +12,11 @@ export function canRetryStatus(status: string): boolean {
   return (RETRY_STATUSES as readonly string[]).includes(status);
 }
 
+/** Live followup queues outbound; idle followup injects a new turn. Clients must read this, not 200 vs 201. */
+export function followupOutcome(status: string): "queued" | "injected" {
+  return status === "running" ? "queued" : "injected";
+}
+
 export interface ConcurrencyLimits {
   maxPerMachine: number;
   maxPerWorkspace: number;

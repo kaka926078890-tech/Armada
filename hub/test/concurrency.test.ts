@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { normalizePrompt } from "../../extension/src/promptNormalize";
-import { limitsFromEnv, extensionSupportsMultiRunPerWindow, httpStatusForRunError, ACTIVE_STATUSES, TERMINAL_STATUSES, OCCUPYING_STATUSES } from "../src/concurrency";
+import { limitsFromEnv, extensionSupportsMultiRunPerWindow, httpStatusForRunError, followupOutcome, ACTIVE_STATUSES, TERMINAL_STATUSES, OCCUPYING_STATUSES } from "../src/concurrency";
 
 describe("normalizePrompt", () => {
   test("trims, strips CR, collapses whitespace", () => {
@@ -78,5 +78,14 @@ describe("httpStatusForRunError", () => {
     expect(httpStatusForRunError("ALREADY_ACTIVE")).toBe(409);
     expect(httpStatusForRunError("RUN_BUSY")).toBe(409);
     expect(httpStatusForRunError("ALREADY_TERMINAL")).toBe(409);
+  });
+});
+
+describe("followupOutcome", () => {
+  test("running is queued; idle dispatch is injected", () => {
+    expect(followupOutcome("running")).toBe("queued");
+    expect(followupOutcome("dispatched")).toBe("injected");
+    expect(followupOutcome("binding")).toBe("injected");
+    expect(followupOutcome("completed")).toBe("injected");
   });
 });

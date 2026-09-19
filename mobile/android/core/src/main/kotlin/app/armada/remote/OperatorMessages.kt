@@ -26,6 +26,8 @@ fun operatorMessage(code: String): String = when (code) {
     "RUN_LIMIT" -> "这台机器任务数已满"
     "WINDOW_BUSY" -> "该窗口正忙"
     "ASK_INVALID_OPTION" -> "选项无效，请改选或 Skip"
+    "ASK_TEXT_EMPTY" -> "先写回复，或不选选项去点上面的答案"
+    "ASK_TEXT_TOO_LONG" -> "回复太长，请缩短后再发"
     "ASK_IN_FLIGHT" -> "正在提交，请稍候"
     "NO_PENDING_ASK" -> "当前没有待回答的问题"
     "ASK_MISMATCH" -> "问题已更新，请刷新后再答"

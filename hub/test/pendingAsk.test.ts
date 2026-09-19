@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mergePendingAskRecord, parsePendingAsk } from "../src/pendingAsk";
+import { choiceOptions, mergePendingAskRecord, parsePendingAsk } from "../src/pendingAsk";
 
 const short = parsePendingAsk({
   request_id: "ask-plan-1",
@@ -57,5 +57,28 @@ describe("mergePendingAskRecord", () => {
     expect(next.questions[0].options[0].text).toContain("# 完整计划");
     expect(next.request_id).toBe("ask-plan-1");
     expect(next.detected_at).toBe(2);
+  });
+});
+
+describe("choiceOptions", () => {
+  test("drops freeform Other from chips and keeps A/B/C", () => {
+    const ask = parsePendingAsk({
+      request_id: "ask-1",
+      questions: [{
+        id: "q0",
+        prompt: "选一个",
+        options: [
+          { id: "a", label: "A", text: "甲" },
+          { id: "b", label: "B", text: "乙" },
+          { id: "d", label: "D", text: "Other...", freeform: true },
+        ],
+      }],
+      detected_at: 1,
+      detect_via: "cdp",
+    });
+    expect(ask).not.toBeNull();
+    expect(ask!.questions[0].options.map((o) => o.id)).toEqual(["a", "b", "d"]);
+    expect(ask!.questions[0].options[2]?.freeform).toBe(true);
+    expect(choiceOptions(ask!).map((o) => o.id)).toEqual(["a", "b"]);
   });
 });

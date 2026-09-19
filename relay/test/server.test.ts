@@ -449,6 +449,54 @@ describe("relay serve", () => {
     expect(body.run.runId).toBe("r-1");
     expect(body.run.prompt).toBe("继续");
     expect(body.run.status).toBe("dispatched");
+    expect(body.outcome).toBe("injected");
+    ws.close();
+  });
+
+  test("followup on running run returns outcome queued", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    ws.addEventListener("message", (e) => {
+      const msg = JSON.parse(String(e.data));
+      if (msg.type === "cmd.followup") {
+        ws.send(JSON.stringify({
+          type: "cmd.result",
+          requestId: msg.requestId,
+          ok: true,
+          run: {
+            runId: msg.runId,
+            machineId: "m-1",
+            workspaceRoot: "/Users/me/proj",
+            prompt: msg.prompt,
+            status: "running",
+            outbound: [{ id: "o1", prompt: msg.prompt, expectedMode: "queue", state: "injecting", createdAt: 1 }],
+            updatedAt: Date.now(),
+          },
+        }));
+      }
+    });
+    ws.send(JSON.stringify({
+      type: "snap.run",
+      run: {
+        runId: "r-1",
+        machineId: "m-1",
+        workspaceRoot: "/Users/me/proj",
+        prompt: "hello fleet",
+        status: "running",
+        updatedAt: Date.now(),
+      },
+    }));
+    await Bun.sleep(40);
+    const f = await fetch(url(s, "/mobile/runs/r-1/followup"), {
+      method: "POST",
+      headers: { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ prompt: "续" }),
+    });
+    expect(f.status).toBe(201);
+    const queued = await f.json() as any;
+    expect(queued.outcome).toBe("queued");
+    expect(queued.run.status).toBe("running");
     ws.close();
   });
 
@@ -595,6 +643,105 @@ describe("relay serve", () => {
     const r = await fetch(url(s, "/mobile/runs/nope/archive"), { method: "POST", headers });
     expect(r.status).toBe(404);
     expect(await r.json()).toEqual({ error: "NOT_FOUND" });
+    ws.close();
+  });
+
+  test("answer and cancel of unknown run are 404 without hub command", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    const cmds: string[] = [];
+    ws.addEventListener("message", (e) => {
+      const msg = JSON.parse(String(e.data));
+      if (typeof msg.type === "string" && msg.type.startsWith("cmd.")) cmds.push(msg.type);
+    });
+    const headers = { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" };
+    const a = await fetch(url(s, "/mobile/runs/nope/answer"), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ request_id: "x" }),
+    });
+    expect(a.status).toBe(404);
+    expect(await a.json()).toEqual({ error: "NOT_FOUND" });
+    const cxl = await fetch(url(s, "/mobile/runs/nope/cancel"), { method: "POST", headers });
+    expect(cxl.status).toBe(404);
+    expect(await cxl.json()).toEqual({ error: "NOT_FOUND" });
+    await Bun.sleep(30);
+    expect(cmds).toEqual([]);
+    ws.close();
+  });
+
+  test("answer and cancel of another fleet's run are 404", async () => {
+    const s = start();
+    const owner = s.createFleet();
+    const other = s.createFleet();
+    const wsOwner = await connectHub(s, owner.fleet, owner.hubSecret);
+    const wsOther = await connectHub(s, other.fleet, other.hubSecret);
+    autoHub(wsOwner);
+    autoHub(wsOther);
+    const otherCmds: string[] = [];
+    wsOther.addEventListener("message", (e) => {
+      const msg = JSON.parse(String(e.data));
+      if (typeof msg.type === "string" && msg.type.startsWith("cmd.")) otherCmds.push(msg.type);
+    });
+    wsOwner.send(JSON.stringify({
+      type: "snap.run",
+      run: {
+        runId: "r-owned",
+        machineId: "m-1",
+        workspaceRoot: "/Users/me/proj",
+        prompt: "hello fleet",
+        status: "running",
+        updatedAt: Date.now(),
+      },
+    }));
+    await Bun.sleep(40);
+    const headers = { authorization: `Bearer ${other.operatorToken}`, "content-type": "application/json" };
+    const a = await fetch(url(s, "/mobile/runs/r-owned/answer"), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ request_id: "x" }),
+    });
+    expect(a.status).toBe(404);
+    expect(await a.json()).toEqual({ error: "NOT_FOUND" });
+    const cxl = await fetch(url(s, "/mobile/runs/r-owned/cancel"), { method: "POST", headers });
+    expect(cxl.status).toBe(404);
+    expect(await cxl.json()).toEqual({ error: "NOT_FOUND" });
+    await Bun.sleep(30);
+    expect(otherCmds).toEqual([]);
+    wsOwner.close();
+    wsOther.close();
+  });
+
+  test("answer and cancel share followup checkRate", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    autoHub(ws);
+    ws.send(JSON.stringify({
+      type: "snap.run",
+      run: {
+        runId: "r-1",
+        machineId: "m-1",
+        workspaceRoot: "/Users/me/proj",
+        prompt: "hello fleet",
+        status: "running",
+        updatedAt: Date.now(),
+      },
+    }));
+    await Bun.sleep(40);
+    const headers = { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" };
+    for (let i = 0; i < 20; i++) {
+      const r = await fetch(url(s, "/mobile/runs/r-1/answer"), {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ request_id: `x-${i}` }),
+      });
+      expect(r.status).toBe(202);
+    }
+    const limited = await fetch(url(s, "/mobile/runs/r-1/cancel"), { method: "POST", headers });
+    expect(limited.status).toBe(429);
+    expect(await limited.json()).toEqual({ error: "RATE_LIMIT" });
     ws.close();
   });
 
@@ -1272,6 +1419,17 @@ describe("relay HTTP map and snap fingerprint", () => {
         }));
       }
     });
+    ws.send(JSON.stringify({
+      type: "snap.run",
+      run: {
+        runId: "r-1",
+        machineId: "m-1",
+        workspaceRoot: "/Users/me/proj",
+        prompt: "hello fleet",
+        status: "running",
+        updatedAt: Date.now(),
+      },
+    }));
     await Bun.sleep(50);
     const r = await fetch(url(s, "/mobile/runs/r-1/answer"), {
       method: "POST",
@@ -1298,6 +1456,17 @@ describe("relay HTTP map and snap fingerprint", () => {
         }));
       }
     });
+    ws.send(JSON.stringify({
+      type: "snap.run",
+      run: {
+        runId: "r-1",
+        machineId: "m-1",
+        workspaceRoot: "/Users/me/proj",
+        prompt: "hello fleet",
+        status: "running",
+        updatedAt: Date.now(),
+      },
+    }));
     await Bun.sleep(50);
     const r = await fetch(url(s, "/mobile/runs/r-1/answer"), {
       method: "POST",
@@ -1324,6 +1493,17 @@ describe("relay HTTP map and snap fingerprint", () => {
         }));
       }
     });
+    ws.send(JSON.stringify({
+      type: "snap.run",
+      run: {
+        runId: "r-1",
+        machineId: "m-1",
+        workspaceRoot: "/Users/me/proj",
+        prompt: "hello fleet",
+        status: "running",
+        updatedAt: Date.now(),
+      },
+    }));
     await Bun.sleep(50);
     const r = await fetch(url(s, "/mobile/runs/r-1/cancel"), {
       method: "POST",

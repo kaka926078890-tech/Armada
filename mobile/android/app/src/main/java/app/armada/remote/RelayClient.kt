@@ -79,7 +79,8 @@ class RelayClient(base: String, private val token: String) {
 
     suspend fun followup(runId: String, prompt: String): RunDto {
         val body = JSONObject().put("prompt", prompt)
-        return parseRun(JSONObject(send("/mobile/runs/$runId/followup", "POST", body.toString(), listOf(200, 201))).getJSONObject("run"))
+        val o = JSONObject(send("/mobile/runs/$runId/followup", "POST", body.toString(), listOf(200, 201)))
+        return parseFollowupAck(parseRun(o.getJSONObject("run")), o.optNullableString("outcome")).run
     }
 
     suspend fun retry(runId: String): RunDto =
@@ -220,7 +221,12 @@ private fun parseAsk(o: JSONObject): PendingAskDto {
                         options = buildList {
                             for (j in 0 until opts.length()) {
                                 val op = opts.getJSONObject(j)
-                                add(PendingAskOption(op.getString("id"), op.optString("label"), op.optString("text")))
+                                add(PendingAskOption(
+                                    op.getString("id"),
+                                    op.optString("label"),
+                                    op.optString("text"),
+                                    if (op.has("freeform")) op.optBoolean("freeform") else null,
+                                ))
                             }
                         },
                     ),

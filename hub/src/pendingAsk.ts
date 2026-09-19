@@ -1,4 +1,4 @@
-export type PendingAskOption = { id: string; label: string; text: string };
+export type PendingAskOption = { id: string; label: string; text: string; freeform?: boolean };
 
 export type PendingAskQuestion = {
   id: string;
@@ -34,7 +34,9 @@ function parseOption(raw: unknown): PendingAskOption | null {
   const label = asTrimmedString(o.label) ?? asTrimmedString(o.id);
   if (!id || !label) return null;
   const text = asTrimmedString(o.text) ?? asTrimmedString(o.label) ?? id;
-  return { id, label, text };
+  const opt: PendingAskOption = { id, label, text };
+  if (o.freeform === true) opt.freeform = true;
+  return opt;
 }
 
 function parseQuestion(raw: unknown, index: number): PendingAskQuestion | null {
@@ -80,6 +82,13 @@ export function continueAllowed(ask: PendingAsk): boolean {
   return ask.questions.length === 1 && ask.questions[0].allow_multiple !== true;
 }
 
+/** Chips the operator can pick. Other/freeform is a textarea, not a letter row. */
+export function choiceOptions(ask: PendingAsk): PendingAskOption[] {
+  return (ask.questions[0]?.options ?? []).filter((o) => o.freeform !== true);
+}
+
+export const ASK_TEXT_MAX = 4000;
+
 export function mergePendingAskRecord(existing: PendingAsk | null, incoming: PendingAsk): PendingAsk {
   if (!existing || existing.request_id !== incoming.request_id) return incoming;
   const takeQuestions = isPlanAsk(incoming) && incoming.detected_at >= existing.detected_at;
@@ -98,5 +107,5 @@ export function optionInAsk(ask: PendingAsk, questionId: string, optionId: strin
   const q = ask.questions.find((x) => x.id === questionId)
     ?? (ask.questions.length === 1 ? ask.questions[0] : undefined);
   if (!q) return false;
-  return q.options.some((o) => o.id === optionId);
+  return q.options.some((o) => o.freeform !== true && o.id === optionId);
 }

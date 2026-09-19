@@ -13,7 +13,7 @@ export type ChatBlock =
     seq: number;
     request_id: string;
     prompt: string;
-    options: { id: string; label: string; text: string }[];
+    options: { id: string; label: string; text: string; freeform?: boolean }[];
     action: "pending" | "submitting" | "submit_failed" | "resolved";
     error?: string;
     askKind?: "plan";
@@ -81,11 +81,11 @@ function subagentFromHook(p: any, status: string, seq: number): SubagentBlock {
 
 export const ASK_TOOL_NAME = "AskQuestion";
 
-function askOptionsFromInput(input: Record<string, unknown> | undefined): { id: string; label: string; text: string }[] {
+function askOptionsFromInput(input: Record<string, unknown> | undefined): { id: string; label: string; text: string; freeform?: boolean }[] {
   const questions = Array.isArray(input?.questions) ? input.questions : [];
   const q = questions[0] as Record<string, unknown> | undefined;
   const opts = Array.isArray(q?.options) ? q.options : [];
-  const out: { id: string; label: string; text: string }[] = [];
+  const out: { id: string; label: string; text: string; freeform?: boolean }[] = [];
   for (const item of opts) {
     if (!item || typeof item !== "object") continue;
     const o = item as Record<string, unknown>;
@@ -93,7 +93,9 @@ function askOptionsFromInput(input: Record<string, unknown> | undefined): { id: 
     if (!id) continue;
     const label = typeof o.label === "string" && o.label.trim() ? o.label.trim() : id;
     const text = typeof o.text === "string" && o.text.trim() ? o.text.trim() : label;
-    out.push({ id, label, text });
+    const opt: { id: string; label: string; text: string; freeform?: boolean } = { id, label, text };
+    if (o.freeform === true) opt.freeform = true;
+    out.push(opt);
   }
   return out;
 }
@@ -518,7 +520,7 @@ export function eventsToChat(events: RunEvent[]): ChatBlock[] {
 export type PendingAskView = {
   request_id: string;
   kind?: "plan";
-  questions: { prompt: string; allow_multiple?: boolean; options: { id: string; label: string; text: string }[] }[];
+  questions: { prompt: string; allow_multiple?: boolean; options: { id: string; label: string; text: string; freeform?: boolean }[] }[];
 };
 
 export function mergePendingAsk(blocks: ChatBlock[], pending: PendingAskView | null | undefined): ChatBlock[] {

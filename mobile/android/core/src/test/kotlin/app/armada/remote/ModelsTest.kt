@@ -233,6 +233,25 @@ class ModelsTest {
     }
 
     @Test
+    fun followupAckReadsExplicitOutcomeNotHttpStatus() {
+        assertEquals("queued", followupOutcomeOrNull("queued"))
+        assertEquals("injected", followupOutcomeOrNull("injected"))
+        assertEquals(null, followupOutcomeOrNull("201"))
+        assertEquals(null, followupOutcomeOrNull(""))
+        assertEquals(null, followupOutcomeOrNull(null))
+        val queued = parseFollowupAck(
+            run("running", conversationId = "cid-1"),
+            "queued",
+        )
+        assertEquals("queued", queued.outcome)
+        assertEquals("r1", queued.run.runId)
+        val injected = parseFollowupAck(run("dispatched", conversationId = "cid-1"), "injected")
+        assertEquals("injected", injected.outcome)
+        val unknown = parseFollowupAck(run("dispatched"), "201")
+        assertEquals(null, unknown.outcome)
+    }
+
+    @Test
     fun liveWorkspacePrefersSessionSlotOverStaleSnapshot() {
         val stale = WorkspaceDto("w", "m", "/p", "p", online = true, cdpReady = false)
         val live = stale.copy(cdpReady = true)

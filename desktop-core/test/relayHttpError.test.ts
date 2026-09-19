@@ -40,6 +40,8 @@ describe("classifyRelayHttp", () => {
     expect(operatorCopy("NO_PENDING_ASK")).toBe("当前没有待回答的问题");
     expect(operatorCopy("ASK_MISMATCH")).toBe("问题已更新，请刷新后再答");
     expect(operatorCopy("NO_ASSISTANT_BODY")).toBe("任务已完成，正文尚未生成");
+    expect(operatorCopy("ASK_TEXT_EMPTY")).toBe("先写回复，或不选选项去点上面的答案");
+    expect(operatorCopy("ASK_TEXT_TOO_LONG")).toBe("回复太长，请缩短后再发");
     expect(classifyRelayHttp(409, '{"error":"ASK_INVALID_OPTION"}').message).toBe("选项无效，请改选或 Skip");
   });
 

@@ -25,7 +25,7 @@ data class PromptSnippet(
     val body: String,
 )
 
-data class PendingAskOption(val id: String, val label: String, val text: String)
+data class PendingAskOption(val id: String, val label: String, val text: String, val freeform: Boolean? = null)
 
 data class PendingAskQuestion(
     val id: String,
@@ -102,6 +102,14 @@ data class RunDto(
     val activityTs: Long get() = updatedAt ?: 0
     val column: BoardColumn get() = BoardColumn.column(status)
 }
+
+data class FollowupAck(val run: RunDto, val outcome: String?)
+
+fun followupOutcomeOrNull(raw: String?): String? =
+    if (raw == "queued" || raw == "injected") raw else null
+
+fun parseFollowupAck(run: RunDto, outcome: String?): FollowupAck =
+    FollowupAck(run, followupOutcomeOrNull(outcome))
 
 fun isPlanAsk(ask: PendingAskDto): Boolean = ask.kind == "plan"
 

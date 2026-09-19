@@ -12,6 +12,8 @@ export function operatorCopy(code: string): string {
     case "EMPTY_PROMPT": return "提示词是空的";
     case "NET_INTERCEPT": return NETWORK_INTERCEPT_COPY;
     case "ASK_INVALID_OPTION": return "选项无效，请改选或 Skip";
+    case "ASK_TEXT_EMPTY": return "先写回复，或不选选项去点上面的答案";
+    case "ASK_TEXT_TOO_LONG": return "回复太长，请缩短后再发";
     case "ASK_IN_FLIGHT": return "正在提交，请稍候";
     case "NO_PENDING_ASK": return "当前没有待回答的问题";
     case "ASK_MISMATCH": return "问题已更新，请刷新后再答";
