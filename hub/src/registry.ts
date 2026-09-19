@@ -46,6 +46,11 @@ export class Registry {
   public onRegistered: (machineId: string, windowId: string) => void = () => {};
 
   constructor(private db: Database) {
+    // Previous hub left machines `online`. This process has no sockets yet —
+    // display offline without onMachineOffline (that would MACHINE_OFFLINE live runs).
+    this.db.query(
+      "UPDATE machines SET status='offline', open_workspaces='[]' WHERE status='online'",
+    ).run();
     this.db.query(
       "UPDATE machines SET open_workspaces='[]' WHERE status='offline' AND open_workspaces != '[]'",
     ).run();

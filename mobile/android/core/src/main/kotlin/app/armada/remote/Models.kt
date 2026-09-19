@@ -118,8 +118,30 @@ fun continueAllowed(ask: PendingAskDto): Boolean {
 }
 
 fun askOptionBody(label: String, text: String): String {
+    val L = label.trim()
     val t = text.trim()
-    return t.ifEmpty { label }
+    if (t.isEmpty() || t == L) return ""
+    if (L.isEmpty()) return t
+    return t.replace(Regex("^${Regex.escape(L)}(?:\\s*[：:]\\s*|\\s+)"), "").trim()
+}
+
+fun visibleAskOptions(options: List<PendingAskOption>): List<PendingAskOption> {
+    if (options.any { it.freeform == true }) return options
+    val used = options.map { it.label.trim().uppercase() }.filter { it.isNotEmpty() }.toSet()
+    var letter = "D"
+    for (i in 0 until 26) {
+        val c = ('A' + i).toString()
+        if (c !in used) {
+            letter = c
+            break
+        }
+    }
+    return options + PendingAskOption("__freeform__", letter, "Other...", true)
+}
+
+fun isFreeformAskOption(options: List<PendingAskOption>, picked: String?): Boolean {
+    if (picked.isNullOrBlank()) return false
+    return options.firstOrNull { it.id == picked }?.freeform == true || picked == "__freeform__"
 }
 
 fun coalesceFinalText(incoming: RunDto, prior: RunDto?): RunDto {

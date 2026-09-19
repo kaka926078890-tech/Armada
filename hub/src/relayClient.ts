@@ -85,16 +85,16 @@ export function hubWsUrl(cfg: RelayConfig): string {
   return u.toString();
 }
 
-/** Live snaps must not scan transcript jsonl. Terminal cards may need finalText. */
+/** Live snaps must not scan transcript jsonl. Terminal + unknown cards may need finalText. */
 export function loadEventsForSnap(status: string): boolean {
-  return (TERMINAL_STATUSES as readonly string[]).includes(status);
+  return (TERMINAL_STATUSES as readonly string[]).includes(status) || status === "unknown";
 }
 
 export function runToSnap(run: any, events: RunEvent[]): RunSnap {
   const body = lastTurnAssistantBody(eventsToChat(events));
   const status = String(run.status ?? "unknown");
   const error = (run.end_reason as string | null) ?? null;
-  const terminal = (TERMINAL_STATUSES as readonly string[]).includes(status);
+  const terminal = (TERMINAL_STATUSES as readonly string[]).includes(status) || status === "unknown";
   const finalText = terminal ? (body || null) : null;
   const mode = typeof run.queue_message_default_behavior === "string" ? run.queue_message_default_behavior
     : typeof run.queueMessageDefaultBehavior === "string" ? run.queueMessageDefaultBehavior

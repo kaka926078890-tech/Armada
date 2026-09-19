@@ -15,6 +15,7 @@ import {
   COMPOSER_ENTER_JS,
   ASK_INSPECT_JS,
   ASK_CLICK_LETTER_JS,
+  ASK_CLICK_SKIP_JS,
   PLAN_INSPECT_JS,
   PLAN_CLICK_BUILD_JS,
   type CdpSession,
@@ -828,10 +829,24 @@ describe("AskQuestion CDP driver", () => {
     expect(evals.some((e) => e.includes("armadaDraftHit"))).toBe(false);
   });
 
-  test("skip sends Escape not Enter", async () => {
+  test("skip clicks composer-skip-button, not Escape first", async () => {
     const log: CallLog[] = [];
     const driver = createAskQuestionDriver(deps({
-      connect: async () => mockSession([{ present: false }], log),
+      connect: async () => mockSession(["OK", { present: false }], log),
+    }));
+    const r = await driver.submit("/Users/x/armada-test-ws", "skip");
+    expect(r.ok).toBe(true);
+    const evals = log.filter((c) => c.method === "Runtime.evaluate").map((c) => String(c.params?.expression ?? ""));
+    expect(evals.some((e) => e.includes("composer-skip-button"))).toBe(true);
+    expect(ASK_CLICK_SKIP_JS).toContain("composer-skip-button");
+    expect(log.some((c) => c.method === "Input.dispatchKeyEvent" && c.params?.key === "Escape")).toBe(false);
+    expect(log.some((c) => c.method === "Input.dispatchKeyEvent" && c.params?.key === "Enter")).toBe(false);
+  });
+
+  test("skip Escape only when skip button is missing", async () => {
+    const log: CallLog[] = [];
+    const driver = createAskQuestionDriver(deps({
+      connect: async () => mockSession(["NO_SKIP", { present: false }], log),
     }));
     const r = await driver.submit("/Users/x/armada-test-ws", "skip");
     expect(r.ok).toBe(true);

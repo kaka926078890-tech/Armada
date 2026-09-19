@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import Foundation
 
 enum AppRoute: Hashable {
     case workspace(WorkspaceDTO)
@@ -14,10 +15,33 @@ func hideError(_ error: Error) -> String {
     return error.localizedDescription
 }
 
-/// CDP Ask 的 label 是 A/B/C，正文在 text；jsonl 可能只有 label。
+/// CDP Ask 的 label 是 A/B/C；正文在 text。去掉「A：」前缀，避免「A A：…」。
 func askOptionBody(label: String, text: String) -> String {
+    let L = label.trimmingCharacters(in: .whitespacesAndNewlines)
     let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-    return t.isEmpty ? label : t
+    if t.isEmpty || t == L { return "" }
+    if L.isEmpty { return t }
+    let escaped = NSRegularExpression.escapedPattern(for: L)
+    guard let regex = try? NSRegularExpression(pattern: "^\(escaped)(?:\\s*[：:]\\s*|\\s+)") else { return t }
+    let range = NSRange(t.startIndex..., in: t)
+    return regex.stringByReplacingMatches(in: t, options: [], range: range, withTemplate: "")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
+func visibleAskOptions(_ options: [PendingAskOption]) -> [PendingAskOption] {
+    if options.contains(where: { $0.freeform == true }) { return options }
+    let used = Set(options.map { $0.label.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() }.filter { !$0.isEmpty })
+    var letter = "D"
+    for scalar in 65...90 {
+        let c = String(UnicodeScalar(scalar)!)
+        if !used.contains(c) { letter = c; break }
+    }
+    return options + [PendingAskOption(id: "__freeform__", label: letter, text: "Other...", freeform: true)]
+}
+
+func isFreeformAskOption(_ options: [PendingAskOption], picked: String?) -> Bool {
+    guard let picked, !picked.isEmpty else { return false }
+    return options.first(where: { $0.id == picked })?.freeform == true || picked == "__freeform__"
 }
 
 func appendSnippetBody(_ current: String, _ body: String) -> String {
@@ -624,7 +648,8 @@ struct ComposerBar: View {
             .disabled(sending)
             ComposerField(text: $text, placeholder: "输入提示词", enabled: !listening && !sending)
                 .padding(.horizontal, 8)
-                .frame(minHeight: 36)
+                .frame(minHeight: 36, maxHeight: 132)
+                .fixedSize(horizontal: false, vertical: true)
                 .background(Color(.secondarySystemFill), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             Button(action: onSend) {
                 Image(systemName: sending ? "hourglass" : "arrow.up")
@@ -1140,10 +1165,10 @@ struct AskView: View {
                         .font(.body)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    ForEach(q.options.filter { $0.freeform != true }) { o in
+                    ForEach(visibleAskOptions(q.options)) { o in
                         Button {
                             optionId = o.id
-                            freeformText = ""
+                            if o.freeform != true { freeformText = "" }
                         } label: {
                             HStack(alignment: .top, spacing: 8) {
                                 Text(o.label.isEmpty ? o.id.uppercased() : o.label)
@@ -1171,15 +1196,12 @@ struct AskView: View {
                             RoundedRectangle(cornerRadius: 10)
                                 .stroke(optionId == o.id ? Self.accentBlue : Color.secondary.opacity(0.35), lineWidth: optionId == o.id ? 2 : 1)
                         )
-                    }
-                    TextField("Other...", text: $freeformText, axis: .vertical)
-                        .lineLimit(1...6)
-                        .disabled(busyAction != nil)
-                        .onChange(of: freeformText) { _, next in
-                            if !next.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                optionId = nil
-                            }
+                        if optionId == o.id && o.freeform == true {
+                            TextField("Other...", text: $freeformText, axis: .vertical)
+                                .lineLimit(1...6)
+                                .disabled(busyAction != nil)
                         }
+                    }
                 }
                 if let err { Text(err).foregroundStyle(.red) }
                 HStack(spacing: 8) {
@@ -1189,7 +1211,7 @@ struct AskView: View {
                     } label: {
                         HStack(spacing: 8) {
                             if busyAction == "skip" { ProgressView() }
-                            Text(busyAction == "skip" ? "Skipping..." : "跳过")
+                            Text(busyAction == "skip" ? "Skipping..." : "Skip")
                                 .font(.subheadline.weight(.medium))
                         }
                         .frame(minWidth: 72, minHeight: 36)
@@ -1200,11 +1222,11 @@ struct AskView: View {
                     .disabled(busyAction != nil)
                     if canContinue {
                     Button {
-                        Task { await submit(action: typed.isEmpty ? "continue" : "freeform") }
+                        Task { await submit(action: pickedFreeform ? "freeform" : "continue") }
                     } label: {
                         HStack(spacing: 8) {
                             if busyAction == "continue" || busyAction == "freeform" { ProgressView().tint(.white) }
-                            Text((busyAction == "continue" || busyAction == "freeform") ? "Continuing..." : "继续")
+                            Text((busyAction == "continue" || busyAction == "freeform") ? "Continuing..." : "Continue")
                                 .font(.subheadline.weight(.semibold))
                         }
                         .frame(minWidth: 72, minHeight: 36)
@@ -1213,7 +1235,7 @@ struct AskView: View {
                     .buttonStyle(.borderedProminent)
                     .controlSize(.regular)
                     .tint(Self.accentBlue)
-                    .disabled((optionId == nil && typed.isEmpty) || busyAction != nil)
+                    .disabled(!canSubmitChoice || busyAction != nil)
                     }
                 }
             }
@@ -1234,6 +1256,9 @@ struct AskView: View {
     private var isPlan: Bool { isPlanAsk(ask) }
     private var canContinue: Bool { continueAllowed(ask) }
     private var typed: String { freeformText.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var askRows: [PendingAskOption] { visibleAskOptions(ask.questions.first?.options ?? []) }
+    private var pickedFreeform: Bool { isFreeformAskOption(askRows, picked: optionId) }
+    private var canSubmitChoice: Bool { pickedFreeform ? !typed.isEmpty : optionId != nil }
 
     private func submitBuild() async {
         guard busyAction == nil, let q = ask.questions.first, let opt = q.options.first else { return }
@@ -1247,6 +1272,7 @@ struct AskView: View {
         do {
             try await session.api().answer(runId: runId, body: body)
             await onDone()
+            busyAction = nil
         } catch {
             err = error.localizedDescription
             busyAction = nil
@@ -1262,12 +1288,13 @@ struct AskView: View {
         if action == "freeform" {
             body["text"] = typed
             body["answers"] = [] as [[String: Any]]
-        } else if action == "continue", let q = ask.questions.first, let optionId {
+        } else         if action == "continue", let q = ask.questions.first, let optionId {
             body["answers"] = [["question_id": q.id, "option_ids": [optionId]]]
         }
         do {
             try await session.api().answer(runId: runId, body: body)
             await onDone()
+            busyAction = nil
         } catch {
             err = error.localizedDescription
             busyAction = nil

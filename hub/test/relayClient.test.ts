@@ -170,6 +170,17 @@ describe("runToSnap", () => {
     expect(loadEventsForSnap("error")).toBe(true);
     expect(loadEventsForSnap("aborted")).toBe(true);
     expect(loadEventsForSnap("cancelled")).toBe(true);
+    expect(loadEventsForSnap("unknown")).toBe(true);
+    const unknownSnap = runToSnap({
+      id: "r-1", machine_id: "m-1", workspace_root: "/ws/a", prompt: "hi",
+      status: "unknown", end_reason: "MACHINE_OFFLINE", created_at: 1,
+    }, [ev({
+      seq: 1, source: "transcript",
+      payload: JSON.stringify({ role: "assistant", message: { content: [{ type: "text", text: "重启前正文" }] } }),
+    })]);
+    expect(unknownSnap.status).toBe("unknown");
+    expect(unknownSnap.finalText).toBe("重启前正文");
+    expect(unknownSnap.error).toBe("MACHINE_OFFLINE");
     const long = "长文".repeat(4000);
     const snap = runToSnap({
       id: "r-1", machine_id: "m-1", workspace_root: "/ws/a", prompt: long, status: "dispatched", created_at: 1,

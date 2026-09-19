@@ -193,6 +193,23 @@ describe("Registry", () => {
     expect(reg.getMachine("m-old")!.status).toBe("offline");
   });
 
+  test("boot leftover online is display-offline without onMachineOffline", () => {
+    const home = mkdtempSync(join(tmpdir(), "armada-reg-boot-"));
+    const db = openDb(home);
+    db.query(`
+      INSERT INTO machines (id, name, os, open_workspaces, status, last_seen_at)
+      VALUES ('m-1', 'Mac-A', 'darwin', ?1, 'online', ?2)
+    `).run(JSON.stringify(["/ws/a"]), Date.now() - 60_000);
+    let offline = 0;
+    const reg = new Registry(db);
+    reg.onMachineOffline = () => { offline += 1; };
+    expect(reg.getMachine("m-1")!.status).toBe("offline");
+    expect(JSON.parse(reg.getMachine("m-1")!.open_workspaces)).toEqual([]);
+    expect(offline).toBe(0);
+    reg.sweep(Date.now());
+    expect(offline).toBe(0);
+  });
+
   test("sendToConnected can target one machine or every live socket", () => {
     const { reg } = setup();
     const sent: string[] = [];

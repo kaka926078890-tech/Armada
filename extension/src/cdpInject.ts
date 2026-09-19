@@ -408,6 +408,24 @@ export const ASK_CLICK_LETTER_JS = `function (letter) {
   return "OK";
 }`;
 
+/** 点 Cursor Skip 控件 `.composer-skip-button`；禁止点字母、禁止先 Escape。 */
+export const ASK_CLICK_SKIP_JS = `function () {
+  ${ASK_LETTER_BUTTONS_JS}
+  var bar = document.querySelector(".composer-questionnaire-toolbar");
+  if (!bar) return "GONE";
+  var btns = Array.prototype.slice.call(bar.querySelectorAll("button.composer-questionnaire-toolbar-option-letter"));
+  var classified = armadaLetterButtons(btns, bar);
+  var btn = classified.skip;
+  if (!btn) {
+    try { btn = bar.querySelector(".composer-skip-button"); } catch (e) {}
+  }
+  if (!btn) return "NO_SKIP";
+  if (typeof bar.scrollIntoView === "function") bar.scrollIntoView({ block: "center" });
+  if (typeof btn.focus === "function") btn.focus();
+  if (typeof btn.click === "function") btn.click();
+  return "OK";
+}`;
+
 /** 点 Other 字母并聚焦自由输入。禁止走 composer insertText。 */
 export const ASK_FOCUS_FREEFORM_JS = `function () {
   var bar = document.querySelector(".composer-questionnaire-toolbar");
@@ -606,7 +624,12 @@ export function createAskQuestionDriver(deps: CdpSubmitterDeps) {
         if (clicked !== "OK") return { ok: false, reason: clicked === "GONE" ? "ASK_WIDGET_NOT_FOUND" : "ASK_INVALID_OPTION" };
         await dispatchKey(hit.session, "Enter");
       } else {
-        await dispatchKey(hit.session, "Escape");
+        const clicked = String(await hit.session.call("Runtime.evaluate", {
+          expression: `(${ASK_CLICK_SKIP_JS})()`,
+          returnByValue: true,
+        }).then((x) => x?.result?.value));
+        if (clicked === "GONE") return { ok: false, reason: "ASK_WIDGET_NOT_FOUND" };
+        if (clicked !== "OK") await dispatchKey(hit.session, "Escape");
       }
       for (let i = 0; i < 8; i++) {
         const v = await hit.session.call("Runtime.evaluate", {

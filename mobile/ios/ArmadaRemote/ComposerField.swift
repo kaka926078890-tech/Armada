@@ -24,6 +24,8 @@ struct ComposerField: UIViewRepresentable {
         view.adjustsFontForContentSizeCategory = true
         view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         view.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        view.setContentHuggingPriority(.required, for: .vertical)
+        view.setContentCompressionResistancePriority(.required, for: .vertical)
         view.placeholderLabel.text = placeholder
         view.placeholderLabel.font = view.font
         view.placeholderLabel.textColor = .placeholderText

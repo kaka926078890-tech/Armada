@@ -204,7 +204,7 @@ describe("ask / plan action buttons", () => {
     expect(html).not.toContain("Continue");
   });
 
-  test("Ask card always has Other input and hides the freeform letter chip", () => {
+  test("Ask card shows A/B/C and D Other like Cursor, without duplicating the letter", () => {
     const html = renderToStaticMarkup(
       <ChatThread
         blocks={[{
@@ -213,19 +213,23 @@ describe("ask / plan action buttons", () => {
           request_id: "ask-1",
           prompt: "选一个",
           options: [
-            { id: "a", label: "A", text: "甲" },
-            { id: "d", label: "D", text: "Other...", freeform: true },
+            { id: "a", label: "A", text: "A：芯片只显示 A/B/C" },
+            { id: "b", label: "B", text: "乙" },
+            { id: "c", label: "C", text: "丙" },
           ],
           action: "pending",
         }]}
         onAnswerAsk={async () => true}
       />,
     );
-    expect(html).toContain("placeholder=\"Other...\"");
     expect(html).toContain(">A</span>");
-    expect(html).toContain("甲");
-    expect(html).not.toMatch(/>D<\/span>/);
+    expect(html).toContain("芯片只显示 A/B/C");
+    expect(html).not.toContain("A：芯片只显示");
+    expect(html).toMatch(/>D<\/span>/);
+    expect(html).toContain("Other...");
+    expect(html).not.toContain("placeholder=\"Other...\"");
     expect(html).toContain("Continue");
+    expect(html).toContain("Skip");
   });
 
   test("plan card renders captured overview, not just Created Plan filename", () => {

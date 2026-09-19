@@ -45,6 +45,32 @@ class ModelsTest {
     }
 
     @Test
+    fun askOptionBodyDropsDuplicatedLetter() {
+        assertEquals("芯片只显示 A/B/C", askOptionBody("A", "A：芯片只显示 A/B/C"))
+        assertEquals("甲", askOptionBody("A", "A 甲"))
+        assertEquals("甲", askOptionBody("A", "甲"))
+        assertEquals("", askOptionBody("A", "A"))
+        assertEquals("Other...", askOptionBody("D", "Other..."))
+    }
+
+    @Test
+    fun visibleAskOptionsSynthesizesDWhenCdpOmittedOther() {
+        val abc = listOf(
+            PendingAskOption("a", "A", "甲"),
+            PendingAskOption("b", "B", "乙"),
+            PendingAskOption("c", "C", "丙"),
+        )
+        val rows = visibleAskOptions(abc)
+        assertEquals("__freeform__", rows.last().id)
+        assertEquals("D", rows.last().label)
+        assertEquals(true, rows.last().freeform)
+        val withD = visibleAskOptions(abc + PendingAskOption("d", "D", "Other...", true))
+        assertEquals("d", withD.last().id)
+        assertTrue(isFreeformAskOption(withD, "d"))
+        assertFalse(isFreeformAskOption(withD, "a"))
+    }
+
+    @Test
     fun planAskIsKindPlanOnly() {
         val buildWithoutKind = PendingAskDto(
             "rid",

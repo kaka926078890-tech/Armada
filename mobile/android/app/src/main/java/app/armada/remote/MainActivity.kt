@@ -959,38 +959,43 @@ fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend (
                 Text("需要选择", style = MaterialTheme.typography.titleMedium)
                 ask.questions.forEach { q ->
                     Text(q.prompt)
-                    q.options.filter { it.freeform != true }.forEach { o ->
+                    val rows = visibleAskOptions(q.options)
+                    rows.forEach { o ->
                         val selected = optionId == o.id
-                        Row(
-                            Modifier.fillMaxWidth().padding(vertical = 2.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(if (selected) AccentBlue.copy(alpha = 0.12f) else Color.Transparent)
-                                .border(if (selected) 2.dp else 1.dp, if (selected) AccentBlue else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
-                                .clickable(enabled = busy == null) { optionId = o.id; freeformText = "" }
-                                .padding(horizontal = 10.dp, vertical = 8.dp)
-                                .heightIn(min = 36.dp),
-                        ) {
-                            Text(o.label.ifEmpty { o.id.uppercase() }, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = FontFamily.Monospace)
-                            Spacer(Modifier.width(8.dp))
-                            Text(askOptionBody(o.label, o.text))
+                        Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                            Row(
+                                Modifier.fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(if (selected) AccentBlue.copy(alpha = 0.12f) else Color.Transparent)
+                                    .border(if (selected) 2.dp else 1.dp, if (selected) AccentBlue else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+                                    .clickable(enabled = busy == null) {
+                                        optionId = o.id
+                                        if (o.freeform != true) freeformText = ""
+                                    }
+                                    .padding(horizontal = 10.dp, vertical = 8.dp)
+                                    .heightIn(min = 36.dp),
+                            ) {
+                                Text(o.label.ifEmpty { o.id.uppercase() }, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = FontFamily.Monospace)
+                                Spacer(Modifier.width(8.dp))
+                                Text(askOptionBody(o.label, o.text))
+                            }
+                            if (selected && o.freeform == true) {
+                                IosTextField(
+                                    value = freeformText,
+                                    onValueChange = { freeformText = it },
+                                    placeholder = "Other...",
+                                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp).heightIn(min = 36.dp),
+                                    minLines = 1,
+                                    maxLines = 6,
+                                    readOnly = busy != null,
+                                )
+                            }
                         }
                     }
-                    IosTextField(
-                        value = freeformText,
-                        onValueChange = {
-                            freeformText = it
-                            if (it.trim().isNotEmpty()) optionId = null
-                        },
-                        placeholder = "Other...",
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 36.dp),
-                        minLines = 1,
-                        maxLines = 6,
-                        readOnly = busy != null,
-                    )
                 }
                 err?.let { Text(it, color = StatusRed) }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
-                    BarButton(if (busy == "skip") "Skipping..." else "跳过", compact = true, enabled = busy == null, onClick = {
+                    BarButton(if (busy == "skip") "Skipping..." else "Skip", compact = true, enabled = busy == null, onClick = {
                         busy = "skip"
                         scope.launch {
                             try {
@@ -998,14 +1003,17 @@ fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend (
                                 onDone()
                             } catch (e: Exception) {
                                 err = e.message
-                                busy = null
                             }
+                            busy = null
                         }
                     })
                     if (canContinue) {
-                    BarButton(if (busy == "continue" || busy == "freeform") "Continuing..." else "继续", filled = true, compact = true, enabled = (optionId != null || typed.isNotEmpty()) && busy == null, onClick = click@{
+                    val rows = visibleAskOptions(ask.questions.firstOrNull()?.options.orEmpty())
+                    val pickedFreeform = isFreeformAskOption(rows, optionId)
+                    BarButton(if (busy == "continue" || busy == "freeform") "Continuing..." else "Continue", filled = true, compact = true, enabled = (if (pickedFreeform) typed.isNotEmpty() else optionId != null) && busy == null, onClick = click@{
                         val q = ask.questions.firstOrNull() ?: return@click
-                        val sendFreeform = typed.isNotEmpty()
+                        val sendFreeform = pickedFreeform
+                        if (sendFreeform && typed.isEmpty()) return@click
                         busy = if (sendFreeform) "freeform" else "continue"
                         scope.launch {
                             try {
@@ -1021,8 +1029,8 @@ fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend (
                                 onDone()
                             } catch (e: Exception) {
                                 err = e.message
-                                busy = null
                             }
+                            busy = null
                         }
                     })
                     }

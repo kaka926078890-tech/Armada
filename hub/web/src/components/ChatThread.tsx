@@ -1,7 +1,8 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
+import { askOptionDisplayText, isFreeformAskOption, visibleAskOptions } from "../askOptions";
 import { segmentChat, processFoldLabel, type ChatBlock } from "../chatView";
 import { Button } from "./ui/button";
 import { Textarea } from "./ui/textarea";
@@ -245,9 +246,15 @@ function AskCard({ block, onAnswerAsk }: {
   const plan = isPlanAsk(block);
   const showContinue = continueAllowed(block);
   const overview = plan ? planOverviewOf(block) : "";
-  const chips = block.options.filter((o) => o.freeform !== true);
+  const chips = visibleAskOptions(block.options);
   const typed = freeform.trim();
-  const canSubmit = plan || !!picked || !!typed;
+  const pickedFreeform = isFreeformAskOption(chips, picked);
+  const canSubmit = plan || (pickedFreeform ? !!typed : !!picked);
+  useEffect(() => {
+    if (!busyAction) return;
+    const t = window.setTimeout(() => setBusyAction(null), 8000);
+    return () => window.clearTimeout(t);
+  }, [busyAction]);
   const submit = async (action: "continue" | "skip" | "freeform") => {
     if (!onAnswerAsk || wait) return;
     setBusyAction(action);
@@ -285,32 +292,36 @@ function AskCard({ block, onAnswerAsk }: {
       <div className="mt-2.5 flex flex-col gap-2">
         {chips.map((o) => {
           const on = picked === o.id;
+          const body = askOptionDisplayText(o.label, o.text);
           return (
-            <button
-              key={o.id}
-              type="button"
-              disabled={!interactive || wait}
-              aria-pressed={on}
-              onClick={(e) => { stopCard(e); setPicked(o.id); setFreeform(""); }}
-              className={on ? UI_OPTION_ON : UI_OPTION_OFF}
-            >
-              <span className="text-muted-foreground font-mono mr-1.5">{o.label}</span>
-              {o.text}
-            </button>
+            <div key={o.id} className="flex flex-col gap-2">
+              <button
+                type="button"
+                disabled={!interactive || wait}
+                aria-pressed={on}
+                onClick={(e) => {
+                  stopCard(e);
+                  setPicked(o.id);
+                  if (o.freeform !== true) setFreeform("");
+                }}
+                className={on ? UI_OPTION_ON : UI_OPTION_OFF}
+              >
+                <span className="text-muted-foreground font-mono mr-1.5">{o.label}</span>
+                {body}
+              </button>
+              {on && o.freeform === true ? (
+                <Textarea
+                  placeholder="Other..."
+                  value={freeform}
+                  disabled={!interactive || wait}
+                  rows={2}
+                  className="min-h-8"
+                  onChange={(e) => setFreeform(e.target.value)}
+                />
+              ) : null}
+            </div>
           );
         })}
-        <Textarea
-          placeholder="Other..."
-          value={freeform}
-          disabled={!interactive || wait}
-          rows={2}
-          className="min-h-8"
-          onChange={(e) => {
-            const v = e.target.value;
-            setFreeform(v);
-            if (v.trim()) setPicked("");
-          }}
-        />
       </div>
       )}
       {block.action === "resolved" ? (
@@ -339,7 +350,7 @@ function AskCard({ block, onAnswerAsk }: {
             variant={plan ? "plan" : "default"}
             disabled={wait || (!plan && !canSubmit)}
             aria-busy={continueBusy}
-            onClick={(e) => { stopCard(e); void submit(typed ? "freeform" : "continue"); }}
+            onClick={(e) => { stopCard(e); void submit(pickedFreeform ? "freeform" : "continue"); }}
           >
             {continueBusy ? <AskSpinner /> : null}
             {askContinueLabel(plan, continueBusy)}
