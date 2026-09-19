@@ -1,6 +1,6 @@
 # Armada 远程：中转 serve + 简易 iOS App
 
-- 日期：2026-09-12（修订 2026-09-13）
+- 日期：2026-09-12（修订 2026-09-13、2026-09-19）
 - 状态：**草稿代码已入库，App 交互与启动尚未产品确认**（协议主体已拍板；UI/启动流程见下方「下一步」）
 - 父文档：
   - [README.md](../../../README.md)（局域网舰队；hub `:7380`）
@@ -45,7 +45,7 @@
 | R1 | 不在同一局域网也能控中台 | 中转公网 HTTPS；中台 **出站**；手机 4G 只连中转 |
 | R2 | 选任意 **已打开** 工作区并下发 | `GET /mobile/workspaces` ← 中台 `GET /api/machines[].open_workspaces` |
 | R3 | 超长 prompt（含粘贴 review） | 中转与 hub **不截断** prompt；飞书/APNs 体积限制只影响投递，不砍存储 |
-| R4 | 终态必须是完整助手正文 | `finalText` = `assistantBodyText`；空正文不得标 `completed` |
+| R4 | 终态必须是完整助手正文 | `finalText` = `assistantBodyText`（有则全文）；Hub 已 `completed` 时快照不得因空正文改写 status；App 展示 completed + 占位文案；空正文 ≠ 可重试 error |
 | R5 | 状态要及时，不要人肉刷进度 | 中台→中转已是 WS 推快照。App：**v1 前台 10s 轮询**；**v1.5 前台 SSE**；**锁屏只有 APNs**（见 4.9）。不推工具日志 |
 | R6 | 问答 Ask | 快照 `pendingAsk`；App 按钮 → `POST /mobile/runs/:id/answer` → hub `POST /api/runs/:id/answer-ask` |
 | R7 | Armada 与 App 均开源、可自建 | 中转可自部署；绑定 URI 里带 `relay` 主机，不写死某一云厂商 |
@@ -208,7 +208,7 @@ armada-relay://op?relay=https%3A%2F%2Frelay.example.com&fleet={fleetId}&token={o
 | `queueMessageDefaultBehavior` | 被控机 `queue` / `steer` / `null` |
 | `updatedAt` | 中台变更 Unix ms |
 
-**完成门禁：** `status=completed` 当且仅当 `finalText.length > 0`。否则中转存 `error`/`unknown` 并文案 `NO_ASSISTANT_BODY`。
+**完成门禁（方案 1）：** `runToSnap.status` 与中台 hub `runs.status` **一致，快照不得改写**。Hub 为 `completed` 时 `finalText` 仍可为 `null` 或空字符串。App：`status=completed` 且无可展示正文时仍标 completed 并显示占位文案，**不得**把空正文当成可重试 error。`canRetry` 与 hub `runs.retry()` 使用同一准入（真实 DB status，不用改写后的展示 status）。`NO_ASSISTANT_BODY` 若保留，仅作展示/审计，**不得**把 `completed` 打成 `error`/`unknown`。
 
 **备选不选 2KB excerpt：** 已否决。
 
@@ -427,7 +427,7 @@ p95（同区域 VPS，排除 DERP）：`GET /mobile/workspaces` < 400ms；`POST 
 
 跨仓：v1 **本仓先合中转+hub**；iOS 可同 PR 或紧随。扩展 **不必升级**（仍连中台）。桌面 mDNS **不改**。
 
-版本对齐：中转 `protocolVersion: 1`；hub/App 拒绝更高主版本。
+版本对齐：中转 `protocolVersion: 2`（2026-09-19 完成门禁方案 1：**breaking**——snap 不再把无正文 `completed` 存成 `error`/`unknown`）；hub/App 拒绝更高主版本。
 
 ### 7.2 每阶段验收（必须可测）
 
@@ -493,5 +493,6 @@ p95（同区域 VPS，排除 DERP）：`GET /mobile/workspaces` < 400ms；`POST 
 | 2026-09-16 | App 可见 APNs 从「v2 以后」落到独立实施基准：[2026-09-16-armada-app-push-design.md](./2026-09-16-armada-app-push-design.md)。本文件 §4.9 原则仍有效（可见推送、不带 `finalText`）。 |
 | 2026-09-17 | v1.5 落地：中转 `GET /mobile/stream`；App 前台 SSE、后台停、断线退避轮询；相同快照不刷新 `@Published`。 |
 | 2026-09-17 | Android 遥控器另开实施基准：[2026-09-17-armada-android-app-design.md](./2026-09-17-armada-android-app-design.md)。本文件协议（`/mobile/*`、邀请 URI、SSE）不变；Android 一次对齐 iOS 完整态（含 FCM），技术栈不锁。 |
+| 2026-09-19 | **完成门禁方案 1**（对齐 [架构债](./2026-09-19-armada-architecture-debt-design.md) §4.1）：快照 `status` 只读 hub；`completed` 允许空/`null` `finalText`；`canRetry` 与 `runs.retry()` 同源；`NO_ASSISTANT_BODY` 不改 status。R4、§4.4 完成门禁改写；**`protocolVersion` 1→2**（breaking snap 语义）。 |
 
 本文件为远程能力的 **实施基准**。变更绑定字段或完成门禁须改本 spec 并升 `protocolVersion`。

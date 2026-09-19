@@ -371,3 +371,4 @@ v1 = P0 全部。v1.5 = P1。v2 = P2（含 CDP 真机）。P3 按拍板插入，
 | --- | --- |
 | 2026-09-19 | 初稿。汇总 HEAD `b49123f` 四层审查；长期方案按共享边界收口；优先级 P0 安全与快照 → P1 契约 → P2 CDP/性能 → P3 拍板项。 |
 | 2026-09-19 | 补 §7.5：四层原文 Minor / 规格 X2 / 未编号 parity。合并审查 51 条主 ID 已齐；原先 `m*` 一行改为可追踪子 ID。 |
+| 2026-09-19 | **完成门禁方案 1 已采纳**（快照不改写 hub `status`；空 `finalText` 仍可 `completed`）。规格落点：[2026-09-12-armada-relay-mobile-design.md](./2026-09-12-armada-relay-mobile-design.md) §4.4、`protocolVersion: 2`。 |
