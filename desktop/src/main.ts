@@ -465,7 +465,7 @@ window.addEventListener("DOMContentLoaded", () => {
   modeCreate()?.addEventListener("change", () => applyLandingMode("create"));
   modeJoin()?.addEventListener("change", () => applyLandingMode("join"));
 
-  if (canCreate && lastBoard && isLocalOwnedBoard(lastBoard.origin)) {
+  if (canCreate && (!lastBoard || isLocalOwnedBoard(lastBoard.origin))) {
     void restoreOwnedHub();
   } else if (lastBoard) {
     openBoard(lastBoard.origin, lastBoard.token);

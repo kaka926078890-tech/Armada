@@ -113,6 +113,7 @@ describe("board session", () => {
     expect(main).not.toMatch(/sessionStorage\.(setItem|getItem|removeItem)\(BOARD_SESSION_KEY/);
     expect(main).toContain("void restoreOwnedHub()");
     expect(main).toContain("isLocalOwnedBoard(lastBoard.origin)");
+    expect(main).toMatch(/canCreate && \(!lastBoard \|\| isLocalOwnedBoard\(lastBoard\.origin\)\)/);
   });
 });
 
