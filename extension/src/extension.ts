@@ -20,7 +20,7 @@ import { hubRunsNeedingTranscriptFollow, shouldArmFollowupStopOnAdopt } from "./
 import { noteOwnerBsp, clearGeneration, synthesizedStopPayload, noteHubGeneration, onFollowupBindGeneration, shouldSynthesizeTranscriptStop } from "./generationStamp";
 import { parseAskInspect, askPollActions } from "./askDetect";
 import { enrichPlanAsk, planDirsFor } from "./planFile";
-import { PENDING_RELOAD_NAME, decideWindowReload, parsePendingReload } from "../../desktop-core/src/cursorReload";
+import { PENDING_RELOAD_NAME, decideWindowReload, parsePendingReload, windowHasInFlightArmadaRun } from "../../desktop-core/src/cursorReload";
 
 const EXTENSION_VERSION = "0.4.28";
 
@@ -567,7 +567,11 @@ export function activate(context: vscode.ExtensionContext): void {
   };
   const considerCursorReload = (pending: ReturnType<typeof parsePendingReload>) => {
     if (disposed) return;
-    const live = boundRuns.size > 0 || pendingRuns.length > 0;
+    const live = windowHasInFlightArmadaRun({
+      pendingStartCount: pendingRuns.length,
+      boundRunIds: boundRuns.keys(),
+      stopSentRunIds: stopSent,
+    });
     const decision = decideWindowReload({
       pending,
       thisWindowHasLiveRun: live,

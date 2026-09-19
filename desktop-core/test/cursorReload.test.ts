@@ -8,6 +8,7 @@ import {
   pendingFromAction,
   reloadStillNeeded,
   reloadStillNeededForFleet,
+  windowHasInFlightArmadaRun,
 } from "../src/cursorReload";
 
 describe("parsePendingReload", () => {
@@ -132,6 +133,48 @@ describe("reloadStillNeededForFleet", () => {
   });
 });
 
+describe("windowHasInFlightArmadaRun", () => {
+  test("pending start is in-flight even with no binds", () => {
+    expect(windowHasInFlightArmadaRun({
+      pendingStartCount: 1,
+      boundRunIds: [],
+      stopSentRunIds: [],
+    })).toBe(true);
+  });
+
+  test("bound run with no stop is in-flight", () => {
+    expect(windowHasInFlightArmadaRun({
+      pendingStartCount: 0,
+      boundRunIds: ["r-live"],
+      stopSentRunIds: [],
+    })).toBe(true);
+  });
+
+  test("synthesized completed bind is idle; keep boundRuns for followup", () => {
+    expect(windowHasInFlightArmadaRun({
+      pendingStartCount: 0,
+      boundRunIds: ["r-bcdccf9d"],
+      stopSentRunIds: ["r-bcdccf9d"],
+    })).toBe(false);
+  });
+
+  test("followup that cleared stopSent is in-flight again", () => {
+    expect(windowHasInFlightArmadaRun({
+      pendingStartCount: 0,
+      boundRunIds: ["r-bcdccf9d"],
+      stopSentRunIds: [],
+    })).toBe(true);
+  });
+
+  test("one completed bind does not hide a still-running bind", () => {
+    expect(windowHasInFlightArmadaRun({
+      pendingStartCount: 0,
+      boundRunIds: ["r-done", "r-live"],
+      stopSentRunIds: ["r-done"],
+    })).toBe(true);
+  });
+});
+
 describe("detached schedule script", () => {
   test("ignores HUP and writes the shipped vsix, not a placeholder", () => {
     const script = readFileSync(join(import.meta.dir, "../../desktop/scripts/schedule-cursor-reload.sh"), "utf8");
@@ -146,5 +189,7 @@ describe("extension delivers hub reload over ws", () => {
     const src = readFileSync(join(import.meta.dir, "../../extension/src/extension.ts"), "utf8");
     expect(src).toContain("case \"ext.cursorReload\"");
     expect(src).toContain("machineId: machineId");
+    expect(src).toContain("windowHasInFlightArmadaRun");
+    expect(src).not.toContain("boundRuns.size > 0 || pendingRuns.length > 0");
   });
 });

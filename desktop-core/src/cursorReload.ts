@@ -80,7 +80,27 @@ export function reloadStillNeededForFleet(
 }
 
 /**
- * Per Cursor window: `when-idle` never Reloads while this window has an Armada live run.
+ * Busy for `when-idle` Reload: a pending start, or a bound run that has not
+ * synthesized stop yet. Completed binds stay in `boundRuns` for followup and
+ * must not count as live.
+ */
+export function windowHasInFlightArmadaRun(opts: {
+  pendingStartCount: number;
+  boundRunIds: Iterable<string>;
+  stopSentRunIds: Iterable<string>;
+}): boolean {
+  if (opts.pendingStartCount > 0) return true;
+  const done = new Set(opts.stopSentRunIds);
+  for (const id of opts.boundRunIds) {
+    if (!done.has(id)) return true;
+  }
+  return false;
+}
+
+/**
+ * Per Cursor window: `when-idle` never Reloads while this window has an
+ * in-flight Armada run (pending start or bound run without synthesized stop).
+ * Completed binds may stay in `boundRuns` for followup and are not live.
  * `now` is operator-forced and Reloads even with a live run.
  * `expired` = waited maxWaitMs still busy → notify, do not force.
  * `done` = this window already runs pending.vsix or newer.
