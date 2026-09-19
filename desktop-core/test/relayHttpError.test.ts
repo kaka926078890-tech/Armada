@@ -49,7 +49,7 @@ describe("classifyRelayHttp", () => {
     const root = join(import.meta.dir, "../..");
     const swift = readFileSync(join(root, "mobile/ios/ArmadaRemote/RelayAPI.swift"), "utf8");
     const kt = readFileSync(join(root, "mobile/android/core/src/main/kotlin/app/armada/remote/OperatorMessages.kt"), "utf8");
-    for (const code of ["ASK_INVALID_OPTION", "ASK_IN_FLIGHT", "NO_PENDING_ASK", "ASK_MISMATCH", "NO_ASSISTANT_BODY"]) {
+    for (const code of ["ASK_INVALID_OPTION", "ASK_IN_FLIGHT", "NO_PENDING_ASK", "ASK_MISMATCH", "NO_ASSISTANT_BODY", "ASK_TEXT_EMPTY", "ASK_TEXT_TOO_LONG"]) {
       expect(swift).toContain(`case "${code}"`);
       expect(kt).toContain(`"${code}"`);
       expect(operatorCopy(code)).not.toBe(code);

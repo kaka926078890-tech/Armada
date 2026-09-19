@@ -29,7 +29,7 @@ export const api = {
     req(`/api/runs/${id}/followup`, { method: "POST", body: JSON.stringify({ prompt, attachmentIds }) }).then((r) => r.json()),
   retry: (id: string) =>
     req(`/api/runs/${id}/retry`, { method: "POST" }).then((r) => r.json()),
-  answerAsk: (id: string, body: { request_id: string; action: "continue" | "skip"; answers?: { question_id: string; option_ids: string[] }[] }) =>
+  answerAsk: (id: string, body: { request_id: string; action: "continue" | "skip" | "freeform"; answers?: { question_id: string; option_ids: string[] }[]; text?: string }) =>
     req(`/api/runs/${id}/answer-ask`, { method: "POST", body: JSON.stringify(body) }).then(async (r) => {
       const j = await r.json();
       return { ...j, httpStatus: r.status };

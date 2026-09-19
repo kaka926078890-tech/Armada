@@ -72,6 +72,8 @@ describe("httpStatusForRunError", () => {
 
   test("ASK_* and occupancy conflicts are 409", () => {
     expect(httpStatusForRunError("ASK_INVALID_OPTION")).toBe(409);
+    expect(httpStatusForRunError("ASK_TEXT_EMPTY")).toBe(409);
+    expect(httpStatusForRunError("ASK_TEXT_TOO_LONG")).toBe(409);
     expect(httpStatusForRunError("ASK_IN_FLIGHT")).toBe(409);
     expect(httpStatusForRunError("NO_PENDING_ASK")).toBe(409);
     expect(httpStatusForRunError("ASK_MISMATCH")).toBe(409);

@@ -907,10 +907,12 @@ fun DetailReplyBlock(text: String?, isLive: Boolean) {
 fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend () -> Unit) {
     val scope = rememberCoroutineScope()
     var optionId by remember { mutableStateOf<String?>(null) }
+    var freeformText by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf<String?>(null) }
     var err by remember { mutableStateOf<String?>(null) }
     val plan = isPlanAsk(ask)
     val canContinue = continueAllowed(ask)
+    val typed = freeformText.trim()
     Box(Modifier.fillMaxWidth().height(IntrinsicSize.Min).clip(RoundedCornerShape(12.dp)).background(LocalIosPalette.current.secondary)) {
         Box(
             Modifier.align(Alignment.CenterStart).padding(vertical = 10.dp, horizontal = 4.dp)
@@ -957,14 +959,14 @@ fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend (
                 Text("需要选择", style = MaterialTheme.typography.titleMedium)
                 ask.questions.forEach { q ->
                     Text(q.prompt)
-                    q.options.forEach { o ->
+                    q.options.filter { it.freeform != true }.forEach { o ->
                         val selected = optionId == o.id
                         Row(
                             Modifier.fillMaxWidth().padding(vertical = 2.dp)
                                 .clip(RoundedCornerShape(10.dp))
                                 .background(if (selected) AccentBlue.copy(alpha = 0.12f) else Color.Transparent)
                                 .border(if (selected) 2.dp else 1.dp, if (selected) AccentBlue else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
-                                .clickable(enabled = busy == null) { optionId = o.id }
+                                .clickable(enabled = busy == null) { optionId = o.id; freeformText = "" }
                                 .padding(horizontal = 10.dp, vertical = 8.dp)
                                 .heightIn(min = 36.dp),
                         ) {
@@ -973,6 +975,18 @@ fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend (
                             Text(askOptionBody(o.label, o.text))
                         }
                     }
+                    IosTextField(
+                        value = freeformText,
+                        onValueChange = {
+                            freeformText = it
+                            if (it.trim().isNotEmpty()) optionId = null
+                        },
+                        placeholder = "Other...",
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 36.dp),
+                        minLines = 1,
+                        maxLines = 6,
+                        readOnly = busy != null,
+                    )
                 }
                 err?.let { Text(it, color = StatusRed) }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
@@ -989,16 +1003,20 @@ fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend (
                         }
                     })
                     if (canContinue) {
-                    BarButton(if (busy == "continue") "Continuing..." else "继续", filled = true, compact = true, enabled = optionId != null && busy == null, onClick = click@{
+                    BarButton(if (busy == "continue" || busy == "freeform") "Continuing..." else "继续", filled = true, compact = true, enabled = (optionId != null || typed.isNotEmpty()) && busy == null, onClick = click@{
                         val q = ask.questions.firstOrNull() ?: return@click
-                        val oid = optionId ?: return@click
-                        busy = "continue"
+                        val sendFreeform = typed.isNotEmpty()
+                        busy = if (sendFreeform) "freeform" else "continue"
                         scope.launch {
                             try {
-                                val body = JSONObject()
-                                    .put("request_id", ask.requestId)
-                                    .put("action", "continue")
-                                    .put("answers", JSONArray().put(JSONObject().put("question_id", q.id).put("option_ids", JSONArray().put(oid))))
+                                val body = JSONObject().put("request_id", ask.requestId)
+                                if (sendFreeform) {
+                                    body.put("action", "freeform").put("text", typed).put("answers", JSONArray())
+                                } else {
+                                    val oid = optionId ?: return@launch
+                                    body.put("action", "continue")
+                                        .put("answers", JSONArray().put(JSONObject().put("question_id", q.id).put("option_ids", JSONArray().put(oid))))
+                                }
                                 vm.api().answer(runId, body)
                                 onDone()
                             } catch (e: Exception) {

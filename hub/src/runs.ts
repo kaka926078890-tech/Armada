@@ -16,7 +16,7 @@ import { BIND_TIMEOUT_MS, WINDOWS_BIND_TIMEOUT_MS } from "../../extension/src/tr
 import { collisionKey, hasImageMarkers, stripImageMarkers } from "../../extension/src/imageMarkers";
 import { BlobStore, parseAttachmentIds, type BlobMeta } from "./blobs";
 import { appendRetired, decideArm, decideStop, parseRetiredIds, isWindowsMachineOs, genOf, stopFromCursorSessionEnd } from "./generationOwnership";
-import { parsePendingAsk, continueAllowed, optionInAsk, isPlanAsk, mergePendingAskRecord } from "./pendingAsk";
+import { parsePendingAsk, continueAllowed, optionInAsk, isPlanAsk, mergePendingAskRecord, ASK_TEXT_MAX } from "./pendingAsk";
 import {
   OUTBOUND_LIMIT, QUEUE_DRAIN_MS, queueModeOf,
 } from "./outboundClaim";
@@ -889,10 +889,14 @@ export class RunService {
     }
     if (run.status !== "running") return { error: "NO_PENDING_ASK" };
     if (!request_id || request_id !== ask.request_id) return { error: "ASK_MISMATCH" };
-    const action = body?.action === "skip" ? "skip" : body?.action === "continue" ? "continue" : "";
+    const action = body?.action === "skip" ? "skip"
+      : body?.action === "continue" ? "continue"
+      : body?.action === "freeform" ? "freeform"
+      : "";
     if (!action) return { error: "ASK_INVALID_OPTION" };
-    if (action === "skip" && isPlanAsk(ask)) return { error: "ASK_INVALID_OPTION" };
+    if ((action === "skip" || action === "freeform") && isPlanAsk(ask)) return { error: "ASK_INVALID_OPTION" };
     let answers: { question_id: string; option_ids: string[] }[] = [];
+    let text: string | undefined;
     if (action === "continue") {
       if (!continueAllowed(ask)) return { error: "ASK_INVALID_OPTION" };
       const raw = Array.isArray(body?.answers) ? body.answers : [];
@@ -906,6 +910,12 @@ export class RunService {
       if (option_ids.length !== 1) return { error: "ASK_INVALID_OPTION" };
       if (!optionInAsk(ask, qid, option_ids[0])) return { error: "ASK_INVALID_OPTION" };
       answers = [{ question_id: qid, option_ids }];
+    } else if (action === "freeform") {
+      if (!continueAllowed(ask)) return { error: "ASK_INVALID_OPTION" };
+      const rawText = typeof body?.text === "string" ? body.text.trim() : "";
+      if (!rawText) return { error: "ASK_TEXT_EMPTY" };
+      if (rawText.length > ASK_TEXT_MAX) return { error: "ASK_TEXT_TOO_LONG" };
+      text = rawText;
     }
     if (this.askInFlight.has(runId)) return { error: "ASK_IN_FLIGHT" };
     const routed = this.resolveInjectWindow(run, { requireCdp: true });
@@ -928,6 +938,7 @@ export class RunService {
       request_id: ask.request_id,
       action,
       answers,
+      ...(text ? { text } : {}),
       ...(ask.kind === "plan" ? { kind: "plan" as const } : {}),
     });
     this.audit("operator", "run.answerAsk", runId, {

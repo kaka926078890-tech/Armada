@@ -490,6 +490,8 @@ export default function RunDetail({
             if (r?.error) {
               setAskError(r.error === "ASK_IN_FLIGHT" ? "正在提交，请稍候"
                 : r.error === "ASK_INVALID_OPTION" ? "选项无效，请改选或 Skip"
+                : r.error === "ASK_TEXT_EMPTY" ? "先写回复，或不选选项去点上面的答案"
+                : r.error === "ASK_TEXT_TOO_LONG" ? "回复太长，请缩短后再发"
                 : "提交失败，请到本机点 Continue / Skip");
               return false;
             }

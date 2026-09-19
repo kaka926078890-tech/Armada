@@ -1091,6 +1091,7 @@ struct AskView: View {
     var onDone: () async -> Void
     @EnvironmentObject var session: Session
     @State private var optionId: String?
+    @State private var freeformText = ""
     @State private var err: String?
     @State private var busyAction: String?
     @State private var planHeight: CGFloat = 80
@@ -1139,9 +1140,10 @@ struct AskView: View {
                         .font(.body)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    ForEach(q.options) { o in
+                    ForEach(q.options.filter { $0.freeform != true }) { o in
                         Button {
                             optionId = o.id
+                            freeformText = ""
                         } label: {
                             HStack(alignment: .top, spacing: 8) {
                                 Text(o.label.isEmpty ? o.id.uppercased() : o.label)
@@ -1170,6 +1172,14 @@ struct AskView: View {
                                 .stroke(optionId == o.id ? Self.accentBlue : Color.secondary.opacity(0.35), lineWidth: optionId == o.id ? 2 : 1)
                         )
                     }
+                    TextField("Other...", text: $freeformText, axis: .vertical)
+                        .lineLimit(1...6)
+                        .disabled(busyAction != nil)
+                        .onChange(of: freeformText) { _, next in
+                            if !next.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                optionId = nil
+                            }
+                        }
                 }
                 if let err { Text(err).foregroundStyle(.red) }
                 HStack(spacing: 8) {
@@ -1190,11 +1200,11 @@ struct AskView: View {
                     .disabled(busyAction != nil)
                     if canContinue {
                     Button {
-                        Task { await submit(action: "continue") }
+                        Task { await submit(action: typed.isEmpty ? "continue" : "freeform") }
                     } label: {
                         HStack(spacing: 8) {
-                            if busyAction == "continue" { ProgressView().tint(.white) }
-                            Text(busyAction == "continue" ? "Continuing..." : "继续")
+                            if busyAction == "continue" || busyAction == "freeform" { ProgressView().tint(.white) }
+                            Text((busyAction == "continue" || busyAction == "freeform") ? "Continuing..." : "继续")
                                 .font(.subheadline.weight(.semibold))
                         }
                         .frame(minWidth: 72, minHeight: 36)
@@ -1203,7 +1213,7 @@ struct AskView: View {
                     .buttonStyle(.borderedProminent)
                     .controlSize(.regular)
                     .tint(Self.accentBlue)
-                    .disabled(optionId == nil || busyAction != nil)
+                    .disabled((optionId == nil && typed.isEmpty) || busyAction != nil)
                     }
                 }
             }
@@ -1223,6 +1233,7 @@ struct AskView: View {
 
     private var isPlan: Bool { isPlanAsk(ask) }
     private var canContinue: Bool { continueAllowed(ask) }
+    private var typed: String { freeformText.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     private func submitBuild() async {
         guard busyAction == nil, let q = ask.questions.first, let opt = q.options.first else { return }
@@ -1245,9 +1256,13 @@ struct AskView: View {
     private func submit(action: String) async {
         guard busyAction == nil else { return }
         if action == "continue", optionId == nil { return }
+        if action == "freeform", typed.isEmpty { return }
         busyAction = action
         var body: [String: Any] = ["request_id": ask.request_id, "action": action]
-        if action == "continue", let q = ask.questions.first, let optionId {
+        if action == "freeform" {
+            body["text"] = typed
+            body["answers"] = [] as [[String: Any]]
+        } else if action == "continue", let q = ask.questions.first, let optionId {
             body["answers"] = [["question_id": q.id, "option_ids": [optionId]]]
         }
         do {

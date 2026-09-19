@@ -1306,6 +1306,79 @@ describe("answerAsk kind on wire", () => {
     expect(msg.kind).toBeUndefined();
     ws.close();
   });
+
+  test("freeform posts text and empty answers; plan and empty text are rejected", async () => {
+    const { ws, inbound, api } = await startWithExt();
+    const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "hello" }) });
+    const { run } = await r.json() as any;
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId: run.id, conversationId: "cid-1", transcriptPath: "/tmp/t.jsonl", promptMatch: true }));
+    await new Promise((x) => setTimeout(x, 80));
+    ws.send(JSON.stringify({
+      type: "run.event", runId: run.id, conversationId: "cid-1", source: "cdp", hookEventName: "askQuestion", seq: 1, ts: Date.now(),
+      payload: {
+        request_id: "ask-1",
+        conversation_id: "cid-1",
+        questions: [{ id: "q0", prompt: "选一个", options: [{ id: "a", label: "A", text: "甲" }, { id: "d", label: "D", text: "Other...", freeform: true }] }],
+        detected_at: 1, detect_via: "cdp",
+      },
+    }));
+    await new Promise((x) => setTimeout(x, 120));
+    inbound.length = 0;
+    const empty = await api(`/api/runs/${run.id}/answer-ask`, {
+      method: "POST",
+      body: JSON.stringify({ request_id: "ask-1", action: "freeform", text: "  " }),
+    });
+    expect(empty.status).toBe(409);
+    expect(((await empty.json()) as any).error).toBe("ASK_TEXT_EMPTY");
+    const tooLong = await api(`/api/runs/${run.id}/answer-ask`, {
+      method: "POST",
+      body: JSON.stringify({ request_id: "ask-1", action: "freeform", text: "x".repeat(4001) }),
+    });
+    expect(tooLong.status).toBe(409);
+    expect(((await tooLong.json()) as any).error).toBe("ASK_TEXT_TOO_LONG");
+    const ans = await api(`/api/runs/${run.id}/answer-ask`, {
+      method: "POST",
+      body: JSON.stringify({ request_id: "ask-1", action: "freeform", text: "走平台合同", answers: [{ question_id: "q0", option_ids: ["a"] }] }),
+    });
+    expect(ans.status).toBe(202);
+    await new Promise((x) => setTimeout(x, 80));
+    expect(inbound.find((m) => m.type === "run.answerAsk")).toMatchObject({
+      type: "run.answerAsk",
+      request_id: "ask-1",
+      action: "freeform",
+      text: "走平台合同",
+      answers: [],
+    });
+    ws.close();
+  });
+
+  test("plan ask rejects freeform", async () => {
+    const { ws, api } = await startWithExt();
+    const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "hello" }) });
+    const { run } = await r.json() as any;
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId: run.id, conversationId: "cid-1", transcriptPath: "/tmp/t.jsonl", promptMatch: true }));
+    await new Promise((x) => setTimeout(x, 80));
+    ws.send(JSON.stringify({
+      type: "run.event", runId: run.id, conversationId: "cid-1", source: "cdp", hookEventName: "askQuestion", seq: 1, ts: Date.now(),
+      payload: {
+        request_id: "ask-plan-1",
+        kind: "plan",
+        conversation_id: "cid-1",
+        questions: [{ id: "q0", prompt: "Created Plan: x", options: [{ id: "build", label: "Build", text: "Build" }] }],
+        detected_at: 1, detect_via: "cdp",
+      },
+    }));
+    await new Promise((x) => setTimeout(x, 120));
+    const planFree = await api(`/api/runs/${run.id}/answer-ask`, {
+      method: "POST",
+      body: JSON.stringify({ request_id: "ask-plan-1", action: "freeform", text: "不要 Build" }),
+    });
+    expect(planFree.status).toBe(409);
+    expect(((await planFree.json()) as any).error).toBe("ASK_INVALID_OPTION");
+    ws.close();
+  });
 });
 
 describe("resolveInjectWindow", () => {
