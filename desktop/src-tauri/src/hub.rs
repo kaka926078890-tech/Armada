@@ -737,6 +737,10 @@ fn finish_create(
         crate::attach::run_local_attach(resource, "127.0.0.1:7380", &token, overwrite, None).ok()
     } else {
         let _ = crate::attach::install_vsix(resource);
+        if should_write_owned_cursor_hub_url(attach_cursor, overwrite) {
+            let path = crate::attach::real_cursor_settings_path();
+            let _ = crate::attach::apply_cursor_settings(&path, "127.0.0.1:7380", &token, overwrite);
+        }
         None
     };
     let share_candidates = pick_share_candidates(&list_ifaces());
@@ -955,6 +959,11 @@ pub fn attach_cursor_on_owned(user_initiated: bool) -> bool {
     user_initiated
 }
 
+/// HubUrl rewrite is independent of full Cursor attach (hooks). Ensure still writes when overwrite.
+pub fn should_write_owned_cursor_hub_url(_attach_cursor: bool, overwrite: bool) -> bool {
+    overwrite
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1026,6 +1035,21 @@ mod tests {
             keep_awake_args(39523),
             vec!["-i", "-s", "-w", "39523"]
         );
+    }
+
+    #[test]
+    fn restore_path_surfaces_decision_attach() {
+        let action = decide_occupancy(false, true, Some("armada-hub"), Auth::Ok);
+        assert_eq!(action, OccupancyAction::Attach);
+        assert_eq!(apply_decision(true, action), Ok(ApplyKind::Attach));
+        assert_eq!(decision_label(ApplyKind::Attach), "attach");
+    }
+
+    #[test]
+    fn ensure_rewrites_hub_url_when_overwrite_even_without_full_attach() {
+        assert!(should_write_owned_cursor_hub_url(false, true));
+        assert!(!should_write_owned_cursor_hub_url(false, false));
+        assert!(should_write_owned_cursor_hub_url(true, true));
     }
 
     #[test]

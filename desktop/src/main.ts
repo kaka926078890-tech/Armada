@@ -21,6 +21,7 @@ import {
   parsePastedJoin,
   fleetErrorCopy,
   recreateFleetCopy,
+  restoreDecisionNotice,
   restoreHubCopy,
   isLocalOwnedBoard,
   selectShareCandidate,
@@ -302,6 +303,9 @@ async function restoreOwnedHub(opts?: { toast?: boolean }) {
     reopenCount = 0;
     lastReopenAt = Date.now();
     rememberShareFromCreate(r.shareCandidates, r.token);
+    const attachNotice = restoreDecisionNotice(r.decision);
+    if (attachNotice) showToast(attachNotice);
+    toastAttach(r.attach);
     openBoard(r.webviewOrigin ?? "127.0.0.1:7380", r.token);
   } catch (e) {
     showToast(fleetErrorMessage(String(e)), "err");

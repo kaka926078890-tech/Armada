@@ -22,3 +22,13 @@ export function decideOccupancy(i: OccupancyInput): OccupancyDecision {
   }
   return { action: "block", reason: "port-busy" };
 }
+
+/** Overlay/restore attach is not a spawn of this Armada.app. */
+export function restoreAttachCopy(): string {
+  return "已接入已有中台，非本应用启动";
+}
+
+export function restoreDecisionNotice(decision: OccupancyDecision["action"] | string): string | null {
+  if (decision === "attach") return restoreAttachCopy();
+  return null;
+}

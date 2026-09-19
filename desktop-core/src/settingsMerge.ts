@@ -20,3 +20,12 @@ export function shouldWriteCursorSettings(opts: {
     : (typeof opts.existingHubUrl === "string" ? opts.existingHubUrl : opts.hubUrl);
   return opts.existingHubUrl !== hubToWrite || opts.existingToken !== opts.token;
 }
+
+/** Full Cursor attach stays gated by attachCursor. HubUrl rewrite follows overwrite even on ensure. */
+export function shouldWriteOwnedCursorHubUrl(opts: {
+  attachCursor: boolean;
+  overwriteCursorHubUrl: boolean;
+}): boolean {
+  void opts.attachCursor;
+  return opts.overwriteCursorHubUrl;
+}
