@@ -1,7 +1,9 @@
 package app.armada.remote
 
 object MarkdownHtml {
-    const val MEASURE_JS = "document.body ? document.body.offsetHeight : 0"
+    // Keep in sync with iOS MarkdownHeight.measureJavaScript and mobile/markdown-measure.ts.
+    const val MEASURE_JS =
+        "(function(){var b=document.body;if(!b||!b.lastElementChild)return 1;var last=b.lastElementChild;var mb=parseFloat(getComputedStyle(last).marginBottom)||0;return Math.ceil(Math.max(last.getBoundingClientRect().bottom+mb-b.getBoundingClientRect().top,1));})()"
 
     fun from(source: String, fontScale: String = "normal", theme: String = "dark"): String {
         val inner = splitFences(source.replace("\r\n", "\n")).joinToString("") { renderBlock(it) }

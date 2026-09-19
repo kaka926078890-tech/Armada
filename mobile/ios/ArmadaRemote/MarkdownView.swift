@@ -236,10 +236,25 @@ enum MarkdownHTML {
 }
 
 enum MarkdownHeight {
-    /// `documentElement.scrollHeight` follows the WKWebView frame (viewport), so a
-    /// later short reply keeps the previous long page's height and the outer
-    /// ScrollView overscrolls. `body.offsetHeight` is the content box.
-    static let measureJavaScript = "document.body ? document.body.offsetHeight : 0"
+    /// Last-block box, not the WKWebView frame. `documentElement.scrollHeight`
+    /// tracks the viewport so a later short reply keeps the previous page.
+    /// `body.offsetHeight` drops collapsed trailing margin and late reflow.
+    /// Keep in sync with Android `MarkdownHtml.MEASURE_JS` and `mobile/markdown-measure.ts`.
+    static let measureJavaScript =
+        "(function(){var b=document.body;if(!b||!b.lastElementChild)return 1;var last=b.lastElementChild;var mb=parseFloat(getComputedStyle(last).marginBottom)||0;return Math.ceil(Math.max(last.getBoundingClientRect().bottom+mb-b.getBoundingClientRect().top,1));})()"
+}
+
+final class MarkdownMeasuringWebView: WKWebView {
+    var onLayoutWidth: ((WKWebView) -> Void)?
+    private var lastWidth: CGFloat = -1
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let w = bounds.width
+        guard w > 0, abs(w - lastWidth) > 0.5 else { return }
+        lastWidth = w
+        onLayoutWidth?(self)
+    }
 }
 
 struct MarkdownWebView: UIViewRepresentable {
@@ -249,38 +264,51 @@ struct MarkdownWebView: UIViewRepresentable {
 
     func makeCoordinator() -> Coord { Coord() }
 
-    func makeUIView(context: Context) -> WKWebView {
+    func makeUIView(context: Context) -> MarkdownMeasuringWebView {
         let cfg = WKWebViewConfiguration()
         cfg.defaultWebpagePreferences.preferredContentMode = .mobile
-        let w = WKWebView(frame: .zero, configuration: cfg)
+        let w = MarkdownMeasuringWebView(frame: .zero, configuration: cfg)
         w.navigationDelegate = context.coordinator
         w.scrollView.isScrollEnabled = false
         w.scrollView.bounces = false
+        w.scrollView.contentInsetAdjustmentBehavior = .never
         w.isOpaque = false
         w.backgroundColor = .clear
         w.scrollView.backgroundColor = .clear
+        w.onLayoutWidth = { web in
+            context.coordinator.measureIfReady(web)
+        }
         return w
     }
 
-    func updateUIView(_ webView: WKWebView, context: Context) {
+    func updateUIView(_ webView: MarkdownMeasuringWebView, context: Context) {
         context.coordinator.height = $height
         let key = "\(text)|\(appearance.fontScale)|\(appearance.theme)"
         if context.coordinator.lastKey != key {
             context.coordinator.lastKey = key
+            context.coordinator.pageReady = false
             webView.loadHTMLString(MarkdownHTML.from(text, fontScale: appearance.fontScale, theme: appearance.theme), baseURL: nil)
         }
     }
 
     final class Coord: NSObject, WKNavigationDelegate {
         var lastKey = ""
+        var pageReady = false
         var height: Binding<CGFloat> = .constant(120)
-        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+
+        func measureIfReady(_ webView: WKWebView) {
+            guard pageReady, webView.bounds.width > 0 else { return }
             webView.evaluateJavaScript(MarkdownHeight.measureJavaScript) { val, _ in
                 let h = CGFloat((val as? NSNumber)?.doubleValue ?? 0)
                 DispatchQueue.main.async {
                     self.height.wrappedValue = max(h, 1)
                 }
             }
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            pageReady = true
+            measureIfReady(webView)
         }
         func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
             if navigationAction.navigationType == .linkActivated, let url = navigationAction.request.url {

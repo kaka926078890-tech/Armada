@@ -3,7 +3,7 @@
   "private": true,
   "workspaces": ["hub", "extension", "hub/web", "relay"],
   "scripts": {
-    "test": "bun test hub/test extension/test hooks/test hub/web/test desktop-core/test relay/test",
+    "test": "bun test hub/test extension/test hooks/test hub/web/test desktop-core/test relay/test mobile/markdown-measure.test.ts",
     "dev:relay": "bun run relay/src/index.ts",
     "dev:relay-attach": "bun run scripts/relay-attach.ts",
     "pack:extension": "bash scripts/pack-extension.sh",

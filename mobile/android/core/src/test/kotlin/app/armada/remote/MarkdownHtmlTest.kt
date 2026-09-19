@@ -29,6 +29,13 @@ class MarkdownHtmlTest {
     }
 
     @Test
+    fun measureJsUsesLastBlockNotViewport() {
+        assertTrue(!MarkdownHtml.MEASURE_JS.contains("documentElement.scrollHeight"), MarkdownHtml.MEASURE_JS)
+        assertTrue(MarkdownHtml.MEASURE_JS.contains("lastElementChild"), MarkdownHtml.MEASURE_JS)
+        assertTrue(MarkdownHtml.MEASURE_JS.contains("Math.ceil"), MarkdownHtml.MEASURE_JS)
+    }
+
+    @Test
     fun tableBlockquoteLinkAndHrMatchIos() {
         val src = """
             | 项 | 内容 |
