@@ -414,10 +414,10 @@ fun WorkspaceScreen(vm: SessionVm, state: UiState, workspace: WorkspaceDto, onBa
                                 val unread = vm.isUnread(run)
                                 if (index > 0) GroupedDivider()
                                 SwipeActionRow(
-                                    leading = if (vm.canMarkUnread(run)) {
-                                        SwipeAction("标为未读", StatusOrange) { vm.markUnread(run.runId, hold = false) }
-                                    } else null,
                                     trailing = listOfNotNull(
+                                        if (vm.canMarkUnread(run)) {
+                                            SwipeAction("标为未读", StatusOrange) { vm.markUnread(run.runId, hold = false) }
+                                        } else null,
                                         when {
                                             showArchived -> SwipeAction("取消隐藏", StatusGray) { archive(run, false) }
                                             run.showsArchive -> SwipeAction("隐藏", StatusRed) { archive(run, true) }
@@ -426,7 +426,7 @@ fun WorkspaceScreen(vm: SessionVm, state: UiState, workspace: WorkspaceDto, onBa
                                     ),
                                 ) {
                                     Row(
-                                        Modifier.fillMaxWidth().clickable { onOpenRun(run.runId) }.padding(horizontal = 16.dp, vertical = 8.dp),
+                                        Modifier.fillMaxWidth().clickable { onOpenRun(run.runId) }.padding(end = 16.dp, top = 8.dp, bottom = 8.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
                                         Box(Modifier.weight(1f)) { RunRow(run, unread) }
@@ -464,9 +464,21 @@ fun RunRow(run: RunDto, unread: Boolean) {
         unread && run.status in setOf("error", "aborted", "unknown") -> StatusRed
         else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
     }
-    Row(verticalAlignment = Alignment.Top) {
-        Box(Modifier.padding(top = 6.dp).size(8.dp).clip(CircleShape).background(statusColor(run.status)))
-        Spacer(Modifier.width(10.dp))
+    val chrome = when (runRowChrome(run, unread)) {
+        RowChrome.Green -> StatusGreen
+        RowChrome.Red -> StatusRed
+        RowChrome.None -> Color.Transparent
+    }
+    Row(Modifier.height(IntrinsicSize.Min), verticalAlignment = Alignment.Top) {
+        Box(
+            Modifier
+                .width(3.dp)
+                .fillMaxHeight()
+                .padding(vertical = 2.dp)
+                .clip(RoundedCornerShape(1.5.dp))
+                .background(chrome),
+        )
+        Spacer(Modifier.width(13.dp))
         Column(Modifier.weight(1f)) {
             Text(run.prompt, maxLines = 2, fontSize = 17.sp)
             Text(cap, fontSize = 13.sp, color = captionColor)

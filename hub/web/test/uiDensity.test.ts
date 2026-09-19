@@ -78,7 +78,7 @@ describe("hub UI density is one scale", () => {
 describe("App UI density is one scale", () => {
   test("iOS and Android primary controls stay 36pt, not 44/48", () => {
     const ios = readFileSync(join(repoRoot, "mobile/ios/ArmadaRemote/Screens.swift"), "utf8");
-    const android = readFileSync(join(repoRoot, "mobile/android/app/src/main/java/app/armada/remote/MainActivity.kt"), "utf8");
+    const android = androidUi();
     const hits: string[] = [];
     if (ios.includes("controlSize(.large)")) hits.push("ios: controlSize(.large)");
     if (/\bminHeight:\s*44\b/.test(ios)) hits.push("ios: minHeight 44");
@@ -89,32 +89,72 @@ describe("App UI density is one scale", () => {
 
   test("kanban rows use a 3pt left chrome bar like hub, not only a status dot", () => {
     const ios = readFileSync(join(repoRoot, "mobile/ios/ArmadaRemote/Screens.swift"), "utf8");
+    const android = androidUi();
     const iosRow = ios.slice(ios.indexOf("struct RunRow"), ios.indexOf("struct BindView"));
+    const androidRow = android.slice(android.indexOf("fun RunRow"), android.indexOf("fun DispatchModal"));
     expect(iosRow).toContain("runRowChrome");
     expect(iosRow).toContain("frame(width: 3)");
     expect(iosRow).not.toContain("Circle().fill(statusColor");
+    expect(androidRow).toContain("runRowChrome");
+    expect(androidRow).toContain("width(3.dp)");
+    expect(androidRow).not.toContain("size(8.dp).clip(CircleShape).background(statusColor");
   });
 
   test("workspace swipe reveals hide and mark-unread on the same trailing edge", () => {
     const ios = readFileSync(join(repoRoot, "mobile/ios/ArmadaRemote/Screens.swift"), "utf8");
+    const android = androidUi();
     const iosHome = ios.slice(ios.indexOf("struct WorkspaceHome"), ios.indexOf("struct PromptSnippetChips"));
     const trailing = iosHome.slice(iosHome.indexOf("swipeActions(edge: .trailing"));
     expect(trailing).toContain("标为未读");
     expect(trailing).toContain("隐藏");
     expect(iosHome).not.toContain("swipeActions(edge: .leading");
+    const workspace = android.slice(android.indexOf("fun WorkspaceScreen"), android.indexOf("fun RunRow"));
+    expect(workspace).toContain("SwipeActionRow");
+    expect(workspace).toContain("标为未读");
+    expect(workspace).toContain("隐藏");
+    expect(workspace).toContain("listOfNotNull");
+    expect(workspace).not.toContain("leading = if (vm.canMarkUnread");
   });
 
   test("dispatch/followup is a capsule composer, not stacked full-width buttons", () => {
     const ios = readFileSync(join(repoRoot, "mobile/ios/ArmadaRemote/Screens.swift"), "utf8");
-    const android = readFileSync(join(repoRoot, "mobile/android/app/src/main/java/app/armada/remote/MainActivity.kt"), "utf8");
+    const android = androidUi();
     const iosDispatch = ios.slice(ios.indexOf("struct DispatchSheet"), ios.indexOf("struct DetailPromptCard"));
     const androidDispatch = android.slice(android.indexOf("fun DispatchSheet"), android.indexOf("fun RunDetailScreen"));
     expect(ios).toContain("struct ComposerBar");
+    expect(android).toContain("fun ComposerBar");
     expect(ios).toContain("width * 0.78");
     expect(android).toContain("weight(0.78f)");
     expect(iosDispatch).not.toContain("VolumeButton");
     expect(iosDispatch).not.toContain("minHeight: 220");
     expect(androidDispatch).not.toContain("220.dp");
     expect(androidDispatch).not.toContain("expand = true");
+    expect(android).toContain("size(32.dp)");
+  });
+
+  test("Android chrome matches iOS grouped list, capsule composer, swipe, icon action bar", () => {
+    const android = androidUi();
+    const composer = android.slice(android.indexOf("fun ComposerBar"), android.indexOf("fun UnreadBadge"));
+    const workspace = android.slice(android.indexOf("fun WorkspaceScreen"), android.indexOf("fun RunRow"));
+    const actionBar = android.slice(android.indexOf("fun DetailActionBar"), android.indexOf("fun AskBlock"));
+    expect(android).toContain("查看已隐藏");
+    expect(android).toContain("F2F2F7");
+    expect(android).toContain("1C1C1E");
+    expect(composer).toContain("IosTextField");
+    expect(composer).not.toContain("OutlinedTextField");
+    expect(composer).toContain("IosIcon.Mic");
+    expect(composer).toContain("IosIcon.ArrowUp");
+    expect(workspace).toContain("SwipeActionRow");
+    expect(workspace).not.toContain("TextButton");
+    expect(actionBar).toContain("IosIcon.Copy");
+    expect(actionBar).toContain("IosIcon.Unread");
+    expect(android).toContain("\"–\"");
   });
 });
+
+function androidUi(): string {
+  const main = readFileSync(join(repoRoot, "mobile/android/app/src/main/java/app/armada/remote/MainActivity.kt"), "utf8");
+  const chrome = readFileSync(join(repoRoot, "mobile/android/app/src/main/java/app/armada/remote/IosChrome.kt"), "utf8");
+  const logic = readFileSync(join(repoRoot, "mobile/android/core/src/main/kotlin/app/armada/remote/Chrome.kt"), "utf8");
+  return `${chrome}\n${main}\n${logic}`;
+}
