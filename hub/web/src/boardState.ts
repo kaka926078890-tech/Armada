@@ -50,9 +50,7 @@ export function cardView(run: RunRow, now: number): { title: string; elapsed: st
       } catch { return []; }
     })();
   const named = runDisplayName(run);
-  const title = named
-    ? (named.length > 40 ? named.slice(0, 40) + "…" : named)
-    : (ids.length ? `[${ids.length} 个附件]` : named);
+  const title = named || (ids.length ? `[${ids.length} 个附件]` : named);
 
   const from = run.started_at ?? run.created_at;
   const secs = Math.max(0, Math.floor(((run.ended_at ?? now) - from) / 1000));

@@ -38,10 +38,11 @@ describe("groupRuns", () => {
 });
 
 describe("cardView", () => {
-  test("title truncates prompt at 40 chars", () => {
-    const v = cardView({ ...base, prompt: "x".repeat(100) }, 5000);
-    expect(v.title).toHaveLength(41); // 40 + …
-    expect(v.title.endsWith("…")).toBe(true);
+  test("title keeps the full prompt instead of slicing it", () => {
+    const prompt = "x".repeat(100);
+    const v = cardView({ ...base, prompt }, 5000);
+    expect(v.title).toBe(prompt);
+    expect(v.title).not.toContain("…");
   });
   test("elapsed from started_at for running", () => {
     const v = cardView(base, 62_000);

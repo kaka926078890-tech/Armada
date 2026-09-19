@@ -104,6 +104,30 @@ describe("Board unread chrome", () => {
     expect(html).toContain("重试");
     expect(html).not.toContain("absolute top-1.5 right-1.5");
     expect(html).not.toContain("pr-16");
+    expect(html).not.toMatch(/line-clamp-\d+/);
+  });
+
+  test("long card title stays in full and actions sit after the body", () => {
+    const prompt = "手机端不要创建提示词报错，只做同步就好了，而且现在中台，app 端也要对齐一遍操作路径";
+    const html = renderToStaticMarkup(
+      <Board
+        runs={[{ ...run, prompt }]}
+        machines={[{ id: "m-1", name: "Mac-A", os: "darwin", cursor_version: null, extension_version: null, open_workspaces: "[]", status: "online", last_seen_at: 1 }]}
+        selected={null}
+        onSelect={() => {}}
+        showArchived={false}
+        onHide={() => {}}
+        onUnhide={() => {}}
+        readMap={{}}
+        onRename={() => {}}
+      />,
+    );
+    expect(html).toContain(prompt);
+    expect(html).not.toContain("…");
+    const titleAt = html.indexOf(prompt);
+    const actionsAt = html.indexOf("改标题");
+    expect(titleAt).toBeGreaterThan(-1);
+    expect(actionsAt).toBeGreaterThan(titleAt);
   });
 
   test("card on a stale Windows extension names the vsix gap", () => {
