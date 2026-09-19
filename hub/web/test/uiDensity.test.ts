@@ -94,9 +94,11 @@ describe("App UI density is one scale", () => {
     const androidRow = android.slice(android.indexOf("fun RunRow"), android.indexOf("fun DispatchModal"));
     expect(iosRow).toContain("runRowChrome");
     expect(iosRow).toContain("frame(width: 3)");
+    expect(iosRow).toContain("Capsule()");
     expect(iosRow).not.toContain("Circle().fill(statusColor");
     expect(androidRow).toContain("runRowChrome");
     expect(androidRow).toContain("width(3.dp)");
+    expect(androidRow).toContain("boardCardElapsed");
     expect(androidRow).not.toContain("size(8.dp).clip(CircleShape).background(statusColor");
   });
 
@@ -127,7 +129,9 @@ describe("App UI density is one scale", () => {
     expect(iosHome).toContain("RoundedRectangle");
     expect(workspace).not.toContain("GroupedSection");
     expect(workspace).not.toContain("GroupedDivider");
-    expect(workspace).toContain("RoundedCornerShape(10.dp)");
+    expect(workspace).toContain("RoundedCornerShape(12.dp)");
+    expect(workspace).not.toContain("Text(\"›\"");
+    expect(iosHome).toContain("navigationLinkIndicatorVisibility(.hidden)");
   });
 
   test("dispatch/followup is a capsule composer, not stacked full-width buttons", () => {

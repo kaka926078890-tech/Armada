@@ -456,7 +456,7 @@ fun WorkspaceScreen(vm: SessionVm, state: UiState, workspace: WorkspaceDto, onBa
                         Box(
                             Modifier
                                 .padding(horizontal = 16.dp, vertical = 4.dp)
-                                .clip(RoundedCornerShape(10.dp))
+                                .clip(RoundedCornerShape(12.dp))
                                 .background(MaterialTheme.colorScheme.surface),
                         ) {
                             SwipeActionRow(
@@ -471,12 +471,8 @@ fun WorkspaceScreen(vm: SessionVm, state: UiState, workspace: WorkspaceDto, onBa
                                     },
                                 ),
                             ) {
-                                Row(
-                                    Modifier.fillMaxWidth().clickable { onOpenRun(run.runId) }.padding(end = 16.dp, top = 8.dp, bottom = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Box(Modifier.weight(1f)) { RunRow(run, unread) }
-                                    Text("›", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 8.dp))
+                                Box(Modifier.fillMaxWidth().clickable { onOpenRun(run.runId) }.padding(end = 12.dp, top = 10.dp, bottom = 10.dp)) {
+                                    RunRow(run, unread)
                                 }
                             }
                         }
@@ -503,17 +499,18 @@ fun RunRow(run: RunDto, unread: Boolean) {
         run.queuedOutbound.isNotEmpty() -> "队列 ${run.queuedOutbound.size}"
         else -> statusLabel(run.status)
     }
-    val captionColor = when {
+    val badgeColor = when {
         run.pendingAsk != null -> StatusRed
         unread && run.status == "completed" -> StatusGreen
         unread && run.status in setOf("error", "aborted", "unknown") -> StatusRed
-        else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+        else -> statusColor(run.status)
     }
     val chrome = when (runRowChrome(run, unread)) {
         RowChrome.Green -> StatusGreen
         RowChrome.Red -> StatusRed
         RowChrome.None -> Color.Transparent
     }
+    val elapsed = boardCardElapsed(run.updatedAt, System.currentTimeMillis())
     Row(Modifier.height(IntrinsicSize.Min), verticalAlignment = Alignment.Top) {
         Box(
             Modifier
@@ -521,16 +518,35 @@ fun RunRow(run: RunDto, unread: Boolean) {
                 .fillMaxHeight()
                 .background(chrome),
         )
-        Spacer(Modifier.width(13.dp))
+        Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(run.prompt, maxLines = 2, fontSize = 17.sp)
-            Text(cap, fontSize = 13.sp, color = captionColor)
-        }
-        if (unread) {
-            Box(
-                Modifier.padding(top = 8.dp).size(7.dp).clip(CircleShape)
-                    .background(if (run.status == "completed" && run.pendingAsk == null) StatusGreen else StatusRed),
-            )
+            Text(run.prompt, maxLines = 3, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Row(
+                Modifier.padding(top = 8.dp).fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (unread) {
+                    Box(
+                        Modifier.size(6.dp).clip(CircleShape)
+                            .background(if (run.status == "completed" && run.pendingAsk == null) StatusGreen else StatusRed),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                }
+                Text(
+                    cap,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = badgeColor,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(badgeColor.copy(alpha = 0.14f))
+                        .padding(horizontal = 7.dp, vertical = 3.dp),
+                )
+                Spacer(Modifier.weight(1f))
+                if (elapsed != null) {
+                    Text(elapsed, fontSize = 11.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f))
+                }
+            }
         }
     }
 }

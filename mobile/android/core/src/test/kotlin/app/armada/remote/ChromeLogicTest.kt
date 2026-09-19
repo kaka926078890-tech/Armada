@@ -59,6 +59,15 @@ class ChromeLogicTest {
     }
 
     @Test
+    fun boardCardElapsedIsCompact() {
+        assertEquals("12s", boardCardElapsed(1_000L, 13_000L))
+        assertEquals("3m", boardCardElapsed(1_000L, 181_000L))
+        assertEquals("2h", boardCardElapsed(1_000L, 7_201_000L))
+        assertEquals(null, boardCardElapsed(null, 10_000L))
+        assertEquals(null, boardCardElapsed(0L, 10_000L))
+    }
+
+    @Test
     fun unreadBadgeTextMatchesIos() {
         assertEquals(null, unreadBadgeText(0))
         assertEquals("1", unreadBadgeText(1))

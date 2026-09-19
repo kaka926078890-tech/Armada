@@ -60,6 +60,15 @@ func statusLabel(_ status: String) -> String {
     }
 }
 
+func boardCardElapsed(updatedAt: Int?, now: Date = Date()) -> String? {
+    guard let updatedAt, updatedAt > 0 else { return nil }
+    let secs = max(0, Int((now.timeIntervalSince1970 * 1000 - Double(updatedAt)) / 1000))
+    if secs < 60 { return "\(secs)s" }
+    if secs < 3600 { return "\(secs / 60)m" }
+    if secs < 86_400 { return "\(secs / 3600)h" }
+    return "\(secs / 86_400)d"
+}
+
 func statusColor(_ status: String) -> Color {
     switch status {
     case "completed": return .green
@@ -192,32 +201,55 @@ struct DetailActionBar: View {
 struct RunRow: View {
     let run: RunDTO
     let unread: Bool
+    var now: Date = Date()
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
             Rectangle()
                 .fill(runRowChrome(run, unread: unread) ?? .clear)
                 .frame(width: 3)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(run.prompt).font(.system(size: 17)).lineLimit(2)
-                Text(run.pendingAsk != nil && run.status == "running" ? "待处理"
-                     : !run.queuedOutbound.isEmpty ? "队列 \(run.queuedOutbound.count)"
-                     : statusLabel(run.status))
-                    .font(.system(size: 13))
-                    .foregroundStyle(captionColor)
+            VStack(alignment: .leading, spacing: 8) {
+                Text(run.prompt)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(3)
+                    .multilineTextAlignment(.leading)
+                HStack(spacing: 6) {
+                    if unread {
+                        Circle()
+                            .fill(run.status == "completed" && run.pendingAsk == nil ? Color.green : Color.red)
+                            .frame(width: 6, height: 6)
+                    }
+                    Text(caption)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(badgeForeground)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(badgeForeground.opacity(0.14), in: Capsule())
+                    Spacer(minLength: 8)
+                    if let elapsed = boardCardElapsed(updatedAt: run.updatedAt, now: now) {
+                        Text(elapsed)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.tertiary)
+                            .monospacedDigit()
+                    }
+                }
             }
-            .padding(.leading, 13)
-            Spacer(minLength: 8)
-            if unread {
-                Circle().fill(run.status == "completed" && run.pendingAsk == nil ? Color.green : Color.red).frame(width: 7, height: 7).padding(.top, 8)
-            }
+            .padding(.leading, 12)
+            .padding(.vertical, 2)
         }
     }
 
-    private var captionColor: Color {
+    private var caption: String {
+        if run.pendingAsk != nil && run.status == "running" { return "待处理" }
+        if !run.queuedOutbound.isEmpty { return "队列 \(run.queuedOutbound.count)" }
+        return statusLabel(run.status)
+    }
+
+    private var badgeForeground: Color {
         if run.pendingAsk != nil { return .red }
         if unread && run.status == "completed" { return .green }
         if unread && ["error", "aborted", "unknown"].contains(run.status) { return .red }
-        return .secondary
+        return statusColor(run.status)
     }
 }
 
@@ -435,11 +467,12 @@ struct WorkspaceHome: View {
                     NavigationLink(value: AppRoute.run(run.runId)) {
                         RunRow(run: run, unread: session.isUnread(run))
                             .padding(.vertical, 10)
-                            .padding(.trailing, 8)
+                            .padding(.trailing, 12)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .background(Color(.secondarySystemGroupedBackground))
-                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
+                    .navigationLinkIndicatorVisibility(.hidden)
                     .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)

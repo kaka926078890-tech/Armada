@@ -36,6 +36,18 @@ fun hideArchiveLabel(hiddenCount: Int, showingArchived: Boolean): String {
     return if (hiddenCount > 0) "查看已隐藏 $hiddenCount" else "查看已隐藏"
 }
 
+/** Compact activity age for kanban cards. Null if the snap has no clock. */
+fun boardCardElapsed(updatedAt: Long?, nowMs: Long): String? {
+    if (updatedAt == null || updatedAt <= 0L) return null
+    val secs = maxOf(0L, (nowMs - updatedAt) / 1000L)
+    return when {
+        secs < 60L -> "${secs}s"
+        secs < 3600L -> "${secs / 60L}m"
+        secs < 86400L -> "${secs / 3600L}h"
+        else -> "${secs / 86400L}d"
+    }
+}
+
 fun unreadBadgeText(count: Int): String? {
     if (count <= 0) return null
     return if (count > 99) "99+" else "$count"
