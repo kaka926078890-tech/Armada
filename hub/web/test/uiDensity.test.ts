@@ -39,6 +39,14 @@ describe("hub UI density is one scale", () => {
     expect(button).not.toContain("min-w-[128px]");
   });
 
+  test("thread uses shadcn semantic colors, not zinc (light theme must stay readable)", () => {
+    const chat = readFileSync(join(srcRoot, "components/ChatThread.tsx"), "utf8");
+    expect(chat).toContain("text-foreground");
+    expect(chat).toContain("text-muted-foreground");
+    expect(chat).toContain("bg-muted");
+    expect(chat).not.toMatch(/\b(?:text|bg|border|hover:text|hover:bg)-zinc-/);
+  });
+
   test("pages do not mix oversized Ask rows or 10px chrome", () => {
     const files = walk(srcRoot).filter((p) => !p.endsWith("/ui.ts") && !p.includes("/components/ui/"));
     const hits: string[] = [];

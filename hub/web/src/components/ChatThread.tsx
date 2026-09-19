@@ -7,7 +7,7 @@ import { Button } from "./ui/button";
 import { UI_BODY, UI_META, UI_OPTION_OFF, UI_OPTION_ON, UI_TYPE } from "../ui";
 
 function ThoughtLive({ text }: { text: string }) {
-  return <div className="text-[12px] text-zinc-500 whitespace-pre-wrap leading-relaxed">{text}</div>;
+  return <div className="text-[12px] text-muted-foreground whitespace-pre-wrap leading-relaxed">{text}</div>;
 }
 
 function modelLabel(model: string): string {
@@ -25,9 +25,9 @@ function ProcessStep({ block }: { block: ChatBlock }) {
   if (block.kind === "tool") {
     const times = block.count && block.count > 1 ? ` × ${block.count}` : "";
     return (
-      <div className="flex items-center gap-2 text-[12px] text-zinc-400">
-        <span className="size-1.5 rounded-full bg-zinc-600 shrink-0" />
-        <span className="font-mono text-zinc-300">{block.summary}{times}</span>
+      <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
+        <span className="size-1.5 rounded-full bg-muted-foreground/50 shrink-0" />
+        <span className="font-mono text-foreground">{block.summary}{times}</span>
       </div>
     );
   }
@@ -37,17 +37,17 @@ function ProcessStep({ block }: { block: ChatBlock }) {
       <div className="flex items-start gap-2 text-[12px]">
         <span className="text-sky-500 mt-0.5">▸</span>
         <div className="min-w-0">
-          <div className="text-zinc-300">
+          <div className="text-foreground">
             子代理{done ? (block.status === "error" ? " 失败" : " 已回复") : " 运行中"}
-            {block.title && block.title !== "子代理" ? <span className="text-zinc-500"> · {block.title}</span> : null}
+            {block.title && block.title !== "子代理" ? <span className="text-muted-foreground"> · {block.title}</span> : null}
           </div>
-          <div className="text-zinc-600 mt-0.5">
+          <div className="text-muted-foreground mt-0.5">
             {block.model ? modelLabel(block.model) : ""}
             {block.durationMs != null ? ` · ${durationLabel(block.durationMs)}` : ""}
             {done ? " · Completed" : ""}
           </div>
           {block.text ? (
-            <div className="mt-1.5 text-zinc-400 whitespace-pre-wrap leading-relaxed max-h-64 overflow-y-auto">
+            <div className="mt-1.5 text-muted-foreground whitespace-pre-wrap leading-relaxed max-h-64 overflow-y-auto">
               <AssistantMarkdown text={block.text} />
             </div>
           ) : null}
@@ -68,12 +68,12 @@ function ProcessFold({ steps }: { steps: ChatBlock[] }) {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="text-left text-[12px] text-zinc-500 hover:text-zinc-300"
+        className="text-left text-[12px] text-muted-foreground hover:text-foreground"
       >
-        <span className="text-zinc-600">{open ? "▾" : "▸"}</span> {processFoldLabel(steps)}
+        <span className="text-muted-foreground">{open ? "▾" : "▸"}</span> {processFoldLabel(steps)}
       </button>
       {open ? (
-        <div className="mt-2 flex flex-col gap-2 pl-3 border-l border-zinc-800">
+        <div className="mt-2 flex flex-col gap-2 pl-3 border-l border-border">
           {steps.map((s, i) => <ProcessStep key={`${s.kind}-${s.seq}-${i}`} block={s} />)}
         </div>
       ) : null}
@@ -82,41 +82,41 @@ function ProcessFold({ steps }: { steps: ChatBlock[] }) {
 }
 
 const mdComponents = {
-  h1: ({ children }: { children?: ReactNode }) => <h1 className="text-[16px] font-semibold text-zinc-100 mt-3 mb-1">{children}</h1>,
-  h2: ({ children }: { children?: ReactNode }) => <h2 className="text-[15px] font-semibold text-zinc-100 mt-3 mb-1">{children}</h2>,
-  h3: ({ children }: { children?: ReactNode }) => <h3 className="text-[14px] font-medium text-zinc-100 mt-3 mb-1">{children}</h3>,
+  h1: ({ children }: { children?: ReactNode }) => <h1 className="text-[16px] font-semibold text-foreground mt-3 mb-1">{children}</h1>,
+  h2: ({ children }: { children?: ReactNode }) => <h2 className="text-[15px] font-semibold text-foreground mt-3 mb-1">{children}</h2>,
+  h3: ({ children }: { children?: ReactNode }) => <h3 className="text-[14px] font-medium text-foreground mt-3 mb-1">{children}</h3>,
   p: ({ children }: { children?: ReactNode }) => <p className="mb-2 last:mb-0">{children}</p>,
   ul: ({ children }: { children?: ReactNode }) => <ul className="list-disc pl-5 mb-2 space-y-1">{children}</ul>,
   ol: ({ children }: { children?: ReactNode }) => <ol className="list-decimal pl-5 mb-2 space-y-1">{children}</ol>,
   li: ({ children }: { children?: ReactNode }) => <li className="pl-0.5">{children}</li>,
-  strong: ({ children }: { children?: ReactNode }) => <strong className="font-medium text-zinc-100">{children}</strong>,
+  strong: ({ children }: { children?: ReactNode }) => <strong className="font-medium text-foreground">{children}</strong>,
   em: ({ children }: { children?: ReactNode }) => <em className="italic">{children}</em>,
-  hr: () => <hr className="border-zinc-800 my-3" />,
+  hr: () => <hr className="border-border my-3" />,
   blockquote: ({ children }: { children?: ReactNode }) => (
-    <blockquote className="border-l-2 border-zinc-700 pl-3 text-zinc-400 mb-2">{children}</blockquote>
+    <blockquote className="border-l-2 border-border pl-3 text-muted-foreground mb-2">{children}</blockquote>
   ),
   a: ({ href, children }: { href?: string; children?: ReactNode }) => (
-    <a href={href} className="text-sky-400 hover:underline" target="_blank" rel="noreferrer">{children}</a>
+    <a href={href} className="text-primary hover:underline" target="_blank" rel="noreferrer">{children}</a>
   ),
   table: ({ children }: { children?: ReactNode }) => (
     <div className="overflow-x-auto mb-2">
       <table className="text-[12px] border-collapse">{children}</table>
     </div>
   ),
-  th: ({ children }: { children?: ReactNode }) => <th className="border border-zinc-700 px-2 py-1 text-left text-zinc-300">{children}</th>,
-  td: ({ children }: { children?: ReactNode }) => <td className="border border-zinc-800 px-2 py-1 text-zinc-300">{children}</td>,
+  th: ({ children }: { children?: ReactNode }) => <th className="border border-border px-2 py-1 text-left text-foreground">{children}</th>,
+  td: ({ children }: { children?: ReactNode }) => <td className="border border-border px-2 py-1 text-foreground">{children}</td>,
   pre: ({ children }: { children?: ReactNode }) => (
-    <pre className="mb-2 p-2.5 rounded-md bg-zinc-900 overflow-x-auto text-[12px]">{children}</pre>
+    <pre className="mb-2 p-2.5 rounded-md bg-muted overflow-x-auto text-[12px]">{children}</pre>
   ),
   code: ({ className, children }: { className?: string; children?: ReactNode }) => {
     if (className) return <code className={className}>{children}</code>;
-    return <code className="px-1 py-px rounded bg-zinc-800/80 text-zinc-200 text-[12px]">{children}</code>;
+    return <code className="px-1 py-px rounded bg-muted text-foreground text-[12px]">{children}</code>;
   },
 };
 
 export function AssistantMarkdown({ text }: { text: string }) {
   return (
-    <div className={`break-words leading-[1.65] ${UI_BODY} text-zinc-200`}>
+    <div className={`break-words leading-[1.65] ${UI_BODY} text-foreground`}>
       <Markdown remarkPlugins={[remarkGfm, remarkBreaks]} components={mdComponents}>{text}</Markdown>
     </div>
   );
@@ -124,7 +124,7 @@ export function AssistantMarkdown({ text }: { text: string }) {
 
 function UserMarkdown({ text }: { text: string }) {
   return (
-    <div className={`break-words leading-[1.65] ${UI_BODY} text-zinc-100`}>
+    <div className={`break-words leading-[1.65] ${UI_BODY} text-foreground`}>
       <Markdown remarkPlugins={[remarkGfm, remarkBreaks]} components={mdComponents}>{text}</Markdown>
     </div>
   );
@@ -172,7 +172,7 @@ function CopyIconButton({ text }: { text: string }) {
         setCopied(true);
         window.setTimeout(() => setCopied(false), 1600);
       }}
-      className="mt-1.5 p-1 rounded text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800"
+      className="mt-1.5 p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted"
     >
       {copied ? <CheckIcon /> : <CopyIcon />}
     </button>
@@ -273,7 +273,7 @@ function AskCard({ block, onAnswerAsk }: {
               onClick={(e) => { stopCard(e); setPicked(o.id); }}
               className={on ? UI_OPTION_ON : UI_OPTION_OFF}
             >
-              <span className="text-zinc-500 font-mono mr-1.5">{o.label}</span>
+              <span className="text-muted-foreground font-mono mr-1.5">{o.label}</span>
               {o.text}
             </button>
           );
@@ -332,7 +332,7 @@ export default function ChatThread({ blocks, onAnswerAsk }: {
         if (s.kind === "user") {
           return (
             <div key={key} className="flex justify-end">
-              <div className="max-w-[78%] rounded-2xl bg-zinc-800/70 px-3.5 py-2 text-zinc-100 leading-relaxed">
+              <div className="max-w-[78%] rounded-2xl bg-muted px-3.5 py-2 text-foreground leading-relaxed">
                 <UserMarkdown text={s.text} />
               </div>
             </div>
