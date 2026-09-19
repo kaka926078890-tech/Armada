@@ -17,7 +17,7 @@ import { DispatchModal } from "./components/Modals";
 import { alertCompletions, alertNeedInput, ensureNotifyPermission, seedAskStatus, seedRunStatus, stopTitleMarquee, takeNewlyAlertable, takeNewlyNeedInput } from "./completionNotify";
 import { applyFontScale, applyTheme, loadFontScale, loadTheme, saveFontScale, saveTheme, type FontScale, type ThemeName } from "./theme";
 import SettingsModal from "./components/SettingsModal";
-import { UI_BTN_GHOST, UI_BTN_PRIMARY, UI_INPUT, UI_META, UI_TYPE } from "./ui";
+import { UI_BTN_GHOST, UI_BTN_GHOST_ACTIVE, UI_BTN_PRIMARY, UI_INPUT, UI_META, UI_TYPE } from "./ui";
 import {
   WS_KEY, READ_KEY, READ_SEEDED,
   loadLocalUiPrefsMirror, applyUiPrefsToLocalStorage,
@@ -402,7 +402,7 @@ export default function App() {
         <button
           type="button"
           onClick={() => { setShowArchived((v) => !v); setSelectedRun(null); }}
-          className={`${showArchived ? "bg-amber-900/60 text-amber-200 border-amber-800" : ""} ${UI_BTN_GHOST} shrink-0`}
+          className={`${showArchived ? UI_BTN_GHOST_ACTIVE : UI_BTN_GHOST} shrink-0`}
         >
           {showArchived ? "返回看板" : `查看已隐藏${hiddenRuns.length ? ` ${hiddenRuns.length}` : ""}`}
         </button>

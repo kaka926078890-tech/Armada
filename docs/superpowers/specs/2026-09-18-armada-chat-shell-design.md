@@ -1,15 +1,15 @@
 # Armada UI 组件升级（shadcn）+ Ask 自由输入
 
 - 日期：2026-09-18
-- 状态：**待评审**（v2：2026-09-19 —— 豆包 / ChatGPT **只对齐手机 App 视觉**；中台用 shadcn 换皮，五列看板不动）
+- 状态：**P1/P2 已落地密度 token**（v3：2026-09-19 —— 中台交付 `hub/web/src/ui.ts`，**不上** shadcn 脚手架；豆包 / ChatGPT 只对齐手机 App 视觉；五列看板不动）
 - 父文档：
   - [2026-09-07-armada-ask-question-hitl-design.md](../../../../docs/superpowers/specs/2026-09-07-armada-ask-question-hitl-design.md)（desk 仓；Ask v1：选项 Continue / Skip；**明确不做自由文字**，本规格把它补进 Ask **组件**）
   - [2026-09-18-armada-appearance-settings-design.md](./2026-09-18-armada-appearance-settings-design.md)（主题 / 字号；禁止 `zoom`、禁止 root rem 跟倍率走）
   - [2026-09-18-armada-prompt-snippets-design.md](./2026-09-18-armada-prompt-snippets-design.md)（快捷提示词；本规格只换皮，不改插入语义）
   - [armada-hub-app-parity](../../../.cursor/rules/armada-hub-app-parity.mdc)
   - [armada-feasibility-before-solution](../../../.cursor/rules/armada-feasibility-before-solution.mdc)
-- 修订范围：中台 `hub/web` 用 shadcn 换现有组件皮；**iOS / Android 按豆包 / ChatGPT 移动端对齐视觉**（列表、详情气泡、底栏、Ask 芯片）。Ask 卡补自由输入；`POST /api/runs/:id/answer-ask` 增加 `freeform`；扩展 CDP 自由输入。两端信息架构都保留。不改 `generation_id` / `decideStop` / ingest cid / `runToSnap` 字段集。
-- 触发：中台要 shadcn 组件升级；手机要对话产品观感；Ask 缺自由输入；App 按钮又大又丑。
+- 修订范围：中台 `hub/web` **P1 用 `ui.ts` 密度令牌换皮**（shadcn 脚手架缓做）；**iOS / Android 按豆包 / ChatGPT 移动端对齐视觉**（列表、详情气泡、底栏、Ask 芯片）。Ask 卡补自由输入；`POST /api/runs/:id/answer-ask` 增加 `freeform`；扩展 CDP 自由输入。两端信息架构都保留。不改 `generation_id` / `decideStop` / ingest cid / `runToSnap` 字段集。
+- 触发：中台控件大又大、小又小；手机要对话产品观感；Ask 缺自由输入；App 按钮又大又丑。
 
 ---
 
@@ -18,21 +18,21 @@
 | 项 | 内容 |
 | --- | --- |
 | 问题 | 中台手写控件不统一；手机详情像后台表单，Ask 按钮过大；Ask 不能打字作答。 |
-| 核心方案 | **两条皮、一套能力、一个 `origin/master`。** 中台：shadcn 换皮，**五列看板留下**。App：按豆包 / ChatGPT 移动端换视觉（气泡、紧凑底栏、芯片选项），**列表→详情结构留下**。Ask 两端卡内补自由输入。 |
-| 关键约束 | ① 豆包 / GPT **不准**用来改中台导航或删看板。② shadcn **不准**进 iOS/Android。③ `freeform` 须 Mac+Windows 真机过闸。④ 自由输入不是 `followup`。⑤ 主题/字号规格不废止。 |
+| 核心方案 | **两条皮、一套能力、一个 `origin/master`。** 中台：`ui.ts` 密度令牌换皮，**五列看板留下**。App：按豆包 / ChatGPT 移动端换视觉（气泡、紧凑底栏、芯片选项），**列表→详情结构留下**。Ask 两端卡内补自由输入。 |
+| 关键约束 | ① 豆包 / GPT **不准**用来改中台导航或删看板。② shadcn **不准**进 iOS/Android；P1 **也不上** hub shadcn 脚手架。③ `freeform` 须 Mac+Windows 真机过闸。④ 自由输入不是 `followup`。⑤ 主题/字号规格不废止。 |
 | 明确不做 | 中台改成 ChatGPT 桌面壳；App 改成完整 cid 逐条流（仍是 prompt 气泡 + 终态正文，现网数据没有全量线程）；复制品牌吉祥物/字标；Plan 自由输入；切 `feat/*`。 |
 
 **可行性：**
 
 | 路径 | 是否阻塞 | 说明 |
 | --- | --- | --- |
-| shadcn 换皮 / App 按钮密度 | 否 | 纯 UI；可在 master 先改、先测 |
+| 密度令牌 / App 按钮密度 | 否 | 纯 UI；可在 master 先改、先测 |
 | Ask 点选项 / Skip | 否 | v1 已过闸 |
 | Ask `freeform` CDP | **是** | Questions **在屏** DOM + 不选字母、打字、提交后框关。Mac 一次、Windows 一次。夹具入仓、单测先红，再写生产 |
 
 | OS | 是否阻塞 |
 | --- | --- |
-| 中台 Chromium / 打包 Tauri | shadcn 换皮；验收 overlay `/Applications/Armada.app` |
+| 中台 Chromium / 打包 Tauri | `ui.ts` 换皮；验收 overlay `/Applications/Armada.app` |
 | 被控 macOS / Windows | 仅 `freeform` 提交闸 |
 | iOS / Android | 豆包 / ChatGPT **风格**本规格；不引入 WebView 套壳 |
 
@@ -42,7 +42,7 @@
 
 | # | 原始诉求 | 设计映射 |
 | --- | --- | --- |
-| R1 | 用 shadcn 改造（中台）UI | 只动 `hub/web`：原语 + CSS 变量；五列 / 侧栏 / 抽屉 / 弹窗换皮 |
+| R1 | 用 shadcn 改造（中台）UI | **v3 改交付：** 只动 `hub/web` 的 `ui.ts` 密度令牌 + 现有组件换皮。shadcn 脚手架（`components.json` / `src/components/ui/*` / `cn`）**不做**，直到需要 Radix 无障碍原语或 zinc 反转无法表达新语义色 |
 | R2 | 所有组件 UI 升级 | 中台清单见 §4.2；App 清单见 §4.6。两边都 **不改路由树** |
 | R3 | 豆包、ChatGPT 对齐 **手机** UI 风格 | **仅 iOS / Android。** 中台禁止按这两款改布局。App 抽：右气泡用户、左齐助手、胶囊底栏、芯片选项、紧凑主按钮 |
 | R4 | Ask 不选可直接输入 | 中台 Ask 卡内 + App 详情 Ask 区；`action: "freeform"` |
@@ -81,8 +81,8 @@
 
 | 能力 | 落点 |
 | --- | --- |
-| shadcn 脚手架 | `hub/web/components.json`、`src/lib/utils.ts` `cn`、`src/components/ui/{button,input,textarea,dialog,sheet,badge,card,separator,dropdown-menu,scroll-area}.tsx`、Vite `@` 别名 |
-| 令牌 | `index.css`：`html[data-theme]` 写 shadcn 变量，**不**再整表反转 zinc 当第二套色 |
+| 密度令牌 | `hub/web/src/ui.ts`：chrome `h-8`/13px，chip `h-7`/12px；变体不得再叠同属性 Tailwind 色类 |
+| shadcn 脚手架 | **缓做（v1.5+）。** 触发：需要 Radix Dialog/Sheet 无障碍，或 zinc 反转无法表达新语义色。落点仍是 `components.json` + `src/components/ui/*`，禁止提前铺空文件 |
 | Ask 卡自由输入 | `ChatThread.tsx` `AskCard`；iOS `AskView`；Android `AskBlock` |
 | `action: "freeform"` | `hub/src/runs.ts`；`api.ts`；扩展 CDP（**P0 过闸后**） |
 
@@ -100,10 +100,10 @@
 ## 3. 设计原则
 
 1. **信息架构冻结。** 顶栏 → 侧栏工作区 → 五列看板 → 右侧详情抽屉 → 派发/设置弹窗。只换组件实现。
-2. **令牌唯一。** shadcn CSS 变量是中台唯一色板；旧 `bg-zinc-*` 从页面上退掉。
-3. **两套视觉目标。** 中台 = shadcn 操作台。App = 豆包 / ChatGPT 移动端。禁止把手机风格倒灌进五列看板，也禁止把看板风格留在手机详情。
+2. **密度唯一。** 中台 chrome 只走 `ui.ts`；变体用独立 token，禁止 `UI_CHIP` + `bg-sky-*` 这类同属性覆盖。色板仍 `html[data-theme]` zinc 反转，直到 shadcn 触发条件成立。
+3. **两套视觉目标。** 中台 = 操作台密度。App = 豆包 / ChatGPT 移动端。禁止把手机风格倒灌进五列看板，也禁止把看板风格留在手机详情。
 4. **升级组件，不改操作路径。** 中台：侧栏派发、点卡开抽屉。App：工作区列表 → 任务列表 → 详情。Ask 仍先选再 Continue，另补自由输入。
-5. **技术栈不混。** shadcn 只在 `hub/web`。App 用 SwiftUI / Compose 复刻手机视觉合同。
+5. **技术栈不混。** 即便将来上 shadcn，也只在 `hub/web`。App 用 SwiftUI / Compose 复刻手机视觉合同。
 6. **先红后改（CDP）。** `freeform` 无在屏夹具不得写生产点击。
 
 App 从豆包 / ChatGPT **只抽这些**（验收可观察）：
@@ -131,15 +131,15 @@ App 从豆包 / ChatGPT **只抽这些**（验收可观察）：
 
 | 现网 | 换成 | 验收 |
 | --- | --- | --- |
-| 顶栏裸 `button` | `Button variant="ghost" size="sm"` | 设置 / 退出 / 已隐藏仍在原位 |
-| 侧栏派发与桌面动作 | `Button` | 仍三条桌面动作 + 派发 |
-| 看板卡片 `div.border` | `Card` + 状态 `Badge` | 点卡仍 `onSelect`；未读/待处理 chrome 函数不改 |
-| 详情 `DrawerShell` | shadcn `Sheet` 皮肤（可仍自管宽度） | 拖宽、关遮罩仍在 |
-| 续聊 `textarea` | `Textarea` + 发送 `Button` | Enter 发送现网不变；**pending Ask 时续聊仍禁用**（自由输入在 Ask 卡内） |
-| `DispatchModal` / `SettingsModal` | `Dialog` | 字段与 API 不变 |
-| `PromptSnippetBar` | `Badge` / `Button size="sm"` | 插入语义不变 |
-| Ask 选项大块 `button` | 紧凑可点选行 | 仍先选再 Continue |
-| Ask Skip / Continue | `Button size="sm"` | 不再 `min-h-11` 通栏感 |
+| 顶栏裸 `button` | `UI_BTN_GHOST` / `UI_BTN_GHOST_ACTIVE` | 设置 / 退出 / 已隐藏仍在原位 |
+| 侧栏派发与桌面动作 | `UI_BTN_*` | 仍三条桌面动作 + 派发 |
+| 看板卡片 `div.border` | 密度 class + 状态色（非 shadcn Card） | 点卡仍 `onSelect`；未读/待处理 chrome 函数不改 |
+| 详情 `DrawerShell` | 现网抽屉 + `ui.ts` 控件 | 拖宽、关遮罩仍在 |
+| 续聊 `textarea` | `UI_TEXTAREA_INSET` + `UI_BTN_PRIMARY` | Enter 发送现网不变；**pending Ask 时续聊仍禁用**（自由输入在 Ask 卡内） |
+| `DispatchModal` / `SettingsModal` | 现网 overlay + `UI_PANEL` | 字段与 API 不变 |
+| `PromptSnippetBar` | `UI_CHIP` / `UI_CHIP_ADD` | 插入语义不变 |
+| Ask 选项大块 `button` | `UI_OPTION_*` 紧凑可点选行 | 仍先选再 Continue |
+| Ask Skip / Continue | `ASK_*_BTN`（h-8） | 不再 `min-h-11` 通栏感 |
 | App Ask 通栏 large | 见 §4.6 | 豆包 / GPT 密度 |
 
 ### 4.3 `POST /api/runs/:id/answer-ask`（`freeform`）
@@ -241,7 +241,7 @@ sequenceDiagram
 
 | 项 | 约束 |
 | --- | --- |
-| shadcn | 只拷 §2.2 列出的原语，不打全套 blocks |
+| 密度 token | 变体走独立 class，禁止与 `UI_CHIP`/`UI_BTN_GHOST`/`UI_TEXTAREA` 叠同属性色 |
 | `freeform` | 4000 字；审计 `text_len` + 前 80 字 |
 | 限流 | `ASK_IN_FLIGHT` |
 | 换皮 | 无新网络；列表仍不扫 jsonl |
@@ -252,9 +252,9 @@ sequenceDiagram
 
 ## 6. 视觉令牌
 
-### 6.1 中台（shadcn）
+### 6.1 中台（`ui.ts` 密度）
 
-`index.css` 用 `html[data-theme]` 驱动 shadcn 变量（不用 `.dark` class，以免和 `applyTheme` 打架）。
+P1 色板继续 `html[data-theme]` zinc 反转（不用 `.dark` class，以免和 `applyTheme` 打架）。下表是 **v1.5+ shadcn 触发后** 才迁的目标变量，不是本轮交付物。
 
 | Token | Dark | Light |
 | --- | --- | --- |
@@ -275,7 +275,7 @@ sequenceDiagram
 | 元信息 | 12px | caption 13pt |
 | 禁止 | `min-h-11`、`text-[10px]`、Ask `min-w-[128px]`、iOS `.large`+44 | 通栏 44 + 12pt 内边距叠高 |
 
-`hub/web/test/uiDensity.test.ts` 扫源码，混用即红。
+`hub/web/test/uiDensity.test.ts` 扫 hub 源码 + iOS `Screens.swift` + Android `MainActivity.kt`，混用即红。页面不得在 `UI_CHIP` / `UI_BTN_GHOST` / `UI_TEXTAREA` 上再叠同属性色类。
 
 线程正文可升到 14–15px，仍乘 `--armada-text-scale`。看板列 `min-w-[240px]`、侧栏 `w-[224px]` **保留**（外观规格）。
 
@@ -301,7 +301,7 @@ sequenceDiagram
 | 阶段 | 范围 | 验收 | Gate |
 | --- | --- | --- | --- |
 | **P0** | Questions 在屏自由输入真机 | 夹具入 `docs/superpowers/fixtures/armada-ask-question/`；Mac + Windows | 未绿禁止 P3 生产 |
-| **P1** | shadcn 脚手架 + 令牌；顶栏/侧栏/五列/抽屉/弹窗/线程换皮 | `bun test hub/web/test`（含 `appearanceLayout` 224/240）；overlay 仍能派发、点五列、开抽屉续聊 | 非 CDP |
+| **P1** | `ui.ts` 密度令牌；顶栏/侧栏/五列/抽屉/弹窗/线程换皮。**不上** shadcn 脚手架 | `bun test hub/web/test`（含 `appearanceLayout` 224/240、`uiDensity`）；overlay 仍能派发、点五列、开抽屉续聊 | 非 CDP |
 | **P2** | 中台 Ask 卡紧凑化；**App 按 §4.6 换对话皮肤**（气泡、胶囊底栏、小 Ask 钮） | 列表→详情→选项 Continue/Skip 仍通 | 非 CDP（Ask 提交仍 v1） |
 | **P3** | `freeform` hub + 扩展 + 卡内输入 | 单测先红再绿；双 OS 真机 | **P0 已绿** |
 | **P4** | 停 7380；`tauri build` overlay | 看板+抽屉+Ask 选项+自由输入+App | 打包壳 |
@@ -322,7 +322,7 @@ P1+P2 可先 overlay；自由输入入口在 P3 前禁用或不上。
 | --- | --- | --- | --- |
 | 自由输入不是 composer Enter | 误发续聊 | P0 记录提交后 jsonl 是否多 user 行 | **阻塞 P3** |
 | 换皮漏页面 | 新旧 class 混杂 | §4.2 清单逐页；禁止残留 `bg-zinc-950` 当主底 | 开放 |
-| shadcn CLI × bun / TW4 | init 失败 | 手写 `cn` + 拷所列 ui 文件 | 开放 |
+| shadcn CLI × bun / TW4 | 若 v1.5 触发 init 失败 | 仍不提前铺空文件；触发后再手写 `cn` + 拷所列 ui 文件 | 缓做 |
 | iOS 触控过小 | 难点 | 视觉紧凑，命中区 36–40pt，不要 44+12 大块 | 开放 |
 
 **阻塞项：** P0。未关闭不得宣称能打字答题。
@@ -338,6 +338,7 @@ P1+P2 可先 overlay；自由输入入口在 P3 前禁用或不上。
 - [x] 修订记录
 - [x] 五列看板保留（2026-09-19）
 - [x] 豆包 / GPT 仅 App，不改中台导航（2026-09-19）
+- [x] P1 交付 = `ui.ts` 密度 token，非 shadcn 脚手架（2026-09-19 v3）
 - [ ] P0 真机夹具
 
 未勾 P0 不得标 P3 为实施基准。**P1 中台换皮 + P2 App 皮肤可在本确认后开工。**
@@ -351,3 +352,4 @@ P1+P2 可先 overlay；自由输入入口在 P3 前禁用或不上。
 | 2026-09-18 | v0 | 误把参考豆包 / ChatGPT 做成删除五列、对话壳首页。 |
 | 2026-09-19 | v1 | **撤回 v0 信息架构。** 保留五列 / 侧栏 / 抽屉 / 派发弹窗。范围改为 shadcn 换皮 + 组件升级；Ask 自由输入放在卡内；续聊底栏 pending 时仍禁用。 |
 | 2026-09-19 | v2 | 用户澄清：豆包 / ChatGPT **只对齐手机 UI 风格**。中台继续 shadcn 看板换皮；App 详情改为用户右气泡 + 助手左齐 + 胶囊底栏。 |
+| 2026-09-19 | v3 | **P1 实际交付 `hub/web/src/ui.ts` 密度令牌**，不是 shadcn 脚手架。`components.json` / `src/components/ui/*` / `cn` / CSS 变量色板 **缓做**，触发条件见 §2.2。同属性 Tailwind 覆盖改为独立 token（`UI_CHIP_ACCENT`、`UI_BTN_GHOST_ACTIVE`、`UI_TEXTAREA_INSET`）。`uiDensity` 扫描扩到 iOS/Android。 |

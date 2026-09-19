@@ -10,7 +10,7 @@ import { endFollowupSend, isFollowupSendEnter, tryBeginFollowupSend } from "../f
 import { WIDTH_KEY, type PromptSnippet } from "../uiPrefs";
 import { appendSnippetBody } from "../promptSnippets";
 import { PromptSnippetBar } from "./PromptSnippetBar";
-import { UI_BTN, UI_BTN_GHOST, UI_BTN_PRIMARY, UI_INPUT, UI_META, UI_TEXTAREA, UI_TYPE } from "../ui";
+import { UI_BTN_ACCENT, UI_BTN_DANGER_FILL, UI_BTN_GHOST, UI_BTN_PRIMARY, UI_INPUT, UI_META, UI_TEXTAREA_INSET, UI_TYPE } from "../ui";
 
 const DEFAULT_W = 576;
 const MIN_W = 400;
@@ -407,7 +407,7 @@ export default function RunDetail({
               onChanged();
             }).catch((err) => setCancelError(String(err)));
           }}
-            className={`${UI_BTN} bg-red-950/80 hover:bg-red-900 text-red-200`}>取消</button>}
+            className={UI_BTN_DANGER_FILL}>取消</button>}
           {["error", "unknown"].includes(run.status) && <button onClick={() => api.close(run.id).then(onChanged)}
             className={UI_BTN_GHOST}>人工关闭</button>}
           {canRetryRun(run) && <button disabled={!injectReady} onClick={() => {
@@ -429,13 +429,13 @@ export default function RunDetail({
               onChanged();
             }).catch((err) => setRetryError(String(err)));
           }}
-            className={`${UI_BTN} bg-sky-800 hover:bg-sky-700 text-sky-100`}>重试</button>}
+            className={UI_BTN_ACCENT}>重试</button>}
           {run.archived_at
             ? <button onClick={() => { api.unarchive(run.id).then((res) => { if (res?.run) setRun(res.run); onChanged(); }); }} className={UI_BTN_GHOST}>取消隐藏</button>
             : ["dispatched", "binding", "running", "created"].includes(run.status) ? null
             : <button onClick={() => api.archive(run.id).then(() => { onChanged(); onClose(); })} className={UI_BTN_GHOST}>隐藏</button>}
           <a href={`/api/audit/export?token=${encodeURIComponent(getToken())}`}
-            className={`${UI_BTN_GHOST} text-zinc-300`}>导出审计</a>
+            className={UI_BTN_GHOST}>导出审计</a>
         </div>
         {cancelError && <div className="mt-2 text-red-400 text-sm">{cancelError}</div>}
         {retryError && <div className="mt-2 text-red-400 text-sm">{retryError}</div>}
@@ -525,7 +525,7 @@ export default function RunDetail({
               }}
               rows={3}
               placeholder={run.pending_ask ? (run.pending_ask.kind === "plan" ? "请先点上方 Build…" : "请先回答上方选择题…") : run.status === "running" ? "Add a follow-up…" : "续聊同一对话…（Enter 发送，Shift+Enter 换行；可粘贴截图）"}
-              className={`flex-1 min-h-[4.5rem] max-h-48 resize-y ${UI_TEXTAREA} bg-zinc-900 placeholder:text-zinc-600`}
+              className={`flex-1 min-h-[4.5rem] max-h-48 resize-y ${UI_TEXTAREA_INSET}`}
             />
             <button type="submit" disabled={!injectReady || sending || (!followup.trim() && followupFiles.length === 0)} className={`${UI_BTN_PRIMARY} shrink-0`}>发送</button>
           </div>

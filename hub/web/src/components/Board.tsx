@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { groupRuns, cardView, COLUMN_LABELS, canArchiveRun, canRetryRun, isUnreadAlert, isUnreadNeedInput, machineLabel, workspaceFolderName, runDisplayName, cardChromeClass, cardChromeOf, columnHasAlert, extensionLagNotice, type ColumnKey, type RunRow } from "../boardState";
 import type { Machine } from "../types";
-import { UI_CHIP, UI_INPUT, UI_META, UI_TYPE } from "../ui";
+import { UI_CHIP, UI_CHIP_ACCENT, UI_INPUT, UI_META, UI_TYPE } from "../ui";
 
 const COL_ACCENT: Record<ColumnKey, string> = {
   waiting: "border-t-amber-500",
@@ -128,7 +128,7 @@ export default function Board({ runs, machines, selected, onSelect, showArchived
                   {!editing && onRetry && canRetryRun(r) ? (
                     <div className="px-2.5 pb-2">
                       <button type="button" onClick={(e) => { e.stopPropagation(); onRetry(r.id); }}
-                        className={`${UI_CHIP} bg-sky-800 hover:bg-sky-700 text-sky-100 border-sky-800`}>
+                        className={UI_CHIP_ACCENT}>
                         重试
                       </button>
                     </div>
