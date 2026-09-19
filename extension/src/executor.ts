@@ -99,6 +99,7 @@ export interface ExecutorDeps {
     workspaceRoot: string;
     action: "continue" | "skip";
     letter?: string;
+    kind?: "plan";
   }) => Promise<{ ok: boolean; reason?: string }>;
 }
 
@@ -428,6 +429,7 @@ export class Executor {
     request_id: string;
     action: "continue" | "skip";
     answers?: { question_id: string; option_ids: string[] }[];
+    kind?: "plan";
   }): Promise<void> {
     const vscode = vs();
     const lock = await acquireCdpLock({
@@ -459,6 +461,7 @@ export class Executor {
         workspaceRoot: msg.workspaceRoot,
         action: msg.action,
         letter,
+        ...(msg.kind === "plan" ? { kind: "plan" as const } : {}),
       });
       if (!r.ok) {
         this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: r.reason ?? "ASK_SUBMIT_FAILED" });

@@ -734,12 +734,51 @@ describe("AskQuestion CDP driver", () => {
     const driver = createAskQuestionDriver(deps({
       connect: async () => mockSession(["OK", { present: false }], log),
     }));
-    const r = await driver.submit("/Users/x/armada-test-ws", "continue", "build");
+    const r = await driver.submit("/Users/x/armada-test-ws", "continue", "build", "plan");
     expect(r.ok).toBe(true);
     const evals = log.filter((c) => c.method === "Runtime.evaluate").map((c) => String(c.params?.expression ?? ""));
     expect(evals.some((e) => e.includes("split-button") && e.includes("Build"))).toBe(true);
     expect(evals.some((e) => e.includes("composer-questionnaire-toolbar-option-letter"))).toBe(false);
     expect(log.some((c) => c.method === "Input.dispatchKeyEvent")).toBe(false);
+  });
+
+  test("kind=plan clicks plan split-button even when letter is not build", async () => {
+    const log: CallLog[] = [];
+    const driver = createAskQuestionDriver(deps({
+      connect: async () => mockSession(["OK", { present: false }], log),
+    }));
+    const r = await driver.submit("/Users/x/armada-test-ws", "continue", "x", "plan");
+    expect(r.ok).toBe(true);
+    const evals = log.filter((c) => c.method === "Runtime.evaluate").map((c) => String(c.params?.expression ?? ""));
+    expect(evals.some((e) => e.includes("split-button") && e.includes("Build"))).toBe(true);
+    expect(evals.some((e) => e.includes("composer-questionnaire-toolbar-option-letter"))).toBe(false);
+    expect(log.some((c) => c.method === "Input.dispatchKeyEvent")).toBe(false);
+  });
+
+  test("letter=build without kind clicks Ask letter, not plan split-button", async () => {
+    const log: CallLog[] = [];
+    const driver = createAskQuestionDriver(deps({
+      connect: async () => mockSession(["OK", { present: false }], log),
+    }));
+    const r = await driver.submit("/Users/x/armada-test-ws", "continue", "build");
+    expect(r.ok).toBe(true);
+    const evals = log.filter((c) => c.method === "Runtime.evaluate").map((c) => String(c.params?.expression ?? ""));
+    expect(evals.some((e) => e.includes("composer-questionnaire-toolbar-option-letter"))).toBe(true);
+    expect(evals.some((e) => e.includes("split-button") && e.includes("Build"))).toBe(false);
+    expect(log.some((c) => c.method === "Input.dispatchKeyEvent" && c.params?.key === "Enter")).toBe(true);
+  });
+
+  test("submit branches on kind===plan, not letter===build", () => {
+    const src = readFileSync(join(import.meta.dir, "../src/cdpInject.ts"), "utf8");
+    const start = src.indexOf("export function createAskQuestionDriver");
+    const driver = src.slice(start, src.indexOf("export type CdpSubmitOpts"));
+    expect(driver).toMatch(/kind\s*===\s*["']plan["']/);
+    expect(driver).not.toMatch(/toLowerCase\(\)\s*===\s*["']build["']/);
+  });
+
+  test("extension forwards kind into askDriver.submit", () => {
+    const src = readFileSync(join(import.meta.dir, "../src/extension.ts"), "utf8");
+    expect(src).toMatch(/askDriver\.submit\(\s*workspaceRoot,\s*action,\s*letter,\s*kind\s*\)/);
   });
 });
 

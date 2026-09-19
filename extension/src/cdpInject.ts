@@ -509,11 +509,12 @@ export function createAskQuestionDriver(deps: CdpSubmitterDeps) {
     workspaceRoot: string,
     action: "continue" | "skip",
     letter?: string,
+    kind?: "plan",
   ): Promise<CdpSubmitResult> {
     const hit = await connectWorkspacePage(deps, workspaceRoot);
     if (!hit.ok) return { ok: false, reason: hit.reason };
     try {
-      if (action === "continue" && String(letter || "").trim().toLowerCase() === "build") {
+      if (action === "continue" && kind === "plan") {
         const clicked = String(await hit.session.call("Runtime.evaluate", {
           expression: `(${PLAN_CLICK_BUILD_JS})()`,
           returnByValue: true,

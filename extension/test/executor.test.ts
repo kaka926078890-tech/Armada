@@ -381,4 +381,38 @@ describe("Executor answerAsk", () => {
     expect(clipboardWrites).toEqual([]);
     expect(acks[acks.length - 1]).toEqual({ type: "run.ack", runId: "r1", status: "accepted" });
   });
+
+  test("passes kind=plan through to the CDP driver", async () => {
+    let seen: { kind?: string; letter?: string } | undefined;
+    const { ex, acks } = makeExec({
+      answerAskCdp: async (a) => {
+        seen = { kind: a.kind, letter: a.letter };
+        return { ok: true };
+      },
+    });
+    await ex.answerAsk({
+      runId: "r1", conversationId: "c1", workspaceRoot: "/ws/a",
+      request_id: "ask-plan-1", action: "continue", kind: "plan",
+      answers: [{ question_id: "q0", option_ids: ["build"] }],
+    });
+    expect(seen).toEqual({ kind: "plan", letter: "build" });
+    expect(acks[acks.length - 1]).toEqual({ type: "run.ack", runId: "r1", status: "accepted" });
+  });
+
+  test("option id build without kind is not treated as plan", async () => {
+    let seen: { kind?: string; letter?: string } | undefined;
+    const { ex, acks } = makeExec({
+      answerAskCdp: async (a) => {
+        seen = { kind: a.kind, letter: a.letter };
+        return { ok: true };
+      },
+    });
+    await ex.answerAsk({
+      runId: "r1", conversationId: "c1", workspaceRoot: "/ws/a",
+      request_id: "ask-1", action: "continue",
+      answers: [{ question_id: "q0", option_ids: ["build"] }],
+    });
+    expect(seen).toEqual({ kind: undefined, letter: "build" });
+    expect(acks[acks.length - 1]).toEqual({ type: "run.ack", runId: "r1", status: "accepted" });
+  });
 });

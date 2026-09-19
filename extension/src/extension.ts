@@ -348,8 +348,8 @@ export function activate(context: vscode.ExtensionContext): void {
       else log("composer finish ok");
       return r.ok;
     },
-    answerAskCdp: async ({ workspaceRoot, action, letter }) => {
-      const r = await askDriver.submit(workspaceRoot, action, letter);
+    answerAskCdp: async ({ workspaceRoot, action, letter, kind }) => {
+      const r = await askDriver.submit(workspaceRoot, action, letter, kind);
       if (!r.ok) log(`ask submit failed: ${r.reason}`);
       else log(`ask submit ok action=${action}`);
       return r;
