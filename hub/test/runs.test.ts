@@ -39,7 +39,7 @@ async function startWithExt(opts: {
   return { ws, inbound, api };
 }
 
-async function startTwoWindows() {
+async function startTwoWindows(opts: { sameWorkspace?: boolean; os?: string } = {}) {
   const home = mkdtempSync(join(tmpdir(), "armada-runs-"));
   hub = createServer({ port: 0, home });
   const connect = async (windowId: string, openWorkspaces: string[]) => {
@@ -51,14 +51,14 @@ async function startTwoWindows() {
     ws.addEventListener("message", (e) => inbound.push(JSON.parse(String(e.data))));
     ws.send(JSON.stringify({
       type: "register", machineId: "m-1", windowId, name: "Mac-A",
-      os: "darwin-arm64", openWorkspaces, extensionVersion: "0.4.0", cdpReady: true,
+      os: opts.os ?? "darwin-arm64", openWorkspaces, extensionVersion: "0.4.0", cdpReady: true,
     }));
     await new Promise((r) => setTimeout(r, 100));
     inbound.length = 0;
     return { ws, inbound };
   };
   const a = await connect("w-1", ["/ws/a"]);
-  const b = await connect("w-2", ["/ws/b"]);
+  const b = await connect("w-2", opts.sameWorkspace ? ["/ws/a"] : ["/ws/b"]);
   const api = (path: string, init?: RequestInit) =>
     fetch(`http://127.0.0.1:${hub!.port}${path}`, {
       ...init,
@@ -1232,6 +1232,265 @@ describe("run retry", () => {
     const closed = await api(`/api/runs/${run.id}/retry`, { method: "POST" });
     expect(closed.status).toBe(409);
     expect(((await closed.json()) as any).error).toBe("INVALID_STATE");
+    ws.close();
+  });
+});
+
+describe("answerAsk kind on wire", () => {
+  test("plan pending_ask includes kind=plan on run.answerAsk", async () => {
+    const { ws, inbound, api } = await startWithExt();
+    const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "hello" }) });
+    const { run } = await r.json() as any;
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId: run.id, conversationId: "cid-1", transcriptPath: "/tmp/t.jsonl", promptMatch: true }));
+    await new Promise((x) => setTimeout(x, 80));
+    ws.send(JSON.stringify({
+      type: "run.event", runId: run.id, conversationId: "cid-1", source: "cdp", hookEventName: "askQuestion", seq: 1, ts: Date.now(),
+      payload: {
+        request_id: "ask-plan-1",
+        kind: "plan",
+        filename: "Markdown date line",
+        conversation_id: "cid-1",
+        questions: [{ id: "q0", prompt: "Created Plan: Markdown date line", options: [{ id: "build", label: "Build", text: "Build" }] }],
+        detected_at: 1, detect_via: "cdp",
+      },
+    }));
+    await new Promise((x) => setTimeout(x, 120));
+    inbound.length = 0;
+    const ans = await api(`/api/runs/${run.id}/answer-ask`, {
+      method: "POST",
+      body: JSON.stringify({ request_id: "ask-plan-1", action: "continue", answers: [{ question_id: "q0", option_ids: ["build"] }] }),
+    });
+    expect(ans.status).toBe(202);
+    await new Promise((x) => setTimeout(x, 80));
+    expect(inbound.find((m) => m.type === "run.answerAsk")).toMatchObject({
+      type: "run.answerAsk",
+      runId: run.id,
+      request_id: "ask-plan-1",
+      action: "continue",
+      kind: "plan",
+    });
+    ws.close();
+  });
+
+  test("regular pending_ask does not put kind on run.answerAsk", async () => {
+    const { ws, inbound, api } = await startWithExt();
+    const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "hello" }) });
+    const { run } = await r.json() as any;
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId: run.id, conversationId: "cid-1", transcriptPath: "/tmp/t.jsonl", promptMatch: true }));
+    await new Promise((x) => setTimeout(x, 80));
+    ws.send(JSON.stringify({
+      type: "run.event", runId: run.id, conversationId: "cid-1", source: "cdp", hookEventName: "askQuestion", seq: 1, ts: Date.now(),
+      payload: {
+        request_id: "ask-1",
+        conversation_id: "cid-1",
+        questions: [{ id: "q0", prompt: "选一个", options: [{ id: "a", label: "A", text: "甲" }] }],
+        detected_at: 1, detect_via: "cdp",
+      },
+    }));
+    await new Promise((x) => setTimeout(x, 120));
+    inbound.length = 0;
+    const ans = await api(`/api/runs/${run.id}/answer-ask`, {
+      method: "POST",
+      body: JSON.stringify({ request_id: "ask-1", action: "continue", answers: [{ question_id: "q0", option_ids: ["a"] }] }),
+    });
+    expect(ans.status).toBe(202);
+    await new Promise((x) => setTimeout(x, 80));
+    const msg = inbound.find((m) => m.type === "run.answerAsk");
+    expect(msg).toMatchObject({ type: "run.answerAsk", request_id: "ask-1", action: "continue" });
+    expect(msg.kind).toBeUndefined();
+    ws.close();
+  });
+});
+
+describe("resolveInjectWindow", () => {
+  async function bindThenRetarget(api: (path: string, init?: RequestInit) => Promise<Response>, wsA: WebSocket) {
+    const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "hello" }) });
+    const { run } = await r.json() as any;
+    wsA.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    wsA.send(JSON.stringify({ type: "run.bound", runId: run.id, conversationId: "cid-1", transcriptPath: "/tmp/t.jsonl", promptMatch: true }));
+    await new Promise((x) => setTimeout(x, 80));
+    hub!.db.query("UPDATE runs SET window_id=?1 WHERE id=?2").run("w-2", run.id);
+    return run;
+  }
+
+  test("followup sends to bound window_id, not the first workspace window", async () => {
+    const { wsA, inboundA, wsB, inboundB, api } = await startTwoWindows({ sameWorkspace: true });
+    const run = await bindThenRetarget(api, wsA);
+    wsA.send(JSON.stringify({ type: "run.event", runId: run.id, source: "hook", hookEventName: "stop", payload: { status: "completed" }, ts: Date.now(), seq: 1 }));
+    await new Promise((x) => setTimeout(x, 80));
+    inboundA.length = 0;
+    inboundB.length = 0;
+    const f = await api(`/api/runs/${run.id}/followup`, { method: "POST", body: JSON.stringify({ prompt: "续聊" }) });
+    expect(f.status).toBe(200);
+    await new Promise((x) => setTimeout(x, 80));
+    expect(inboundA.find((m) => m.type === "run.followup")).toBeUndefined();
+    expect(inboundB.find((m) => m.type === "run.followup")).toMatchObject({ runId: run.id, prompt: "续聊" });
+    wsA.close();
+    wsB.close();
+  });
+
+  test("followupWhileRunning sends to bound window_id, not the first workspace window", async () => {
+    const { wsA, inboundA, wsB, inboundB, api } = await startTwoWindows({ sameWorkspace: true });
+    const run = await bindThenRetarget(api, wsA);
+    inboundA.length = 0;
+    inboundB.length = 0;
+    const f = await api(`/api/runs/${run.id}/followup`, { method: "POST", body: JSON.stringify({ prompt: "边跑边续" }) });
+    expect(f.status).toBe(201);
+    await new Promise((x) => setTimeout(x, 80));
+    expect(inboundA.find((m) => m.type === "run.followup")).toBeUndefined();
+    expect(inboundB.find((m) => m.type === "run.followup")).toMatchObject({ runId: run.id, prompt: "边跑边续", live: true });
+    wsA.close();
+    wsB.close();
+  });
+
+  test("answerAsk sends to bound window_id, not the first workspace window", async () => {
+    const { wsA, inboundA, wsB, inboundB, api } = await startTwoWindows({ sameWorkspace: true });
+    const run = await bindThenRetarget(api, wsA);
+    wsA.send(JSON.stringify({
+      type: "run.event", runId: run.id, conversationId: "cid-1", source: "cdp", hookEventName: "askQuestion", seq: 1, ts: Date.now(),
+      payload: {
+        request_id: "ask-1",
+        conversation_id: "cid-1",
+        questions: [{ id: "q0", prompt: "选一个", options: [{ id: "a", label: "A", text: "甲" }] }],
+        detected_at: 1, detect_via: "cdp",
+      },
+    }));
+    await new Promise((x) => setTimeout(x, 120));
+    inboundA.length = 0;
+    inboundB.length = 0;
+    const ans = await api(`/api/runs/${run.id}/answer-ask`, {
+      method: "POST",
+      body: JSON.stringify({ request_id: "ask-1", action: "continue", answers: [{ question_id: "q0", option_ids: ["a"] }] }),
+    });
+    expect(ans.status).toBe(202);
+    await new Promise((x) => setTimeout(x, 80));
+    expect(inboundA.find((m) => m.type === "run.answerAsk")).toBeUndefined();
+    expect(inboundB.find((m) => m.type === "run.answerAsk")).toMatchObject({ runId: run.id, request_id: "ask-1" });
+    wsA.close();
+    wsB.close();
+  });
+
+  test("cancel sends to bound window_id, not the first workspace window", async () => {
+    const { wsA, inboundA, wsB, inboundB, api } = await startTwoWindows({ sameWorkspace: true });
+    const run = await bindThenRetarget(api, wsA);
+    inboundA.length = 0;
+    inboundB.length = 0;
+    const cr = await api(`/api/runs/${run.id}/cancel`, { method: "POST" });
+    expect(cr.status).toBe(200);
+    await new Promise((x) => setTimeout(x, 80));
+    expect(inboundA.find((m) => m.type === "run.cancel")).toBeUndefined();
+    expect(inboundB.find((m) => m.type === "run.cancel")).toMatchObject({ runId: run.id, conversationId: "cid-1" });
+    wsA.close();
+    wsB.close();
+  });
+});
+
+describe("onRunBound cid unique", () => {
+  test("binding a second live run to an occupied cid is BIND_AMBIGUOUS, not unique-index throw", async () => {
+    const { ws, api } = await startWithExt({ extensionVersion: "0.4.0" });
+    const r1 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "a" }) });
+    const { run: a } = await r1.json() as any;
+    const r2 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "b" }) });
+    const { run: b } = await r2.json() as any;
+    expect(b.status).toBe("queued");
+    ws.send(JSON.stringify({ type: "run.ack", runId: a.id, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId: a.id, conversationId: "cid-1", transcriptPath: "/tmp/t.jsonl", promptMatch: true }));
+    await new Promise((x) => setTimeout(x, 150));
+    expect(((await (await api(`/api/runs/${a.id}`)).json()) as any).status).toBe("running");
+    expect(((await (await api(`/api/runs/${b.id}`)).json()) as any).status).toBe("dispatched");
+    ws.send(JSON.stringify({ type: "run.ack", runId: b.id, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId: b.id, conversationId: "cid-1", transcriptPath: "/tmp/t.jsonl", promptMatch: true }));
+    await new Promise((x) => setTimeout(x, 150));
+    const afterA = (await (await api(`/api/runs/${a.id}`)).json()) as any;
+    const afterB = (await (await api(`/api/runs/${b.id}`)).json()) as any;
+    expect(afterA.status).toBe("running");
+    expect(afterA.conversation_id).toBe("cid-1");
+    expect(afterB.status).toBe("unknown");
+    expect(afterB.end_reason).toBe("BIND_AMBIGUOUS");
+    ws.close();
+  });
+});
+
+describe("replayCursorSessionEndStops", () => {
+  test("same sessionEnd seq is not replayed on a later sweep (no ignore-audit flood)", async () => {
+    const G = "46e45631-22f2-4d0e-aec7-4d9db35db614";
+    const { ws, api } = await startWithExt();
+    const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "hi" }) });
+    const { run } = await r.json() as any;
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId: run.id, conversationId: "cid-1", transcriptPath: "/tmp/t.jsonl", promptMatch: true }));
+    await new Promise((x) => setTimeout(x, 80));
+    ws.send(JSON.stringify({
+      type: "run.event", runId: run.id, source: "hook", hookEventName: "beforeSubmitPrompt",
+      payload: { conversation_id: "cid-1", generation_id: G, prompt: "hi" }, ts: Date.now(), seq: 1,
+    }));
+    await new Promise((x) => setTimeout(x, 80));
+    hub!.db.query(
+      `INSERT INTO run_events (run_id, seq, machine_id, ext_seq, source, hook_event_name, payload, ts, post_terminal)
+       VALUES (?1, 2, 'm-1', 90001, 'hook', 'sessionEnd', ?2, ?3, 0)`,
+    ).run(run.id, JSON.stringify({
+      conversation_id: "cid-1",
+      generation_id: "other-gen",
+      reason: "user_close",
+      duration_ms: 0,
+      is_background_agent: false,
+      final_status: "aborted",
+      session_id: "cid-1",
+      hook_event_name: "sessionEnd",
+    }), Date.now());
+    hub!.runs.sweepTimeouts();
+    const count = () => (hub!.db.query(
+      "SELECT COUNT(*) AS n FROM audit WHERE target=?1 AND action='STOP_GEN_MISMATCH'",
+    ).get(run.id) as { n: number }).n;
+    expect(count()).toBe(1);
+    expect(((await (await api(`/api/runs/${run.id}`)).json()) as any).status).toBe("running");
+    hub!.runs.sweepTimeouts();
+    expect(count()).toBe(1);
+    ws.close();
+  });
+
+  test("a newer sessionEnd seq is still replayed", async () => {
+    const G = "46e45631-22f2-4d0e-aec7-4d9db35db614";
+    const { ws, api } = await startWithExt();
+    const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "hi" }) });
+    const { run } = await r.json() as any;
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId: run.id, conversationId: "cid-1", transcriptPath: "/tmp/t.jsonl", promptMatch: true }));
+    await new Promise((x) => setTimeout(x, 80));
+    ws.send(JSON.stringify({
+      type: "run.event", runId: run.id, source: "hook", hookEventName: "beforeSubmitPrompt",
+      payload: { conversation_id: "cid-1", generation_id: G, prompt: "hi" }, ts: Date.now(), seq: 1,
+    }));
+    await new Promise((x) => setTimeout(x, 80));
+    hub!.db.query(
+      `INSERT INTO run_events (run_id, seq, machine_id, ext_seq, source, hook_event_name, payload, ts, post_terminal)
+       VALUES (?1, 2, 'm-1', 90001, 'hook', 'sessionEnd', ?2, ?3, 0)`,
+    ).run(run.id, JSON.stringify({
+      conversation_id: "cid-1",
+      generation_id: "other-gen",
+      reason: "user_close",
+      final_status: "aborted",
+      session_id: "cid-1",
+      hook_event_name: "sessionEnd",
+    }), Date.now());
+    hub!.runs.sweepTimeouts();
+    expect(((await (await api(`/api/runs/${run.id}`)).json()) as any).status).toBe("running");
+    hub!.db.query(
+      `INSERT INTO run_events (run_id, seq, machine_id, ext_seq, source, hook_event_name, payload, ts, post_terminal)
+       VALUES (?1, 3, 'm-1', 90002, 'hook', 'sessionEnd', ?2, ?3, 0)`,
+    ).run(run.id, JSON.stringify({
+      conversation_id: "cid-1",
+      generation_id: G,
+      reason: "user_close",
+      final_status: "aborted",
+      session_id: "cid-1",
+      hook_event_name: "sessionEnd",
+    }), Date.now());
+    hub!.runs.sweepTimeouts();
+    const after = (await (await api(`/api/runs/${run.id}`)).json()) as any;
+    expect(after.status).toBe("completed");
     ws.close();
   });
 });

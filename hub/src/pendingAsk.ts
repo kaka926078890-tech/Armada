@@ -82,12 +82,11 @@ export function continueAllowed(ask: PendingAsk): boolean {
 
 export function mergePendingAskRecord(existing: PendingAsk | null, incoming: PendingAsk): PendingAsk {
   if (!existing || existing.request_id !== incoming.request_id) return incoming;
-  const oldText = existing.questions[0]?.options[0]?.text ?? "";
-  const newText = incoming.questions[0]?.options[0]?.text ?? "";
-  const takeQuestions = isPlanAsk(incoming) && newText.length > oldText.length;
+  const takeQuestions = isPlanAsk(incoming) && incoming.detected_at >= existing.detected_at;
   return {
     ...existing,
     questions: takeQuestions ? incoming.questions : existing.questions,
+    detected_at: takeQuestions ? incoming.detected_at : existing.detected_at,
     filename: incoming.filename ?? existing.filename,
     detect_via: existing.detect_via === "jsonl" && incoming.detect_via !== "jsonl"
       ? incoming.detect_via

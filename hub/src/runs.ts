@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { randomUUID } from "crypto";
-import type { Registry } from "./registry";
+import type { InjectRoute, Registry } from "./registry";
 import type { SseHub } from "./sse";
 import {
   type ConcurrencyLimits,
@@ -31,6 +31,7 @@ export class RunService {
   private cancelRequested = new Set<string>();
   private promoting = false;
   private limits: ConcurrencyLimits;
+  private sessionEndReplaySeq = new Map<string, number>();
 
   constructor(
     private db: Database,
@@ -221,8 +222,9 @@ export class RunService {
     const queueTurn = hit.state === "queued" || (hit.state === "injecting" && hit.expected_mode === "queue");
     const run = this.get(runId);
     if (queueTurn && run?.status === "running" && isWindowsMachineOs(this.registry.getMachine(run.machine_id)?.os)) {
-      const windowId = this.liveWindowId(run);
-      if (!windowId) return;
+      const routed = this.resolveInjectWindow(run, { requireCdp: false });
+      if (!routed.ok) return;
+      const windowId = routed.windowId;
       const prev = this.db.query(
         "SELECT live_generation_id, retired_generation_ids, deferred_stop FROM runs WHERE id=?1",
       ).get(runId) as { live_generation_id: string | null; retired_generation_ids: string; deferred_stop: string | null };
@@ -495,6 +497,16 @@ export class RunService {
     const recoverable = this.isFalseDispatchTimeout(run) || this.isFalseBindTimeout(run);
     if (!["binding", "dispatched"].includes(run.status) && !recoverable) return;
     if (recoverable && this.denyReviveIfSlotBusy(machineId, run.id)) return;
+    const cid = typeof msg.conversationId === "string" && msg.conversationId.trim()
+      ? msg.conversationId.trim()
+      : null;
+    if (cid) {
+      const other = this.getActiveByConversation(cid);
+      if (other && other.id !== run.id) {
+        this.onBindAmbiguous(run.id);
+        return;
+      }
+    }
     this.setStatus(run.id, "running", {
       conversation_id: msg.conversationId ?? null,
       transcript_path: msg.transcriptPath ?? null,
@@ -512,10 +524,19 @@ export class RunService {
     this.promoteNextQueued(run.machine_id);
   }
 
-  /** Prefer the stored window if still online; else the live workspace window (Cursor reload changes windowId). */
-  private liveWindowId(run: { machine_id: string; window_id: string | null; workspace_root: string }): string | null {
-    if (run.window_id && this.registry.isConnected(run.machine_id, run.window_id)) return run.window_id;
-    return this.registry.findWindowForWorkspace(run.machine_id, run.workspace_root)?.windowId ?? null;
+  /** Bound window if still connected; else workspace first window. CDP is opt-in, not a third routing rule. */
+  private resolveInjectWindow(
+    run: { machine_id: string; window_id: string | null; workspace_root: string },
+    opts: { requireCdp?: boolean } = {},
+  ): InjectRoute {
+    const windowId = run.window_id && this.registry.isConnected(run.machine_id, run.window_id)
+      ? run.window_id
+      : this.registry.findWindowForWorkspace(run.machine_id, run.workspace_root)?.windowId ?? null;
+    if (!windowId) return { ok: false, error: "WORKSPACE_NOT_OPEN" };
+    if (opts.requireCdp && this.registry.windowCdpReady(run.machine_id, windowId) !== true) {
+      return { ok: false, error: "CDP_NOT_READY" };
+    }
+    return { ok: true, windowId };
   }
 
   onCancelRequested(runId: string): { error?: string } {
@@ -531,7 +552,8 @@ export class RunService {
     this.failUnconsumedOutbound(runId);
     this.clearDeferredStop(runId);
     this.retireLiveGeneration(runId);
-    const windowId = this.liveWindowId(run);
+    const routed = this.resolveInjectWindow(run, { requireCdp: false });
+    const windowId = routed.ok ? routed.windowId : null;
     let sent = false;
     if (run.conversation_id && windowId) {
       if (windowId !== run.window_id) {
@@ -748,11 +770,14 @@ export class RunService {
     ).all() as { id: string }[];
     for (const r of live) {
       const row = this.db.query(
-        `SELECT payload FROM run_events
+        `SELECT seq, payload FROM run_events
          WHERE run_id=?1 AND hook_event_name='sessionEnd'
          ORDER BY seq DESC LIMIT 1`,
-      ).get(r.id) as { payload: string } | null;
+      ).get(r.id) as { seq: number; payload: string } | null;
       if (!row) continue;
+      const last = this.sessionEndReplaySeq.get(r.id);
+      if (last != null && row.seq <= last) continue;
+      this.sessionEndReplaySeq.set(r.id, row.seq);
       let payload: unknown;
       try { payload = JSON.parse(row.payload); } catch { continue; }
       const mapped = stopFromCursorSessionEnd(payload);
@@ -882,7 +907,7 @@ export class RunService {
       answers = [{ question_id: qid, option_ids }];
     }
     if (this.askInFlight.has(runId)) return { error: "ASK_IN_FLIGHT" };
-    const routed = this.registry.routeForInject(run.machine_id, run.workspace_root);
+    const routed = this.resolveInjectWindow(run, { requireCdp: true });
     if (!routed.ok) return { error: routed.error };
 
     this.askInFlight.add(runId);
@@ -902,6 +927,7 @@ export class RunService {
       request_id: ask.request_id,
       action,
       answers,
+      ...(ask.kind === "plan" ? { kind: "plan" as const } : {}),
     });
     this.audit("operator", "run.answerAsk", runId, {
       request_id: ask.request_id, action, option_ids: answers[0]?.option_ids ?? [],
@@ -951,7 +977,7 @@ export class RunService {
     if (run.status === "running") return this.followupWhileRunning(run, prompt, attachmentIds);
     if ((OCCUPYING_STATUSES as readonly string[]).includes(run.status)) return { error: "CONVERSATION_BUSY" };
     if (this.injectSlotCount(run.machine_id) > 0) return { error: "INJECT_SLOT_BUSY" };
-    const routed = this.registry.routeForInject(run.machine_id, run.workspace_root);
+    const routed = this.resolveInjectWindow(run, { requireCdp: true });
     if (!routed.ok) return { error: routed.error };
     const win = { windowId: routed.windowId };
 
@@ -1002,7 +1028,7 @@ export class RunService {
     }
     if (this.hasOutboundCollision(run.id, prompt)) return { error: "PROMPT_COLLISION" };
     if (this.unconsumedOutboundCount(run.id) >= OUTBOUND_LIMIT) return { error: "OUTBOUND_LIMIT" };
-    const routed = this.registry.routeForInject(run.machine_id, run.workspace_root);
+    const routed = this.resolveInjectWindow(run, { requireCdp: true });
     if (!routed.ok) return { error: routed.error };
     const win = { windowId: routed.windowId };
 
