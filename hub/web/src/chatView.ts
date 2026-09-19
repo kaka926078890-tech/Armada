@@ -65,6 +65,7 @@ function mergeSubagent(prev: SubagentBlock, next: SubagentBlock): SubagentBlock 
 
 function subagentFromHook(p: any, status: string, seq: number): SubagentBlock {
   const title = String(p?.description || "").trim() || "子代理";
+  const cid = typeof p?.conversation_id === "string" ? p.conversation_id.trim() : "";
   return {
     kind: "subagent",
     seq,
@@ -72,6 +73,7 @@ function subagentFromHook(p: any, status: string, seq: number): SubagentBlock {
     title,
     status,
     task: typeof p?.task === "string" ? p.task : undefined,
+    cid: cid || undefined,
     durationMs: typeof p?.duration_ms === "number" ? p.duration_ms : undefined,
     model: String(p?.subagent_model ?? p?.model ?? ""),
   };
@@ -112,25 +114,25 @@ function askKindOf(raw: unknown): "plan" | undefined {
 }
 
 function askBlockFromPayload(p: any, seq: number, action: "pending" | "resolved"): ChatBlock | null {
-  const request_id = typeof p?.request_id === "string" && p.request_id.trim() ? p.request_id.trim() : "";
   const questions = Array.isArray(p?.questions) ? p.questions : [];
-  if (request_id && questions.length) {
-    const q = questions[0] as Record<string, unknown>;
-    const prompt = typeof q?.prompt === "string" && q.prompt.trim() ? q.prompt.trim() : "Questions";
-    const options = askOptionsFromInput({ questions });
-    if (!options.length) return null;
-    return {
-      kind: "ask",
-      seq,
-      request_id,
-      prompt,
-      options,
-      action,
-      askKind: askKindOf(p.kind),
-      continueAllowed: askContinueAllowed(questions),
-    };
-  }
-  return null;
+  if (!questions.length) return null;
+  const request_id = typeof p?.request_id === "string" && p.request_id.trim()
+    ? p.request_id.trim()
+    : `ask-hook-${seq}`;
+  const q = questions[0] as Record<string, unknown>;
+  const prompt = typeof q?.prompt === "string" && q.prompt.trim() ? q.prompt.trim() : "Questions";
+  const options = askOptionsFromInput({ questions });
+  if (!options.length) return null;
+  return {
+    kind: "ask",
+    seq,
+    request_id,
+    prompt,
+    options,
+    action,
+    askKind: askKindOf(p.kind),
+    continueAllowed: askContinueAllowed(questions),
+  };
 }
 
 function parsePayload(raw: string): any {
@@ -144,14 +146,17 @@ export function extractUserText(raw: string): string {
   return raw.replace(/<timestamp>[\s\S]*?<\/timestamp>\s*/g, "").trim();
 }
 
+/** Cursor 协议注入的用户句前缀。只 startsWith 这些；对不上就当操作员输入画出来，不要 silently hide。 */
+export const CURSOR_PROTOCOL_USER_PREFIXES = [
+  "Perform any necessary follow-up actions",
+  "Implement the plan as specified",
+  "Briefly inform the user about the task result",
+] as const;
+
 /** Cursor 协议注入的用户句，不是操作员输入；详情不画成气泡。不参与忙/闲。 */
 function isCursorProtocolUser(text: string): boolean {
   const t = text.trim();
-  return (
-    t.startsWith("Perform any necessary follow-up actions") ||
-    t.startsWith("Implement the plan as specified") ||
-    t.startsWith("Briefly inform the user about the task result")
-  );
+  return CURSOR_PROTOCOL_USER_PREFIXES.some((prefix) => t.startsWith(prefix));
 }
 
 function emitUser(text: string, seq: number): ChatBlock[] {
@@ -274,7 +279,6 @@ function dedupe(blocks: ChatBlock[]): ChatBlock[] {
   const subById = new Map<string, number>();
   const subByTask = new Map<string, number>();
   const askById = new Map<string, number>();
-  const askByPrompt = new Map<string, number>();
   let lastThought = "";
   const asstSeen = new Set<string>();
   for (const b of blocks) {
@@ -290,9 +294,7 @@ function dedupe(blocks: ChatBlock[]): ChatBlock[] {
       if (asstSeen.has(b.text)) continue;
       asstSeen.add(b.text);
     } else if (b.kind === "ask") {
-      let prev = b.request_id ? askById.get(b.request_id) : undefined;
-      const pkey = b.prompt.trim();
-      if (prev === undefined && pkey) prev = askByPrompt.get(pkey);
+      const prev = b.request_id ? askById.get(b.request_id) : undefined;
       if (prev !== undefined) {
         const old = out[prev];
         if (old.kind === "ask") {
@@ -306,12 +308,10 @@ function dedupe(blocks: ChatBlock[]): ChatBlock[] {
           };
           out[prev] = merged;
           if (merged.request_id) askById.set(merged.request_id, prev);
-          if (merged.prompt.trim()) askByPrompt.set(merged.prompt.trim(), prev);
         }
         continue;
       }
       if (b.request_id) askById.set(b.request_id, out.length);
-      if (pkey) askByPrompt.set(pkey, out.length);
     } else if (b.kind === "subagent") {
       const id = (b.id ?? "").trim();
       const task = normTask(b.task);
@@ -431,9 +431,7 @@ function attachChildText(blocks: ChatBlock[], children: Map<string, ChildAcc>): 
   const unused = [...children.values()];
   return blocks.map((b) => {
     if (b.kind !== "subagent") return b;
-    const i = unused.findIndex((c) =>
-      (b.cid && c.cid === b.cid) || (normTask(c.task) !== "" && normTask(c.task) === normTask(b.task)),
-    );
+    const i = unused.findIndex((c) => !!(b.cid && c.cid === b.cid));
     if (i < 0) return b;
     const [c] = unused.splice(i, 1);
     if (!c) return b;
@@ -538,9 +536,7 @@ export function mergePendingAsk(blocks: ChatBlock[], pending: PendingAskView | n
     askKind: askKindOf(pending.kind),
     continueAllowed: askContinueAllowed(pending.questions),
   };
-  const idx = blocks.findIndex((b) =>
-    b.kind === "ask" && (b.request_id === pending.request_id || (q.prompt && b.prompt === q.prompt)),
-  );
+  const idx = blocks.findIndex((b) => b.kind === "ask" && b.request_id === pending.request_id);
   if (idx < 0) return [...blocks, card];
   const copy = [...blocks];
   const old = copy[idx];

@@ -3,6 +3,7 @@ import { mkdtempSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { createServer, type HubServer } from "../src/index";
+import { clearSubagentCidCache } from "../src/ingest";
 
 let hub: HubServer | null = null;
 afterEach(() => { hub?.stop(); hub = null; });
@@ -889,6 +890,25 @@ describe("event ingest", () => {
     ws.close();
   });
 
+  test("subagent cid ownership reconstructs from run_events after cache drop", async () => {
+    const { ws, api, runId } = await startBoundRun();
+    ws.send(JSON.stringify(ev(runId, 1, "subagentStart", {
+      conversation_id: "cid-child",
+      parent_conversation_id: "cid-1",
+      description: "说一句你好",
+    })));
+    await new Promise((r) => setTimeout(r, 120));
+    clearSubagentCidCache();
+    ws.send(JSON.stringify(ev(runId, 2, "preToolUse", {
+      conversation_id: "cid-child",
+      tool_name: "Grep",
+    })));
+    await new Promise((r) => setTimeout(r, 150));
+    const events = (await (await api(`/api/runs/${runId}/events`)).json()) as any[];
+    expect(events.map((e) => e.hook_event_name)).toEqual(["subagentStart", "preToolUse"]);
+    ws.close();
+  });
+
   test("image-only beforeSubmitPrompt without runId binds unique waiting run", async () => {
     const home = mkdtempSync(join(tmpdir(), "armada-ing-"));
     hub = createServer({ port: 0, home });
@@ -1065,7 +1085,7 @@ describe("event ingest", () => {
       method: "POST",
       body: JSON.stringify({ request_id: "ask-plan-1", action: "skip" }),
     });
-    expect(skip.status).toBe(400);
+    expect(skip.status).toBe(409);
     expect(((await skip.json()) as any).error).toBe("ASK_INVALID_OPTION");
     ws.close();
   });

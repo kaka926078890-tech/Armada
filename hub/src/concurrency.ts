@@ -5,6 +5,7 @@ export const OCCUPYING_STATUSES = ["queued", "dispatched", "binding", "running"]
 export const INJECTING_STATUSES = ["dispatched", "binding"] as const;
 export const RETRY_STATUSES = ["error", "unknown", "aborted"] as const;
 export const TERMINAL_STATUSES = ["completed", "error", "aborted", "cancelled"] as const;
+export const ACTIVE_STATUSES = ["created", "dispatched", "binding", "running"] as const;
 
 /** Same gate as `runs.retry()`: error / unknown / aborted. */
 export function canRetryStatus(status: string): boolean {

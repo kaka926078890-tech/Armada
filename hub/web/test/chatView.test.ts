@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { assistantBodyForPrompt, assistantBodyText, lastTurnAssistantBody, eventsToChat, extractUserText, segmentChat, INITIAL_VISIBLE_TURNS, initialHiddenPrefixTurns, recentTurnsWindow, mergeOutboundChat, mergePendingAsk, queuedOutbound, collapseRepeatedTools, processFoldLabel } from "../src/chatView";
+import { assistantBodyForPrompt, assistantBodyText, lastTurnAssistantBody, eventsToChat, extractUserText, segmentChat, INITIAL_VISIBLE_TURNS, initialHiddenPrefixTurns, recentTurnsWindow, mergeOutboundChat, mergePendingAsk, queuedOutbound, collapseRepeatedTools, processFoldLabel, CURSOR_PROTOCOL_USER_PREFIXES } from "../src/chatView";
 import type { ChatBlock } from "../src/chatView";
 import type { RunEvent } from "../src/types";
 
@@ -14,6 +14,23 @@ describe("extractUserText", () => {
   test("strips timestamp and user_query wrapper", () => {
     const raw = "<timestamp>Saturday, Aug 29, 2026, 8:55 PM (UTC+8)</timestamp>\n<user_query>\n你会什么技能\n</user_query>";
     expect(extractUserText(raw)).toBe("你会什么技能");
+  });
+});
+
+describe("Cursor protocol user prefixes", () => {
+  test("table is the only hide list; a near-miss stays a user bubble", () => {
+    expect([...CURSOR_PROTOCOL_USER_PREFIXES]).toEqual([
+      "Perform any necessary follow-up actions",
+      "Implement the plan as specified",
+      "Briefly inform the user about the task result",
+    ]);
+    const blocks = eventsToChat([
+      ev({ seq: 1, source: "transcript", payload: JSON.stringify({
+        role: "user",
+        message: { content: [{ type: "text", text: "<user_query>Please perform follow-up actions if needed.</user_query>" }] },
+      }) }),
+    ]);
+    expect(blocks).toEqual([{ kind: "user", text: "Please perform follow-up actions if needed.", seq: 1 }]);
   });
 });
 
@@ -536,6 +553,7 @@ describe("eventsToChat", () => {
   test("child jsonl assistant return attaches to the matching Task card, not the parent body", () => {
     const webTask = "Independent Senior Code Review of FULL chatkit-web branch.";
     const review = "# chatkit-web 独立评审\n\n**结论：可合并，无 Critical。**";
+    const childCid = "a7bcf55d-baaa-41fb-95ec-e4b600bc9773";
     const blocks = eventsToChat([
       ev({ seq: 1, source: "transcript", payload: JSON.stringify({
         role: "user", message: { content: [{ type: "text", text: "<user_query>\nreview\n</user_query>" }] },
@@ -546,18 +564,21 @@ describe("eventsToChat", () => {
           { type: "tool_use", name: "Task", input: { description: "Kimi web branch review", prompt: webTask } },
         ] },
       }) }),
+      ev({ seq: 3, hook_event_name: "subagentStart", payload: JSON.stringify({
+        subagent_id: "call-web", conversation_id: childCid, task: webTask,
+      }) }),
       ev({ seq: 10, source: "subagent-transcript", payload: JSON.stringify({
-        __subagent_cid: "a7bcf55d-baaa-41fb-95ec-e4b600bc9773",
+        __subagent_cid: childCid,
         role: "user",
         message: { content: [{ type: "text", text: `<user_query>\n${webTask}\n</user_query>` }] },
       }) }),
       ev({ seq: 11, source: "subagent-transcript", payload: JSON.stringify({
-        __subagent_cid: "a7bcf55d-baaa-41fb-95ec-e4b600bc9773",
+        __subagent_cid: childCid,
         role: "assistant",
         message: { content: [{ type: "text", text: "Let me start by reading the diff." }] },
       }) }),
       ev({ seq: 12, source: "subagent-transcript", payload: JSON.stringify({
-        __subagent_cid: "a7bcf55d-baaa-41fb-95ec-e4b600bc9773",
+        __subagent_cid: childCid,
         role: "assistant",
         message: { content: [{ type: "text", text: review }] },
       }) }),
@@ -573,6 +594,38 @@ describe("eventsToChat", () => {
       text: review,
       cid: "a7bcf55d-baaa-41fb-95ec-e4b600bc9773",
     });
+  });
+
+  test("without cid, child jsonl does not attach by matching task text", () => {
+    const webTask = "Independent Senior Code Review of FULL chatkit-web branch.";
+    const review = "# chatkit-web 独立评审\n\n**结论：可合并，无 Critical。**";
+    const blocks = eventsToChat([
+      ev({ seq: 1, source: "transcript", payload: JSON.stringify({
+        role: "user", message: { content: [{ type: "text", text: "<user_query>\nreview\n</user_query>" }] },
+      }) }),
+      ev({ seq: 2, source: "transcript", payload: JSON.stringify({
+        role: "assistant", message: { content: [
+          { type: "text", text: "先拉审查。" },
+          { type: "tool_use", name: "Task", input: { description: "Kimi web branch review", prompt: webTask } },
+        ] },
+      }) }),
+      ev({ seq: 10, source: "subagent-transcript", payload: JSON.stringify({
+        __subagent_cid: "a7bcf55d-baaa-41fb-95ec-e4b600bc9773",
+        role: "user",
+        message: { content: [{ type: "text", text: `<user_query>\n${webTask}\n</user_query>` }] },
+      }) }),
+      ev({ seq: 12, source: "subagent-transcript", payload: JSON.stringify({
+        __subagent_cid: "a7bcf55d-baaa-41fb-95ec-e4b600bc9773",
+        role: "assistant",
+        message: { content: [{ type: "text", text: review }] },
+      }) }),
+    ]);
+    expect(assistantBodyText(blocks)).toBe("");
+    const subs = blocks.filter((b) => b.kind === "subagent");
+    expect(subs).toHaveLength(1);
+    expect(subs[0]).toMatchObject({ kind: "subagent", title: "Kimi web branch review" });
+    expect(subs[0].kind === "subagent" && subs[0].text).toBeUndefined();
+    expect(subs[0].kind === "subagent" && subs[0].cid).toBeUndefined();
   });
 });
 
@@ -760,6 +813,64 @@ describe("AskQuestion chat blocks", () => {
     ]);
     expect(blocks.some((b) => b.kind === "user")).toBe(false);
     expect(blocks).toMatchObject([{ kind: "ask", request_id: "ask-1", prompt: "选一个", action: "resolved" }]);
+  });
+});
+
+describe("mergePendingAsk / ask identity is request_id", () => {
+  const opt = { id: "a", label: "A", text: "甲" };
+
+  test("same prompt different request_id does not replace the existing card", () => {
+    const blocks: ChatBlock[] = [{
+      kind: "ask", seq: 1, request_id: "old-id", prompt: "选一个", options: [opt], action: "pending",
+    }];
+    const next = mergePendingAsk(blocks, {
+      request_id: "new-id",
+      questions: [{ prompt: "选一个", options: [opt] }],
+    });
+    const asks = next.filter((b) => b.kind === "ask");
+    expect(asks).toHaveLength(2);
+    expect(asks.map((b) => b.kind === "ask" ? b.request_id : "")).toEqual(["old-id", "new-id"]);
+  });
+
+  test("same request_id still replaces even if prompt changed", () => {
+    const blocks: ChatBlock[] = [{
+      kind: "ask", seq: 1, request_id: "ask-1", prompt: "短问", options: [opt], action: "pending",
+    }];
+    const next = mergePendingAsk(blocks, {
+      request_id: "ask-1",
+      questions: [{ prompt: "更长的问题", options: [opt] }],
+    });
+    expect(next).toHaveLength(1);
+    expect(next[0]).toMatchObject({ kind: "ask", request_id: "ask-1", prompt: "更长的问题" });
+  });
+
+  test("askQuestion without request_id synthesizes ask-hook-<seq> at the producer", () => {
+    const blocks = eventsToChat([
+      ev({
+        seq: 7, source: "cdp", hook_event_name: "askQuestion",
+        payload: JSON.stringify({
+          questions: [{ id: "q0", prompt: "选一个", options: [opt] }],
+        }),
+      }),
+    ]);
+    expect(blocks).toMatchObject([{ kind: "ask", request_id: "ask-hook-7", prompt: "选一个", action: "pending" }]);
+  });
+
+  test("dedupe does not collapse two asks that only share a prompt", () => {
+    const q = { id: "q0", prompt: "选一个", options: [opt] };
+    const blocks = eventsToChat([
+      ev({
+        seq: 1, source: "cdp", hook_event_name: "askQuestion",
+        payload: JSON.stringify({ request_id: "ask-a", questions: [q] }),
+      }),
+      ev({
+        seq: 2, source: "cdp", hook_event_name: "askQuestion",
+        payload: JSON.stringify({ request_id: "ask-b", questions: [q] }),
+      }),
+    ]);
+    expect(blocks.filter((b) => b.kind === "ask").map((b) => b.kind === "ask" ? b.request_id : "")).toEqual([
+      "ask-a", "ask-b",
+    ]);
   });
 });
 

@@ -3,9 +3,14 @@ import type { RunService } from "./runs";
 import type { SseHub } from "./sse";
 import { hookSubmitPrompt, transcriptUserPrompt } from "./outboundClaim";
 import { stopFromCursorSessionEnd } from "./generationOwnership";
+import { ACTIVE_STATUSES, OCCUPYING_STATUSES, TERMINAL_STATUSES } from "./concurrency";
 
-/** runId → 该任务派出的子代理 conversation_id */
+/** runId → 该任务派出的子代理 conversation_id。缓存；重启后从 run_events 重建。 */
 const subagentCids = new Map<string, Set<string>>();
+
+export function clearSubagentCidCache(): void {
+  subagentCids.clear();
+}
 
 function transcriptPathForCid(path: unknown, cid: string): string | null {
   if (typeof path !== "string" || !cid) return null;
@@ -16,14 +21,42 @@ function transcriptPathForCid(path: unknown, cid: string): string | null {
   return null;
 }
 
-export function cidBelongsToRun(run: { id?: string; conversation_id?: string | null }, cid: unknown, payload: any): boolean {
+export function cidBelongsToRun(
+  run: { id?: string; conversation_id?: string | null },
+  cid: unknown,
+  payload: any,
+  childCids?: Set<string>,
+): boolean {
   const owner = run.conversation_id;
   if (!owner) return true;
   if (typeof cid !== "string" || !cid) return true;
   if (cid === owner) return true;
   if (payload?.parent_conversation_id === owner) return true;
-  if (run.id && subagentCids.get(run.id)?.has(cid)) return true;
+  if (run.id && (childCids ?? subagentCids.get(run.id))?.has(cid)) return true;
   return false;
+}
+
+function childCidsFromEvents(db: Database, runId: string): Set<string> {
+  const rows = db.query(
+    `SELECT payload FROM run_events WHERE run_id=?1 AND hook_event_name='subagentStart'`,
+  ).all(runId) as { payload: string }[];
+  const set = new Set<string>();
+  for (const row of rows) {
+    try {
+      const p = JSON.parse(row.payload) as { conversation_id?: unknown };
+      if (typeof p.conversation_id === "string" && p.conversation_id) set.add(p.conversation_id);
+    } catch { /* skip */ }
+  }
+  return set;
+}
+
+function rememberedChildCids(db: Database, runId: string): Set<string> {
+  let set = subagentCids.get(runId);
+  if (!set) {
+    set = childCidsFromEvents(db, runId);
+    subagentCids.set(runId, set);
+  }
+  return set;
 }
 
 const TRANSCRIPT_SOURCES = new Set(["transcript", "subagent-transcript"]);
@@ -43,13 +76,18 @@ export function isRepeatTranscriptPayload(
   return Math.abs(eventTs - stored.ts) < REPEAT_TURN_ENDED_MS;
 }
 
-function cdpAskOwnsConversation(run: { conversation_id?: string | null }, msg: any, cid: unknown): boolean {
+function cdpAskOwnsConversation(
+  run: { id?: string; conversation_id?: string | null },
+  msg: any,
+  cid: unknown,
+  childCids?: Set<string>,
+): boolean {
   if (msg.source !== "cdp") return true;
   if (msg.hookEventName !== "askQuestion" && msg.hookEventName !== "askQuestionResolved") return true;
   // Windows 旧扩展只带 runId、不带 cid；run 已由 runId 钉死。空 cid 不得再丢。
   // 外卡仍靠下面 cidBelongsToRun（cid 有值且不等于主人 → 丢）。
   if (typeof cid !== "string" || !cid) return true;
-  return cidBelongsToRun(run, cid, msg.payload);
+  return cidBelongsToRun(run, cid, msg.payload, childCids);
 }
 
 export function ingestEvent(db: Database, runs: RunService, sse: SseHub, machineId: string, msg: any): void {
@@ -59,24 +97,25 @@ export function ingestEvent(db: Database, runs: RunService, sse: SseHub, machine
 
   const cid = msg.conversationId || msg.payload?.conversation_id;
   const roots: string[] = Array.isArray(msg.payload?.workspace_roots) ? msg.payload.workspace_roots : [];
-  const ACTIVE = ["created", "dispatched", "binding", "running"];
+  const active = ACTIVE_STATUSES as readonly string[];
   let runId: string | undefined = msg.runId || undefined;
   let run = runId ? runs.get(runId) : null;
   // 扩展若把 stop 标到已终态的旧 run(同对话续聊/CDP 注入进原会话),改挂到该对话当前活跃 run
-  if ((!run || !ACTIVE.includes(run.status)) && cid) {
+  if ((!run || !active.includes(run.status)) && cid) {
     const live = runs.getActiveByConversation(cid);
     if (live) { runId = live.id; run = live; }
   }
   // 共享 spool 被其它窗口先转发时 runId 为空:prompt 对齐的 beforeSubmitPrompt 才能挂到等待绑定的任务
   const submitHook = msg.hookEventName === "beforeSubmitPrompt";
-  if ((!run || !ACTIVE.includes(run.status)) && roots.length && submitHook) {
+  if ((!run || !active.includes(run.status)) && roots.length && submitHook) {
     const waiting = runs.findAttachableRun(machineId, roots, msg.payload?.prompt);
     if (waiting) { runId = waiting.id; run = waiting; }
   }
   if (!runId) { (msg as any).__ack = ack(); return; }
   if (!run) { (msg as any).__ack = ack(); return; }
-  if (!cidBelongsToRun(run, cid, msg.payload)) { (msg as any).__ack = ack(); return; }
-  if (!cdpAskOwnsConversation(run, msg, cid)) { (msg as any).__ack = ack(); return; }
+  const childCids = rememberedChildCids(db, runId);
+  if (!cidBelongsToRun(run, cid, msg.payload, childCids)) { (msg as any).__ack = ack(); return; }
+  if (!cdpAskOwnsConversation(run, msg, cid, childCids)) { (msg as any).__ack = ack(); return; }
   if (submitHook && !run.conversation_id) {
     const p = typeof msg.payload?.prompt === "string" ? msg.payload.prompt : "";
     if (!runs.submitPromptMatches(run, p)) { (msg as any).__ack = ack(); return; }
@@ -98,7 +137,7 @@ export function ingestEvent(db: Database, runs: RunService, sse: SseHub, machine
   }
 
   const maxSeq = (db.query("SELECT COALESCE(MAX(seq),0) AS m FROM run_events WHERE run_id=?1").get(runId) as any).m as number;
-  const terminal = !["created", "dispatched", "binding", "running"].includes(run.status);
+  const terminal = !(ACTIVE_STATUSES as readonly string[]).includes(run.status);
   db.query(`INSERT INTO run_events (run_id, seq, machine_id, ext_seq, source, hook_event_name, payload, ts, post_terminal)
             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)`)
     .run(runId, maxSeq + 1, machineId, extSeq, source, msg.hookEventName ?? null,
@@ -130,9 +169,7 @@ export function ingestEvent(db: Database, runs: RunService, sse: SseHub, machine
     if (user) runs.claimOutbound(runId, user, msg.ts ?? Date.now());
   }
   if (msg.hookEventName === "subagentStart" && typeof cid === "string" && run.conversation_id && cid !== run.conversation_id) {
-    const set = subagentCids.get(runId) ?? new Set<string>();
-    set.add(cid);
-    subagentCids.set(runId, set);
+    rememberedChildCids(db, runId).add(cid);
   }
   if (msg.hookEventName === "askQuestion") {
     runs.applyAskQuestion(runId, msg.payload);

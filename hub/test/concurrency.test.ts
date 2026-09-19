@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { normalizePrompt } from "../../extension/src/promptNormalize";
-import { limitsFromEnv, extensionSupportsMultiRunPerWindow, httpStatusForRunError } from "../src/concurrency";
+import { limitsFromEnv, extensionSupportsMultiRunPerWindow, httpStatusForRunError, ACTIVE_STATUSES, TERMINAL_STATUSES, OCCUPYING_STATUSES } from "../src/concurrency";
 
 describe("normalizePrompt", () => {
   test("trims, strips CR, collapses whitespace", () => {
@@ -30,6 +30,29 @@ describe("extensionSupportsMultiRunPerWindow", () => {
     expect(extensionSupportsMultiRunPerWindow("0.4.0")).toBe(true);
     expect(extensionSupportsMultiRunPerWindow("0.3.8")).toBe(false);
     expect(extensionSupportsMultiRunPerWindow(null)).toBe(false);
+  });
+});
+
+describe("status tables", () => {
+  test("ACTIVE / TERMINAL / OCCUPYING membership is owned here", () => {
+    expect([...ACTIVE_STATUSES]).toEqual(["created", "dispatched", "binding", "running"]);
+    expect([...TERMINAL_STATUSES]).toEqual(["completed", "error", "aborted", "cancelled"]);
+    expect([...OCCUPYING_STATUSES]).toEqual(["queued", "dispatched", "binding", "running"]);
+    expect(ACTIVE_STATUSES).not.toContain("queued");
+    expect(OCCUPYING_STATUSES).not.toContain("created");
+  });
+
+  test("runs.ts and ingest.ts import ACTIVE from concurrency, not a local copy", async () => {
+    const runs = await Bun.file(new URL("../src/runs.ts", import.meta.url)).text();
+    const ingest = await Bun.file(new URL("../src/ingest.ts", import.meta.url)).text();
+    expect(runs).toMatch(/ACTIVE_STATUSES/);
+    expect(runs).toMatch(/TERMINAL_STATUSES/);
+    expect(runs).toMatch(/OCCUPYING_STATUSES/);
+    expect(runs).not.toMatch(/const ACTIVE = \[/);
+    expect(ingest).toMatch(/ACTIVE_STATUSES/);
+    expect(ingest).toMatch(/TERMINAL_STATUSES/);
+    expect(ingest).toMatch(/OCCUPYING_STATUSES/);
+    expect(ingest).not.toMatch(/const ACTIVE = \[/);
   });
 });
 

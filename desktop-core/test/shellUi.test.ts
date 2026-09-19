@@ -16,6 +16,8 @@ import {
   noShareIpCopy,
   parseBoardSession,
   parseDesktopBoardRequest,
+  boardFrameOrigin,
+  isTrustedBoardMessageOrigin,
   parsePastedJoin,
   recreateFleetCopy,
   restoreHubCopy,
@@ -89,6 +91,22 @@ describe("parseDesktopBoardRequest", () => {
     expect(parseDesktopBoardRequest({ source: "other", type: "open-workspace" })).toBeNull();
     expect(parseDesktopBoardRequest({ source: "armada-desktop", type: "dispatch" })).toBeNull();
     expect(parseDesktopBoardRequest(null)).toBeNull();
+  });
+
+  test("board iframe origin is http://host:port, not *", () => {
+    expect(boardFrameOrigin("127.0.0.1:7380")).toBe("http://127.0.0.1:7380");
+    expect(boardFrameOrigin("192.168.1.23:7380")).toBe("http://192.168.1.23:7380");
+    expect(isTrustedBoardMessageOrigin("http://127.0.0.1:7380", "http://127.0.0.1:7380")).toBe(true);
+    expect(isTrustedBoardMessageOrigin("http://evil.example", "http://127.0.0.1:7380")).toBe(false);
+    expect(isTrustedBoardMessageOrigin("http://127.0.0.1:7380", null)).toBe(false);
+  });
+
+  test("desktop shell stores currentBoardOrigin and posts to it", () => {
+    const main = readFileSync(join(import.meta.dir, "../../desktop/src/main.ts"), "utf8");
+    expect(main).toContain("currentBoardOrigin");
+    expect(main).toContain("boardFrameOrigin");
+    expect(main).toMatch(/e\.origin !== currentBoardOrigin|!isTrustedBoardMessageOrigin\(e\.origin/);
+    expect(main).not.toMatch(/postMessage\([^;]*,\s*"\*"\s*\)/);
   });
 });
 
@@ -221,6 +239,15 @@ describe("fleetErrorCopy", () => {
     );
     expect(fleetErrorCopy("unreachable")).toBe("无法连接中台");
     expect(fleetErrorCopy("something-else")).toBe("操作失败");
+  });
+
+  test("structured unauthorized is not beaten by substring invalid", () => {
+    expect(fleetErrorCopy("invalid")).toBe("链接无效");
+    expect(fleetErrorCopy("Command join_fleet failed: invalid")).toBe("链接无效");
+    expect(fleetErrorCopy("invalid ticket unauthorized")).toBe(
+      "加入票据无效或已过期，请让中台重新打开可发现",
+    );
+    expect(fleetErrorCopy("settings-invalid")).not.toBe("链接无效");
   });
 });
 

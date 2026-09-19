@@ -36,6 +36,19 @@ export function boardUrl(webviewOrigin: string, token: string): string {
   return `http://${webviewOrigin}/?token=${token}&desktop=1`;
 }
 
+/** iframe `MessageEvent.origin` for a hub host:port stored by openBoard. */
+export function boardFrameOrigin(webviewOrigin: string): string {
+  try {
+    return new URL(`http://${webviewOrigin}`).origin;
+  } catch {
+    return "";
+  }
+}
+
+export function isTrustedBoardMessageOrigin(eventOrigin: string, currentBoardOrigin: string | null): boolean {
+  return !!currentBoardOrigin && eventOrigin === currentBoardOrigin;
+}
+
 export type BoardSession = { origin: string; token: string };
 
 export function serializeBoardSession(session: BoardSession): string {
@@ -179,12 +192,12 @@ export function parsePastedJoin(raw: string): { uri: string } | { error: "incomp
 }
 
 export function fleetErrorCopy(raw: string): string {
-  const blob = raw.toLowerCase();
+  const blob = raw.trim().toLowerCase();
   const codes: [string, string][] = [
+    ["unauthorized", "加入票据无效或已过期，请让中台重新打开可发现"],
     ["incomplete", "链接不完整"],
     ["invalid", "链接无效"],
     ["unreachable", "无法连接中台"],
-    ["unauthorized", "加入票据无效或已过期，请让中台重新打开可发现"],
     ["foreign-armada", "7380 上已有另一份 Armada（令牌不同）"],
     ["port-busy", "7380 被其他程序占用"],
     ["join-must-not-spawn", "加入不会在本机启动中台"],
@@ -204,8 +217,17 @@ export function fleetErrorCopy(raw: string): string {
     ["cursor-missing", "找不到 Cursor"],
     ["cancelled", "已取消"],
   ];
+  const byCode = new Map(codes);
+  const exact = byCode.get(blob);
+  if (exact) return exact;
+  const colon = blob.match(/:\s*([a-z0-9-]+)\s*$/);
+  if (colon) {
+    const mapped = byCode.get(colon[1]!);
+    if (mapped) return mapped;
+  }
+  const tokens = blob.split(/[^a-z0-9-]+/).filter(Boolean);
   for (const [code, msg] of codes) {
-    if (blob.includes(code)) return msg;
+    if (tokens.includes(code)) return msg;
   }
   return "操作失败";
 }

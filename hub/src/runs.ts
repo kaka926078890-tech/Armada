@@ -8,6 +8,8 @@ import {
   normalizePrompt,
   extensionSupportsMultiRunPerWindow,
   OCCUPYING_STATUSES,
+  ACTIVE_STATUSES,
+  TERMINAL_STATUSES,
 } from "./concurrency";
 import { workspacePathIn } from "../../extension/src/workspacePath";
 import { BIND_TIMEOUT_MS, WINDOWS_BIND_TIMEOUT_MS } from "../../extension/src/transcriptBind";
@@ -19,7 +21,6 @@ import {
   OUTBOUND_LIMIT, QUEUE_DRAIN_MS, queueModeOf,
 } from "./outboundClaim";
 
-const ACTIVE = ["created", "dispatched", "binding", "running"];
 const DISPATCH_TIMEOUT_MS = 30_000;
 
 function publicRunError(reason: string): string {
@@ -547,7 +548,7 @@ export class RunService {
       this.promoteNextQueued(run.machine_id);
       return {};
     }
-    if (!ACTIVE.includes(run.status)) return { error: "ALREADY_TERMINAL" };
+    if (!(ACTIVE_STATUSES as readonly string[]).includes(run.status)) return { error: "ALREADY_TERMINAL" };
     this.cancelRequested.add(runId);
     this.failUnconsumedOutbound(runId);
     this.clearDeferredStop(runId);
@@ -673,7 +674,7 @@ export class RunService {
     if (!run) return;
     // BIND_TIMEOUT / DISPATCH_TIMEOUT 误杀后真实事件仍可能到达
     const recoverable = this.isFalseBindTimeout(run) || this.isFalseDispatchTimeout(run);
-    if (!ACTIVE.includes(run.status) && !recoverable) return;
+    if (!(ACTIVE_STATUSES as readonly string[]).includes(run.status) && !recoverable) return;
     const retired = this.retiredState(run);
     const live = genOf(run.live_generation_id);
     const d = decideStop({
@@ -830,7 +831,7 @@ export class RunService {
 
   getActiveByConversation(cid: string): any {
     return this.hydrateRun(this.db.query(
-      `SELECT * FROM runs WHERE conversation_id=?1 AND status IN ('created','dispatched','binding','running')
+      `SELECT * FROM runs WHERE conversation_id=?1 AND status IN (${ACTIVE_STATUSES.map((s) => `'${s}'`).join(",")})
        ORDER BY created_at DESC LIMIT 1`,
     ).get(cid) ?? null);
   }
