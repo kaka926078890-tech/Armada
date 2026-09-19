@@ -45,6 +45,16 @@ struct WorkspacesResponse: Decodable {
     var workspaces: [WorkspaceDTO]
 }
 
+struct CursorReloadPending: Decodable, Equatable {
+    var action: String
+    var vsix: String
+}
+
+struct CursorReloadDTO: Decodable, Equatable {
+    var needed: Bool
+    var pending: CursorReloadPending?
+}
+
 struct PendingAskOption: Decodable, Identifiable, Hashable {
     var id: String
     var label: String
@@ -282,6 +292,14 @@ actor RelayAPI {
 
     func workspaces() async throws -> WorkspacesResponse {
         try await get("/mobile/workspaces")
+    }
+
+    func cursorReload() async throws -> CursorReloadDTO {
+        try await get("/mobile/cursor-reload")
+    }
+
+    func setCursorReload(action: String) async throws -> CursorReloadDTO {
+        try await send("/mobile/cursor-reload", method: "POST", body: encode(["action": action]), ok: [200])
     }
 
     func runs(limit: Int = 50, archived: Bool = false) async throws -> [RunDTO] {

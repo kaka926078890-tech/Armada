@@ -17,6 +17,7 @@ import { DispatchModal } from "./components/Modals";
 import { alertCompletions, alertNeedInput, ensureNotifyPermission, seedAskStatus, seedRunStatus, stopTitleMarquee, takeNewlyAlertable, takeNewlyNeedInput } from "./completionNotify";
 import { applyFontScale, applyTheme, loadFontScale, loadTheme, saveFontScale, saveTheme, type FontScale, type ThemeName } from "./theme";
 import SettingsModal from "./components/SettingsModal";
+import CursorReloadBar from "./components/CursorReloadBar";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
 import { UI_META, UI_TYPE } from "./ui";
@@ -66,6 +67,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [snippets, setSnippets] = useState<PromptSnippet[]>([]);
   const [snippetError, setSnippetError] = useState("");
+  const [cursorReload, setCursorReload] = useState<{ needed: boolean; vsix?: string }>({ needed: false });
   const desktop = isDesktopShell(window.location.search);
   const askedHost = useRef(false);
   const readMapRef = useRef(readMap);
@@ -155,11 +157,12 @@ export default function App() {
 
   const refresh = useCallback(() => {
     if (!authed) return;
-    Promise.all([api.machines(), api.runs(), api.runs({ archived: true })])
-      .then(([m, r, hidden]) => {
+    Promise.all([api.machines(), api.runs(), api.runs({ archived: true }), api.getCursorReload().catch(() => null)])
+      .then(([m, r, hidden, reload]) => {
         setMachines(m);
         setRuns(Array.isArray(r) ? r : []);
         setHiddenRuns(Array.isArray(hidden) ? hidden : []);
+        setCursorReload({ needed: !!reload?.needed, vsix: reload?.pending?.vsix });
         setLoadError("");
       })
       .catch((e) => {
@@ -419,6 +422,13 @@ export default function App() {
           </Button>
         </span>
       </header>
+      <CursorReloadBar
+        needed={cursorReload.needed}
+        vsix={cursorReload.vsix}
+        onNow={() => { void api.postCursorReload("now").then(() => refresh()); }}
+        onIdle={() => { void api.postCursorReload("when-idle").then(() => refresh()); }}
+        onSkip={() => { void api.postCursorReload("skip").then(() => refresh()); }}
+      />
       <div className="flex flex-1 min-h-0">
         <Sidebar
           slots={slots}

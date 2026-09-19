@@ -20,6 +20,9 @@ import { hubRunsNeedingTranscriptFollow, shouldArmFollowupStopOnAdopt } from "./
 import { noteOwnerBsp, clearGeneration, synthesizedStopPayload, noteHubGeneration, onFollowupBindGeneration, shouldSynthesizeTranscriptStop } from "./generationStamp";
 import { parseAskInspect, askPollActions } from "./askDetect";
 import { enrichPlanAsk, planDirsFor } from "./planFile";
+import { PENDING_RELOAD_NAME, decideWindowReload, parsePendingReload } from "../../desktop-core/src/cursorReload";
+
+const EXTENSION_VERSION = "0.4.27";
 
 let client: { dispose: () => void } | null = null;
 
@@ -576,7 +579,7 @@ export function activate(context: vscode.ExtensionContext): void {
         core.sendRegister({
           type: "register", machineId, windowId,
           name: hostname(), os: `${process.platform}-${process.arch}`,
-          cursorVersion: vscode.version, extensionVersion: "0.4.26",
+          cursorVersion: vscode.version, extensionVersion: EXTENSION_VERSION,
           openWorkspaces: workspaces(),
           cdpReady,
         });
@@ -649,11 +652,38 @@ export function activate(context: vscode.ExtensionContext): void {
   };
   connect();
 
+  const pendingReloadPath = join(homedir(), ".armada", PENDING_RELOAD_NAME);
+  const reloadPoll = setInterval(() => {
+    if (disposed) return;
+    if (!existsSync(pendingReloadPath)) return;
+    let pending = null;
+    try {
+      pending = parsePendingReload(JSON.parse(readFileSync(pendingReloadPath, "utf8")));
+    } catch {
+      return;
+    }
+    const live = boundRuns.size > 0 || pendingRuns.length > 0;
+    const decision = decideWindowReload({
+      pending,
+      thisWindowHasLiveRun: live,
+      now: Date.now(),
+      runningVsix: EXTENSION_VERSION,
+    });
+    if (decision === "expired") {
+      log("vsix pending-reload expired; this window still has a live Armada run");
+      return;
+    }
+    if (decision !== "reload") return;
+    log(`vsix pending-reload: reloading window for ${pending?.vsix}`);
+    void vscode.commands.executeCommand("workbench.action.reloadWindow");
+  }, 10_000);
+
   client = {
     dispose() {
       disposed = true;
       if (heartbeat) clearInterval(heartbeat);
       if (reconnectTimer) clearTimeout(reconnectTimer);
+      clearInterval(reloadPoll);
       clearInterval(spoolPoll);
       clearInterval(transcriptPoll);
       clearInterval(askPoll);

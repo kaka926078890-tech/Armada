@@ -57,7 +57,7 @@ export type RunSnap = {
 type PromptSnippet = { id: string; title: string; body: string };
 
 type Pending = {
-  resolve: (v: { ok: boolean; error?: string; run?: RunSnap; snippets?: PromptSnippet[] }) => void;
+  resolve: (v: { ok: boolean; error?: string; run?: RunSnap; snippets?: PromptSnippet[]; cursorReload?: unknown }) => void;
 };
 
 function hex64(): string {
@@ -341,7 +341,7 @@ export function createRelayServer(opts: {
     return true;
   }
 
-  function waitHub(requestId: string): Promise<{ ok: boolean; error?: string; run?: RunSnap; snippets?: PromptSnippet[] }> {
+  function waitHub(requestId: string): Promise<{ ok: boolean; error?: string; run?: RunSnap; snippets?: PromptSnippet[]; cursorReload?: unknown }> {
     return new Promise((resolve) => {
       const t = setTimeout(() => {
         pending.delete(requestId);
@@ -452,6 +452,45 @@ export function createRelayServer(opts: {
       return c.json({ error: err }, hubCmdStatus(err) as 400);
     }
     return c.json({ snippets: result.snippets ?? [] });
+  });
+
+  app.get("/mobile/cursor-reload", async (c) => {
+    const fleet = (c as any).get("fleet") as { id: string; hub_online: number };
+    if (fleet.hub_online !== 1) return c.json({ error: "HUB_OFFLINE" }, 503);
+    const requestId = `r${++reqSeq}`;
+    if (!sendHub(fleet.id, { type: "cmd.cursorReloadGet", requestId })) {
+      return c.json({ error: "HUB_OFFLINE" }, 503);
+    }
+    const result = await waitHub(requestId);
+    if (!result.ok) {
+      const err = result.error ?? "HUB_TIMEOUT";
+      return c.json({ error: err }, hubCmdStatus(err) as 400);
+    }
+    return c.json(result.cursorReload ?? { pending: null, needed: false });
+  });
+
+  app.post("/mobile/cursor-reload", async (c) => {
+    const tok = (c as any).get("opToken") as string;
+    const fleet = (c as any).get("fleet") as { id: string; hub_online: number };
+    if (!checkRate(tok)) return c.json({ error: "RATE_LIMIT" }, 429);
+    if (fleet.hub_online !== 1) return c.json({ error: "HUB_OFFLINE" }, 503);
+    const body = await c.req.json().catch(() => ({})) as { action?: unknown; vsix?: unknown; notBefore?: unknown };
+    const requestId = `r${++reqSeq}`;
+    if (!sendHub(fleet.id, {
+      type: "cmd.cursorReloadPost",
+      requestId,
+      action: body.action,
+      vsix: body.vsix,
+      notBefore: body.notBefore,
+    })) {
+      return c.json({ error: "HUB_OFFLINE" }, 503);
+    }
+    const result = await waitHub(requestId);
+    if (!result.ok) {
+      const err = result.error ?? "HUB_TIMEOUT";
+      return c.json({ error: err }, hubCmdStatus(err) as 400);
+    }
+    return c.json(result.cursorReload ?? { pending: null, needed: false });
   });
 
   const TOKEN_HEX = /^[a-fA-F0-9]{64}$/;
@@ -738,7 +777,7 @@ export function createRelayServer(opts: {
           const p = pending.get(msg.requestId);
           if (p) {
             pending.delete(msg.requestId);
-            p.resolve({ ok: !!msg.ok, error: msg.error, run: msg.run, snippets: msg.snippets });
+            p.resolve({ ok: !!msg.ok, error: msg.error, run: msg.run, snippets: msg.snippets, cursorReload: msg.cursorReload });
           }
         }
       },

@@ -41,6 +41,19 @@ describe("appearance layout stays coordinated when text scales", () => {
     expect(board).not.toMatch(/max-w-\[240px\]/);
   });
 
+  test("hub and App share cursor vsix reload controls", () => {
+    const app = readFileSync(join(web, "src/App.tsx"), "utf8");
+    const bar = readFileSync(join(web, "src/components/CursorReloadBar.tsx"), "utf8");
+    const ios = readFileSync(join(repo, "mobile/ios/ArmadaRemote/Screens.swift"), "utf8");
+    const android = readFileSync(join(repo, "mobile/android/app/src/main/java/app/armada/remote/MainActivity.kt"), "utf8");
+    expect(app).toContain("CursorReloadBar");
+    expect(bar).toContain("现在 Reload");
+    expect(bar).toContain("空闲后自动");
+    expect(bar).toContain("这次跳过");
+    expect(ios).toContain("现在 Reload");
+    expect(android).toContain("现在 Reload");
+  });
+
   test("desktop window is a board, not an 800x600 document", () => {
     const conf = JSON.parse(readFileSync(join(repo, "desktop/src-tauri/tauri.conf.json"), "utf8"));
     const win = conf.app.windows[0];

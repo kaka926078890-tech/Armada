@@ -186,6 +186,23 @@ export function startRelayClient(opts: {
     const requestId = msg.requestId;
     const fail = (error: string) => send({ type: "cmd.result", requestId, ok: false, error });
     try {
+      if (msg.type === "cmd.cursorReloadGet") {
+        const r = await hubFetch("/api/cursor-reload");
+        const body = await r.json().catch(() => ({})) as any;
+        if (!r.ok) return fail(body.error ?? "HUB_ERROR");
+        send({ type: "cmd.result", requestId, ok: true, cursorReload: body });
+        return;
+      }
+      if (msg.type === "cmd.cursorReloadPost") {
+        const r = await hubFetch("/api/cursor-reload", {
+          method: "POST",
+          body: JSON.stringify({ action: msg.action, vsix: msg.vsix, notBefore: msg.notBefore }),
+        });
+        const body = await r.json().catch(() => ({})) as any;
+        if (!r.ok) return fail(body.error ?? "HUB_ERROR");
+        send({ type: "cmd.result", requestId, ok: true, cursorReload: body });
+        return;
+      }
       if (msg.type === "cmd.promptSnippetsGet") {
         const r = await hubFetch("/api/prompt-snippets");
         const body = await r.json().catch(() => ({})) as any;

@@ -13,6 +13,8 @@ import { BlobStore } from "./blobs";
 import { assertPromptSnippets, fillSnippetIds, readUiPrefs, writeUiPrefs, mergeUiPrefs } from "./uiPrefs";
 import { JoinTickets } from "./joinTickets";
 import { startRelayClient } from "./relayClient";
+import { cursorReloadView, writePendingReload } from "./cursorReloadStore";
+import { REQUIRED_EXTENSION_VERSION } from "../web/src/boardState";
 
 export interface HubServer {
   server: ReturnType<typeof Bun.serve>;
@@ -77,6 +79,21 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
     return c.json({ ok: true });
   });
   app.get("/api/machines", (c) => c.json(registry.listMachines()));
+  app.get("/api/cursor-reload", (c) => {
+    return c.json(cursorReloadView(home, registry.listMachines().map((m) => m.extension_version)));
+  });
+  app.post("/api/cursor-reload", async (c) => {
+    const body = await c.req.json().catch(() => ({})) as { action?: string; vsix?: string; notBefore?: number };
+    const action = body.action;
+    if (action !== "now" && action !== "when-idle" && action !== "skip") {
+      return c.json({ error: "INVALID" }, 400);
+    }
+    const vsix = typeof body.vsix === "string" && body.vsix.trim() ? body.vsix.trim() : REQUIRED_EXTENSION_VERSION;
+    const notBefore = typeof body.notBefore === "number" && Number.isFinite(body.notBefore) ? body.notBefore : undefined;
+    writePendingReload(home, action, vsix, Date.now(), notBefore);
+    sse.broadcast("*", { type: "machine.updated" });
+    return c.json(cursorReloadView(home, registry.listMachines().map((m) => m.extension_version)));
+  });
   app.patch("/api/machines/:id", async (c) => {
     const body = await c.req.json().catch(() => ({}));
     if (typeof body.displayName !== "string") return c.json({ error: "INVALID" }, 400);

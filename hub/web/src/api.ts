@@ -70,5 +70,15 @@ export const api = {
       if (!r.ok) throw new Error(j.error ?? `prompt-snippets put ${r.status}`);
       return j as { snippets: PromptSnippet[] };
     }),
+  getCursorReload: () => req("/api/cursor-reload").then((r) => r.json()) as Promise<{
+    pending: { action: "now" | "when-idle"; vsix: string; setAt: number; notBefore: number } | null;
+    needed: boolean;
+  }>,
+  postCursorReload: (action: "now" | "when-idle" | "skip") =>
+    req("/api/cursor-reload", { method: "POST", body: JSON.stringify({ action }) }).then(async (r) => {
+      const j = await r.json().catch(() => ({})) as { error?: string };
+      if (!r.ok) throw new Error(j.error ?? `cursor-reload ${r.status}`);
+      return j as { pending: { action: "now" | "when-idle"; vsix: string } | null; needed: boolean };
+    }),
   streamUrl: (id: string) => `/api/runs/${id}/stream?token=${encodeURIComponent(getToken())}`,
 };

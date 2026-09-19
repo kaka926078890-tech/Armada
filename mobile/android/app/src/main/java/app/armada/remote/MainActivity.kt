@@ -52,6 +52,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -261,6 +262,24 @@ fun FleetScreen(vm: SessionVm, state: UiState, onOpen: (WorkspaceDto) -> Unit, o
         },
     ) { pad ->
         LazyColumn(Modifier.padding(pad)) {
+            val reload = state.cursorReload
+            if (reload?.needed == true) {
+                item {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("本机 Cursor 扩展已更新，需 Reload Window")
+                        Text(
+                            "有 Armada 任务在跑的窗口会等空闲；点「现在 Reload」会立刻重载。",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
+                        )
+                        Row {
+                            TextButton(onClick = { vm.setCursorReload("now") }) { Text("现在 Reload") }
+                            TextButton(onClick = { vm.setCursorReload("when-idle") }) { Text("空闲后自动") }
+                            TextButton(onClick = { vm.setCursorReload("skip") }) { Text("这次跳过") }
+                        }
+                    }
+                }
+            }
             if (state.hubOffline) {
                 item {
                     Text(

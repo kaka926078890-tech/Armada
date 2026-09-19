@@ -69,7 +69,7 @@ let lastShareUri = "";
 let joinInFlight = false;
 const BOARD_SESSION_KEY = "armada.boardSession";
 let lastBoard = parseBoardSession(
-  typeof sessionStorage === "undefined" ? null : sessionStorage.getItem(BOARD_SESSION_KEY),
+  typeof localStorage === "undefined" ? null : localStorage.getItem(BOARD_SESSION_KEY),
 );
 let reopenCount = 0;
 let lastReopenAt: number | null = null;
@@ -231,14 +231,14 @@ function toastAttach(attach: LocalAttachView | null | undefined) {
 
 function persistBoard(origin: string, token: string) {
   lastBoard = { origin, token };
-  try { sessionStorage.setItem(BOARD_SESSION_KEY, serializeBoardSession(lastBoard)); } catch { /* quota / private */ }
+  try { localStorage.setItem(BOARD_SESSION_KEY, serializeBoardSession(lastBoard)); } catch { /* quota / private */ }
 }
 
 function clearBoardSession() {
   lastBoard = null;
   reopenCount = 0;
   lastReopenAt = null;
-  try { sessionStorage.removeItem(BOARD_SESSION_KEY); } catch { /* ignore */ }
+  try { localStorage.removeItem(BOARD_SESSION_KEY); } catch { /* ignore */ }
 }
 
 function openBoard(origin: string, token: string, fromNeedToken = false) {
@@ -261,8 +261,8 @@ function openBoard(origin: string, token: string, fromNeedToken = false) {
 }
 
 function onNeedToken() {
-  if (!lastBoard && typeof sessionStorage !== "undefined") {
-    lastBoard = parseBoardSession(sessionStorage.getItem(BOARD_SESSION_KEY));
+  if (!lastBoard && typeof localStorage !== "undefined") {
+    lastBoard = parseBoardSession(localStorage.getItem(BOARD_SESSION_KEY));
   }
   const decision = decideNeedToken({
     hasSession: !!lastBoard,

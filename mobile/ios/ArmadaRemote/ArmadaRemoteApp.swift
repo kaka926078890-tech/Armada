@@ -59,6 +59,7 @@ final class Session: ObservableObject {
     @Published var watchingId: String?
     @Published var streamHealthy = false
     @Published var snippets: [PromptSnippet] = []
+    @Published var cursorReload: CursorReloadDTO?
 
     private var live: Task<Void, Never>?
     private var foreground = true
@@ -263,6 +264,7 @@ final class Session: ObservableObject {
             async let w = api.workspaces()
             async let r = api.runs()
             async let h = api.runs(archived: true)
+            async let reload = api.cursorReload()
             let ws = try await w
             let newRuns = try await r
             let newHidden: [RunDTO]
@@ -271,9 +273,11 @@ final class Session: ObservableObject {
             } catch {
                 newHidden = hiddenRuns
             }
+            let reloadState = try? await reload
             guard seq == refreshSeq else { return }
             if hubOffline != ws.hubOffline { hubOffline = ws.hubOffline }
             if workspaces != ws.workspaces { workspaces = ws.workspaces }
+            if cursorReload != reloadState { cursorReload = reloadState }
             adoptFetchedLists(runs: newRuns, hidden: newHidden)
             lastError = nil
             if let id = watchingId {

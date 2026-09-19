@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import { formatJoinUri, parseJoinUri } from "../src/joinUri";
 import {
@@ -101,6 +103,16 @@ describe("board session", () => {
     expect(parseBoardSession("")).toBeNull();
     expect(parseBoardSession("{}")).toBeNull();
     expect(parseBoardSession(JSON.stringify({ origin: "127.0.0.1:7380", token: "" }))).toBeNull();
+  });
+
+  test("desktop shell persists the owned board in localStorage so overlay reopen restores the sidecar", () => {
+    const main = readFileSync(join(import.meta.dir, "../../desktop/src/main.ts"), "utf8");
+    expect(main).toContain("localStorage.setItem(BOARD_SESSION_KEY");
+    expect(main).toContain("localStorage.getItem(BOARD_SESSION_KEY");
+    expect(main).toContain("localStorage.removeItem(BOARD_SESSION_KEY");
+    expect(main).not.toMatch(/sessionStorage\.(setItem|getItem|removeItem)\(BOARD_SESSION_KEY/);
+    expect(main).toContain("void restoreOwnedHub()");
+    expect(main).toContain("isLocalOwnedBoard(lastBoard.origin)");
   });
 });
 

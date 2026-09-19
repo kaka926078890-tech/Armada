@@ -234,6 +234,58 @@ describe("relay serve", () => {
     ws.close();
   });
 
+  test("cursor-reload hub offline → 503", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const headers = { authorization: `Bearer ${fleet.operatorToken}` };
+    expect((await fetch(url(s, "/mobile/cursor-reload"), { headers })).status).toBe(503);
+    const post = await fetch(url(s, "/mobile/cursor-reload"), {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({ action: "when-idle" }),
+    });
+    expect(post.status).toBe(503);
+    expect(await post.json()).toEqual({ error: "HUB_OFFLINE" });
+  });
+
+  test("cursor-reload get/post round-trip via fake hub", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    ws.addEventListener("message", (e) => {
+      const msg = JSON.parse(String(e.data));
+      if (msg.type === "cmd.cursorReloadGet") {
+        ws.send(JSON.stringify({
+          type: "cmd.result",
+          requestId: msg.requestId,
+          ok: true,
+          cursorReload: { pending: { action: "when-idle", vsix: "0.4.27", setAt: 1, notBefore: 1 }, needed: true },
+        }));
+      }
+      if (msg.type === "cmd.cursorReloadPost") {
+        ws.send(JSON.stringify({
+          type: "cmd.result",
+          requestId: msg.requestId,
+          ok: true,
+          cursorReload: { pending: msg.action === "skip" ? null : { action: msg.action, vsix: "0.4.27", setAt: 1, notBefore: 1 }, needed: msg.action !== "skip" },
+        }));
+      }
+    });
+    await Bun.sleep(50);
+    const headers = { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" };
+    const get = await fetch(url(s, "/mobile/cursor-reload"), { headers });
+    expect(get.status).toBe(200);
+    expect(await get.json()).toMatchObject({ needed: true, pending: { action: "when-idle" } });
+    const post = await fetch(url(s, "/mobile/cursor-reload"), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ action: "now" }),
+    });
+    expect(post.status).toBe(200);
+    expect(await post.json()).toMatchObject({ needed: true, pending: { action: "now" } });
+    ws.close();
+  });
+
   test("prompt-snippets missing array returns SNIPPET_INVALID via fake hub", async () => {
     const s = start();
     const fleet = s.createFleet();

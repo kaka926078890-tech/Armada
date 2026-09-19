@@ -7,7 +7,7 @@
     },
     "extension": {
       "name": "armada-agent",
-      "version": "0.4.26",
+      "version": "0.4.27",
       "dependencies": {
         "ws": "^8.18.0",
       },

@@ -13,6 +13,12 @@ data class WorkspaceDto(
     val canInject: Boolean get() = online && cdpReady
 }
 
+data class CursorReloadDto(
+    val needed: Boolean,
+    val vsix: String? = null,
+    val action: String? = null,
+)
+
 data class PromptSnippet(
     val id: String,
     val title: String,

@@ -37,6 +37,27 @@ class RelayClient(base: String, private val token: String) {
         return o.optBoolean("hubOffline") to ws
     }
 
+    fun cursorReload(): CursorReloadDto {
+        val o = JSONObject(get("/mobile/cursor-reload"))
+        val pending = o.optJSONObject("pending")
+        return CursorReloadDto(
+            needed = o.optBoolean("needed"),
+            vsix = pending?.optString("vsix")?.ifBlank { null },
+            action = pending?.optString("action")?.ifBlank { null },
+        )
+    }
+
+    fun setCursorReload(action: String): CursorReloadDto {
+        val body = JSONObject().put("action", action)
+        val o = JSONObject(send("/mobile/cursor-reload", "POST", body.toString(), listOf(200)))
+        val pending = o.optJSONObject("pending")
+        return CursorReloadDto(
+            needed = o.optBoolean("needed"),
+            vsix = pending?.optString("vsix")?.ifBlank { null },
+            action = pending?.optString("action")?.ifBlank { null },
+        )
+    }
+
     fun runs(hidden: Boolean = false): List<RunDto> {
         val o = JSONObject(get(runsListPath(50, hidden)))
         val arr = o.optJSONArray("runs") ?: JSONArray()

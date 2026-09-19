@@ -25,6 +25,7 @@ data class UiState(
     val hubOffline: Boolean = false,
     val workspaces: List<WorkspaceDto> = emptyList(),
     val snippets: List<PromptSnippet> = emptyList(),
+    val cursorReload: CursorReloadDto? = null,
     val board: BoardLists = BoardLists(emptyList(), emptyList(), emptySet(), emptySet()),
     val streamHealthy: Boolean = false,
     val pendingOpenRunId: String? = null,
@@ -66,6 +67,13 @@ class SessionVm(app: Application) : AndroidViewModel(app) {
     }
 
     fun api(): RelayClient = RelayClient(store.relay, store.token)
+
+    fun setCursorReload(action: String) {
+        viewModelScope.launch {
+            runCatching { withContext(Dispatchers.IO) { api().setCursorReload(action) } }
+            refresh()
+        }
+    }
 
     fun bind(uri: String) {
         when (val parsed = Invite.parse(uri)) {
@@ -240,6 +248,7 @@ class SessionVm(app: Application) : AndroidViewModel(app) {
         try {
             val client = api()
             val (offline, ws) = withContext(Dispatchers.IO) { client.workspaces() }
+            val reload = withContext(Dispatchers.IO) { runCatching { client.cursorReload() }.getOrNull() }
             val runs = withContext(Dispatchers.IO) { client.runs() }
             val hidden = withContext(Dispatchers.IO) {
                 runCatching { client.runs(hidden = true) }.getOrDefault(_state.value.board.hidden)
@@ -248,6 +257,7 @@ class SessionVm(app: Application) : AndroidViewModel(app) {
             _state.value = _state.value.copy(
                 hubOffline = offline,
                 workspaces = ws,
+                cursorReload = reload,
                 board = adoptFetchedLists(_state.value.board, runs, hidden),
                 lastError = null,
             )

@@ -257,6 +257,24 @@ struct WorkspaceListView: View {
     var body: some View {
         NavigationStack(path: $path) {
             List {
+                if session.cursorReload?.needed == true {
+                    Section {
+                        Text("本机 Cursor 扩展已更新，需 Reload Window")
+                            .font(.subheadline)
+                        Text("有 Armada 任务在跑的窗口会等空闲；点「现在 Reload」会立刻重载。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Button("现在 Reload") {
+                            Task { _ = try? await session.api().setCursorReload(action: "now"); await session.refresh() }
+                        }
+                        Button("空闲后自动") {
+                            Task { _ = try? await session.api().setCursorReload(action: "when-idle"); await session.refresh() }
+                        }
+                        Button("这次跳过") {
+                            Task { _ = try? await session.api().setCursorReload(action: "skip"); await session.refresh() }
+                        }
+                    }
+                }
                 if session.hubOffline {
                     Text("中台离线或没有打开的仓").foregroundStyle(.secondary)
                 }
