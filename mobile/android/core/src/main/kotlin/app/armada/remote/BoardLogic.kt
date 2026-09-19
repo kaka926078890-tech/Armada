@@ -62,6 +62,12 @@ fun revertLocalArchive(state: BoardLists, runId: String): BoardLists {
     return state
 }
 
+fun upsertRun(list: List<RunDto>, run: RunDto): List<RunDto> {
+    val i = list.indexOfFirst { it.runId == run.runId }
+    if (i < 0) return listOf(run) + list
+    return list.mapIndexed { idx, item -> if (idx == i) run else item }
+}
+
 fun applyStreamRun(state: BoardLists, run: RunDto): BoardLists {
     if (run.runId in state.pendingArchive && !run.isArchived) return state
     if (run.runId in state.pendingUnarchive && run.isArchived) return state
@@ -74,15 +80,15 @@ fun applyStreamRun(state: BoardLists, run: RunDto): BoardLists {
     val adopted = coalesceFinalText(run, prior)
     return if (adopted.isArchived) {
         state.copy(
-            runs = state.runs.filter { it.runId != run.runId },
-            hidden = listOf(adopted) + state.hidden.filter { it.runId != run.runId },
+            runs = state.runs.filter { it.runId != adopted.runId },
+            hidden = upsertRun(state.hidden, adopted),
             pendingArchive = pendingA,
             pendingUnarchive = pendingU,
         )
     } else {
         state.copy(
-            hidden = state.hidden.filter { it.runId != run.runId },
-            runs = listOf(adopted) + state.runs.filter { it.runId != run.runId },
+            hidden = state.hidden.filter { it.runId != adopted.runId },
+            runs = upsertRun(state.runs, adopted),
             pendingArchive = pendingA,
             pendingUnarchive = pendingU,
         )

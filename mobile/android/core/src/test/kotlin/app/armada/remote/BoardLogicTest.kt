@@ -30,6 +30,24 @@ class BoardLogicTest {
     }
 
     @Test
+    fun applyStreamRunUpdatesExistingInPlace() {
+        val a = run("a", false).copy(status = "running")
+        val b = run("b", false).copy(status = "queued")
+        val start = BoardLists(listOf(a, b), emptyList(), emptySet(), emptySet())
+        val next = applyStreamRun(start, b.copy(status = "dispatched"))
+        assertEquals(listOf("a", "b"), next.runs.map { it.runId })
+        assertEquals("dispatched", next.runs[1].status)
+    }
+
+    @Test
+    fun applyStreamRunInsertsUnknownAtFront() {
+        val a = run("a", false)
+        val start = BoardLists(listOf(a), emptyList(), emptySet(), emptySet())
+        val next = applyStreamRun(start, run("b", false))
+        assertEquals(listOf("b", "a"), next.runs.map { it.runId })
+    }
+
+    @Test
     fun applyStreamRunFollowupKeepsBodyUntilNewFinalText() {
         val start = BoardLists(
             listOf(run("r1", false).copy(status = "completed", finalText = "上一折")),
