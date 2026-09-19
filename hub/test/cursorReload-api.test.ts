@@ -45,6 +45,52 @@ describe("GET/POST /api/cursor-reload", () => {
     expect(await skip.json()).toEqual({ pending: null, needed: false });
   });
 
+  test("needed ignores offline stale extension versions", async () => {
+    const { base, tok } = start();
+    s!.registry.upsertMachine({
+      id: "m-old", name: "Old", os: "darwin", extensionVersion: "0.4.18", openWorkspaces: [],
+    });
+    s!.registry.markOffline("m-old");
+    s!.registry.upsertMachine({
+      id: "m-mac", name: "Mac", os: "darwin", extensionVersion: REQUIRED_EXTENSION_VERSION, openWorkspaces: [],
+    });
+    await fetch(`${base}/api/cursor-reload`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${tok}`, "content-type": "application/json" },
+      body: JSON.stringify({ action: "when-idle" }),
+    });
+    const get = await fetch(`${base}/api/cursor-reload`, { headers: { Authorization: `Bearer ${tok}` } });
+    expect(await get.json()).toMatchObject({ needed: false });
+  });
+
+  test("POST pushes ext.cursorReload on connected sockets", async () => {
+    const { base, tok } = start();
+    const sent: unknown[] = [];
+    const ws = { data: { registered: false }, send(raw: string) { sent.push(JSON.parse(raw)); }, close() {} };
+    s!.registry.onRegister(ws, {
+      machineId: "m-1", windowId: "w-1", name: "Mac", os: "darwin",
+      extensionVersion: "0.4.26", openWorkspaces: ["/ws"],
+    });
+    sent.length = 0;
+    const put = await fetch(`${base}/api/cursor-reload`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${tok}`, "content-type": "application/json" },
+      body: JSON.stringify({ action: "now", machineId: "m-1" }),
+    });
+    expect(put.status).toBe(200);
+    expect(sent.some((m) => (m as { type?: string }).type === "ext.cursorReload")).toBe(true);
+  });
+
+  test("POST unknown machineId is 404", async () => {
+    const { base, tok } = start();
+    const r = await fetch(`${base}/api/cursor-reload`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${tok}`, "content-type": "application/json" },
+      body: JSON.stringify({ action: "now", machineId: "nope" }),
+    });
+    expect(r.status).toBe(404);
+  });
+
   test("POST junk action is 400 INVALID", async () => {
     const { base, tok } = start();
     const r = await fetch(`${base}/api/cursor-reload`, {

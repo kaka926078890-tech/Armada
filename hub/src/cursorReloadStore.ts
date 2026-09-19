@@ -4,9 +4,10 @@ import {
   PENDING_RELOAD_NAME,
   parsePendingReload,
   pendingFromAction,
-  reloadStillNeeded,
+  reloadStillNeededForFleet,
   type CursorReloadAction,
   type PendingReload,
+  type ReloadMachine,
 } from "../../desktop-core/src/cursorReload";
 import { REQUIRED_EXTENSION_VERSION } from "../web/src/boardState";
 
@@ -30,22 +31,31 @@ export function writePendingReload(
   vsix: string,
   now: number,
   notBefore?: number,
+  machineId?: string,
 ): PendingReload | null {
   const p = pendingReloadPath(home);
   if (action === "skip") {
+    const cur = readPendingReload(home);
+    if (machineId) {
+      if (cur?.machineId === machineId) {
+        try { unlinkSync(p); } catch { /* missing */ }
+        return null;
+      }
+      return cur;
+    }
     try { unlinkSync(p); } catch { /* missing */ }
     return null;
   }
-  const next = pendingFromAction(action, vsix || REQUIRED_EXTENSION_VERSION, now, notBefore);
+  const next = pendingFromAction(action, vsix || REQUIRED_EXTENSION_VERSION, now, notBefore, machineId);
   if (!next) return null;
   writeFileSync(p, JSON.stringify(next), { mode: 0o600 });
   return next;
 }
 
-export function cursorReloadView(home: string, installed: Array<string | null | undefined>): {
+export function cursorReloadView(home: string, machines: ReloadMachine[]): {
   pending: PendingReload | null;
   needed: boolean;
 } {
   const pending = readPendingReload(home);
-  return { pending, needed: reloadStillNeeded(pending, installed) };
+  return { pending, needed: reloadStillNeededForFleet(pending, machines) };
 }

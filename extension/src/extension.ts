@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import WebSocket from "ws";
 import { randomUUID } from "crypto";
 import { hostname, homedir } from "os";
-import { readFileSync, openSync, readSync, closeSync, fstatSync, existsSync, mkdirSync, writeFileSync, copyFileSync } from "fs";
+import { readFileSync, openSync, readSync, closeSync, fstatSync, existsSync, mkdirSync, writeFileSync, copyFileSync, unlinkSync } from "fs";
 import { join } from "path";
 import { loadConfig } from "./config";
 import { WS_HEARTBEAT_MS, WsClientCore } from "./wsClient";
@@ -22,7 +22,7 @@ import { parseAskInspect, askPollActions } from "./askDetect";
 import { enrichPlanAsk, planDirsFor } from "./planFile";
 import { PENDING_RELOAD_NAME, decideWindowReload, parsePendingReload } from "../../desktop-core/src/cursorReload";
 
-const EXTENSION_VERSION = "0.4.27";
+const EXTENSION_VERSION = "0.4.28";
 
 let client: { dispose: () => void } | null = null;
 
@@ -556,6 +556,38 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   };
 
+  const pendingReloadPath = join(homedir(), ".armada", PENDING_RELOAD_NAME);
+  const persistLocalPending = (pending: ReturnType<typeof parsePendingReload>) => {
+    mkdirSync(join(homedir(), ".armada"), { recursive: true });
+    if (!pending) {
+      try { unlinkSync(pendingReloadPath); } catch { /* missing */ }
+      return;
+    }
+    writeFileSync(pendingReloadPath, JSON.stringify(pending), { mode: 0o600 });
+  };
+  const considerCursorReload = (pending: ReturnType<typeof parsePendingReload>) => {
+    if (disposed) return;
+    const live = boundRuns.size > 0 || pendingRuns.length > 0;
+    const decision = decideWindowReload({
+      pending,
+      thisWindowHasLiveRun: live,
+      now: Date.now(),
+      runningVsix: EXTENSION_VERSION,
+      machineId: machineId ?? undefined,
+    });
+    if (decision === "expired") {
+      log("vsix pending-reload expired; this window still has a live Armada run");
+      return;
+    }
+    if (decision !== "reload") return;
+    log(`vsix pending-reload: reloading window for ${pending?.vsix}`);
+    void vscode.commands.executeCommand("workbench.action.reloadWindow");
+  };
+  const applyHubCursorReload = (raw: unknown) => {
+    persistLocalPending(parsePendingReload(raw));
+    considerCursorReload(parsePendingReload(raw));
+  };
+
   const connect = () => {
     if (disposed) return;
     if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
@@ -633,6 +665,9 @@ export function activate(context: vscode.ExtensionContext): void {
         case "run.answerAsk":
           void executor.answerAsk(msg).catch((e) => log(`answerAsk error: ${String(e)}`));
           break;
+        case "ext.cursorReload":
+          applyHubCursorReload(msg.pending);
+          break;
         case "event.ack":
           forwarder.ack(msg.lastSeq);
           break;
@@ -652,30 +687,14 @@ export function activate(context: vscode.ExtensionContext): void {
   };
   connect();
 
-  const pendingReloadPath = join(homedir(), ".armada", PENDING_RELOAD_NAME);
   const reloadPoll = setInterval(() => {
     if (disposed) return;
     if (!existsSync(pendingReloadPath)) return;
-    let pending = null;
     try {
-      pending = parsePendingReload(JSON.parse(readFileSync(pendingReloadPath, "utf8")));
+      considerCursorReload(parsePendingReload(JSON.parse(readFileSync(pendingReloadPath, "utf8"))));
     } catch {
       return;
     }
-    const live = boundRuns.size > 0 || pendingRuns.length > 0;
-    const decision = decideWindowReload({
-      pending,
-      thisWindowHasLiveRun: live,
-      now: Date.now(),
-      runningVsix: EXTENSION_VERSION,
-    });
-    if (decision === "expired") {
-      log("vsix pending-reload expired; this window still has a live Armada run");
-      return;
-    }
-    if (decision !== "reload") return;
-    log(`vsix pending-reload: reloading window for ${pending?.vsix}`);
-    void vscode.commands.executeCommand("workbench.action.reloadWindow");
   }, 10_000);
 
   client = {

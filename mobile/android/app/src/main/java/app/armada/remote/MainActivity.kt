@@ -338,6 +338,14 @@ fun FleetScreen(vm: SessionVm, state: UiState, onOpen: (WorkspaceDto) -> Unit, o
                                 Text("›", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 8.dp))
                             }
                         }
+                        if (reload?.needed == true && online) {
+                            GroupedDivider()
+                            Row(Modifier.padding(horizontal = 8.dp)) {
+                                TextButton(onClick = { vm.setCursorReload("now", machineId = mid) }) { Text("现在 Reload") }
+                                TextButton(onClick = { vm.setCursorReload("when-idle", machineId = mid) }) { Text("空闲后自动") }
+                                TextButton(onClick = { vm.setCursorReload("skip", machineId = mid) }) { Text("这次跳过") }
+                            }
+                        }
                     }
                 }
             }

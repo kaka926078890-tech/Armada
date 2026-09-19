@@ -196,7 +196,7 @@ export function startRelayClient(opts: {
       if (msg.type === "cmd.cursorReloadPost") {
         const r = await hubFetch("/api/cursor-reload", {
           method: "POST",
-          body: JSON.stringify({ action: msg.action, vsix: msg.vsix, notBefore: msg.notBefore }),
+          body: JSON.stringify({ action: msg.action, vsix: msg.vsix, notBefore: msg.notBefore, machineId: msg.machineId }),
         });
         const body = await r.json().catch(() => ({})) as any;
         if (!r.ok) return fail(body.error ?? "HUB_ERROR");

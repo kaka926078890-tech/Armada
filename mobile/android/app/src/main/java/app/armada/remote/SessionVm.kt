@@ -68,9 +68,9 @@ class SessionVm(app: Application) : AndroidViewModel(app) {
 
     fun api(): RelayClient = RelayClient(store.relay, store.token)
 
-    fun setCursorReload(action: String) {
+    fun setCursorReload(action: String, machineId: String? = null) {
         viewModelScope.launch {
-            runCatching { withContext(Dispatchers.IO) { api().setCursorReload(action) } }
+            runCatching { withContext(Dispatchers.IO) { api().setCursorReload(action, machineId) } }
             refresh()
         }
     }

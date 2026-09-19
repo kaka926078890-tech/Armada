@@ -7,12 +7,13 @@ import {
   parsePendingReload,
   pendingFromAction,
   reloadStillNeeded,
+  reloadStillNeededForFleet,
 } from "../src/cursorReload";
 
 describe("parsePendingReload", () => {
   test("keeps now/when-idle and drops skip or junk", () => {
-    expect(parsePendingReload({ action: "now", vsix: "0.4.27", setAt: 10, notBefore: 10 })).toEqual({
-      action: "now", vsix: "0.4.27", setAt: 10, notBefore: 10,
+    expect(parsePendingReload({ action: "now", vsix: "0.4.27", setAt: 10, notBefore: 10, machineId: "m-win" })).toEqual({
+      action: "now", vsix: "0.4.27", setAt: 10, notBefore: 10, machineId: "m-win",
     });
     expect(parsePendingReload({ action: "when-idle", vsix: "0.4.27", setAt: 10 })).toEqual({
       action: "when-idle", vsix: "0.4.27", setAt: 10, notBefore: 10,
@@ -29,8 +30,8 @@ describe("pendingFromAction", () => {
     expect(pendingFromAction("now", "0.4.27", 50)).toEqual({
       action: "now", vsix: "0.4.27", setAt: 50, notBefore: 50,
     });
-    expect(pendingFromAction("when-idle", "0.4.27", 50, 80)).toEqual({
-      action: "when-idle", vsix: "0.4.27", setAt: 50, notBefore: 80,
+    expect(pendingFromAction("when-idle", "0.4.27", 50, 80, "m-1")).toEqual({
+      action: "when-idle", vsix: "0.4.27", setAt: 50, notBefore: 80, machineId: "m-1",
     });
     expect(pendingFromAction("now", "  ", 50)).toBeNull();
   });
@@ -83,6 +84,15 @@ describe("decideWindowReload", () => {
       runningVsix: "0.4.27",
     })).toBe("done");
   });
+
+  test("ignores a pending aimed at a different machine", () => {
+    expect(decideWindowReload({
+      pending: { ...pending, machineId: "m-win" },
+      thisWindowHasLiveRun: false,
+      now: 2000,
+      machineId: "m-mac",
+    })).toBe("none");
+  });
 });
 
 describe("reloadStillNeeded", () => {
@@ -96,11 +106,45 @@ describe("reloadStillNeeded", () => {
   });
 });
 
+describe("reloadStillNeededForFleet", () => {
+  const pending = { action: "when-idle" as const, vsix: "0.4.27", setAt: 1, notBefore: 1 };
+  test("ignores offline stale installs", () => {
+    expect(reloadStillNeededForFleet(pending, [
+      { id: "old", status: "offline", extension_version: "0.4.18" },
+      { id: "mac", status: "online", extension_version: "0.4.27" },
+    ])).toBe(false);
+  });
+  test("stays needed while an online machine is behind", () => {
+    expect(reloadStillNeededForFleet(pending, [
+      { id: "mac", status: "online", extension_version: "0.4.27" },
+      { id: "win", status: "online", extension_version: "0.4.26" },
+    ])).toBe(true);
+  });
+  test("scoped pending only looks at that online machine", () => {
+    expect(reloadStillNeededForFleet({ ...pending, machineId: "win" }, [
+      { id: "mac", status: "online", extension_version: "0.4.27" },
+      { id: "win", status: "online", extension_version: "0.4.26" },
+    ])).toBe(true);
+    expect(reloadStillNeededForFleet({ ...pending, machineId: "mac" }, [
+      { id: "mac", status: "online", extension_version: "0.4.27" },
+      { id: "win", status: "online", extension_version: "0.4.26" },
+    ])).toBe(false);
+  });
+});
+
 describe("detached schedule script", () => {
   test("ignores HUP and writes the shipped vsix, not a placeholder", () => {
     const script = readFileSync(join(import.meta.dir, "../../desktop/scripts/schedule-cursor-reload.sh"), "utf8");
     expect(script).toContain("trap '' HUP");
     expect(script).toContain("extension/package.json");
     expect(script).not.toContain('"vsix": "pending"');
+  });
+});
+
+describe("extension delivers hub reload over ws", () => {
+  test("poll and ext.cursorReload share decideWindowReload", () => {
+    const src = readFileSync(join(import.meta.dir, "../../extension/src/extension.ts"), "utf8");
+    expect(src).toContain("case \"ext.cursorReload\"");
+    expect(src).toContain("machineId: machineId");
   });
 });

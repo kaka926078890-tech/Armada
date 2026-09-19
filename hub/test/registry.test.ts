@@ -192,4 +192,22 @@ describe("Registry", () => {
     expect(JSON.parse(reg.getMachine("m-old")!.open_workspaces)).toEqual([]);
     expect(reg.getMachine("m-old")!.status).toBe("offline");
   });
+
+  test("sendToConnected can target one machine or every live socket", () => {
+    const { reg } = setup();
+    const sent: string[] = [];
+    const wsMac = { data: { registered: false }, send(s: string) { sent.push(`mac:${s}`); }, close() {} };
+    const wsWin = { data: { registered: false }, send(s: string) { sent.push(`win:${s}`); }, close() {} };
+    reg.onRegister(wsMac, {
+      machineId: "m-mac", windowId: "w-1", name: "Mac", os: "darwin", openWorkspaces: ["/a"],
+    });
+    reg.onRegister(wsWin, {
+      machineId: "m-win", windowId: "w-2", name: "Win", os: "win32", openWorkspaces: ["/b"],
+    });
+    sent.length = 0;
+    expect(reg.sendToConnected({ type: "ext.cursorReload", pending: null }, "m-win")).toBe(1);
+    expect(sent).toEqual(['win:{"type":"ext.cursorReload","pending":null}']);
+    sent.length = 0;
+    expect(reg.sendToConnected({ type: "ext.cursorReload" })).toBe(2);
+  });
 });

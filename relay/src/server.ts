@@ -474,7 +474,7 @@ export function createRelayServer(opts: {
     const fleet = (c as any).get("fleet") as { id: string; hub_online: number };
     if (!checkRate(tok)) return c.json({ error: "RATE_LIMIT" }, 429);
     if (fleet.hub_online !== 1) return c.json({ error: "HUB_OFFLINE" }, 503);
-    const body = await c.req.json().catch(() => ({})) as { action?: unknown; vsix?: unknown; notBefore?: unknown };
+    const body = await c.req.json().catch(() => ({})) as { action?: unknown; vsix?: unknown; notBefore?: unknown; machineId?: unknown };
     const requestId = `r${++reqSeq}`;
     if (!sendHub(fleet.id, {
       type: "cmd.cursorReloadPost",
@@ -482,6 +482,7 @@ export function createRelayServer(opts: {
       action: body.action,
       vsix: body.vsix,
       notBefore: body.notBefore,
+      machineId: body.machineId,
     })) {
       return c.json({ error: "HUB_OFFLINE" }, 503);
     }

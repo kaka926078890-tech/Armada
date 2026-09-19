@@ -52,6 +52,11 @@ describe("appearance layout stays coordinated when text scales", () => {
     expect(bar).toContain("这次跳过");
     expect(ios).toContain("现在 Reload");
     expect(android).toContain("现在 Reload");
+    expect(ios).toContain("machineId");
+    expect(android).toContain("machineId");
+    const sidebar = readFileSync(join(web, "src/components/Sidebar.tsx"), "utf8");
+    expect(sidebar).toContain("onReloadMachine");
+    expect(sidebar).toContain("现在 Reload");
   });
 
   test("desktop window is a board, not an 800x600 document", () => {

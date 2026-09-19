@@ -16,7 +16,7 @@ export default function CursorReloadBar({
       <span className="text-amber-800 dark:text-amber-200">
         本机 Cursor 扩展已更新{vsix ? `（${vsix}）` : ""}，需 Reload Window
       </span>
-      <span className={`${UI_META} text-muted-foreground`}>空闲后自动会等本窗口 Armada 任务结束；现在 Reload 立刻重载</span>
+      <span className={`${UI_META} text-muted-foreground`}>空闲后自动会等本窗口 Armada 任务结束；现在 Reload 立刻重载。按钮会下发到在线 Cursor（含远程机）。</span>
       <span className="ml-auto flex flex-wrap gap-1">
         <Button type="button" size="sm" onClick={onNow}>现在 Reload</Button>
         <Button type="button" size="sm" variant="outline" onClick={onIdle}>空闲后自动</Button>

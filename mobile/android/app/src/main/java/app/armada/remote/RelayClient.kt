@@ -47,8 +47,9 @@ class RelayClient(base: String, private val token: String) {
         )
     }
 
-    fun setCursorReload(action: String): CursorReloadDto {
+    fun setCursorReload(action: String, machineId: String? = null): CursorReloadDto {
         val body = JSONObject().put("action", action)
+        if (machineId != null) body.put("machineId", machineId)
         val o = JSONObject(send("/mobile/cursor-reload", "POST", body.toString(), listOf(200)))
         val pending = o.optJSONObject("pending")
         return CursorReloadDto(

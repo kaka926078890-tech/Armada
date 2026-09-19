@@ -45,7 +45,7 @@ function LiveSpinner() {
 
 export default function Sidebar({
   slots, machines, allRuns, selectedKey, onSelectWorkspace, readMap, onDispatch, onRename,
-  showDesktopActions, onOpenWorkspace, onRepairCdp, onGetShareLink,
+  showDesktopActions, onOpenWorkspace, onRepairCdp, onGetShareLink, onReloadMachine,
 }: {
   slots: WorkspaceSlot[];
   machines: Machine[];
@@ -59,6 +59,7 @@ export default function Sidebar({
   onOpenWorkspace?: () => void;
   onRepairCdp?: () => void;
   onGetShareLink?: () => void;
+  onReloadMachine?: (machineId: string, action: "now" | "when-idle" | "skip") => void;
 }) {
   const groups = groupSlotsByMachine(slots);
   const selected = slots.find((s) => encodeWorkspaceKey(s.machineId, s.root) === selectedKey);
@@ -138,6 +139,13 @@ export default function Sidebar({
             </div>
             {lag ? (
               <div className={`pl-7 pr-3 pb-1 ${UI_META} text-amber-400 leading-snug`}>{lag}</div>
+            ) : null}
+            {g.online && lag && onReloadMachine ? (
+              <div className="pl-7 pr-3 pb-1 flex flex-wrap gap-1">
+                <Button type="button" size="sm" className="whitespace-nowrap" onClick={() => onReloadMachine(g.machineId, "now")}>现在 Reload</Button>
+                <Button type="button" size="sm" variant="outline" className="whitespace-nowrap" onClick={() => onReloadMachine(g.machineId, "when-idle")}>空闲后自动</Button>
+                <Button type="button" size="sm" variant="ghost" className="whitespace-nowrap" onClick={() => onReloadMachine(g.machineId, "skip")}>这次跳过</Button>
+              </div>
             ) : null}
             {g.workspaces.map((s) => {
               const key = encodeWorkspaceKey(s.machineId, s.root);

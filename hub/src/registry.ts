@@ -43,6 +43,7 @@ export class Registry {
   private conns = new Map<string, Conn>();
   public onMachineOffline: (machineId: string) => void = () => {};
   public onMachinesChanged: () => void = () => {};
+  public onRegistered: (machineId: string, windowId: string) => void = () => {};
 
   constructor(private db: Database) {
     this.db.query(
@@ -118,6 +119,7 @@ export class Registry {
     this.refreshMachineWorkspaces(msg.machineId);
     this.onMachinesChanged();
     ws.send(JSON.stringify({ type: "registered", machineId: msg.machineId }));
+    this.onRegistered(msg.machineId, msg.windowId);
   }
 
   onHeartbeat(ws: ArmadaSocket, msg: any): void {
@@ -202,6 +204,17 @@ export class Registry {
     if (!c) return false;
     c.ws.send(JSON.stringify(msg));
     return true;
+  }
+
+  /** Push to every live extension socket, or only one machine. */
+  sendToConnected(msg: object, machineId?: string): number {
+    let n = 0;
+    for (const c of this.conns.values()) {
+      if (machineId && c.machineId !== machineId) continue;
+      c.ws.send(JSON.stringify(msg));
+      n += 1;
+    }
+    return n;
   }
 
   findWindowForWorkspace(machineId: string, workspaceRoot: string): { machineId: string; windowId: string } | null {

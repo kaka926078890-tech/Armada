@@ -10,6 +10,8 @@ export type PendingReload = {
   vsix: string;
   setAt: number;
   notBefore: number;
+  /** Absent = every connected machine. */
+  machineId?: string;
 };
 
 export function parsePendingReload(raw: unknown): PendingReload | null {
@@ -19,7 +21,8 @@ export function parsePendingReload(raw: unknown): PendingReload | null {
   if (typeof o.vsix !== "string" || !o.vsix.trim()) return null;
   if (typeof o.setAt !== "number" || !Number.isFinite(o.setAt) || o.setAt <= 0) return null;
   const notBefore = typeof o.notBefore === "number" && Number.isFinite(o.notBefore) ? o.notBefore : o.setAt;
-  return { action: o.action, vsix: o.vsix.trim(), setAt: o.setAt, notBefore };
+  const machineId = typeof o.machineId === "string" && o.machineId.trim() ? o.machineId.trim() : undefined;
+  return { action: o.action, vsix: o.vsix.trim(), setAt: o.setAt, notBefore, ...(machineId ? { machineId } : {}) };
 }
 
 export function pendingFromAction(
@@ -27,6 +30,7 @@ export function pendingFromAction(
   vsix: string,
   now: number,
   notBefore?: number,
+  machineId?: string,
 ): PendingReload | null {
   if (action === "skip") return null;
   if (action !== "now" && action !== "when-idle") return null;
@@ -34,7 +38,8 @@ export function pendingFromAction(
   if (!v) return null;
   if (!Number.isFinite(now) || now <= 0) return null;
   const start = notBefore != null && Number.isFinite(notBefore) ? notBefore : now;
-  return { action, vsix: v, setAt: now, notBefore: start };
+  const mid = typeof machineId === "string" && machineId.trim() ? machineId.trim() : undefined;
+  return { action, vsix: v, setAt: now, notBefore: start, ...(mid ? { machineId: mid } : {}) };
 }
 
 export function cmpSemver(a: string, b: string): number {
@@ -57,6 +62,23 @@ export function reloadStillNeeded(
   return live.some((v) => cmpSemver(v.trim(), pending.vsix) < 0);
 }
 
+export type ReloadMachine = {
+  id: string;
+  status: string;
+  extension_version?: string | null;
+};
+
+/** Banner: only online machines; a scoped pending only looks at that machine. */
+export function reloadStillNeededForFleet(
+  pending: PendingReload | null,
+  machines: ReloadMachine[],
+): boolean {
+  if (!pending) return false;
+  const online = machines.filter((m) => m.status === "online");
+  const scoped = pending.machineId ? online.filter((m) => m.id === pending.machineId) : online;
+  return reloadStillNeeded(pending, scoped.map((m) => m.extension_version));
+}
+
 /**
  * Per Cursor window: `when-idle` never Reloads while this window has an Armada live run.
  * `now` is operator-forced and Reloads even with a live run.
@@ -69,9 +91,11 @@ export function decideWindowReload(opts: {
   now: number;
   runningVsix?: string;
   maxWaitMs?: number;
+  machineId?: string;
 }): "none" | "wait" | "reload" | "expired" | "done" {
   const p = opts.pending;
   if (!p) return "none";
+  if (p.machineId && opts.machineId && p.machineId !== opts.machineId) return "none";
   if (opts.runningVsix && cmpSemver(opts.runningVsix, p.vsix) >= 0) return "done";
   if (opts.now < p.notBefore) return "wait";
   if (p.action === "now") return "reload";

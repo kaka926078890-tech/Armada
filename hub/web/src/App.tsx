@@ -443,6 +443,7 @@ export default function App() {
           onOpenWorkspace={() => requestDesktop("open-workspace")}
           onRepairCdp={() => requestDesktop("repair-cdp")}
           onGetShareLink={() => requestDesktop("get-share-link")}
+          onReloadMachine={(id, action) => { void api.postCursorReload(action, id).then(() => refresh()); }}
         />
         <div className="flex-1 min-w-0 min-h-0 flex flex-col">
           {showArchived && (

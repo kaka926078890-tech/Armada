@@ -309,6 +309,19 @@ struct WorkspaceListView: View {
                             Text(group.name)
                         }
                     }
+                    if session.cursorReload?.needed == true, group.slots.contains(where: \.online) {
+                        Section {
+                            Button("现在 Reload") {
+                                Task { _ = try? await session.api().setCursorReload(action: "now", machineId: group.id); await session.refresh() }
+                            }
+                            Button("空闲后自动") {
+                                Task { _ = try? await session.api().setCursorReload(action: "when-idle", machineId: group.id); await session.refresh() }
+                            }
+                            Button("这次跳过") {
+                                Task { _ = try? await session.api().setCursorReload(action: "skip", machineId: group.id); await session.refresh() }
+                            }
+                        }
+                    }
                 }
             }
             .navigationTitle("舰队")

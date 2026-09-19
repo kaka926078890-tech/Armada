@@ -298,8 +298,10 @@ actor RelayAPI {
         try await get("/mobile/cursor-reload")
     }
 
-    func setCursorReload(action: String) async throws -> CursorReloadDTO {
-        try await send("/mobile/cursor-reload", method: "POST", body: encode(["action": action]), ok: [200])
+    func setCursorReload(action: String, machineId: String? = nil) async throws -> CursorReloadDTO {
+        var body: [String: String] = ["action": action]
+        if let machineId { body["machineId"] = machineId }
+        try await send("/mobile/cursor-reload", method: "POST", body: encode(body), ok: [200])
     }
 
     func runs(limit: Int = 50, archived: Bool = false) async throws -> [RunDTO] {
