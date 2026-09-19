@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { assistantBodyForPrompt, assistantBodyText, eventsToChat, extractUserText, segmentChat, INITIAL_VISIBLE_TURNS, initialHiddenPrefixTurns, recentTurnsWindow, mergeOutboundChat, queuedOutbound, collapseRepeatedTools, processFoldLabel } from "../src/chatView";
+import { assistantBodyForPrompt, assistantBodyText, eventsToChat, extractUserText, segmentChat, INITIAL_VISIBLE_TURNS, initialHiddenPrefixTurns, recentTurnsWindow, mergeOutboundChat, mergePendingAsk, queuedOutbound, collapseRepeatedTools, processFoldLabel } from "../src/chatView";
 import type { ChatBlock } from "../src/chatView";
 import type { RunEvent } from "../src/types";
 
@@ -751,6 +751,36 @@ describe("AskQuestion chat blocks", () => {
     ]);
     expect(blocks.some((b) => b.kind === "user")).toBe(false);
     expect(blocks).toMatchObject([{ kind: "ask", request_id: "ask-1", prompt: "选一个", action: "resolved" }]);
+  });
+});
+
+describe("mergePendingAsk kind + continueAllowed", () => {
+  test("copies hub kind=plan and hides continue on two questions", () => {
+    const plan = mergePendingAsk([], {
+      request_id: "p1",
+      kind: "plan",
+      questions: [{ prompt: "Created Plan", options: [{ id: "go", label: "Go", text: "x" }] }],
+    });
+    expect(plan[0]).toMatchObject({ kind: "ask", askKind: "plan", continueAllowed: true });
+    const two = mergePendingAsk([], {
+      request_id: "a1",
+      questions: [
+        { prompt: "q1", options: [{ id: "a", label: "A", text: "a" }] },
+        { prompt: "q2", options: [{ id: "b", label: "B", text: "b" }] },
+      ],
+    });
+    expect(two[0]).toMatchObject({ continueAllowed: false });
+    const multi = mergePendingAsk([], {
+      request_id: "a2",
+      questions: [{ prompt: "q", allow_multiple: true, options: [{ id: "a", label: "A", text: "a" }] }],
+    });
+    expect(multi[0]).toMatchObject({ continueAllowed: false });
+    const buildNoKind = mergePendingAsk([], {
+      request_id: "a3",
+      questions: [{ prompt: "q", options: [{ id: "build", label: "Build", text: "Build" }] }],
+    });
+    expect(buildNoKind[0]).toMatchObject({ continueAllowed: true });
+    expect(buildNoKind[0].kind === "ask" && buildNoKind[0].askKind).toBeUndefined();
   });
 });
 

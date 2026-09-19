@@ -225,6 +225,7 @@ private fun parseAsk(o: JSONObject): PendingAskDto {
                 )
             }
         },
+        kind = o.optString("kind").takeIf { it == "plan" },
     )
 }
 

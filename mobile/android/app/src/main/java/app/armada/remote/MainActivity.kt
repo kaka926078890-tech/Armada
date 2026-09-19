@@ -910,6 +910,7 @@ fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend (
     var busy by remember { mutableStateOf<String?>(null) }
     var err by remember { mutableStateOf<String?>(null) }
     val plan = isPlanAsk(ask)
+    val canContinue = continueAllowed(ask)
     Box(Modifier.fillMaxWidth().height(IntrinsicSize.Min).clip(RoundedCornerShape(12.dp)).background(LocalIosPalette.current.secondary)) {
         Box(
             Modifier.align(Alignment.CenterStart).padding(vertical = 10.dp, horizontal = 4.dp)
@@ -923,6 +924,7 @@ fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend (
                 val overview = ask.questions.firstOrNull()?.options?.firstOrNull()?.text
                 if (!overview.isNullOrEmpty() && overview != "Build") MarkdownFrame(overview)
                 err?.let { Text(it, color = StatusRed) }
+                if (canContinue) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     BarButton(
                         if (busy == "continue") "Building..." else "Build",
@@ -949,6 +951,7 @@ fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend (
                         }
                     }
                 })
+                }
                 }
             } else {
                 Text("需要选择", style = MaterialTheme.typography.titleMedium)
@@ -985,6 +988,7 @@ fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend (
                             }
                         }
                     })
+                    if (canContinue) {
                     BarButton(if (busy == "continue") "Continuing..." else "继续", filled = true, compact = true, enabled = optionId != null && busy == null, onClick = click@{
                         val q = ask.questions.firstOrNull() ?: return@click
                         val oid = optionId ?: return@click
@@ -1003,6 +1007,7 @@ fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend (
                             }
                         }
                     })
+                    }
                 }
             }
         }

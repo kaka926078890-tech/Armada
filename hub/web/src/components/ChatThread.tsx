@@ -185,8 +185,12 @@ export type AnswerAskBody = {
   answers?: { question_id: string; option_ids: string[] }[];
 };
 
-export function isPlanAskOptions(options: { id: string }[]): boolean {
-  return options.length === 1 && options[0]?.id === "build";
+export function isPlanAsk(block: { askKind?: string }): boolean {
+  return block.askKind === "plan";
+}
+
+export function continueAllowed(block: { continueAllowed?: boolean }): boolean {
+  return block.continueAllowed !== false;
 }
 
 export function askContinueLabel(plan: boolean, busy: boolean): string {
@@ -199,9 +203,9 @@ export function askSkipLabel(busy: boolean): string {
 }
 
 /** Cursor's card body is plan.overview, stored on the Build option. Do not hide it. */
-export function planOverviewOf(options: { id: string; text?: string }[]): string {
-  if (!isPlanAskOptions(options)) return "";
-  const text = options[0]?.text?.trim() ?? "";
+export function planOverviewOf(block: { askKind?: string; options: { text?: string }[] }): string {
+  if (!isPlanAsk(block)) return "";
+  const text = block.options[0]?.text?.trim() ?? "";
   if (!text || text === "Build") return "";
   return text;
 }
@@ -226,8 +230,9 @@ function AskCard({ block, onAnswerAsk }: {
   const continueBusy = busyAction === "continue" || (block.action === "submitting" && busyAction !== "skip");
   const skipBusy = busyAction === "skip";
   const interactive = pending && !!onAnswerAsk;
-  const plan = isPlanAskOptions(block.options);
-  const overview = plan ? planOverviewOf(block.options) : "";
+  const plan = isPlanAsk(block);
+  const showContinue = continueAllowed(block);
+  const overview = plan ? planOverviewOf(block) : "";
   const submit = async (action: "continue" | "skip") => {
     if (!onAnswerAsk || wait) return;
     setBusyAction(action);
@@ -286,7 +291,7 @@ function AskCard({ block, onAnswerAsk }: {
       {block.action === "submit_failed" || block.error ? (
         <div className="mt-2 text-[12px] text-destructive">{block.error || "提交失败，请到本机点 Continue / Skip"}</div>
       ) : null}
-      {interactive ? (
+      {interactive && (showContinue || !plan) ? (
         <div className="mt-3 pt-3 border-t border-border/80 flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
           {plan ? null : (
           <Button
@@ -300,6 +305,7 @@ function AskCard({ block, onAnswerAsk }: {
             {askSkipLabel(skipBusy)}
           </Button>
           )}
+          {showContinue ? (
           <Button
             type="button"
             variant={plan ? "plan" : "default"}
@@ -310,6 +316,7 @@ function AskCard({ block, onAnswerAsk }: {
             {continueBusy ? <AskSpinner /> : null}
             {askContinueLabel(plan, continueBusy)}
           </Button>
+          ) : null}
         </div>
       ) : null}
     </div>

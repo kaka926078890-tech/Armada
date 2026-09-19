@@ -71,6 +71,7 @@ struct PendingAskQuestion: Decodable, Identifiable, Hashable {
 struct PendingAskDTO: Decodable, Hashable {
     var request_id: String
     var questions: [PendingAskQuestion]
+    var kind: String?
 }
 
 struct OutboundDTO: Decodable, Hashable, Identifiable {
@@ -139,6 +140,16 @@ struct RunDTO: Decodable, Identifiable, Hashable {
                 label: workspaceRoot.split { $0 == "/" || $0 == "\\" }.map(String.init).last ?? workspaceRoot
             )
     }
+}
+
+/// Plan 只认 hub `kind == "plan"`，不用 option id==build 猜形状。
+func isPlanAsk(_ ask: PendingAskDTO) -> Bool {
+    ask.kind == "plan"
+}
+
+/// 与 hub `pendingAsk.continueAllowed` 对齐：恰好一问且非 `allow_multiple`。
+func continueAllowed(_ ask: PendingAskDTO) -> Bool {
+    ask.questions.count == 1 && ask.questions.first?.allow_multiple != true
 }
 
 /// 仓页必须跟 SSE 列表走；导航快照的 `cdpReady` 会过期。与 Android `liveWorkspace` 对齐。

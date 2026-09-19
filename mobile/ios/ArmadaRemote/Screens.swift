@@ -1111,6 +1111,7 @@ struct AskView: View {
                         .frame(height: max(planHeight, 80))
                 }
                 if let err { Text(err).foregroundStyle(.red) }
+                if canContinue {
                 HStack {
                     Spacer(minLength: 0)
                     Button {
@@ -1129,6 +1130,7 @@ struct AskView: View {
                     .tint(Self.planYellow)
                     .foregroundStyle(.black)
                     .disabled(busyAction != nil)
+                }
                 }
             } else {
                 Text("需要选择").font(.headline)
@@ -1186,6 +1188,7 @@ struct AskView: View {
                     .buttonStyle(.bordered)
                     .controlSize(.regular)
                     .disabled(busyAction != nil)
+                    if canContinue {
                     Button {
                         Task { await submit(action: "continue") }
                     } label: {
@@ -1201,6 +1204,7 @@ struct AskView: View {
                     .controlSize(.regular)
                     .tint(Self.accentBlue)
                     .disabled(optionId == nil || busyAction != nil)
+                    }
                 }
             }
         }
@@ -1217,10 +1221,8 @@ struct AskView: View {
         }
     }
 
-    private var isPlan: Bool {
-        let opts = ask.questions.first?.options ?? []
-        return opts.count == 1 && opts.first?.id == "build"
-    }
+    private var isPlan: Bool { isPlanAsk(ask) }
+    private var canContinue: Bool { continueAllowed(ask) }
 
     private func submitBuild() async {
         guard busyAction == nil, let q = ask.questions.first, let opt = q.options.first else { return }

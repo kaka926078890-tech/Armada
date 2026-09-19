@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import ChatThread, { AssistantMarkdown, askContinueLabel, askSkipLabel, isPlanAskOptions, planOverviewOf } from "../src/components/ChatThread";
+import ChatThread, { AssistantMarkdown, askContinueLabel, askSkipLabel, continueAllowed, isPlanAsk, planOverviewOf } from "../src/components/ChatThread";
 import type { ChatBlock } from "../src/chatView";
 
 describe("AssistantMarkdown", () => {
@@ -59,6 +59,7 @@ describe("ask / plan action buttons", () => {
           seq: 1,
           request_id: "plan-1",
           prompt: "Created Plan: Markdown date line",
+          askKind: "plan",
           options: [{ id: "build", label: "Build", text: "overview" }],
           action: "pending",
         }]}
@@ -84,6 +85,7 @@ describe("ask / plan action buttons", () => {
           seq: 1,
           request_id: "plan-1",
           prompt: "Created Plan: Markdown date line",
+          askKind: "plan",
           options: [{ id: "build", label: "Build", text: "overview" }],
           action: "submitting",
         }]}
@@ -119,8 +121,9 @@ describe("ask / plan action buttons", () => {
   });
 
   test("labels match Cursor Building... / Continuing... while in-flight", () => {
-    expect(isPlanAskOptions([{ id: "build" }])).toBe(true);
-    expect(isPlanAskOptions([{ id: "a" }])).toBe(false);
+    expect(isPlanAsk({ askKind: "plan" })).toBe(true);
+    expect(isPlanAsk({ askKind: undefined })).toBe(false);
+    expect(isPlanAsk({})).toBe(false);
     expect(askContinueLabel(true, false)).toBe("Build");
     expect(askContinueLabel(true, true)).toBe("Building...");
     expect(askContinueLabel(false, false)).toBe("Continue");
@@ -129,9 +132,75 @@ describe("ask / plan action buttons", () => {
     expect(askSkipLabel(true)).toBe("Skipping...");
   });
 
+  test("single option id=build without kind is not plan", () => {
+    expect(isPlanAsk({ askKind: undefined })).toBe(false);
+    const html = renderToStaticMarkup(
+      <ChatThread
+        blocks={[{
+          kind: "ask",
+          seq: 1,
+          request_id: "ask-1",
+          prompt: "选一个",
+          options: [{ id: "build", label: "B", text: "one" }],
+          action: "pending",
+        }]}
+        onAnswerAsk={async () => true}
+      />,
+    );
+    expect(html).toContain("Questions");
+    expect(html).toContain("Continue");
+    expect(html).not.toContain("Created Plan");
+    expect(html).not.toContain("border-l-[#F1B467]");
+    expect(html).toContain("#599CE7");
+  });
+
+  test("kind=plan with a non-build option id is still plan", () => {
+    const html = renderToStaticMarkup(
+      <ChatThread
+        blocks={[{
+          kind: "ask",
+          seq: 1,
+          request_id: "plan-1",
+          prompt: "Created Plan: other id",
+          askKind: "plan",
+          options: [{ id: "go", label: "Go", text: "overview body" }],
+          action: "pending",
+        }]}
+        onAnswerAsk={async () => true}
+      />,
+    );
+    expect(html).toContain("Created Plan");
+    expect(html).toContain("Build");
+    expect(html).toContain("border-l-[#F1B467]");
+    expect(html).toContain("overview body");
+    expect(html).not.toContain("Continue");
+  });
+
+  test("two questions hide Continue", () => {
+    expect(continueAllowed({ continueAllowed: true })).toBe(true);
+    expect(continueAllowed({ continueAllowed: false })).toBe(false);
+    const html = renderToStaticMarkup(
+      <ChatThread
+        blocks={[{
+          kind: "ask",
+          seq: 1,
+          request_id: "ask-2",
+          prompt: "第一问",
+          options: [{ id: "a", label: "A", text: "甲" }],
+          action: "pending",
+          continueAllowed: false,
+        }]}
+        onAnswerAsk={async () => true}
+      />,
+    );
+    expect(html).toContain("Skip");
+    expect(html).not.toContain("Continue");
+  });
+
   test("plan card renders captured overview, not just Created Plan filename", () => {
-    expect(planOverviewOf([{ id: "build", text: "同一分支继续完成内嵌通道修复" }])).toBe("同一分支继续完成内嵌通道修复");
-    expect(planOverviewOf([{ id: "build", text: "Build" }])).toBe("");
+    expect(planOverviewOf({ askKind: "plan", options: [{ id: "build", text: "同一分支继续完成内嵌通道修复" }] })).toBe("同一分支继续完成内嵌通道修复");
+    expect(planOverviewOf({ askKind: "plan", options: [{ id: "build", text: "Build" }] })).toBe("");
+    expect(planOverviewOf({ options: [{ id: "build", text: "同一分支继续完成内嵌通道修复" }] })).toBe("");
     const html = renderToStaticMarkup(
       <ChatThread
         blocks={[{
@@ -139,6 +208,7 @@ describe("ask / plan action buttons", () => {
           seq: 1,
           request_id: "plan-1",
           prompt: "Created Plan: Dual Browser Channels",
+          askKind: "plan",
           options: [{ id: "build", label: "Build", text: "同一分支继续完成内嵌通道修复，并并列接入腾讯 BrowserSkill。" }],
           action: "pending",
         }]}
@@ -157,6 +227,7 @@ describe("ask / plan action buttons", () => {
           seq: 1,
           request_id: "plan-1",
           prompt: "Created Plan: Markdown date line",
+          askKind: "plan",
           options: [{ id: "build", label: "Build", text: "# 在 markdown 追加日期\n\n在任意一份现有 markdown 末尾追加一行。" }],
           action: "pending",
         }]}

@@ -37,6 +37,7 @@ data class PendingAskQuestion(
 data class PendingAskDto(
     val requestId: String,
     val questions: List<PendingAskQuestion> = emptyList(),
+    val kind: String? = null,
 )
 
 data class OutboundDto(
@@ -99,9 +100,10 @@ data class RunDto(
     val column: BoardColumn get() = BoardColumn.column(status)
 }
 
-fun isPlanAsk(ask: PendingAskDto): Boolean {
-    val opts = ask.questions.firstOrNull()?.options ?: return false
-    return opts.size == 1 && opts.first().id == "build"
+fun isPlanAsk(ask: PendingAskDto): Boolean = ask.kind == "plan"
+
+fun continueAllowed(ask: PendingAskDto): Boolean {
+    return ask.questions.size == 1 && ask.questions.first().allowMultiple != true
 }
 
 fun askOptionBody(label: String, text: String): String {

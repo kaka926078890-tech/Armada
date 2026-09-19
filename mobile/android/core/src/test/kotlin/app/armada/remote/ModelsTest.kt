@@ -31,12 +31,18 @@ class ModelsTest {
     }
 
     @Test
-    fun planAskIsSingleBuildOption() {
-        val plan = PendingAskDto(
+    fun planAskIsKindPlanOnly() {
+        val buildWithoutKind = PendingAskDto(
             "rid",
             listOf(PendingAskQuestion("q", "Created Plan", options = listOf(PendingAskOption("build", "Build", "Build")))),
         )
-        assertTrue(isPlanAsk(plan))
+        assertFalse(isPlanAsk(buildWithoutKind))
+        val planOtherId = PendingAskDto(
+            "rid",
+            listOf(PendingAskQuestion("q", "Created Plan", options = listOf(PendingAskOption("go", "Go", "Go")))),
+            kind = "plan",
+        )
+        assertTrue(isPlanAsk(planOtherId))
         val normal = PendingAskDto(
             "rid",
             listOf(
@@ -48,6 +54,35 @@ class ModelsTest {
             ),
         )
         assertFalse(isPlanAsk(normal))
+    }
+
+    @Test
+    fun continueAllowedMatchesHubShape() {
+        val one = PendingAskDto(
+            "rid",
+            listOf(PendingAskQuestion("q", "pick", options = listOf(PendingAskOption("a", "A", "one")))),
+        )
+        assertTrue(continueAllowed(one))
+        val two = PendingAskDto(
+            "rid",
+            listOf(
+                PendingAskQuestion("q1", "one", options = listOf(PendingAskOption("a", "A", "a"))),
+                PendingAskQuestion("q2", "two", options = listOf(PendingAskOption("b", "B", "b"))),
+            ),
+        )
+        assertFalse(continueAllowed(two))
+        val multi = PendingAskDto(
+            "rid",
+            listOf(
+                PendingAskQuestion(
+                    "q",
+                    "pick",
+                    allowMultiple = true,
+                    options = listOf(PendingAskOption("a", "A", "one"), PendingAskOption("b", "B", "two")),
+                ),
+            ),
+        )
+        assertFalse(continueAllowed(multi))
     }
 
     @Test

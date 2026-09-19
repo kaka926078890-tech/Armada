@@ -16,6 +16,8 @@ export type ChatBlock =
     options: { id: string; label: string; text: string }[];
     action: "pending" | "submitting" | "submit_failed" | "resolved";
     error?: string;
+    askKind?: "plan";
+    continueAllowed?: boolean;
   }
   | {
     kind: "subagent";
@@ -101,6 +103,14 @@ function askPromptFromInput(input: Record<string, unknown> | undefined): string 
   return prompt || "Questions";
 }
 
+function askContinueAllowed(questions: { allow_multiple?: boolean }[]): boolean {
+  return questions.length === 1 && questions[0]?.allow_multiple !== true;
+}
+
+function askKindOf(raw: unknown): "plan" | undefined {
+  return raw === "plan" ? "plan" : undefined;
+}
+
 function askBlockFromPayload(p: any, seq: number, action: "pending" | "resolved"): ChatBlock | null {
   const request_id = typeof p?.request_id === "string" && p.request_id.trim() ? p.request_id.trim() : "";
   const questions = Array.isArray(p?.questions) ? p.questions : [];
@@ -109,7 +119,16 @@ function askBlockFromPayload(p: any, seq: number, action: "pending" | "resolved"
     const prompt = typeof q?.prompt === "string" && q.prompt.trim() ? q.prompt.trim() : "Questions";
     const options = askOptionsFromInput({ questions });
     if (!options.length) return null;
-    return { kind: "ask", seq, request_id, prompt, options, action };
+    return {
+      kind: "ask",
+      seq,
+      request_id,
+      prompt,
+      options,
+      action,
+      askKind: askKindOf(p.kind),
+      continueAllowed: askContinueAllowed(questions),
+    };
   }
   return null;
 }
@@ -189,6 +208,7 @@ function transcriptBlocks(ev: RunEvent, p: any): ChatBlock[] {
       if (c?.type === "tool_use" && c.name === ASK_TOOL_NAME) {
         const input = (c.input ?? {}) as Record<string, unknown>;
         const options = askOptionsFromInput(input);
+        const questions = Array.isArray(input.questions) ? input.questions as { allow_multiple?: boolean }[] : [];
         if (options.length) {
           out.push({
             kind: "ask",
@@ -197,6 +217,8 @@ function transcriptBlocks(ev: RunEvent, p: any): ChatBlock[] {
             prompt: askPromptFromInput(input),
             options,
             action: "resolved",
+            askKind: askKindOf(input.kind),
+            continueAllowed: askContinueAllowed(questions),
           });
         }
         continue;
@@ -497,7 +519,8 @@ export function eventsToChat(events: RunEvent[]): ChatBlock[] {
 
 export type PendingAskView = {
   request_id: string;
-  questions: { prompt: string; options: { id: string; label: string; text: string }[] }[];
+  kind?: "plan";
+  questions: { prompt: string; allow_multiple?: boolean; options: { id: string; label: string; text: string }[] }[];
 };
 
 export function mergePendingAsk(blocks: ChatBlock[], pending: PendingAskView | null | undefined): ChatBlock[] {
@@ -512,6 +535,8 @@ export function mergePendingAsk(blocks: ChatBlock[], pending: PendingAskView | n
     prompt: q.prompt,
     options: q.options ?? [],
     action: "pending",
+    askKind: askKindOf(pending.kind),
+    continueAllowed: askContinueAllowed(pending.questions),
   };
   const idx = blocks.findIndex((b) =>
     b.kind === "ask" && (b.request_id === pending.request_id || (q.prompt && b.prompt === q.prompt)),
