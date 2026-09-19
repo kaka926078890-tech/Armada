@@ -20,7 +20,7 @@ import { hubRunsNeedingTranscriptFollow, shouldArmFollowupStopOnAdopt } from "./
 import { noteOwnerBsp, clearGeneration, synthesizedStopPayload, noteHubGeneration, onFollowupBindGeneration, shouldSynthesizeTranscriptStop } from "./generationStamp";
 import { parseAskInspect, askPollActions, coalesceAskInspect } from "./askDetect";
 import { enrichPlanAsk, planDirsFor } from "./planFile";
-import { PENDING_RELOAD_NAME, decideWindowReload, parsePendingReload, windowHasInFlightArmadaRun } from "../../desktop-core/src/cursorReload";
+import { PENDING_RELOAD_NAME, decideReloadFire, decideWindowReload, noteReloadCommandSettled, parsePendingReload, windowHasInFlightArmadaRun, type ReloadFireState } from "../../desktop-core/src/cursorReload";
 
 const EXTENSION_VERSION = "0.4.30";
 
@@ -577,6 +577,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }
     writeFileSync(pendingReloadPath, JSON.stringify(pending), { mode: 0o600 });
   };
+  let reloadFire: ReloadFireState = { lastFiredSetAt: null, lastDecision: null, inFlight: false };
   const considerCursorReload = (pending: ReturnType<typeof parsePendingReload>) => {
     if (disposed) return;
     const live = windowHasInFlightArmadaRun({
@@ -591,13 +592,18 @@ export function activate(context: vscode.ExtensionContext): void {
       runningVsix: EXTENSION_VERSION,
       machineId: machineId ?? undefined,
     });
+    const attempt = decideReloadFire(reloadFire, { decision, pendingSetAt: pending?.setAt ?? null });
+    reloadFire = attempt.next;
     if (decision === "expired") {
       log("vsix pending-reload expired; this window still has a live Armada run");
       return;
     }
-    if (decision !== "reload") return;
+    if (!attempt.fire) return;
     log(`vsix pending-reload: reloading window for ${pending?.vsix}`);
-    void vscode.commands.executeCommand("workbench.action.reloadWindow");
+    void Promise.resolve(vscode.commands.executeCommand("workbench.action.reloadWindow")).then(
+      () => { reloadFire = noteReloadCommandSettled(reloadFire); },
+      () => { reloadFire = noteReloadCommandSettled(reloadFire); },
+    );
   };
   const applyHubCursorReload = (raw: unknown) => {
     persistLocalPending(parsePendingReload(raw));

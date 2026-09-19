@@ -3,12 +3,15 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import {
   IDLE_RELOAD_MAX_WAIT_MS,
+  decideReloadFire,
   decideWindowReload,
+  noteReloadCommandSettled,
   parsePendingReload,
   pendingFromAction,
   reloadStillNeeded,
   reloadStillNeededForFleet,
   windowHasInFlightArmadaRun,
+  type ReloadFireState,
 } from "../src/cursorReload";
 
 describe("parsePendingReload", () => {
@@ -93,6 +96,53 @@ describe("decideWindowReload", () => {
       now: 2000,
       machineId: "m-mac",
     })).toBe("none");
+  });
+});
+
+describe("decideReloadFire", () => {
+  const idle: ReloadFireState = { lastFiredSetAt: null, lastDecision: null, inFlight: false };
+  const setAt = 1000;
+
+  test("fires once when idle reload is decided", () => {
+    const r = decideReloadFire(idle, { decision: "reload", pendingSetAt: setAt });
+    expect(r.fire).toBe(true);
+    expect(r.next.inFlight).toBe(true);
+    expect(r.next.lastFiredSetAt).toBe(setAt);
+  });
+
+  test("does not re-fire the same pending after reloadWindow left the window alive", () => {
+    const first = decideReloadFire(idle, { decision: "reload", pendingSetAt: setAt });
+    const survived = noteReloadCommandSettled(first.next);
+    const again = decideReloadFire(survived, { decision: "reload", pendingSetAt: setAt });
+    expect(again.fire).toBe(false);
+  });
+
+  test("holds while reloadWindow is still in flight (Cursor confirmation dialog)", () => {
+    const first = decideReloadFire(idle, { decision: "reload", pendingSetAt: setAt });
+    const stacked = decideReloadFire(first.next, { decision: "reload", pendingSetAt: setAt });
+    expect(stacked.fire).toBe(false);
+  });
+
+  test("fires again after a busy→idle edge on the same pending", () => {
+    const first = decideReloadFire(idle, { decision: "reload", pendingSetAt: setAt });
+    const survived = noteReloadCommandSettled(first.next);
+    const busy = decideReloadFire(survived, { decision: "wait", pendingSetAt: setAt });
+    expect(busy.fire).toBe(false);
+    const idleAgain = decideReloadFire(busy.next, { decision: "reload", pendingSetAt: setAt });
+    expect(idleAgain.fire).toBe(true);
+  });
+
+  test("new pending setAt can fire even if the previous attempt survived", () => {
+    const first = decideReloadFire(idle, { decision: "reload", pendingSetAt: setAt });
+    const survived = noteReloadCommandSettled(first.next);
+    const nextPending = decideReloadFire(survived, { decision: "reload", pendingSetAt: setAt + 1 });
+    expect(nextPending.fire).toBe(true);
+  });
+
+  test("expired/done/none never fire", () => {
+    expect(decideReloadFire(idle, { decision: "expired", pendingSetAt: setAt }).fire).toBe(false);
+    expect(decideReloadFire(idle, { decision: "done", pendingSetAt: setAt }).fire).toBe(false);
+    expect(decideReloadFire(idle, { decision: "none", pendingSetAt: null }).fire).toBe(false);
   });
 });
 
@@ -190,6 +240,8 @@ describe("extension delivers hub reload over ws", () => {
     expect(src).toContain("case \"ext.cursorReload\"");
     expect(src).toContain("machineId: machineId");
     expect(src).toContain("windowHasInFlightArmadaRun");
+    expect(src).toContain("decideReloadFire");
+    expect(src).toContain("noteReloadCommandSettled");
     expect(src).not.toContain("boundRuns.size > 0 || pendingRuns.length > 0");
   });
 });

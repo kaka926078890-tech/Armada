@@ -105,6 +105,8 @@ export function windowHasInFlightArmadaRun(opts: {
  * `expired` = waited maxWaitMs still busy → notify, do not force.
  * `done` = this window already runs pending.vsix or newer.
  */
+export type WindowReloadDecision = "none" | "wait" | "reload" | "expired" | "done";
+
 export function decideWindowReload(opts: {
   pending: PendingReload | null;
   thisWindowHasLiveRun: boolean;
@@ -112,7 +114,7 @@ export function decideWindowReload(opts: {
   runningVsix?: string;
   maxWaitMs?: number;
   machineId?: string;
-}): "none" | "wait" | "reload" | "expired" | "done" {
+}): WindowReloadDecision {
   const p = opts.pending;
   if (!p) return "none";
   if (p.machineId && opts.machineId && p.machineId !== opts.machineId) return "none";
@@ -125,4 +127,42 @@ export function decideWindowReload(opts: {
     return "wait";
   }
   return "reload";
+}
+
+/**
+ * Cursor's Reload Window confirmation stays up if a local composer (AskQuestion
+ * etc.) is still working. `decideWindowReload` only sees Armada live runs, so
+ * the 10s poll would keep calling reloadWindow and restack that dialog.
+ * Fire at most once per pending until the command settles; retry only after a
+ * busy→idle edge (Armada run started then finished) or a new pending setAt.
+ */
+export type ReloadFireState = {
+  lastFiredSetAt: number | null;
+  lastDecision: WindowReloadDecision | null;
+  inFlight: boolean;
+};
+
+export function decideReloadFire(
+  state: ReloadFireState,
+  opts: { decision: WindowReloadDecision; pendingSetAt: number | null },
+): { fire: boolean; next: ReloadFireState } {
+  const lastDecision = opts.decision;
+  if (opts.decision !== "reload" || opts.pendingSetAt == null) {
+    return { fire: false, next: { ...state, lastDecision } };
+  }
+  if (state.inFlight) {
+    return { fire: false, next: { ...state, lastDecision } };
+  }
+  const idleEdge = state.lastDecision === "wait";
+  if (state.lastFiredSetAt === opts.pendingSetAt && !idleEdge) {
+    return { fire: false, next: { ...state, lastDecision } };
+  }
+  return {
+    fire: true,
+    next: { lastFiredSetAt: opts.pendingSetAt, lastDecision, inFlight: true },
+  };
+}
+
+export function noteReloadCommandSettled(state: ReloadFireState): ReloadFireState {
+  return { ...state, inFlight: false };
 }
