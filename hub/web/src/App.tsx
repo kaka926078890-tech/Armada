@@ -17,7 +17,9 @@ import { DispatchModal } from "./components/Modals";
 import { alertCompletions, alertNeedInput, ensureNotifyPermission, seedAskStatus, seedRunStatus, stopTitleMarquee, takeNewlyAlertable, takeNewlyNeedInput } from "./completionNotify";
 import { applyFontScale, applyTheme, loadFontScale, loadTheme, saveFontScale, saveTheme, type FontScale, type ThemeName } from "./theme";
 import SettingsModal from "./components/SettingsModal";
-import { UI_BTN_GHOST, UI_BTN_GHOST_ACTIVE, UI_BTN_PRIMARY, UI_INPUT, UI_META, UI_TYPE } from "./ui";
+import { Button } from "./components/ui/button";
+import { Input } from "./components/ui/input";
+import { UI_META, UI_TYPE } from "./ui";
 import {
   WS_KEY, READ_KEY, READ_SEEDED,
   loadLocalUiPrefsMirror, applyUiPrefsToLocalStorage,
@@ -348,30 +350,30 @@ export default function App() {
   if (!authed) {
     if (desktop) {
       return (
-        <div className="h-screen flex items-center justify-center bg-zinc-950 text-zinc-100">
+        <div className="h-screen flex items-center justify-center bg-background text-foreground">
           <div className="flex flex-col items-center gap-3">
-            <p className={`${UI_TYPE} text-zinc-500`}>正在重新连接中台…</p>
-            <button type="button" onClick={() => requestDesktop("leave-fleet")} className={UI_BTN_GHOST}>
+            <p className={`${UI_TYPE} text-muted-foreground`}>正在重新连接中台…</p>
+            <Button type="button" variant="outline" onClick={() => requestDesktop("leave-fleet")}>
               返回
-            </button>
+            </Button>
           </div>
         </div>
       );
     }
     return (
-      <div className="h-screen flex items-center justify-center bg-zinc-950 text-zinc-100">
+      <div className="h-screen flex items-center justify-center bg-background text-foreground">
         <form className="flex flex-col gap-3 w-80" onSubmit={(e) => {
           e.preventDefault();
           const v = new FormData(e.currentTarget).get("token");
           if (typeof v === "string" && v.trim()) { setToken(v.trim()); setAuthDenied(false); setAuthed(true); }
         }}>
           <h1 className="text-xl font-bold">Armada 舰队指挥台</h1>
-          <p className={`${UI_META} text-zinc-500 leading-5`}>
-            浏览器联调：先启动 hub，再粘贴 <code className="text-zinc-400">~/.armada/token</code>。创建/加入舰队请用桌面应用。
+          <p className={`${UI_META} text-muted-foreground leading-5`}>
+            浏览器联调：先启动 hub，再粘贴 <code className="text-muted-foreground">~/.armada/token</code>。创建/加入舰队请用桌面应用。
           </p>
-          {authDenied && <div className={`${UI_TYPE} text-red-400`}>令牌无效，请重新从 hub 机器复制（cat ~/.armada/token)</div>}
-          <input name="token" type="password" placeholder="配对令牌" className={UI_INPUT} />
-          <button className={UI_BTN_PRIMARY}>连接</button>
+          {authDenied && <div className={`${UI_TYPE} text-destructive`}>令牌无效，请重新从 hub 机器复制（cat ~/.armada/token)</div>}
+          <Input name="token" type="password" placeholder="配对令牌" />
+          <Button type="submit">连接</Button>
         </form>
       </div>
     );
@@ -391,29 +393,30 @@ export default function App() {
   const presetSlot = selected ? slots.find((s) => s.machineId === selected.machineId && s.root === selected.root) : null;
 
   return (
-    <div className="h-screen flex flex-col bg-zinc-950 text-zinc-100">
+    <div className="h-screen flex flex-col bg-background text-foreground">
       {loadError && (
-        <div className={`px-4 py-2 ${UI_TYPE} text-red-400 bg-red-950/50 border-b border-red-900/50`}>{loadError}</div>
+        <div className={`px-4 py-2 ${UI_TYPE} text-destructive bg-destructive/10 border-b border-destructive/30`}>{loadError}</div>
       )}
-      <header className="flex items-center gap-x-3 gap-y-1.5 px-4 py-2 border-b border-zinc-800/80 flex-wrap">
+      <header className="flex items-center gap-x-3 gap-y-1.5 px-4 py-2 border-b border-border flex-wrap">
         <span className={`font-semibold ${UI_TYPE} tracking-wide shrink-0 whitespace-nowrap`}>Armada</span>
-        <span className={`text-zinc-600 ${UI_META} shrink-0 whitespace-nowrap`}>{location.host}</span>
+        <span className={`text-muted-foreground ${UI_META} shrink-0 whitespace-nowrap`}>{location.host}</span>
         <span className={`${UI_META} text-emerald-500/90 shrink-0 whitespace-nowrap`}>令牌已连接</span>
-        <button
+        <Button
           type="button"
+          variant={showArchived ? "secondary" : "outline"}
+          className="shrink-0"
           onClick={() => { setShowArchived((v) => !v); setSelectedRun(null); }}
-          className={`${showArchived ? UI_BTN_GHOST_ACTIVE : UI_BTN_GHOST} shrink-0`}
         >
           {showArchived ? "返回看板" : `查看已隐藏${hiddenRuns.length ? ` ${hiddenRuns.length}` : ""}`}
-        </button>
-        <span className={`ml-auto flex items-center gap-2 ${UI_META} text-zinc-500 shrink-0 whitespace-nowrap`}>
+        </Button>
+        <span className={`ml-auto flex items-center gap-2 ${UI_META} text-muted-foreground shrink-0 whitespace-nowrap`}>
           在线 {machines.filter((m) => m.status === "online").length}/{machines.length}
-          <button type="button" onClick={() => { reloadSnippets(); setSettingsOpen(true); }} className={UI_BTN_GHOST}>
+          <Button type="button" variant="outline" onClick={() => { reloadSnippets(); setSettingsOpen(true); }}>
             设置
-          </button>
-          <button type="button" onClick={leaveFleet} className={UI_BTN_GHOST}>
+          </Button>
+          <Button type="button" variant="outline" onClick={leaveFleet}>
             退出中台
-          </button>
+          </Button>
         </span>
       </header>
       <div className="flex flex-1 min-h-0">
@@ -433,7 +436,7 @@ export default function App() {
         />
         <div className="flex-1 min-w-0 min-h-0 flex flex-col">
           {showArchived && (
-            <div className={`px-4 py-1.5 ${UI_META} text-amber-200/90 bg-amber-950/40 border-b border-amber-900/40`}>
+            <div className={`px-4 py-1.5 ${UI_META} text-amber-700 dark:text-amber-200 bg-amber-500/10 border-b border-amber-500/20`}>
               正在查看中台已隐藏的卡片（数据未删除，可取消隐藏）
             </div>
           )}

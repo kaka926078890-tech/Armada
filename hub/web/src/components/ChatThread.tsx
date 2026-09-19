@@ -3,7 +3,8 @@ import Markdown from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import { segmentChat, processFoldLabel, type ChatBlock } from "../chatView";
-import { ASK_CONTINUE_BTN, ASK_PLAN_BTN, ASK_SKIP_BTN, UI_BODY, UI_META, UI_OPTION_OFF, UI_OPTION_ON, UI_TYPE } from "../ui";
+import { Button } from "./ui/button";
+import { UI_BODY, UI_META, UI_OPTION_OFF, UI_OPTION_ON, UI_TYPE } from "../ui";
 
 function ThoughtLive({ text }: { text: string }) {
   return <div className="text-[12px] text-zinc-500 whitespace-pre-wrap leading-relaxed">{text}</div>;
@@ -184,8 +185,6 @@ export type AnswerAskBody = {
   answers?: { question_id: string; option_ids: string[] }[];
 };
 
-export { ASK_CONTINUE_BTN, ASK_PLAN_BTN, ASK_SKIP_BTN };
-
 export function isPlanAskOptions(options: { id: string }[]): boolean {
   return options.length === 1 && options[0]?.id === "build";
 }
@@ -249,15 +248,15 @@ function AskCard({ block, onAnswerAsk }: {
   };
   return (
     <div
-      className={`rounded-xl border border-zinc-800 bg-zinc-900/60 pl-3 pr-3 py-3 border-l-[3px] ${plan ? "border-l-[#F1B467]" : "border-l-[#599CE7]"}`}
+      className={`rounded-xl border border-border bg-card/60 pl-3 pr-3 py-3 border-l-[3px] ${plan ? "border-l-[#F1B467]" : "border-l-[#599CE7]"}`}
       onClick={(e) => e.stopPropagation()}
     >
-      <div className={`${UI_META} uppercase tracking-wide text-zinc-500 mb-1`}>{plan ? "Created Plan" : "Questions"}</div>
-      <div className={`${UI_TYPE} text-zinc-200 leading-relaxed`}>
+      <div className={`${UI_META} uppercase tracking-wide text-muted-foreground mb-1`}>{plan ? "Created Plan" : "Questions"}</div>
+      <div className={`${UI_TYPE} text-foreground leading-relaxed`}>
         <AssistantMarkdown text={block.prompt} />
       </div>
       {overview ? (
-        <div className={`mt-2 max-h-80 overflow-y-auto ${UI_TYPE} text-zinc-400 leading-relaxed pr-1`}>
+        <div className={`mt-2 max-h-80 overflow-y-auto ${UI_TYPE} text-muted-foreground leading-relaxed pr-1`}>
           <AssistantMarkdown text={overview} />
         </div>
       ) : null}
@@ -282,35 +281,35 @@ function AskCard({ block, onAnswerAsk }: {
       </div>
       )}
       {block.action === "resolved" ? (
-        <div className="mt-2 text-[12px] text-zinc-500">已处理</div>
+        <div className="mt-2 text-[12px] text-muted-foreground">已处理</div>
       ) : null}
       {block.action === "submit_failed" || block.error ? (
-        <div className="mt-2 text-[12px] text-red-400">{block.error || "提交失败，请到本机点 Continue / Skip"}</div>
+        <div className="mt-2 text-[12px] text-destructive">{block.error || "提交失败，请到本机点 Continue / Skip"}</div>
       ) : null}
       {interactive ? (
-        <div className="mt-3 pt-3 border-t border-zinc-800/80 flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
+        <div className="mt-3 pt-3 border-t border-border/80 flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
           {plan ? null : (
-          <button
+          <Button
             type="button"
+            variant="secondary"
             disabled={wait}
             aria-busy={skipBusy}
             onClick={(e) => { stopCard(e); void submit("skip"); }}
-            className={ASK_SKIP_BTN}
           >
             {skipBusy ? <AskSpinner /> : null}
             {askSkipLabel(skipBusy)}
-          </button>
+          </Button>
           )}
-          <button
+          <Button
             type="button"
+            variant={plan ? "plan" : "default"}
             disabled={wait || (!plan && !picked)}
             aria-busy={continueBusy}
             onClick={(e) => { stopCard(e); void submit("continue"); }}
-            className={plan ? ASK_PLAN_BTN : ASK_CONTINUE_BTN}
           >
             {continueBusy ? <AskSpinner /> : null}
             {askContinueLabel(plan, continueBusy)}
-          </button>
+          </Button>
         </div>
       ) : null}
     </div>
@@ -322,7 +321,7 @@ export default function ChatThread({ blocks, onAnswerAsk }: {
   onAnswerAsk?: (body: AnswerAskBody) => Promise<boolean | void> | boolean | void;
 }) {
   if (blocks.length === 0) {
-    return <div className={`${UI_TYPE} text-zinc-500 px-1 py-8 text-center`}>等待对话内容…</div>;
+    return <div className={`${UI_TYPE} text-muted-foreground px-1 py-8 text-center`}>等待对话内容…</div>;
   }
   const segs = segmentChat(blocks);
   return (

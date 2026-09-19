@@ -1,7 +1,11 @@
 import { useState } from "react";
 import { groupRuns, cardView, COLUMN_LABELS, canArchiveRun, canRetryRun, isUnreadAlert, isUnreadNeedInput, machineLabel, workspaceFolderName, runDisplayName, cardChromeClass, cardChromeOf, columnHasAlert, extensionLagNotice, type ColumnKey, type RunRow } from "../boardState";
 import type { Machine } from "../types";
-import { UI_CHIP, UI_CHIP_ACCENT, UI_INPUT, UI_META, UI_TYPE } from "../ui";
+import { Button } from "./ui/button";
+import { Input } from "./ui/input";
+import { Badge } from "./ui/badge";
+import { Card, CardContent } from "./ui/card";
+import { UI_META, UI_TYPE } from "../ui";
 
 const COL_ACCENT: Record<ColumnKey, string> = {
   waiting: "border-t-amber-500",
@@ -51,16 +55,16 @@ export default function Board({ runs, machines, selected, onSelect, showArchived
   return (
     <main className="flex-1 min-w-0 overflow-x-auto flex gap-2 p-3">
       {(Object.keys(COLUMN_LABELS) as ColumnKey[]).map((col) => (
-        <section key={col} className={`flex-1 min-w-[240px] shrink-0 flex flex-col rounded-xl bg-zinc-900/40 border-t-2 ${COL_ACCENT[col]}`}>
-          <h2 className={`${UI_META} tracking-wide uppercase text-zinc-500 px-2.5 pb-2 pt-2 inline-flex items-center gap-1.5 whitespace-nowrap`}>
-            {COLUMN_LABELS[col]} <span className="text-zinc-600 normal-case tracking-normal">{g[col].length}</span>
+        <section key={col} className={`flex-1 min-w-[240px] shrink-0 flex flex-col rounded-xl bg-card/40 border-t-2 ${COL_ACCENT[col]}`}>
+          <h2 className={`${UI_META} tracking-wide uppercase text-muted-foreground px-2.5 pb-2 pt-2 inline-flex items-center gap-1.5 whitespace-nowrap`}>
+            {COLUMN_LABELS[col]} <span className="text-muted-foreground/70 normal-case tracking-normal">{g[col].length}</span>
             {columnHasAlert(runs, col, readMap) ? (
               <span className="size-1.5 shrink-0 rounded-full bg-red-400" data-col-alert={col} title="待处理或未读异常" />
             ) : null}
           </h2>
           <div className="flex-1 overflow-y-auto flex flex-col gap-1.5 px-1.5 pb-2">
             {g[col].length === 0 && (
-              <div className={`${UI_META} text-zinc-600 px-2 py-6 text-center`}>暂无</div>
+              <div className={`${UI_META} text-muted-foreground px-2 py-6 text-center`}>暂无</div>
             )}
             {g[col].map((r) => {
               const v = cardView(r, now);
@@ -69,12 +73,12 @@ export default function Board({ runs, machines, selected, onSelect, showArchived
               const editing = editingId === r.id;
               const lag = lagOf(r.machine_id);
               return (
-                <div key={r.id} className={`group relative min-w-0 text-left rounded-xl border ${cardChromeClass(chrome, selected === r.id)}`}>
+                <Card key={r.id} size="sm" className={`group relative min-w-0 text-left gap-0 py-0 ring-0 ${cardChromeClass(chrome, selected === r.id)}`}>
                   {editing ? (
-                    <div className="px-2.5 py-2">
-                      <input
+                    <CardContent className="px-2.5 py-2">
+                      <Input
                         autoFocus
-                        className={`w-full ${UI_INPUT}`}
+                        className="w-full"
                         value={draft}
                         onChange={(e) => setDraft(e.target.value)}
                         onBlur={() => commitEdit(r.id)}
@@ -83,11 +87,11 @@ export default function Board({ runs, machines, selected, onSelect, showArchived
                           if (e.key === "Escape") setEditingId(null);
                         }}
                       />
-                    </div>
+                    </CardContent>
                   ) : (
                     <button onClick={() => onSelect(r.id)} className="w-full min-w-0 text-left px-2.5 py-2">
-                      <div className={`${UI_TYPE} font-medium leading-snug text-zinc-100 pr-16 break-words line-clamp-3`}>{v.title}</div>
-                      <div className={`${UI_META} text-zinc-500 mt-1 truncate`}>{nameOf(r.machine_id)} · {workspaceFolderName(r.workspace_root)}</div>
+                      <div className={`${UI_TYPE} font-medium leading-snug text-foreground pr-16 break-words line-clamp-3`}>{v.title}</div>
+                      <div className={`${UI_META} text-muted-foreground mt-1 truncate`}>{nameOf(r.machine_id)} · {workspaceFolderName(r.workspace_root)}</div>
                       {lag ? (
                         <div className={`${UI_META} text-amber-400 mt-1 leading-snug`}>{lag}</div>
                       ) : null}
@@ -97,43 +101,39 @@ export default function Board({ runs, machines, selected, onSelect, showArchived
                       {(r.status === "dispatched" || r.status === "created") && (
                         <div className={`${UI_META} text-amber-500/80 mt-1`}>已预填,待本机回车</div>
                       )}
-                      <div className={`${UI_META} text-zinc-500 mt-1 flex justify-between items-center gap-2`}>
-                        <span className={`inline-flex items-center gap-1.5 whitespace-nowrap ${BADGE_COLOR[col]}`}>
+                      <div className={`${UI_META} text-muted-foreground mt-1 flex justify-between items-center gap-2`}>
+                        <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
                           {unread ? <span className={`size-1.5 shrink-0 rounded-full ${chrome === "done" ? "bg-emerald-400" : "bg-red-400"}`} title={chrome === "need" ? "待处理" : chrome === "fail" ? "异常未读" : "未读"} /> : null}
-                          {v.badge}
+                          <Badge variant="outline" className={BADGE_COLOR[col]}>{v.badge}</Badge>
                         </span>
-                        <span className="text-zinc-600 whitespace-nowrap shrink-0">{v.elapsed}</span>
+                        <span className="text-muted-foreground whitespace-nowrap shrink-0">{v.elapsed}</span>
                       </div>
                     </button>
                   )}
                   {!editing && (
                     <div className="absolute top-1.5 right-1.5 flex gap-1 opacity-0 group-hover:opacity-100">
-                      <button type="button" onClick={(e) => { e.stopPropagation(); startEdit(r); }}
-                        className={UI_CHIP}>
+                      <Button type="button" size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); startEdit(r); }}>
                         改标题
-                      </button>
+                      </Button>
                       {showArchived ? (
-                        <button type="button" onClick={(e) => { e.stopPropagation(); onUnhide(r.id); }}
-                          className={UI_CHIP}>
+                        <Button type="button" size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); onUnhide(r.id); }}>
                           取消隐藏
-                        </button>
+                        </Button>
                       ) : canArchiveRun(r) ? (
-                        <button type="button" onClick={(e) => { e.stopPropagation(); onHide(r.id); }}
-                          className={UI_CHIP}>
+                        <Button type="button" size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); onHide(r.id); }}>
                           隐藏
-                        </button>
+                        </Button>
                       ) : null}
                     </div>
                   )}
                   {!editing && onRetry && canRetryRun(r) ? (
                     <div className="px-2.5 pb-2">
-                      <button type="button" onClick={(e) => { e.stopPropagation(); onRetry(r.id); }}
-                        className={UI_CHIP_ACCENT}>
+                      <Button type="button" size="sm" onClick={(e) => { e.stopPropagation(); onRetry(r.id); }}>
                         重试
-                      </button>
+                      </Button>
                     </div>
                   ) : null}
-                </div>
+                </Card>
               );
             })}
           </div>

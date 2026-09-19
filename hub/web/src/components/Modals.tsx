@@ -7,7 +7,10 @@ import { appendSnippetBody } from "../promptSnippets";
 import type { PromptSnippet } from "../uiPrefs";
 import type { Machine } from "../types";
 import { PromptSnippetBar } from "./PromptSnippetBar";
-import { UI_BTN_GHOST, UI_BTN_PRIMARY, UI_META, UI_OVERLAY, UI_PANEL, UI_SELECT, UI_TEXTAREA, UI_TYPE } from "../ui";
+import { Button } from "./ui/button";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
+import { Textarea } from "./ui/textarea";
+import { UI_META, UI_TYPE } from "../ui";
 
 const ERR: Record<string, string> = {
   RUN_LIMIT: "已达该机或该工作区并行上限",
@@ -88,34 +91,36 @@ export function DispatchModal({
   };
 
   return (
-    <div className={UI_OVERLAY} onClick={onClose}>
-      <div className={`w-[32rem] ${UI_PANEL} p-4 flex flex-col gap-3`} onClick={(e) => e.stopPropagation()}>
-        <h2 className={`font-bold ${UI_TYPE}`}>派发任务</h2>
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="sm:max-w-[32rem] gap-3" showCloseButton={false} onClick={(e) => e.stopPropagation()}>
+        <DialogHeader>
+          <DialogTitle className={UI_TYPE}>派发任务</DialogTitle>
+        </DialogHeader>
         {locked ? (
-          <div className={`${UI_TYPE} text-zinc-300 px-3 h-8 flex items-center rounded-lg bg-zinc-950 border border-zinc-800`}>
+          <div className={`${UI_TYPE} text-foreground px-3 h-8 flex items-center rounded-lg bg-muted border border-border`}>
             当前工作区：{presetLabel ?? workspace}
           </div>
         ) : (
           <>
             <select value={machineId} onChange={(e) => { setMachineId(e.target.value); setWorkspace(""); }}
-              className={UI_SELECT}>
+              className="h-8 w-full rounded-lg border border-input bg-background px-2.5 text-[13px] outline-none focus-visible:border-ring">
               {online.map((m) => <option key={m.id} value={m.id}>{m.name}({m.os})</option>)}
             </select>
             <select value={workspace} onChange={(e) => setWorkspace(e.target.value)}
-              className={UI_SELECT}>
+              className="h-8 w-full rounded-lg border border-input bg-background px-2.5 text-[13px] outline-none focus-visible:border-ring">
               <option value="">选择工作区…</option>
               {workspaces.map((w) => <option key={w} value={w}>{w}</option>)}
             </select>
-            {parseFailed && <div className={`${UI_TYPE} text-red-400`}>工作区列表解析失败，无法选择</div>}
+            {parseFailed && <div className={`${UI_TYPE} text-destructive`}>工作区列表解析失败，无法选择</div>}
           </>
         )}
         {activeOnWorkspace > 0 && (
-          <div className={`${UI_TYPE} text-amber-300/90`}>
+          <div className={`${UI_TYPE} text-amber-600 dark:text-amber-300`}>
             该工作区已有 {activeOnWorkspace} 个任务在跑或排队，并行可能争用同一批文件。
           </div>
         )}
         {selectedMachine && !injectReady && (
-          <div className={`${UI_TYPE} text-red-400`}>{CDP_NOT_READY_COPY}</div>
+          <div className={`${UI_TYPE} text-destructive`}>{CDP_NOT_READY_COPY}</div>
         )}
         <PromptSnippetBar
           snippets={snippets}
@@ -125,9 +130,9 @@ export function DispatchModal({
             await saveSnippets([...snippets, { id: crypto.randomUUID(), title, body }]);
           }}
         />
-        <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={8}
+        <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={8}
           placeholder="提示词（Markdown 原文；Enter 派发，Shift+Enter 换行）"
-          className={`w-full ${UI_TEXTAREA} font-mono min-h-[8rem] resize-y`}
+          className="w-full font-mono min-h-[8rem] resize-y"
           onKeyDown={(e) => {
             if (!isFollowupSendEnter(e)) return;
             e.preventDefault();
@@ -151,24 +156,23 @@ export function DispatchModal({
           e.target.value = "";
         }} />
         {files.length > 0 && (
-          <div className={`${UI_META} text-zinc-400 flex flex-col gap-1`}>
+          <div className={`${UI_META} text-muted-foreground flex flex-col gap-1`}>
             {files.map((f, i) => (
               <div key={i} className="flex justify-between gap-2">
                 <span className="truncate">{f.name || "粘贴的图片"}</span>
-                <button type="button" className="text-zinc-500" onClick={() => setFiles(files.filter((_, j) => j !== i))}>移除</button>
+                <Button type="button" variant="ghost" size="sm" onClick={() => setFiles(files.filter((_, j) => j !== i))}>移除</Button>
               </div>
             ))}
           </div>
         )}
-        {error && <div className={`${UI_TYPE} text-red-400`}>{error}</div>}
-        <div className="flex justify-end gap-2">
-          <button type="button" onClick={onClose} className={UI_BTN_GHOST}>取消</button>
-          <button type="button" disabled={!canDispatch} onClick={() => submitDispatch()}
-            className={UI_BTN_PRIMARY}>
+        {error && <div className={`${UI_TYPE} text-destructive`}>{error}</div>}
+        <DialogFooter className="mx-0 mb-0">
+          <Button type="button" variant="outline" onClick={onClose}>取消</Button>
+          <Button type="button" disabled={!canDispatch} onClick={() => submitDispatch()}>
             {sending ? "派发中…" : "派发"}
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

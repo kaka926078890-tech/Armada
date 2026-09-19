@@ -65,7 +65,7 @@ describe("prompt snippet wiring", () => {
     const detail = readFileSync(join(root, "src/components/RunDetail.tsx"), "utf8");
     expect(dispatch).toContain("PromptSnippetBar");
     expect(dispatch).toContain("appendSnippetBody");
-    expect(dispatch.indexOf("<PromptSnippetBar")).toBeLessThan(dispatch.indexOf("<textarea"));
+    expect(dispatch.indexOf("<PromptSnippetBar")).toBeLessThan(dispatch.indexOf("<Textarea"));
     expect(detail).toContain("PromptSnippetBar");
     expect(detail).toContain("appendSnippetBody");
     expect(detail.indexOf("<PromptSnippetBar")).toBeLessThan(detail.indexOf("value={followup}"));

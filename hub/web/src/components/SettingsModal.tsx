@@ -2,7 +2,11 @@ import { useEffect, useState } from "react";
 import type { FontScale, ThemeName } from "../theme";
 import { snippetOperatorMessage } from "../promptSnippets";
 import type { PromptSnippet } from "../uiPrefs";
-import { UI_BTN_DANGER, UI_BTN_GHOST, UI_BTN_PRIMARY, UI_BTN_SEGMENT_OFF, UI_BTN_SEGMENT_ON, UI_INPUT, UI_LABEL, UI_META, UI_OVERLAY, UI_PANEL, UI_TEXTAREA, UI_TYPE } from "../ui";
+import { Button } from "./ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
+import { Input } from "./ui/input";
+import { Textarea } from "./ui/textarea";
+import { UI_LABEL, UI_META, UI_TYPE } from "../ui";
 
 function SnippetRow({
   snippet, onSave, onDelete,
@@ -35,30 +39,29 @@ function SnippetRow({
   };
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+    <div className="flex flex-col gap-2 rounded-lg border border-border bg-card/60 p-3">
       <label className="flex flex-col gap-1">
         <span className={UI_LABEL}>标题</span>
-        <input
+        <Input
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          className={UI_INPUT}
           aria-label="标题"
         />
       </label>
       <label className="flex flex-col gap-1">
         <span className={UI_LABEL}>提示词</span>
-        <textarea
+        <Textarea
           value={body}
           onChange={(e) => setBody(e.target.value)}
           rows={3}
-          className={`${UI_TEXTAREA} resize-y`}
+          className="resize-y"
           aria-label="提示词"
         />
       </label>
-      {error && <div className={`${UI_TYPE} text-red-400`}>{error}</div>}
+      {error && <div className={`${UI_TYPE} text-destructive`}>{error}</div>}
       <div className="flex justify-end gap-2">
-        <button type="button" disabled={busy} className={UI_BTN_DANGER} onClick={() => void run(onDelete)}>删除</button>
-        <button type="button" disabled={busy} className={UI_BTN_PRIMARY} onClick={() => void run(() => onSave({ ...snippet, title, body }))}>保存</button>
+        <Button type="button" disabled={busy} variant="destructive" onClick={() => void run(onDelete)}>删除</Button>
+        <Button type="button" disabled={busy} onClick={() => void run(() => onSave({ ...snippet, title, body }))}>保存</Button>
       </div>
     </div>
   );
@@ -86,35 +89,32 @@ export default function SettingsModal({
   };
 
   return (
-    <div className={UI_OVERLAY} onClick={onClose}>
-      <div
-        className={`w-[28rem] max-h-[80vh] overflow-y-auto ${UI_PANEL} p-4 flex flex-col gap-4`}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between">
-          <h2 className={`font-bold ${UI_TYPE}`}>设置</h2>
-          <button type="button" className={UI_BTN_GHOST} onClick={onClose}>完成</button>
-        </div>
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="sm:max-w-[28rem] max-h-[80vh] overflow-y-auto gap-4" showCloseButton={false} onClick={(e) => e.stopPropagation()}>
+        <DialogHeader className="flex-row items-center justify-between">
+          <DialogTitle className={UI_TYPE}>设置</DialogTitle>
+          <Button type="button" variant="outline" onClick={onClose}>完成</Button>
+        </DialogHeader>
         <div>
           <div className={`${UI_LABEL} uppercase tracking-wide mb-1.5`}>外观</div>
           <div className="flex gap-1.5">
-            <button type="button" className={theme === "dark" ? UI_BTN_SEGMENT_ON : UI_BTN_SEGMENT_OFF} onClick={() => onTheme("dark")}>黑夜</button>
-            <button type="button" className={theme === "light" ? UI_BTN_SEGMENT_ON : UI_BTN_SEGMENT_OFF} onClick={() => onTheme("light")}>明亮</button>
+            <Button type="button" variant={theme === "dark" ? "secondary" : "outline"} onClick={() => onTheme("dark")}>黑夜</Button>
+            <Button type="button" variant={theme === "light" ? "secondary" : "outline"} onClick={() => onTheme("light")}>明亮</Button>
           </div>
         </div>
         <div>
           <div className={`${UI_LABEL} uppercase tracking-wide mb-1.5`}>字号</div>
           <div className="flex gap-1.5">
-            <button type="button" className={fontScale === "normal" ? UI_BTN_SEGMENT_ON : UI_BTN_SEGMENT_OFF} onClick={() => onFontScale("normal")}>正常</button>
-            <button type="button" className={fontScale === "large" ? UI_BTN_SEGMENT_ON : UI_BTN_SEGMENT_OFF} onClick={() => onFontScale("large")}>大</button>
-            <button type="button" className={fontScale === "xlarge" ? UI_BTN_SEGMENT_ON : UI_BTN_SEGMENT_OFF} onClick={() => onFontScale("xlarge")}>超大</button>
+            <Button type="button" variant={fontScale === "normal" ? "secondary" : "outline"} onClick={() => onFontScale("normal")}>正常</Button>
+            <Button type="button" variant={fontScale === "large" ? "secondary" : "outline"} onClick={() => onFontScale("large")}>大</Button>
+            <Button type="button" variant={fontScale === "xlarge" ? "secondary" : "outline"} onClick={() => onFontScale("xlarge")}>超大</Button>
           </div>
         </div>
         <div>
           <div className={`${UI_LABEL} uppercase tracking-wide mb-1.5`}>快捷提示词</div>
-          {snippetError && <div className={`${UI_TYPE} text-red-400 mb-1.5`}>{snippetError}</div>}
+          {snippetError && <div className={`${UI_TYPE} text-destructive mb-1.5`}>{snippetError}</div>}
           {snippets.length === 0 ? (
-            <div className={`${UI_META} text-zinc-500`}>还没有快捷提示词，在输入框上方点添加</div>
+            <div className={`${UI_META} text-muted-foreground`}>还没有快捷提示词，在输入框上方点添加</div>
           ) : (
             <div className="flex flex-col gap-2">
               {snippets.map((s) => (
@@ -128,7 +128,7 @@ export default function SettingsModal({
             </div>
           )}
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

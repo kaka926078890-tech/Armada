@@ -10,7 +10,10 @@ import { endFollowupSend, isFollowupSendEnter, tryBeginFollowupSend } from "../f
 import { WIDTH_KEY, type PromptSnippet } from "../uiPrefs";
 import { appendSnippetBody } from "../promptSnippets";
 import { PromptSnippetBar } from "./PromptSnippetBar";
-import { UI_BTN_ACCENT, UI_BTN_DANGER_FILL, UI_BTN_GHOST, UI_BTN_PRIMARY, UI_INPUT, UI_META, UI_TEXTAREA_INSET, UI_TYPE } from "../ui";
+import { Button } from "./ui/button";
+import { Input } from "./ui/input";
+import { Textarea } from "./ui/textarea";
+import { UI_META, UI_TYPE } from "../ui";
 
 const DEFAULT_W = 576;
 const MIN_W = 400;
@@ -61,13 +64,13 @@ function DrawerShell({ children }: { children: ReactNode }) {
   };
 
   return (
-    <aside className="h-full min-h-0 shrink-0 border-l border-zinc-800/80 flex flex-col bg-zinc-950 shadow-2xl relative" style={{ width }}>
+    <aside className="h-full min-h-0 shrink-0 border-l border-border flex flex-col bg-background shadow-2xl relative" style={{ width }}>
       <div
         role="separator"
         aria-orientation="vertical"
         aria-label="拖动调整详情宽度"
         title="拖动调整宽度"
-        className="absolute inset-y-0 left-0 w-2 z-10 cursor-ew-resize bg-zinc-700/25 hover:bg-sky-500/60 active:bg-sky-500/80"
+        className="absolute inset-y-0 left-0 w-2 z-10 cursor-ew-resize bg-border/40 hover:bg-primary/60 active:bg-primary/80"
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
@@ -315,9 +318,9 @@ export default function RunDetail({
   if (missing) {
     return (
       <DrawerShell>
-        <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800">
-          <span className={`${UI_TYPE} text-red-400`}>任务不存在或已删除</span>
-          <button onClick={onClose} className="ml-auto text-zinc-500 hover:text-zinc-200">✕</button>
+        <div className="flex items-center gap-2 px-3 py-2 border-b border-border">
+          <span className={`${UI_TYPE} text-destructive`}>任务不存在或已删除</span>
+          <Button type="button" variant="ghost" size="icon-sm" className="ml-auto" onClick={onClose} aria-label="关闭">✕</Button>
         </div>
       </DrawerShell>
     );
@@ -326,8 +329,8 @@ export default function RunDetail({
   if (loadError && !run) {
     return (
       <DrawerShell>
-        <div className={`px-3 py-2 ${UI_TYPE} text-red-400 bg-red-950/40 border-b border-red-900/50`}>{loadError}</div>
-        <button onClick={onClose} className="m-3 text-zinc-500 hover:text-zinc-200 self-end">✕</button>
+        <div className={`px-3 py-2 ${UI_TYPE} text-destructive bg-destructive/10 border-b border-destructive/30`}>{loadError}</div>
+        <Button type="button" variant="ghost" size="icon-sm" className="m-3 self-end" onClick={onClose} aria-label="关闭">✕</Button>
       </DrawerShell>
     );
   }
@@ -335,9 +338,9 @@ export default function RunDetail({
   if (!run) {
     return (
       <DrawerShell>
-        <div className="flex items-center gap-2 px-4 py-2.5 border-b border-zinc-800/80">
-          <span className={`${UI_TYPE} text-zinc-500`}>加载中…</span>
-          <button onClick={onClose} className="ml-auto text-zinc-500 hover:text-zinc-200">✕</button>
+        <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border">
+          <span className={`${UI_TYPE} text-muted-foreground`}>加载中…</span>
+          <Button type="button" variant="ghost" size="icon-sm" className="ml-auto" onClick={onClose} aria-label="关闭">✕</Button>
         </div>
       </DrawerShell>
     );
@@ -367,13 +370,13 @@ export default function RunDetail({
   return (
     <DrawerShell>
       {loadError && (
-        <div className="px-3 py-1.5 text-xs text-red-400 bg-red-950/40 border-b border-red-900/50">{loadError}</div>
+        <div className="px-3 py-1.5 text-[12px] text-destructive bg-destructive/10 border-b border-destructive/30">{loadError}</div>
       )}
-      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-zinc-800/80">
+      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border">
         {editingTitle ? (
-          <input
+          <Input
             autoFocus
-            className={`min-w-0 flex-1 ${UI_INPUT}`}
+            className="min-w-0 flex-1"
             value={titleDraft}
             onChange={(e) => setTitleDraft(e.target.value)}
             onBlur={commitTitle}
@@ -385,32 +388,30 @@ export default function RunDetail({
         ) : (
           <button
             type="button"
-            className={`font-medium ${UI_TYPE} truncate text-left min-w-0 flex-1 hover:text-sky-300`}
+            className={`font-medium ${UI_TYPE} truncate text-left min-w-0 flex-1 hover:text-primary`}
             title={`${titleText}（点击修改标题）`}
             onClick={() => { setTitleDraft(runDisplayName(run)); setEditingTitle(true); }}
           >
             {titleText.length > 36 ? `${titleText.slice(0, 36)}…` : titleText}
           </button>
         )}
-        <span className={`text-xs shrink-0 ${active ? "text-sky-400" : "text-zinc-500"}`}>{STATUS[run.status] ?? run.status}</span>
-        <button onClick={onClose} className="ml-auto text-zinc-500 hover:text-zinc-200">✕</button>
+        <span className={`text-[12px] shrink-0 ${active ? "text-sky-400" : "text-muted-foreground"}`}>{STATUS[run.status] ?? run.status}</span>
+        <Button type="button" variant="ghost" size="icon-sm" className="ml-auto" onClick={onClose} aria-label="关闭">✕</Button>
       </div>
-      <div className={`px-4 py-2 ${UI_META} text-zinc-500 border-b border-zinc-800/80`}>
+      <div className={`px-4 py-2 ${UI_META} text-muted-foreground border-b border-border`}>
         <div className="truncate" title={run.workspace_root}>{workspaceFolderName(run.workspace_root)}</div>
-        {titleError && <div className="mt-1 text-red-400">{titleError}</div>}
-        {!injectReady && <div className="mt-1 text-red-400">{CDP_NOT_READY_COPY}</div>}
-        <div className="mt-2 flex gap-2">
-          {active && <button onClick={() => {
+        {titleError && <div className="mt-1 text-destructive">{titleError}</div>}
+        {!injectReady && <div className="mt-1 text-destructive">{CDP_NOT_READY_COPY}</div>}
+        <div className="mt-2 flex gap-2 flex-wrap">
+          {active && <Button variant="destructive" onClick={() => {
             setCancelError("");
             api.cancel(run.id).then((r) => {
               if (r?.error) { setCancelError(r.error); return; }
               onChanged();
             }).catch((err) => setCancelError(String(err)));
-          }}
-            className={UI_BTN_DANGER_FILL}>取消</button>}
-          {["error", "unknown"].includes(run.status) && <button onClick={() => api.close(run.id).then(onChanged)}
-            className={UI_BTN_GHOST}>人工关闭</button>}
-          {canRetryRun(run) && <button disabled={!injectReady} onClick={() => {
+          }}>取消</Button>}
+          {["error", "unknown"].includes(run.status) && <Button variant="outline" onClick={() => api.close(run.id).then(onChanged)}>人工关闭</Button>}
+          {canRetryRun(run) && <Button variant="secondary" disabled={!injectReady} onClick={() => {
             setRetryError("");
             api.retry(run.id).then((r) => {
               if (r?.error) {
@@ -428,18 +429,18 @@ export default function RunDetail({
               if (r?.run) setRun(r.run);
               onChanged();
             }).catch((err) => setRetryError(String(err)));
-          }}
-            className={UI_BTN_ACCENT}>重试</button>}
+          }}>重试</Button>}
           {run.archived_at
-            ? <button onClick={() => { api.unarchive(run.id).then((res) => { if (res?.run) setRun(res.run); onChanged(); }); }} className={UI_BTN_GHOST}>取消隐藏</button>
+            ? <Button variant="outline" onClick={() => { api.unarchive(run.id).then((res) => { if (res?.run) setRun(res.run); onChanged(); }); }}>取消隐藏</Button>
             : ["dispatched", "binding", "running", "created"].includes(run.status) ? null
-            : <button onClick={() => api.archive(run.id).then(() => { onChanged(); onClose(); })} className={UI_BTN_GHOST}>隐藏</button>}
-          <a href={`/api/audit/export?token=${encodeURIComponent(getToken())}`}
-            className={UI_BTN_GHOST}>导出审计</a>
+            : <Button variant="outline" onClick={() => api.archive(run.id).then(() => { onChanged(); onClose(); })}>隐藏</Button>}
+          <Button variant="outline" asChild>
+            <a href={`/api/audit/export?token=${encodeURIComponent(getToken())}`}>导出审计</a>
+          </Button>
         </div>
-        {cancelError && <div className={`mt-2 text-red-400 ${UI_TYPE}`}>{cancelError}</div>}
-        {retryError && <div className={`mt-2 text-red-400 ${UI_TYPE}`}>{retryError}</div>}
-        {askError && <div className={`mt-2 text-red-400 ${UI_TYPE}`}>{askError}</div>}
+        {cancelError && <div className={`mt-2 text-destructive ${UI_TYPE}`}>{cancelError}</div>}
+        {retryError && <div className={`mt-2 text-destructive ${UI_TYPE}`}>{retryError}</div>}
+        {askError && <div className={`mt-2 text-destructive ${UI_TYPE}`}>{askError}</div>}
       </div>
       <div
         ref={scrollRef}
@@ -460,7 +461,7 @@ export default function RunDetail({
             type="button"
             disabled={loadingOlder}
             onClick={loadOlder}
-            className={`w-full mb-3 h-8 ${UI_META} text-zinc-500 hover:text-zinc-300 disabled:opacity-40`}
+            className={`w-full mb-3 h-8 ${UI_META} text-muted-foreground hover:text-foreground disabled:opacity-40`}
           >
             {loadingOlder ? "加载更早对话…" : "加载更早对话"}
           </button>
@@ -482,20 +483,20 @@ export default function RunDetail({
           } : undefined}
         />
         {queued.length > 0 && (
-          <div className="mt-3 rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2" aria-label="Queued messages">
-            <div className={`${UI_META} text-zinc-500 mb-1`}>
+          <div className="mt-3 rounded-lg border border-border bg-card/60 px-3 py-2" aria-label="Queued messages">
+            <div className={`${UI_META} text-muted-foreground mb-1`}>
               {queued.length} Queued Message{queued.length > 1 ? "s" : ""}
             </div>
             <div className="flex flex-col gap-1.5">
               {queued.map((q) => (
-                <div key={q.id} className={`${UI_TYPE} text-zinc-200 leading-relaxed`}>{q.prompt}</div>
+                <div key={q.id} className={`${UI_TYPE} text-foreground leading-relaxed`}>{q.prompt}</div>
               ))}
             </div>
           </div>
         )}
       </div>
       {run.conversation_id && (
-        <div className="p-3 border-t border-zinc-800/80 flex flex-col gap-2">
+        <div className="p-3 border-t border-border flex flex-col gap-2">
           <PromptSnippetBar
             snippets={snippets}
             onAppend={(body) => setFollowup(appendSnippetBody(followup, body))}
@@ -506,7 +507,7 @@ export default function RunDetail({
           />
           <form className="flex flex-col gap-2" onSubmit={sendFollowup}>
           <div className="flex gap-2 items-end">
-            <textarea
+            <Textarea
               value={followup}
               onChange={(e) => setFollowup(e.target.value)}
               onPaste={(e) => {
@@ -525,9 +526,9 @@ export default function RunDetail({
               }}
               rows={3}
               placeholder={run.pending_ask ? (run.pending_ask.kind === "plan" ? "请先点上方 Build…" : "请先回答上方选择题…") : run.status === "running" ? "Add a follow-up…" : "续聊同一对话…（Enter 发送，Shift+Enter 换行；可粘贴截图）"}
-              className={`flex-1 min-h-[4.5rem] max-h-48 resize-y ${UI_TEXTAREA_INSET}`}
+              className="flex-1 min-h-[4.5rem] max-h-48 resize-y"
             />
-            <button type="submit" disabled={!injectReady || sending || (!followup.trim() && followupFiles.length === 0)} className={`${UI_BTN_PRIMARY} shrink-0`}>发送</button>
+            <Button type="submit" disabled={!injectReady || sending || (!followup.trim() && followupFiles.length === 0)} className="shrink-0">发送</Button>
           </div>
           <input type="file" accept={CONSOLE_ACCEPT} multiple onChange={(e) => {
             const picked = [...(e.target.files ?? [])];
@@ -537,11 +538,11 @@ export default function RunDetail({
             e.target.value = "";
           }} />
           {followupFiles.length > 0 && (
-            <div className="text-[12px] text-zinc-400 flex flex-col gap-1">
+            <div className="text-[12px] text-muted-foreground flex flex-col gap-1">
               {followupFiles.map((f, i) => (
                 <div key={i} className="flex justify-between gap-2">
                   <span className="truncate">{f.name || "粘贴的图片"}</span>
-                  <button type="button" className="text-zinc-500" onClick={() => setFollowupFiles(followupFiles.filter((_, j) => j !== i))}>移除</button>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setFollowupFiles(followupFiles.filter((_, j) => j !== i))}>移除</Button>
                 </div>
               ))}
             </div>

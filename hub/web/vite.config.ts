@@ -8,6 +8,9 @@ const root = dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  resolve: {
+    alias: { "@": resolve(root, "src") },
+  },
   build: { outDir: "dist" },
   server: {
     fs: { allow: [resolve(root, "../..")] },

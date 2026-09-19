@@ -34,9 +34,9 @@ describe("appearance layout stays coordinated when text scales", () => {
   test("sidebar and board columns keep a 240px floor; extra width can grow", () => {
     const sidebar = readFileSync(join(web, "src/components/Sidebar.tsx"), "utf8");
     const board = readFileSync(join(web, "src/components/Board.tsx"), "utf8");
-    const ui = readFileSync(join(web, "src/ui.ts"), "utf8");
+    const button = readFileSync(join(web, "src/components/ui/button.tsx"), "utf8");
     expect(sidebar).toContain("w-[224px]");
-    expect(ui).toContain("whitespace-nowrap");
+    expect(button).toContain("whitespace-nowrap");
     expect(board).toContain("min-w-[240px]");
     expect(board).not.toMatch(/max-w-\[240px\]/);
   });

@@ -180,7 +180,7 @@ describe("unread dots", () => {
     expect(cardChromeClass("fail", false)).toContain("border-l-red-400");
     expect(cardChromeClass("need", true)).toContain("border-l-red-400");
     expect(cardChromeClass("done", false)).toContain("border-l-emerald-400");
-    expect(cardChromeClass("none", true)).toContain("border-sky-600");
+    expect(cardChromeClass("none", true)).toContain("border-primary/80");
     expect(cardChromeClass("none", false)).toContain("border-transparent");
   });
 

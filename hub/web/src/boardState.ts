@@ -252,15 +252,15 @@ export function cardChromeOf(
 }
 
 export function cardChromeClass(chrome: CardChrome, selected: boolean): string {
-  const selectedRing = selected ? " ring-1 ring-sky-500/40" : "";
+    const selectedRing = selected ? " ring-1 ring-primary/40" : "";
   if (chrome === "need" || chrome === "fail") {
-    return `border-zinc-800/80 border-l-[3px] border-l-red-400 bg-zinc-900${selectedRing}`;
+    return `border-border border-l-[3px] border-l-red-400 bg-card${selectedRing}`;
   }
   if (chrome === "done") {
-    return `border-zinc-800/80 border-l-[3px] border-l-emerald-400 bg-zinc-900${selectedRing}`;
+    return `border-border border-l-[3px] border-l-emerald-400 bg-card${selectedRing}`;
   }
-  if (selected) return "border-sky-600/80 bg-zinc-900";
-  return "border-transparent bg-zinc-900/50 hover:border-zinc-700";
+  if (selected) return "border-primary/80 bg-card";
+  return "border-transparent bg-card/50 hover:border-border";
 }
 
 /** 列上的红点：该列有待答 Ask 或未读失败/中止。已完成未读走绿条，不算问题点。 */

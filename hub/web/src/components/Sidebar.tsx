@@ -5,7 +5,10 @@ import {
   encodeWorkspaceKey, extensionLagNotice, filterRunsByWorkspace, formatUnreadCount, groupSlotsByMachine,
   workspaceFolderName, workspaceHasLiveRun, workspaceUnreadCount, type WorkspaceSlot,
 } from "../boardState";
-import { UI_BTN_GHOST, UI_BTN_PRIMARY, UI_INPUT, UI_META, UI_TYPE } from "../ui";
+import { Button } from "./ui/button";
+import { Input } from "./ui/input";
+import { ScrollArea } from "./ui/scroll-area";
+import { UI_META, UI_TYPE } from "../ui";
 
 function UnreadCount({ n }: { n: number }) {
   const label = formatUnreadCount(n);
@@ -72,41 +75,41 @@ export default function Sidebar({
   };
 
   return (
-    <aside className="w-[224px] shrink-0 border-r border-zinc-800/80 flex flex-col bg-zinc-950">
+    <aside className="w-[224px] shrink-0 border-r border-border flex flex-col bg-sidebar text-sidebar-foreground">
       {showDesktopActions ? (
         <div className="mx-3 mt-3 mb-1.5 flex flex-col gap-1.5">
-          <button type="button" onClick={onOpenWorkspace} className={`${UI_BTN_GHOST} w-full`}>
+          <Button type="button" variant="outline" className="w-full" onClick={onOpenWorkspace}>
             打开工作区
-          </button>
-          <button type="button" onClick={onRepairCdp} className={`${UI_BTN_GHOST} w-full`}>
+          </Button>
+          <Button type="button" variant="outline" className="w-full" onClick={onRepairCdp}>
             修复调试口
-          </button>
-          <button type="button" onClick={onGetShareLink} className={`${UI_BTN_GHOST} w-full`}>
+          </Button>
+          <Button type="button" variant="outline" className="w-full" onClick={onGetShareLink}>
             获取分享链接
-          </button>
+          </Button>
         </div>
       ) : null}
-      <button
+      <Button
         type="button"
         disabled={!canDispatch}
         onClick={onDispatch}
-        className={`${UI_BTN_PRIMARY} mx-3 mb-1 w-[calc(100%-1.5rem)] ${showDesktopActions ? "mt-0" : "mt-3"}`}
+        className={`mx-3 mb-1 w-[calc(100%-1.5rem)] ${showDesktopActions ? "mt-0" : "mt-3"}`}
       >
         + 派发任务
-      </button>
-      <div className={`px-3 pt-1.5 pb-1 ${UI_META} uppercase tracking-wide text-zinc-600`}>机器</div>
-      <div className="flex-1 overflow-y-auto">
+      </Button>
+      <div className={`px-3 pt-1.5 pb-1 ${UI_META} uppercase tracking-wide text-muted-foreground`}>机器</div>
+      <ScrollArea className="flex-1">
         {groups.length === 0 && (
-          <div className="px-3 py-4 text-[12px] text-zinc-600">暂无在线工作区</div>
+          <div className={`px-3 py-4 ${UI_META} text-muted-foreground`}>暂无在线工作区</div>
         )}
         {groups.map((g) => {
           const lag = lagOf(g.machineId);
           return (
           <div key={g.machineId} className="pb-2">
             <div className="group px-3 py-1.5 flex items-center gap-2">
-              <span className={g.online ? "text-emerald-400 text-[12px]" : "text-zinc-600 text-[12px]"}>●</span>
+              <span className={g.online ? "text-emerald-400 text-[12px]" : "text-muted-foreground text-[12px]"}>●</span>
               {editingId === g.machineId ? (
-                <input
+                <Input
                   autoFocus
                   value={draft}
                   maxLength={40}
@@ -117,7 +120,7 @@ export default function Sidebar({
                     if (e.key === "Enter") { e.preventDefault(); commit(g.machineId); }
                     if (e.key === "Escape") setEditingId(null);
                   }}
-                  className={`min-w-0 flex-1 ${UI_TYPE} font-medium ${UI_INPUT}`}
+                  className={`min-w-0 flex-1 ${UI_TYPE} font-medium`}
                 />
               ) : (
                 <>
@@ -126,7 +129,7 @@ export default function Sidebar({
                     type="button"
                     aria-label="重命名电脑"
                     onClick={() => { setEditingId(g.machineId); setDraft(g.machineName); }}
-                    className="text-zinc-500 hover:text-zinc-200 opacity-0 group-hover:opacity-100 shrink-0"
+                    className="text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 shrink-0"
                   >
                     <PencilIcon />
                   </button>
@@ -145,9 +148,9 @@ export default function Sidebar({
                 <button
                   key={key}
                   onClick={() => onSelectWorkspace(key)}
-                  className={`w-full text-left pl-7 pr-3 py-1 flex items-center gap-1.5 ${key === selectedKey ? "bg-zinc-900 text-zinc-100" : "hover:bg-zinc-900/50 text-zinc-400"}`}
+                  className={`w-full text-left pl-7 pr-3 py-1 flex items-center gap-1.5 ${key === selectedKey ? "bg-sidebar-accent text-sidebar-accent-foreground" : "hover:bg-sidebar-accent/50 text-muted-foreground"}`}
                 >
-                  <span className="text-zinc-600 text-[12px] shrink-0">–</span>
+                  <span className="text-muted-foreground text-[12px] shrink-0">–</span>
                   <span className="min-w-0 flex-1 flex items-center gap-1.5">
                     <span className={`min-w-0 truncate ${UI_TYPE}`} title={s.root}>{workspaceFolderName(s.root)}</span>
                     {live ? <LiveSpinner /> : null}
@@ -159,7 +162,7 @@ export default function Sidebar({
           </div>
           );
         })}
-      </div>
+      </ScrollArea>
     </aside>
   );
 }
