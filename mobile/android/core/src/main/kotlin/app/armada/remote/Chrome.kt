@@ -40,3 +40,30 @@ fun unreadBadgeText(count: Int): String? {
     if (count <= 0) return null
     return if (count > 99) "99+" else "$count"
 }
+
+/** iOS system colors (light / dark). App accent is systemBlue, not hub primary. */
+data class IosPaletteArgb(
+    val accent: Long,
+    val green: Long,
+    val red: Long,
+    val blue: Long,
+    val gray: Long,
+    val orange: Long,
+    val page: Long,
+    val grouped: Long,
+    val cell: Long,
+    val secondary: Long,
+)
+
+fun iosPaletteArgb(dark: Boolean) = IosPaletteArgb(
+    accent = if (dark) 0xFF0A84FFL else 0xFF007AFFL,
+    green = if (dark) 0xFF30D158L else 0xFF34C759L,
+    red = if (dark) 0xFFFF453AL else 0xFFFF3B30L,
+    blue = if (dark) 0xFF0A84FFL else 0xFF007AFFL,
+    gray = 0xFF8E8E93L,
+    orange = if (dark) 0xFFFF9F0AL else 0xFFFF9500L,
+    page = if (dark) 0xFF000000L else 0xFFFFFFFFL,
+    grouped = if (dark) 0xFF000000L else 0xFFF2F2F7L,
+    cell = if (dark) 0xFF1C1C1EL else 0xFFFFFFFFL,
+    secondary = if (dark) 0xFF1C1C1EL else 0xFFF2F2F7L,
+)

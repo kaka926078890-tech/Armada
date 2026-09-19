@@ -41,6 +41,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextStyle
@@ -51,56 +52,92 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
-val AccentBlue = Color(0xFF599CE7)
 val PlanYellow = Color(0xFFF1B467)
-val StatusGreen = Color(0xFF22C55E)
-val StatusRed = Color(0xFFDC2626)
-val StatusBlue = Color(0xFF3B82F6)
-val StatusGray = Color(0xFF9CA3AF)
-val StatusOrange = Color(0xFFF59E0B)
 val IosGroupedLight = Color(0xFFF2F2F7)
 val IosGroupedDark = Color(0xFF000000)
 val IosCellLight = Color(0xFFFFFFFF)
 val IosCellDark = Color(0xFF1C1C1E)
 
-val LocalIosFill = compositionLocalOf { Color(0x51787880) }
+data class IosPalette(
+    val accent: Color,
+    val green: Color,
+    val red: Color,
+    val blue: Color,
+    val gray: Color,
+    val orange: Color,
+    val page: Color,
+    val grouped: Color,
+    val cell: Color,
+    val secondary: Color,
+)
 
-fun iosFill(dark: Boolean) = if (dark) Color(0x51787880) else Color(0x33787880)
-
-fun armadaColorScheme(dark: Boolean) = if (dark) {
-    darkColorScheme(
-        primary = AccentBlue,
-        onPrimary = Color.White,
-        secondary = AccentBlue,
-        onSecondary = Color.White,
-        tertiary = AccentBlue,
-        background = IosGroupedDark,
-        onBackground = Color(0xFFF2F2F7),
-        surface = IosCellDark,
-        onSurface = Color(0xFFF2F2F7),
-        surfaceVariant = Color(0xFF2C2C2E),
-        onSurfaceVariant = Color(0xFF8E8E93),
-        outline = Color(0xFF3A3A3C),
-        error = StatusRed,
-    )
-} else {
-    lightColorScheme(
-        primary = AccentBlue,
-        onPrimary = Color.White,
-        secondary = AccentBlue,
-        onSecondary = Color.White,
-        tertiary = AccentBlue,
-        background = IosGroupedLight,
-        onBackground = Color(0xFF000000),
-        surface = IosCellLight,
-        onSurface = Color(0xFF000000),
-        surfaceVariant = Color(0xFFE5E5EA),
-        onSurfaceVariant = Color(0xFF8E8E93),
-        outline = Color(0xFFC6C6C8),
-        error = StatusRed,
+fun iosPalette(dark: Boolean): IosPalette {
+    val a = iosPaletteArgb(dark)
+    fun c(v: Long) = Color(v)
+    return IosPalette(
+        accent = c(a.accent),
+        green = c(a.green),
+        red = c(a.red),
+        blue = c(a.blue),
+        gray = c(a.gray),
+        orange = c(a.orange),
+        page = c(a.page),
+        grouped = c(a.grouped),
+        cell = c(a.cell),
+        secondary = c(a.secondary),
     )
 }
 
+val LocalIosPalette = compositionLocalOf { iosPalette(true) }
+val LocalIosFill = compositionLocalOf { Color(0x51787880) }
+
+val AccentBlue: Color @Composable get() = LocalIosPalette.current.accent
+val StatusGreen: Color @Composable get() = LocalIosPalette.current.green
+val StatusRed: Color @Composable get() = LocalIosPalette.current.red
+val StatusBlue: Color @Composable get() = LocalIosPalette.current.blue
+val StatusGray: Color @Composable get() = LocalIosPalette.current.gray
+val StatusOrange: Color @Composable get() = LocalIosPalette.current.orange
+
+fun iosFill(dark: Boolean) = if (dark) Color(0x51787880) else Color(0x33787880)
+
+fun armadaColorScheme(dark: Boolean): androidx.compose.material3.ColorScheme {
+    val p = iosPalette(dark)
+    return if (dark) {
+        darkColorScheme(
+            primary = p.accent,
+            onPrimary = Color.White,
+            secondary = p.accent,
+            onSecondary = Color.White,
+            tertiary = p.accent,
+            background = p.grouped,
+            onBackground = Color(0xFFF2F2F7),
+            surface = p.cell,
+            onSurface = Color(0xFFF2F2F7),
+            surfaceVariant = Color(0xFF2C2C2E),
+            onSurfaceVariant = Color(0xFF8E8E93),
+            outline = Color(0xFF3A3A3C),
+            error = p.red,
+        )
+    } else {
+        lightColorScheme(
+            primary = p.accent,
+            onPrimary = Color.White,
+            secondary = p.accent,
+            onSecondary = Color.White,
+            tertiary = p.accent,
+            background = p.grouped,
+            onBackground = Color(0xFF000000),
+            surface = p.cell,
+            onSurface = Color(0xFF000000),
+            surfaceVariant = Color(0xFFE5E5EA),
+            onSurfaceVariant = Color(0xFF8E8E93),
+            outline = Color(0xFFC6C6C8),
+            error = p.red,
+        )
+    }
+}
+
+@Composable
 fun statusColor(status: String) = when (statusTint(status)) {
     "green" -> StatusGreen
     "blue" -> StatusBlue
@@ -113,49 +150,63 @@ data class NavAction(val title: String, val enabled: Boolean = true, val onClick
 
 data class SwipeAction(val label: String, val color: Color, val onClick: () -> Unit)
 
-enum class IosIcon { Mic, Stop, ArrowUp, Copy, Unread, Eye, EyeSlash, Check }
+enum class IosIcon { Mic, Stop, ArrowUp, Copy, Unread, Eye, EyeSlash, Check, Hourglass }
 
 @Composable
 fun IosNavBar(
     title: String,
     leading: NavAction? = null,
     trailing: List<NavAction> = emptyList(),
+    largeTitle: Boolean = false,
 ) {
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .height(46.dp)
-            .background(MaterialTheme.colorScheme.background)
-            .padding(horizontal = 8.dp),
-    ) {
-        if (leading != null) {
-            Text(
-                leading.title,
-                color = if (leading.enabled) AccentBlue else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
-                modifier = Modifier
-                    .align(Alignment.CenterStart)
-                    .clickable(enabled = leading.enabled, onClick = leading.onClick)
-                    .padding(horizontal = 8.dp, vertical = 10.dp),
-                maxLines = 1,
-            )
-        }
-        Text(
-            title,
-            modifier = Modifier.align(Alignment.Center).padding(horizontal = 72.dp),
-            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-            maxLines = 1,
-        )
-        Row(Modifier.align(Alignment.CenterEnd), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            trailing.forEach { action ->
+    Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background)) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(46.dp)
+                .padding(horizontal = 8.dp),
+        ) {
+            if (leading != null) {
                 Text(
-                    action.title,
-                    color = if (action.enabled) AccentBlue else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+                    leading.title,
+                    color = if (leading.enabled) AccentBlue else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
                     modifier = Modifier
-                        .clickable(enabled = action.enabled, onClick = action.onClick)
+                        .align(Alignment.CenterStart)
+                        .clickable(enabled = leading.enabled, onClick = leading.onClick)
                         .padding(horizontal = 8.dp, vertical = 10.dp),
                     maxLines = 1,
                 )
             }
+            if (!largeTitle) {
+                Text(
+                    title,
+                    modifier = Modifier.align(Alignment.Center).padding(horizontal = 72.dp),
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                    maxLines = 1,
+                )
+            }
+            Row(Modifier.align(Alignment.CenterEnd), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                trailing.forEach { action ->
+                    Text(
+                        action.title,
+                        color = if (action.enabled) AccentBlue else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+                        modifier = Modifier
+                            .clickable(enabled = action.enabled, onClick = action.onClick)
+                            .padding(horizontal = 8.dp, vertical = 10.dp),
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
+        if (largeTitle) {
+            Text(
+                title,
+                color = MaterialTheme.colorScheme.onSurface,
+                fontSize = 34.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
+                maxLines = 1,
+            )
         }
     }
 }
@@ -335,7 +386,7 @@ fun ComposerBar(
                 .clickable(enabled = canSend, onClick = onSend),
             contentAlignment = Alignment.Center,
         ) {
-            IosGlyph(IosIcon.ArrowUp, Modifier.size(16.dp), Color.White)
+            IosGlyph(if (sending) IosIcon.Hourglass else IosIcon.ArrowUp, Modifier.size(16.dp), Color.White)
         }
     }
 }
@@ -347,7 +398,7 @@ fun UnreadBadge(count: Int) {
         Modifier
             .heightIn(min = 18.dp)
             .clip(RoundedCornerShape(50))
-            .background(Color.Red)
+            .background(StatusRed)
             .padding(horizontal = 5.dp),
         contentAlignment = Alignment.Center,
     ) {
@@ -403,6 +454,12 @@ fun SwipeActionRow(
                     detectHorizontalDragGestures(
                         onDragEnd = {
                             scope.launch {
+                                val fullSwipe = trailing.isNotEmpty() && offset.value <= min + 12f
+                                if (fullSwipe) {
+                                    trailing.last().onClick()
+                                    offset.animateTo(0f, tween(160))
+                                    return@launch
+                                }
                                 val target = when {
                                     offset.value > wPx / 2f -> max
                                     offset.value < -wPx / 2f -> min
@@ -526,7 +583,18 @@ fun IosGlyph(icon: IosIcon, modifier: Modifier = Modifier, tint: Color = AccentB
             }
             IosIcon.EyeSlash -> {
                 drawArc(c, 200f, 140f, false, androidx.compose.ui.geometry.Offset(w * 0.12f, h * 0.28f), androidx.compose.ui.geometry.Size(w * 0.76f, h * 0.44f), style = stroke)
-                drawLine(c, androidx.compose.ui.geometry.Offset(w * 0.22f, h * 0.78f), androidx.compose.ui.geometry.Offset(w * 0.78f, h * 0.22f), strokeWidth = stroke.width, cap = StrokeCap.Round)
+                drawArc(c, 20f, 140f, false, androidx.compose.ui.geometry.Offset(w * 0.12f, h * 0.28f), androidx.compose.ui.geometry.Size(w * 0.76f, h * 0.44f), style = stroke)
+                drawCircle(c, radius = w * 0.1f, center = androidx.compose.ui.geometry.Offset(w * 0.5f, h * 0.5f))
+                drawLine(c, androidx.compose.ui.geometry.Offset(w * 0.18f, h * 0.82f), androidx.compose.ui.geometry.Offset(w * 0.82f, h * 0.18f), strokeWidth = stroke.width, cap = StrokeCap.Round)
+            }
+            IosIcon.Hourglass -> {
+                val hs = Stroke(width = stroke.width, cap = StrokeCap.Round, join = StrokeJoin.Round)
+                drawLine(c, androidx.compose.ui.geometry.Offset(w * 0.28f, h * 0.16f), androidx.compose.ui.geometry.Offset(w * 0.72f, h * 0.16f), strokeWidth = hs.width, cap = StrokeCap.Round)
+                drawLine(c, androidx.compose.ui.geometry.Offset(w * 0.28f, h * 0.84f), androidx.compose.ui.geometry.Offset(w * 0.72f, h * 0.84f), strokeWidth = hs.width, cap = StrokeCap.Round)
+                drawLine(c, androidx.compose.ui.geometry.Offset(w * 0.32f, h * 0.16f), androidx.compose.ui.geometry.Offset(w * 0.5f, h * 0.5f), strokeWidth = hs.width, cap = StrokeCap.Round)
+                drawLine(c, androidx.compose.ui.geometry.Offset(w * 0.68f, h * 0.16f), androidx.compose.ui.geometry.Offset(w * 0.5f, h * 0.5f), strokeWidth = hs.width, cap = StrokeCap.Round)
+                drawLine(c, androidx.compose.ui.geometry.Offset(w * 0.32f, h * 0.84f), androidx.compose.ui.geometry.Offset(w * 0.5f, h * 0.5f), strokeWidth = hs.width, cap = StrokeCap.Round)
+                drawLine(c, androidx.compose.ui.geometry.Offset(w * 0.68f, h * 0.84f), androidx.compose.ui.geometry.Offset(w * 0.5f, h * 0.5f), strokeWidth = hs.width, cap = StrokeCap.Round)
             }
             IosIcon.Check -> {
                 val path = Path().apply {

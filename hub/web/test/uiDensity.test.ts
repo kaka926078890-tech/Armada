@@ -138,7 +138,8 @@ describe("App UI density is one scale", () => {
     expect(ios).toContain("struct ComposerBar");
     expect(android).toContain("fun ComposerBar");
     expect(ios).toContain("width * 0.78");
-    expect(android).toContain("weight(0.78f)");
+    expect(android).toContain("screenWidthDp");
+    expect(android).toContain("0.78f");
     expect(iosDispatch).not.toContain("VolumeButton");
     expect(iosDispatch).not.toContain("minHeight: 220");
     expect(androidDispatch).not.toContain("220.dp");
@@ -163,6 +164,36 @@ describe("App UI density is one scale", () => {
     expect(actionBar).toContain("IosIcon.Copy");
     expect(actionBar).toContain("IosIcon.Unread");
     expect(android).toContain("\"–\"");
+  });
+
+  test("Android uses iOS system accent/status colors, not hub #599CE7", () => {
+    const android = androidUi();
+    expect(android).toContain("007AFF");
+    expect(android).toContain("0A84FF");
+    expect(android).toContain("34C759");
+    expect(android).toContain("FF3B30");
+    expect(android).not.toContain("599CE7");
+    expect(android).not.toContain("22C55E");
+    expect(android).not.toContain("DC2626");
+  });
+
+  test("settings snippet row is save then delete as text actions", () => {
+    const android = androidUi();
+    const row = android.slice(android.indexOf("fun PromptSnippetSettingsRow"), android.indexOf("fun statusLabel"));
+    expect(row.indexOf("\"保存\"")).toBeGreaterThan(-1);
+    expect(row.indexOf("\"保存\"")).toBeLessThan(row.indexOf("\"删除\""));
+    expect(row).not.toContain("BarButton(\"删除\"");
+    expect(row).not.toContain("BarButton(if (busy)");
+  });
+
+  test("nav back uses chevron plus previous title; detail bar pads home indicator", () => {
+    const android = androidUi();
+    expect(android).toContain("‹ 舰队");
+    expect(android).toContain("isAppearanceLightStatusBars");
+    expect(android).toContain("screenWidthDp");
+    expect(android).toContain("fullSwipe");
+    const detail = android.slice(android.indexOf("fun RunDetailScreen"), android.indexOf("fun DetailPromptCard"));
+    expect(detail).toContain("navigationBarsPadding");
   });
 });
 

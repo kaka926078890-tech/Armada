@@ -14,6 +14,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
@@ -56,6 +57,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -72,13 +74,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.navigation.NavType
@@ -97,6 +102,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         takeRunIdFromIntent(intent?.getStringExtra("runId") ?: intent?.data?.getQueryParameter("runId"))
         if (intent?.data != null) vm.bind(intent.data.toString())
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
@@ -129,12 +135,20 @@ fun AppearanceRoot(vm: SessionVm) {
     val textScale = appearanceTextScale(fontScale)
     val dark = theme != "light"
     val scheme = armadaColorScheme(dark)
+    val palette = iosPalette(dark)
     val density = LocalDensity.current
+    val view = LocalView.current
+    SideEffect {
+        val window = (view.context as ComponentActivity).window
+        WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !dark
+        WindowCompat.getInsetsController(window, view).isAppearanceLightNavigationBars = !dark
+    }
     MaterialTheme(colorScheme = scheme) {
         CompositionLocalProvider(
             LocalAppTheme provides theme,
             LocalFontScale provides fontScale,
             LocalIosFill provides iosFill(dark),
+            LocalIosPalette provides palette,
             LocalDensity provides Density(density = density.density, fontScale = textScale),
         ) { Root(vm) }
     }
@@ -166,7 +180,7 @@ fun BindScreen(vm: SessionVm, state: UiState) {
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             Column(Modifier.statusBarsPadding()) {
-                IosNavBar("绑定")
+                IosNavBar("绑定", largeTitle = true)
                 HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
             }
         },
@@ -251,6 +265,7 @@ fun FleetScreen(vm: SessionVm, state: UiState, onOpen: (WorkspaceDto) -> Unit, o
             Column(Modifier.statusBarsPadding()) {
                 IosNavBar(
                     title = "舰队",
+                    largeTitle = true,
                     leading = NavAction("解绑") { vm.unbind() },
                     trailing = listOf(
                         NavAction("设置", onClick = onSettings),
@@ -314,7 +329,7 @@ fun FleetScreen(vm: SessionVm, state: UiState, onOpen: (WorkspaceDto) -> Unit, o
                                         Text(w.label, fontSize = 17.sp)
                                         if (live) {
                                             Spacer(Modifier.width(6.dp))
-                                            CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp, color = AccentBlue)
+                                            CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp, color = StatusGray)
                                         }
                                     }
                                     Text(w.workspaceRoot, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
@@ -359,7 +374,7 @@ fun WorkspaceScreen(vm: SessionVm, state: UiState, workspace: WorkspaceDto, onBa
             Column(Modifier.statusBarsPadding()) {
                 IosNavBar(
                     title = workspace.label,
-                    leading = NavAction("返回", onClick = onBack),
+                    leading = NavAction("‹ 舰队", onClick = onBack),
                     trailing = buildList {
                         add(NavAction(hideLabel) { showArchived = !showArchived })
                         if (!showArchived) add(NavAction("派发", enabled = workspace.canInject) { showDispatch = true })
@@ -693,12 +708,12 @@ fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String, onBack: () -> 
         }
     }
     Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
+        containerColor = LocalIosPalette.current.page,
         topBar = {
             Column(Modifier.statusBarsPadding()) {
                 IosNavBar(
                     title = "详情",
-                    leading = NavAction("返回", onClick = onBack),
+                    leading = NavAction("‹ ${slot?.label ?: "舰队"}", onClick = onBack),
                     trailing = listOf(
                         NavAction("续聊", enabled = slot?.canInject == true && run?.canFollowup == true) { showFollow = true },
                     ),
@@ -708,7 +723,14 @@ fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String, onBack: () -> 
         },
         bottomBar = bar@{
             val r = run ?: return@bar
-            DetailActionBar(
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .background(LocalIosPalette.current.cell.copy(alpha = 0.92f))
+                    .navigationBarsPadding(),
+            ) {
+                HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+                DetailActionBar(
                 copy = {
                     val cm = ctx.getSystemService(ClipboardManager::class.java)
                     cm.setPrimaryClip(ClipData.newPlainText("finalText", r.finalText ?: ""))
@@ -751,6 +773,7 @@ fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String, onBack: () -> 
                 } else null,
                 hideTitle = if (r.isArchived) "取消隐藏" else "隐藏",
             )
+            }
         },
     ) { pad ->
         Column(Modifier.padding(pad).padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -804,10 +827,10 @@ fun DetailPromptCard(text: String) {
     val overflows = contentH > DETAIL_PROMPT_MAX_HEIGHT
     val shown = if (expanded) maxOf(contentH, 24f) else detailPromptShownHeight(contentH)
     val bubble = AccentBlue.copy(alpha = 0.18f)
+    val screenWidthDp = LocalConfiguration.current.screenWidthDp
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-        Spacer(Modifier.weight(0.22f))
         Column(
-            Modifier.weight(0.78f).clip(RoundedCornerShape(18.dp)).background(bubble).padding(12.dp),
+            Modifier.width(screenWidthDp.dp * 0.78f).clip(RoundedCornerShape(18.dp)).background(bubble).padding(12.dp),
             horizontalAlignment = Alignment.End,
         ) {
             if (overflows) BarButton(if (expanded) "收起" else "展开", compact = true) { expanded = !expanded }
@@ -843,7 +866,7 @@ fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend (
     var busy by remember { mutableStateOf<String?>(null) }
     var err by remember { mutableStateOf<String?>(null) }
     val plan = isPlanAsk(ask)
-    Box(Modifier.fillMaxWidth().height(IntrinsicSize.Min).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surface)) {
+    Box(Modifier.fillMaxWidth().height(IntrinsicSize.Min).clip(RoundedCornerShape(12.dp)).background(LocalIosPalette.current.secondary)) {
         Box(
             Modifier.align(Alignment.CenterStart).padding(vertical = 10.dp, horizontal = 4.dp)
                 .width(4.dp).fillMaxHeight().clip(RoundedCornerShape(1.5.dp))
@@ -1013,7 +1036,7 @@ fun SettingsScreen(vm: SessionVm, onBack: () -> Unit) {
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             Column(Modifier.statusBarsPadding()) {
-                IosNavBar("设置", leading = NavAction("返回", onClick = onBack))
+                IosNavBar("设置", leading = NavAction("‹ 舰队", onClick = onBack))
                 HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
             }
         },
@@ -1075,32 +1098,44 @@ fun PromptSnippetSettingsRow(
         IosTextField(title, { title = it }, "标题", Modifier.fillMaxWidth())
         IosTextField(body, { body = it }, "提示词", Modifier.fillMaxWidth().height(90.dp), minLines = 3, maxLines = 8)
         rowError?.let { Text(it, color = StatusRed, style = MaterialTheme.typography.bodySmall) }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
-            BarButton("删除", enabled = !busy, danger = true, compact = true) {
-                busy = true
-                scope.launch {
-                    try {
-                        onDelete()
-                    } catch (e: Exception) {
-                        rowError = e.message
-                    } finally {
-                        busy = false
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            Text(
+                "保存",
+                color = if (busy) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f) else AccentBlue,
+                modifier = Modifier
+                    .clickable(enabled = !busy) {
+                        busy = true
+                        scope.launch {
+                            try {
+                                onSave(snippet.copy(title = title, body = body))
+                                rowError = null
+                            } catch (e: Exception) {
+                                rowError = e.message
+                            } finally {
+                                busy = false
+                            }
+                        }
                     }
-                }
-            }
-            BarButton(if (busy) "保存中…" else "保存", enabled = !busy, filled = true, compact = true) {
-                busy = true
-                scope.launch {
-                    try {
-                        onSave(snippet.copy(title = title, body = body))
-                        rowError = null
-                    } catch (e: Exception) {
-                        rowError = e.message
-                    } finally {
-                        busy = false
+                    .padding(horizontal = 8.dp, vertical = 8.dp),
+            )
+            Text(
+                "删除",
+                color = if (busy) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f) else StatusRed,
+                modifier = Modifier
+                    .clickable(enabled = !busy) {
+                        busy = true
+                        scope.launch {
+                            try {
+                                onDelete()
+                            } catch (e: Exception) {
+                                rowError = e.message
+                            } finally {
+                                busy = false
+                            }
+                        }
                     }
-                }
-            }
+                    .padding(horizontal = 8.dp, vertical = 8.dp),
+            )
         }
     }
 }
