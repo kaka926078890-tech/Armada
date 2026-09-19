@@ -316,7 +316,7 @@ export default function RunDetail({
     return (
       <DrawerShell>
         <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800">
-          <span className="text-sm text-red-400">任务不存在或已删除</span>
+          <span className={`${UI_TYPE} text-red-400`}>任务不存在或已删除</span>
           <button onClick={onClose} className="ml-auto text-zinc-500 hover:text-zinc-200">✕</button>
         </div>
       </DrawerShell>
@@ -326,7 +326,7 @@ export default function RunDetail({
   if (loadError && !run) {
     return (
       <DrawerShell>
-        <div className="px-3 py-2 text-sm text-red-400 bg-red-950/40 border-b border-red-900/50">{loadError}</div>
+        <div className={`px-3 py-2 ${UI_TYPE} text-red-400 bg-red-950/40 border-b border-red-900/50`}>{loadError}</div>
         <button onClick={onClose} className="m-3 text-zinc-500 hover:text-zinc-200 self-end">✕</button>
       </DrawerShell>
     );
@@ -336,7 +336,7 @@ export default function RunDetail({
     return (
       <DrawerShell>
         <div className="flex items-center gap-2 px-4 py-2.5 border-b border-zinc-800/80">
-          <span className="text-[13px] text-zinc-500">加载中…</span>
+          <span className={`${UI_TYPE} text-zinc-500`}>加载中…</span>
           <button onClick={onClose} className="ml-auto text-zinc-500 hover:text-zinc-200">✕</button>
         </div>
       </DrawerShell>
@@ -437,9 +437,9 @@ export default function RunDetail({
           <a href={`/api/audit/export?token=${encodeURIComponent(getToken())}`}
             className={UI_BTN_GHOST}>导出审计</a>
         </div>
-        {cancelError && <div className="mt-2 text-red-400 text-sm">{cancelError}</div>}
-        {retryError && <div className="mt-2 text-red-400 text-sm">{retryError}</div>}
-        {askError && <div className="mt-2 text-red-400 text-sm">{askError}</div>}
+        {cancelError && <div className={`mt-2 text-red-400 ${UI_TYPE}`}>{cancelError}</div>}
+        {retryError && <div className={`mt-2 text-red-400 ${UI_TYPE}`}>{retryError}</div>}
+        {askError && <div className={`mt-2 text-red-400 ${UI_TYPE}`}>{askError}</div>}
       </div>
       <div
         ref={scrollRef}
@@ -488,7 +488,7 @@ export default function RunDetail({
             </div>
             <div className="flex flex-col gap-1.5">
               {queued.map((q) => (
-                <div key={q.id} className="text-[13px] text-zinc-200 leading-relaxed">{q.prompt}</div>
+                <div key={q.id} className={`${UI_TYPE} text-zinc-200 leading-relaxed`}>{q.prompt}</div>
               ))}
             </div>
           </div>

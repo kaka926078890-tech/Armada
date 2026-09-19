@@ -82,6 +82,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -223,6 +224,46 @@ fun BarButton(
         contentAlignment = Alignment.Center,
     ) {
         Text(text, color = fg, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+    }
+}
+
+@Composable
+fun ComposerBar(
+    value: String,
+    onValueChange: (String) -> Unit,
+    sending: Boolean,
+    listening: Boolean,
+    canSend: Boolean,
+    enabledMic: Boolean,
+    onMic: () -> Unit,
+    onSend: () -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.Bottom,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        BarButton(if (listening) "停止" else "语音", compact = true, enabled = enabledMic, onClick = onMic)
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            modifier = Modifier.weight(1f).heightIn(min = 36.dp, max = 144.dp),
+            placeholder = { Text("输入提示词") },
+            readOnly = listening || sending,
+            shape = RoundedCornerShape(20.dp),
+            minLines = 1,
+            maxLines = 6,
+        )
+        Box(
+            Modifier
+                .size(32.dp)
+                .clip(CircleShape)
+                .background(if (canSend) AccentBlue else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f))
+                .clickable(enabled = canSend, onClick = onSend),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(if (sending) "…" else "↑", color = Color.White, style = MaterialTheme.typography.labelLarge)
+        }
     }
 }
 
@@ -507,8 +548,8 @@ fun RunRow(run: RunDto, unread: Boolean) {
         Box(Modifier.padding(top = 6.dp).size(8.dp).clip(CircleShape).background(statusColor(run.status)))
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
-            Text(run.prompt, maxLines = 2)
-            Text(cap, style = MaterialTheme.typography.bodySmall, color = captionColor)
+            Text(run.prompt, maxLines = 2, fontSize = 17.sp)
+            Text(cap, fontSize = 13.sp, color = captionColor)
         }
         if (unread) {
             Box(
@@ -572,6 +613,7 @@ fun DispatchSheet(vm: SessionVm, workspace: WorkspaceDto, followupRunId: String?
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text(if (followupRunId == null) "派发任务" else "续聊", style = MaterialTheme.typography.titleLarge)
+        TextButton(onClick = { speech.release(); onDismiss() }, modifier = Modifier.align(Alignment.End)) { Text("取消") }
         Text("${workspace.machineName} · ${workspace.label}", style = MaterialTheme.typography.bodySmall)
         if (followupRunId != null) Text("在当前对话里继续，不会新开一条任务", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
         if (!workspace.canInject) Text(operatorMessage("CDP_NOT_READY"), color = Color.Red, style = MaterialTheme.typography.bodySmall)
@@ -587,27 +629,22 @@ fun DispatchSheet(vm: SessionVm, workspace: WorkspaceDto, followupRunId: String?
                 }
             }
         }
-        OutlinedTextField(
-            value = prompt,
-            onValueChange = { prompt = it },
-            modifier = Modifier.fillMaxWidth().height(220.dp),
-            label = { Text("Prompt") },
-            readOnly = listening,
-        )
         Text(if (trimmed.isEmpty()) "粘贴或语音后应显示字数" else "${prompt.length} 字", style = MaterialTheme.typography.bodySmall)
         if (listening) Text("正在听…说完点停止，改完再派发", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
         err?.let { Text(it, color = Color.Red) }
-        BarButton(if (listening) "停止" else "语音", expand = true, enabled = !sending, onClick = {
-            if (listening) speech.stop()
-            else if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) speech.start(prompt)
-            else micPerm.launch(Manifest.permission.RECORD_AUDIO)
-        })
-        BarButton(
-            if (sending) "发送中…" else if (followupRunId == null) "派发" else "发送",
-            filled = true,
-            expand = true,
-            enabled = workspace.canInject && !sending && !listening && trimmed.isNotEmpty(),
-            onClick = {
+        ComposerBar(
+            value = prompt,
+            onValueChange = { prompt = it },
+            sending = sending,
+            listening = listening,
+            canSend = workspace.canInject && !sending && !listening && trimmed.isNotEmpty(),
+            enabledMic = !sending,
+            onMic = {
+                if (listening) speech.stop()
+                else if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) speech.start(prompt)
+                else micPerm.launch(Manifest.permission.RECORD_AUDIO)
+            },
+            onSend = {
                 if (listening) speech.stop()
                 sending = true
                 scope.launch {
@@ -623,7 +660,6 @@ fun DispatchSheet(vm: SessionVm, workspace: WorkspaceDto, followupRunId: String?
                 }
             },
         )
-        BarButton("取消", expand = true, onClick = { speech.release(); onDismiss() })
     }
 }
 
@@ -746,8 +782,12 @@ fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String, onBack: () -> 
                     Text("${r.queuedOutbound.size} 条排队消息", style = MaterialTheme.typography.bodySmall)
                     r.queuedOutbound.forEach { Text(it.prompt) }
                 }
-                if (r.isLive) BarButton("取消任务", danger = true, expand = true, onClick = { scope.launch { runCatching { vm.api().cancel(runId) }; runCatching { adopt(vm.api().run(runId)) } } })
-                if (r.showsRetry) BarButton("重试", filled = true, expand = true, enabled = slot?.canInject == true, onClick = { scope.launch { runCatching { vm.api().retry(runId) }; vm.refresh(); runCatching { adopt(vm.api().run(runId)) } } })
+                if (r.isLive || r.showsRetry) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (r.isLive) BarButton("取消任务", danger = true, compact = true, onClick = { scope.launch { runCatching { vm.api().cancel(runId) }; runCatching { adopt(vm.api().run(runId)) } } })
+                        if (r.showsRetry) BarButton("重试", filled = true, compact = true, enabled = slot?.canInject == true, onClick = { scope.launch { runCatching { vm.api().retry(runId) }; vm.refresh(); runCatching { adopt(vm.api().run(runId)) } } })
+                    }
+                }
             }
         }
     }
@@ -851,14 +891,15 @@ fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend (
                 val overview = ask.questions.firstOrNull()?.options?.firstOrNull()?.text
                 if (!overview.isNullOrEmpty() && overview != "Build") MarkdownFrame(overview)
                 err?.let { Text(it, color = StatusRed) }
-                BarButton(
-                    if (busy == "continue") "Building..." else "Build",
-                    filled = true,
-                    expand = true,
-                    enabled = busy == null,
-                    fillColor = PlanYellow,
-                    textColor = Color.Black,
-                    onClick = click@{
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    BarButton(
+                        if (busy == "continue") "Building..." else "Build",
+                        filled = true,
+                        compact = true,
+                        enabled = busy == null,
+                        fillColor = PlanYellow,
+                        textColor = Color.Black,
+                        onClick = click@{
                     val q = ask.questions.firstOrNull() ?: return@click
                     val opt = q.options.firstOrNull() ?: return@click
                     busy = "continue"
@@ -876,6 +917,7 @@ fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend (
                         }
                     }
                 })
+                }
             } else {
                 Text("需要选择", style = MaterialTheme.typography.titleMedium)
                 ask.questions.forEach { q ->
@@ -898,8 +940,8 @@ fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend (
                     }
                 }
                 err?.let { Text(it, color = StatusRed) }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    BarButton(if (busy == "skip") "Skipping..." else "跳过", compact = true, modifier = Modifier.weight(1f), enabled = busy == null, onClick = {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
+                    BarButton(if (busy == "skip") "Skipping..." else "跳过", compact = true, enabled = busy == null, onClick = {
                         busy = "skip"
                         scope.launch {
                             try {
@@ -911,7 +953,7 @@ fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend (
                             }
                         }
                     })
-                    BarButton(if (busy == "continue") "Continuing..." else "继续", filled = true, compact = true, modifier = Modifier.weight(1f), enabled = optionId != null && busy == null, onClick = click@{
+                    BarButton(if (busy == "continue") "Continuing..." else "继续", filled = true, compact = true, enabled = optionId != null && busy == null, onClick = click@{
                         val q = ask.questions.firstOrNull() ?: return@click
                         val oid = optionId ?: return@click
                         busy = "continue"

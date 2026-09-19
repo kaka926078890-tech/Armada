@@ -339,6 +339,7 @@ P1+P2 可先 overlay；自由输入入口在 P3 前禁用或不上。
 - [x] 五列看板保留（2026-09-19）
 - [x] 豆包 / GPT 仅 App，不改中台导航（2026-09-19）
 - [x] P1 交付 = `ui.ts` 密度 token，非 shadcn 脚手架（2026-09-19 v3）
+- [x] P2 App 胶囊底栏 + 78% 气泡 + Ask 右齐小钮（2026-09-19 v4）
 - [ ] P0 真机夹具
 
 未勾 P0 不得标 P3 为实施基准。**P1 中台换皮 + P2 App 皮肤可在本确认后开工。**
@@ -353,3 +354,4 @@ P1+P2 可先 overlay；自由输入入口在 P3 前禁用或不上。
 | 2026-09-19 | v1 | **撤回 v0 信息架构。** 保留五列 / 侧栏 / 抽屉 / 派发弹窗。范围改为 shadcn 换皮 + 组件升级；Ask 自由输入放在卡内；续聊底栏 pending 时仍禁用。 |
 | 2026-09-19 | v2 | 用户澄清：豆包 / ChatGPT **只对齐手机 UI 风格**。中台继续 shadcn 看板换皮；App 详情改为用户右气泡 + 助手左齐 + 胶囊底栏。 |
 | 2026-09-19 | v3 | **P1 实际交付 `hub/web/src/ui.ts` 密度令牌**，不是 shadcn 脚手架。`components.json` / `src/components/ui/*` / `cn` / CSS 变量色板 **缓做**，触发条件见 §2.2。同属性 Tailwind 覆盖改为独立 token（`UI_CHIP_ACCENT`、`UI_BTN_GHOST_ACTIVE`、`UI_TEXTAREA_INSET`）。`uiDensity` 扫描扩到 iOS/Android。 |
+| 2026-09-19 | v4 | P2 收口：App 派发/续聊改为胶囊输入 + 32pt 圆发送，取消为文字按钮；气泡最大宽 78%；Ask Skip/Continue/Build 右齐 36pt；列表标题 17 / 字幕 13；中台芯片 `rounded-full`、线程正文 14px、用户气泡 `max-w-[78%]`。Ask `freeform` 仍不做。 |

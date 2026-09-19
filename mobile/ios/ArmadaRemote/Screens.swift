@@ -196,11 +196,11 @@ struct RunRow: View {
         HStack(alignment: .top, spacing: 10) {
             Circle().fill(statusColor(run.status)).frame(width: 8, height: 8).padding(.top, 6)
             VStack(alignment: .leading, spacing: 4) {
-                Text(run.prompt).lineLimit(2)
+                Text(run.prompt).font(.system(size: 17)).lineLimit(2)
                 Text(run.pendingAsk != nil && run.status == "running" ? "待处理"
                      : !run.queuedOutbound.isEmpty ? "队列 \(run.queuedOutbound.count)"
                      : statusLabel(run.status))
-                    .font(.caption)
+                    .font(.system(size: 13))
                     .foregroundStyle(captionColor)
             }
             Spacer(minLength: 8)
@@ -508,6 +508,49 @@ struct PromptSnippetChips: View {
     }
 }
 
+/// 豆包 / GPT 底栏：胶囊输入 + 32pt 圆发送。语音是现网能力，收成图标，不抽独立通栏大钮。
+struct ComposerBar: View {
+    @Binding var text: String
+    var sending: Bool
+    var listening: Bool
+    var canSend: Bool
+    var onMic: () -> Void
+    var onSend: () -> Void
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            Button(action: onMic) {
+                Image(systemName: listening ? "stop.fill" : "mic")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(width: 32, height: 32)
+            }
+            .buttonStyle(.plain)
+            .disabled(sending)
+            TextField("输入提示词", text: $text, axis: .vertical)
+                .textFieldStyle(.plain)
+                .lineLimit(1...6)
+                .disabled(listening || sending)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .frame(minHeight: 36)
+                .background(Color(.secondarySystemFill), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            Button(action: onSend) {
+                Image(systemName: sending ? "hourglass" : "arrow.up")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 32, height: 32)
+                    .background(canSend ? Color.accentColor : Color.secondary.opacity(0.35), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!canSend)
+            .accessibilityLabel(sending ? "发送中" : "发送")
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 8)
+    }
+}
+
 struct DispatchSheet: View {
     @EnvironmentObject var session: Session
     let workspace: WorkspaceDTO
@@ -559,10 +602,6 @@ struct DispatchSheet: View {
                             speech.prompt = appendSnippetBody(speech.prompt, body)
                         }
                     )
-                    TextEditor(text: $speech.prompt)
-                        .frame(minHeight: 220)
-                        .font(.body)
-                        .disabled(speech.listening)
                     Text(trimmed.isEmpty ? "粘贴或语音后应显示字数" : "\(speech.prompt.count) 字")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -571,21 +610,22 @@ struct DispatchSheet: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                    VolumeButton(
-                        title: speech.listening ? "停止" : "语音",
-                        kind: .quiet,
-                        enabled: !sending
-                    ) { speech.toggle() }
-                    VolumeButton(
-                        title: sending ? "发送中…" : (followupRunId == nil ? "派发" : "发送"),
-                        enabled: canSend,
-                        busy: sending
-                    ) { Task { await send() } }
                 } header: {
                     Text("Prompt")
                 } footer: {
-                    Text("语音只写入提示词，不会自动发送。长文请用此处按钮发送；导航栏「派发」在键盘弹起时可能点不到。")
+                    Text("语音只写入提示词，不会自动发送。")
                 }
+            }
+            .safeAreaInset(edge: .bottom) {
+                ComposerBar(
+                    text: $speech.prompt,
+                    sending: sending,
+                    listening: speech.listening,
+                    canSend: canSend,
+                    onMic: { speech.toggle() },
+                    onSend: { Task { await send() } }
+                )
+                .background(.bar)
             }
             .navigationTitle(followupRunId == nil ? "派发任务" : "续聊")
             .toolbar {
@@ -644,8 +684,8 @@ struct DetailPromptCard: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Spacer(minLength: 36)
+        HStack(alignment: .top, spacing: 0) {
+            Spacer(minLength: 0)
             VStack(alignment: .trailing, spacing: 6) {
                 if overflows {
                     VolumeButton(title: expanded ? "收起" : "展开", kind: .quiet, compact: true, expand: false) {
@@ -661,7 +701,7 @@ struct DetailPromptCard: View {
                             LinearGradient(
                                 colors: [
                                     Color.accentColor.opacity(0.0),
-                                    Color.accentColor.opacity(0.22),
+                                    Color.accentColor.opacity(0.18),
                                 ],
                                 startPoint: .top,
                                 endPoint: .bottom
@@ -673,6 +713,7 @@ struct DetailPromptCard: View {
             }
             .padding(12)
             .background(Color.accentColor.opacity(0.18), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .containerRelativeFrame(.horizontal) { width, _ in width * 0.78 }
         }
         .onChange(of: text) { _, _ in expanded = false }
     }
@@ -747,27 +788,32 @@ struct RunDetailView: View {
                             }
                         }
                     }
-                    if run.isLive {
-                        VolumeButton(title: "取消任务", kind: .danger) {
-                            Task {
-                                try? await session.api().cancel(runId: runId)
-                                await reload()
-                                await session.refresh()
-                            }
-                        }
-                    }
-                    if run.showsRetry {
-                        VolumeButton(title: "重试", enabled: slot?.canInject ?? false) {
-                            Task {
-                                do {
-                                    _ = try await session.api().retry(runId: runId)
-                                    err = nil
-                                    await reload()
-                                    await session.refresh()
-                                } catch {
-                                    err = error.localizedDescription
+                    if run.isLive || run.showsRetry {
+                        HStack(spacing: 8) {
+                            if run.isLive {
+                                VolumeButton(title: "取消任务", kind: .danger, compact: true, expand: false) {
+                                    Task {
+                                        try? await session.api().cancel(runId: runId)
+                                        await reload()
+                                        await session.refresh()
+                                    }
                                 }
                             }
+                            if run.showsRetry {
+                                VolumeButton(title: "重试", compact: true, expand: false, enabled: slot?.canInject ?? false) {
+                                    Task {
+                                        do {
+                                            _ = try await session.api().retry(runId: runId)
+                                            err = nil
+                                            await reload()
+                                            await session.refresh()
+                                        } catch {
+                                            err = error.localizedDescription
+                                        }
+                                    }
+                                }
+                            }
+                            Spacer(minLength: 0)
                         }
                     }
                 } else if let err {
@@ -958,21 +1004,25 @@ struct AskView: View {
                         .frame(height: max(planHeight, 80))
                 }
                 if let err { Text(err).foregroundStyle(.red) }
-                Button {
-                    Task { await submitBuild() }
-                } label: {
-                    HStack(spacing: 8) {
-                        if busyAction == "continue" { ProgressView().tint(.black) }
-                        Text(busyAction == "continue" ? "Building..." : "Build")
-                            .font(.body.weight(.semibold))
+                HStack {
+                    Spacer(minLength: 0)
+                    Button {
+                        Task { await submitBuild() }
+                    } label: {
+                        HStack(spacing: 8) {
+                            if busyAction == "continue" { ProgressView().tint(.black) }
+                            Text(busyAction == "continue" ? "Building..." : "Build")
+                                .font(.subheadline.weight(.semibold))
+                        }
+                        .frame(minWidth: 88, minHeight: 36)
+                        .padding(.horizontal, 14)
                     }
-                    .frame(maxWidth: .infinity, minHeight: 36)
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.regular)
+                    .tint(Self.planYellow)
+                    .foregroundStyle(.black)
+                    .disabled(busyAction != nil)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.regular)
-                .tint(Self.planYellow)
-                .foregroundStyle(.black)
-                .disabled(busyAction != nil)
             } else {
                 Text("需要选择").font(.headline)
                 ForEach(ask.questions) { q in
@@ -1013,7 +1063,8 @@ struct AskView: View {
                     }
                 }
                 if let err { Text(err).foregroundStyle(.red) }
-                HStack(spacing: 10) {
+                HStack(spacing: 8) {
+                    Spacer(minLength: 0)
                     Button {
                         Task { await submit(action: "skip") }
                     } label: {
@@ -1022,7 +1073,8 @@ struct AskView: View {
                             Text(busyAction == "skip" ? "Skipping..." : "跳过")
                                 .font(.subheadline.weight(.medium))
                         }
-                        .frame(maxWidth: .infinity, minHeight: 36)
+                        .frame(minWidth: 72, minHeight: 36)
+                        .padding(.horizontal, 12)
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.regular)
@@ -1035,7 +1087,8 @@ struct AskView: View {
                             Text(busyAction == "continue" ? "Continuing..." : "继续")
                                 .font(.subheadline.weight(.semibold))
                         }
-                        .frame(maxWidth: .infinity, minHeight: 36)
+                        .frame(minWidth: 72, minHeight: 36)
+                        .padding(.horizontal, 12)
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.regular)

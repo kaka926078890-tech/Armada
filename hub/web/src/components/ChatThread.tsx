@@ -3,7 +3,7 @@ import Markdown from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import { segmentChat, processFoldLabel, type ChatBlock } from "../chatView";
-import { ASK_CONTINUE_BTN, ASK_PLAN_BTN, ASK_SKIP_BTN, UI_META, UI_OPTION_OFF, UI_OPTION_ON } from "../ui";
+import { ASK_CONTINUE_BTN, ASK_PLAN_BTN, ASK_SKIP_BTN, UI_BODY, UI_META, UI_OPTION_OFF, UI_OPTION_ON, UI_TYPE } from "../ui";
 
 function ThoughtLive({ text }: { text: string }) {
   return <div className="text-[12px] text-zinc-500 whitespace-pre-wrap leading-relaxed">{text}</div>;
@@ -115,7 +115,7 @@ const mdComponents = {
 
 export function AssistantMarkdown({ text }: { text: string }) {
   return (
-    <div className="break-words leading-[1.65] text-[13px] text-zinc-200">
+    <div className={`break-words leading-[1.65] ${UI_BODY} text-zinc-200`}>
       <Markdown remarkPlugins={[remarkGfm, remarkBreaks]} components={mdComponents}>{text}</Markdown>
     </div>
   );
@@ -123,7 +123,7 @@ export function AssistantMarkdown({ text }: { text: string }) {
 
 function UserMarkdown({ text }: { text: string }) {
   return (
-    <div className="break-words leading-[1.65] text-[13px] text-zinc-100">
+    <div className={`break-words leading-[1.65] ${UI_BODY} text-zinc-100`}>
       <Markdown remarkPlugins={[remarkGfm, remarkBreaks]} components={mdComponents}>{text}</Markdown>
     </div>
   );
@@ -253,11 +253,11 @@ function AskCard({ block, onAnswerAsk }: {
       onClick={(e) => e.stopPropagation()}
     >
       <div className={`${UI_META} uppercase tracking-wide text-zinc-500 mb-1`}>{plan ? "Created Plan" : "Questions"}</div>
-      <div className="text-[13px] text-zinc-200 leading-relaxed">
+      <div className={`${UI_TYPE} text-zinc-200 leading-relaxed`}>
         <AssistantMarkdown text={block.prompt} />
       </div>
       {overview ? (
-        <div className="mt-2 max-h-80 overflow-y-auto text-[13px] text-zinc-400 leading-relaxed pr-1">
+        <div className={`mt-2 max-h-80 overflow-y-auto ${UI_TYPE} text-zinc-400 leading-relaxed pr-1`}>
           <AssistantMarkdown text={overview} />
         </div>
       ) : null}
@@ -322,7 +322,7 @@ export default function ChatThread({ blocks, onAnswerAsk }: {
   onAnswerAsk?: (body: AnswerAskBody) => Promise<boolean | void> | boolean | void;
 }) {
   if (blocks.length === 0) {
-    return <div className="text-zinc-500 text-sm px-1 py-8 text-center">等待对话内容…</div>;
+    return <div className={`${UI_TYPE} text-zinc-500 px-1 py-8 text-center`}>等待对话内容…</div>;
   }
   const segs = segmentChat(blocks);
   return (
@@ -333,7 +333,7 @@ export default function ChatThread({ blocks, onAnswerAsk }: {
         if (s.kind === "user") {
           return (
             <div key={key} className="flex justify-end">
-              <div className="max-w-[88%] rounded-xl bg-zinc-800/70 px-3.5 py-2 text-[13px] text-zinc-100 leading-relaxed">
+              <div className="max-w-[78%] rounded-2xl bg-zinc-800/70 px-3.5 py-2 text-zinc-100 leading-relaxed">
                 <UserMarkdown text={s.text} />
               </div>
             </div>

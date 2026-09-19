@@ -106,16 +106,16 @@ export function DispatchModal({
               <option value="">选择工作区…</option>
               {workspaces.map((w) => <option key={w} value={w}>{w}</option>)}
             </select>
-            {parseFailed && <div className="text-red-400 text-sm">工作区列表解析失败，无法选择</div>}
+            {parseFailed && <div className={`${UI_TYPE} text-red-400`}>工作区列表解析失败，无法选择</div>}
           </>
         )}
         {activeOnWorkspace > 0 && (
-          <div className="text-amber-300/90 text-sm">
+          <div className={`${UI_TYPE} text-amber-300/90`}>
             该工作区已有 {activeOnWorkspace} 个任务在跑或排队，并行可能争用同一批文件。
           </div>
         )}
         {selectedMachine && !injectReady && (
-          <div className="text-red-400 text-sm">{CDP_NOT_READY_COPY}</div>
+          <div className={`${UI_TYPE} text-red-400`}>{CDP_NOT_READY_COPY}</div>
         )}
         <PromptSnippetBar
           snippets={snippets}
@@ -160,7 +160,7 @@ export function DispatchModal({
             ))}
           </div>
         )}
-        {error && <div className="text-red-400 text-sm">{error}</div>}
+        {error && <div className={`${UI_TYPE} text-red-400`}>{error}</div>}
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onClose} className={UI_BTN_GHOST}>取消</button>
           <button type="button" disabled={!canDispatch} onClick={() => submitDispatch()}

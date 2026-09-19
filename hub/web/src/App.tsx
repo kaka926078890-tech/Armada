@@ -393,7 +393,7 @@ export default function App() {
   return (
     <div className="h-screen flex flex-col bg-zinc-950 text-zinc-100">
       {loadError && (
-        <div className="px-4 py-2 text-sm text-red-400 bg-red-950/50 border-b border-red-900/50">{loadError}</div>
+        <div className={`px-4 py-2 ${UI_TYPE} text-red-400 bg-red-950/50 border-b border-red-900/50`}>{loadError}</div>
       )}
       <header className="flex items-center gap-x-3 gap-y-1.5 px-4 py-2 border-b border-zinc-800/80 flex-wrap">
         <span className={`font-semibold ${UI_TYPE} tracking-wide shrink-0 whitespace-nowrap`}>Armada</span>

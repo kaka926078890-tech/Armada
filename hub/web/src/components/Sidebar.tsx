@@ -121,7 +121,7 @@ export default function Sidebar({
                 />
               ) : (
                 <>
-                  <span className="min-w-0 flex-1 text-[13px] font-medium truncate" title={g.machineName}>{g.machineName}</span>
+                  <span className={`min-w-0 flex-1 ${UI_TYPE} font-medium truncate`} title={g.machineName}>{g.machineName}</span>
                   <button
                     type="button"
                     aria-label="重命名电脑"
@@ -149,7 +149,7 @@ export default function Sidebar({
                 >
                   <span className="text-zinc-600 text-[12px] shrink-0">–</span>
                   <span className="min-w-0 flex-1 flex items-center gap-1.5">
-                    <span className="min-w-0 truncate text-[13px]" title={s.root}>{workspaceFolderName(s.root)}</span>
+                    <span className={`min-w-0 truncate ${UI_TYPE}`} title={s.root}>{workspaceFolderName(s.root)}</span>
                     {live ? <LiveSpinner /> : null}
                   </span>
                   <UnreadCount n={unread} />

@@ -1,6 +1,7 @@
 /** One density scale for hub chrome. Primary controls are 32×13; snippet chips are the only 28px exception. */
 
 export const UI_TYPE = "text-[13px]";
+export const UI_BODY = "text-[14px]";
 export const UI_META = "text-[12px]";
 export const UI_LABEL = "text-[12px] font-medium text-zinc-500";
 
@@ -26,11 +27,11 @@ export const UI_TEXTAREA_INSET =
   "px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-700 text-[13px] leading-relaxed outline-none focus:border-sky-500 placeholder:text-zinc-600";
 
 export const UI_CHIP =
-  "h-7 px-2.5 rounded-lg border border-zinc-700/80 bg-zinc-900/70 text-[12px] text-zinc-300 hover:text-zinc-100 hover:border-zinc-500 hover:bg-zinc-800 whitespace-nowrap";
+  "h-7 px-2.5 rounded-full border border-zinc-700/80 bg-zinc-900/70 text-[12px] text-zinc-300 hover:text-zinc-100 hover:border-zinc-500 hover:bg-zinc-800 whitespace-nowrap";
 export const UI_CHIP_ACCENT =
-  "h-7 px-2.5 rounded-lg border border-sky-800 bg-sky-800 text-[12px] text-sky-100 hover:bg-sky-700 hover:text-sky-50 whitespace-nowrap";
+  "h-7 px-2.5 rounded-full border border-sky-800 bg-sky-800 text-[12px] text-sky-100 hover:bg-sky-700 hover:text-sky-50 whitespace-nowrap";
 export const UI_CHIP_ADD =
-  "h-7 px-2.5 rounded-lg border border-dashed border-zinc-600 text-[12px] text-zinc-400 hover:text-zinc-100 hover:border-zinc-400 hover:bg-zinc-800 disabled:opacity-40";
+  "h-7 px-2.5 rounded-full border border-dashed border-zinc-600 text-[12px] text-zinc-400 hover:text-zinc-100 hover:border-zinc-400 hover:bg-zinc-800 disabled:opacity-40";
 
 export const UI_OPTION =
   "w-full min-h-8 px-3 py-1.5 rounded-lg border text-left text-[13px] text-zinc-200 disabled:opacity-70";

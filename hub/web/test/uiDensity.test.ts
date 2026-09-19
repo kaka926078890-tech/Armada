@@ -23,7 +23,9 @@ describe("hub UI density is one scale", () => {
     expect(UI_BTN).toContain("h-8");
     expect(UI_BTN).toContain("text-[13px]");
     expect(UI_CHIP).toContain("h-7");
+    expect(UI_CHIP).toContain("rounded-full");
     expect(UI_CHIP_ACCENT).toContain("h-7");
+    expect(UI_CHIP_ACCENT).toContain("rounded-full");
     expect(UI_CHIP_ACCENT).toContain("bg-sky-800");
     expect(UI_CHIP_ACCENT).not.toContain("bg-zinc-900");
     expect(UI_OPTION).toContain("min-h-8");
@@ -42,6 +44,7 @@ describe("hub UI density is one scale", () => {
     for (const file of files) {
       const text = readFileSync(file, "utf8");
       if (text.includes("min-w-[128px]")) hits.push(`${file}: min-w-[128px]`);
+      if (text.includes("text-sm")) hits.push(`${file}: text-sm`);
       if (text.includes("text-[10px]")) hits.push(`${file}: text-[10px]`);
       if (sizeRe.test(text)) hits.push(`${file}: oversized height`);
     }
@@ -70,8 +73,24 @@ describe("App UI density is one scale", () => {
     if (ios.includes("controlSize(.large)")) hits.push("ios: controlSize(.large)");
     if (/\bminHeight:\s*44\b/.test(ios)) hits.push("ios: minHeight 44");
     if (android.includes("48.dp")) hits.push("android: 48.dp");
-    if (android.includes("44.dp")) hits.push("android: 44.dp");
+    if (/(?<!\d)44\.dp/.test(android)) hits.push("android: 44.dp");
     if (android.includes("width(3.dp)")) hits.push("android: 3dp row accent");
     expect(hits).toEqual([]);
+  });
+
+  test("dispatch/followup is a capsule composer, not stacked full-width buttons", () => {
+    const ios = readFileSync(join(repoRoot, "mobile/ios/ArmadaRemote/Screens.swift"), "utf8");
+    const android = readFileSync(join(repoRoot, "mobile/android/app/src/main/java/app/armada/remote/MainActivity.kt"), "utf8");
+    const iosDispatch = ios.slice(ios.indexOf("struct DispatchSheet"), ios.indexOf("struct DetailPromptCard"));
+    const androidDispatch = android.slice(android.indexOf("fun DispatchSheet"), android.indexOf("fun RunDetailScreen"));
+    expect(ios).toContain("struct ComposerBar");
+    expect(android).toContain("fun ComposerBar");
+    expect(ios).toContain("width * 0.78");
+    expect(android).toContain("weight(0.78f)");
+    expect(iosDispatch).not.toContain("VolumeButton");
+    expect(iosDispatch).not.toContain("minHeight: 220");
+    expect(androidDispatch).not.toContain("220.dp");
+    expect(androidDispatch).not.toContain("expand = true");
+    expect(android).toContain("size(32.dp)");
   });
 });

@@ -55,7 +55,7 @@ function SnippetRow({
           aria-label="提示词"
         />
       </label>
-      {error && <div className="text-red-400 text-sm">{error}</div>}
+      {error && <div className={`${UI_TYPE} text-red-400`}>{error}</div>}
       <div className="flex justify-end gap-2">
         <button type="button" disabled={busy} className={UI_BTN_DANGER} onClick={() => void run(onDelete)}>删除</button>
         <button type="button" disabled={busy} className={UI_BTN_PRIMARY} onClick={() => void run(() => onSave({ ...snippet, title, body }))}>保存</button>
@@ -112,7 +112,7 @@ export default function SettingsModal({
         </div>
         <div>
           <div className={`${UI_LABEL} uppercase tracking-wide mb-1.5`}>快捷提示词</div>
-          {snippetError && <div className="text-red-400 text-[13px] mb-1.5">{snippetError}</div>}
+          {snippetError && <div className={`${UI_TYPE} text-red-400 mb-1.5`}>{snippetError}</div>}
           {snippets.length === 0 ? (
             <div className={`${UI_META} text-zinc-500`}>还没有快捷提示词，在输入框上方点添加</div>
           ) : (

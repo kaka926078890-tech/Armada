@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { snippetOperatorMessage } from "../promptSnippets";
 import type { PromptSnippet } from "../uiPrefs";
-import { UI_BTN_GHOST, UI_BTN_PRIMARY, UI_CHIP, UI_CHIP_ADD, UI_INPUT, UI_LABEL, UI_META, UI_OVERLAY, UI_PANEL, UI_TEXTAREA } from "../ui";
+import { UI_BTN_GHOST, UI_BTN_PRIMARY, UI_CHIP, UI_CHIP_ADD, UI_INPUT, UI_LABEL, UI_META, UI_OVERLAY, UI_PANEL, UI_TEXTAREA, UI_TYPE } from "../ui";
 
 const TITLE_MAX = 40;
 const BODY_MAX = 8000;
@@ -59,7 +59,7 @@ export function AddSnippetDialog({
           />
           <span className={`self-end ${UI_META} text-zinc-600`}>{body.length}/{BODY_MAX}</span>
         </label>
-        {error && <div className="text-red-400 text-sm">{error}</div>}
+        {error && <div className={`${UI_TYPE} text-red-400`}>{error}</div>}
         <div className="flex justify-end gap-2 pt-1">
           <button
             type="button"
