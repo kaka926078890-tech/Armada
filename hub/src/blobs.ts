@@ -38,6 +38,14 @@ export function isImageMime(mime: string): boolean {
   return mime === "image/png" || mime === "image/jpeg";
 }
 
+export function isInlineRenderMime(mime: string): boolean {
+  return isImageMime(mime);
+}
+
+export function responseContentType(mime: string): string {
+  return isInlineRenderMime(mime) ? mime : "application/octet-stream";
+}
+
 export function extOf(name: string): string {
   const base = name.replace(/\\/g, "/").split("/").pop() || "";
   const i = base.lastIndexOf(".");
@@ -82,38 +90,42 @@ export class BlobStore {
     mkdirSync(blobsDir(home), { recursive: true });
   }
 
-  put(bytes: Buffer, declaredMime: string, name: string, now = Date.now()): { error?: string; blob?: BlobMeta; status?: number } {
+  beginUpload(): { error?: string; status?: number } {
     if (this.inFlight >= 2) return { error: "RATE_LIMIT", status: 429 };
     this.inFlight += 1;
-    try {
-      const window = this.uploads.filter((t) => now - t < 60_000);
-      this.uploads = window;
-      if (window.length >= 10) return { error: "RATE_LIMIT", status: 429 };
+    return {};
+  }
 
-      if (bytes.length > MAX_BLOB_BYTES) return { error: "ATTACHMENT_TOO_LARGE", status: 413 };
-      const kind = detectBlobKind(bytes, name);
-      if (!kind) return { error: "ATTACHMENT_INVALID_MIME", status: 400 };
-      if ((declaredMime === "image/png" || declaredMime === "image/jpeg") && declaredMime !== kind.mime) {
-        return { error: "ATTACHMENT_INVALID_MIME", status: 400 };
-      }
-      const mime = kind.mime;
-      const storedName = safeBlobName(name, mime);
-      const sha256 = createHash("sha256").update(bytes).digest("hex");
-      const path = join(blobsDir(this.home), sha256);
-      const existing = this.db.query("SELECT sha256, name FROM blobs WHERE sha256=?1").get(sha256) as { sha256: string; name?: string } | null;
-      if (!existing) {
-        writeFileSync(path, bytes);
-        this.db.query("INSERT INTO blobs (sha256, mime, size, refcount, created_at, unref_at, name) VALUES (?1,?2,?3,0,?4,?4,?5)")
-          .run(sha256, mime, bytes.length, now, storedName);
-      } else if (!(existing.name ?? "").trim()) {
-        this.db.query("UPDATE blobs SET name=?1 WHERE sha256=?2").run(storedName, sha256);
-      }
-      this.uploads.push(now);
-      const row = this.db.query("SELECT mime, size, name FROM blobs WHERE sha256=?1").get(sha256) as { mime: string; size: number; name: string };
-      return { blob: { id: sha256, sha256, mime: row.mime, name: row.name || storedName, size: row.size } };
-    } finally {
-      this.inFlight -= 1;
+  endUpload(): void {
+    this.inFlight = Math.max(0, this.inFlight - 1);
+  }
+
+  put(bytes: Buffer, declaredMime: string, name: string, now = Date.now()): { error?: string; blob?: BlobMeta; status?: number } {
+    const window = this.uploads.filter((t) => now - t < 60_000);
+    this.uploads = window;
+    if (window.length >= 10) return { error: "RATE_LIMIT", status: 429 };
+
+    if (bytes.length > MAX_BLOB_BYTES) return { error: "ATTACHMENT_TOO_LARGE", status: 413 };
+    const kind = detectBlobKind(bytes, name);
+    if (!kind) return { error: "ATTACHMENT_INVALID_MIME", status: 400 };
+    if ((declaredMime === "image/png" || declaredMime === "image/jpeg") && declaredMime !== kind.mime) {
+      return { error: "ATTACHMENT_INVALID_MIME", status: 400 };
     }
+    const mime = kind.mime;
+    const storedName = safeBlobName(name, mime);
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    const path = join(blobsDir(this.home), sha256);
+    const existing = this.db.query("SELECT sha256, name FROM blobs WHERE sha256=?1").get(sha256) as { sha256: string; name?: string } | null;
+    if (!existing) {
+      writeFileSync(path, bytes);
+      this.db.query("INSERT INTO blobs (sha256, mime, size, refcount, created_at, unref_at, name) VALUES (?1,?2,?3,0,?4,?4,?5)")
+        .run(sha256, mime, bytes.length, now, storedName);
+    } else if (!(existing.name ?? "").trim()) {
+      this.db.query("UPDATE blobs SET name=?1 WHERE sha256=?2").run(storedName, sha256);
+    }
+    this.uploads.push(now);
+    const row = this.db.query("SELECT mime, size, name FROM blobs WHERE sha256=?1").get(sha256) as { mime: string; size: number; name: string };
+    return { blob: { id: sha256, sha256, mime: row.mime, name: row.name || storedName, size: row.size } };
   }
 
   get(id: string): { bytes: Buffer; mime: string } | null {

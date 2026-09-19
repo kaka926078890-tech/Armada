@@ -1,8 +1,11 @@
 import { describe, expect, test, afterEach } from "bun:test";
 import { mkdtempSync } from "fs";
+import { createConnection, type Socket } from "net";
 import { tmpdir } from "os";
 import { join } from "path";
 import { createServer, type HubServer } from "../src/index";
+import * as blobMod from "../src/blobs";
+import { MAX_BLOB_BYTES } from "../src/blobs";
 
 const PNG_1x1 = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
@@ -35,6 +38,56 @@ async function start() {
   return { ws, inbound, api, home };
 }
 
+function rawBlobPost(
+  port: number,
+  token: string,
+  headers: string[],
+  body = "",
+  waitMs = 1500,
+): Promise<{ status: number; raw: string; ms: number; socket: Socket }> {
+  const t0 = Date.now();
+  return new Promise((resolve) => {
+    const chunks: Buffer[] = [];
+    const socket = createConnection({ host: "127.0.0.1", port }, () => {
+      socket.write(`POST /api/blobs HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer ${token}\r\n${headers.join("\r\n")}\r\n\r\n${body}`);
+    });
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      const raw = Buffer.concat(chunks).toString("utf8");
+      resolve({ status: Number(raw.split(" ")[1]), raw, ms: Date.now() - t0, socket });
+    };
+    socket.on("data", (d) => {
+      chunks.push(Buffer.from(d));
+      const raw = Buffer.concat(chunks).toString("utf8");
+      const headEnd = raw.indexOf("\r\n\r\n");
+      if (headEnd < 0) return;
+      const head = raw.slice(0, headEnd);
+      const cl = head.match(/content-length:\s*(\d+)/i);
+      if (!cl || raw.length - (headEnd + 4) >= Number(cl[1])) finish();
+    });
+    socket.setTimeout(waitMs, finish);
+    socket.on("close", finish);
+    socket.on("error", finish);
+  });
+}
+
+describe("blob response MIME helpers", () => {
+  test("only png/jpeg are inline; html becomes octet-stream", () => {
+    expect(typeof blobMod.isInlineRenderMime).toBe("function");
+    expect(typeof blobMod.responseContentType).toBe("function");
+    expect(blobMod.isInlineRenderMime!("image/png")).toBe(true);
+    expect(blobMod.isInlineRenderMime!("image/jpeg")).toBe(true);
+    expect(blobMod.isInlineRenderMime!("text/html")).toBe(false);
+    expect(blobMod.isInlineRenderMime!("application/pdf")).toBe(false);
+    expect(blobMod.responseContentType!("image/png")).toBe("image/png");
+    expect(blobMod.responseContentType!("image/jpeg")).toBe("image/jpeg");
+    expect(blobMod.responseContentType!("text/html")).toBe("application/octet-stream");
+    expect(blobMod.responseContentType!("text/plain")).toBe("application/octet-stream");
+  });
+});
+
 describe("blobs + image runs", () => {
   test("POST png blob then GET bytes match", async () => {
     const { api, ws } = await start();
@@ -46,8 +99,84 @@ describe("blobs + image runs", () => {
     expect(blob.size).toBe(PNG_1x1.length);
     const got = await api(`/api/blobs/${blob.id}`);
     expect(got.status).toBe(200);
+    expect(got.headers.get("content-type")).toMatch(/image\/png/);
+    expect(got.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(got.headers.get("content-disposition") ?? "").not.toMatch(/attachment/i);
     expect(Buffer.from(await got.arrayBuffer()).equals(PNG_1x1)).toBe(true);
     ws.close();
+  });
+
+  test("GET html blob is octet-stream attachment with nosniff, not text/html", async () => {
+    const { api, ws } = await start();
+    const fd = new FormData();
+    fd.append("file", new File(["<html><script>alert(1)</script></html>"], "note.html", { type: "text/html" }));
+    const up = await api("/api/blobs", { method: "POST", body: fd });
+    expect(up.status).toBe(201);
+    const { blob } = await up.json() as any;
+    expect(blob.mime).toBe("text/html");
+    const got = await api(`/api/blobs/${blob.id}`);
+    expect(got.status).toBe(200);
+    expect(got.headers.get("content-type")).toMatch(/application\/octet-stream/);
+    expect(got.headers.get("content-type")).not.toMatch(/text\/html/);
+    expect(got.headers.get("content-disposition") ?? "").toMatch(/attachment/i);
+    expect(got.headers.get("x-content-type-options")).toBe("nosniff");
+    ws.close();
+  });
+
+  test("oversized Content-Length is 413 before the body is read", async () => {
+    const { ws } = await start();
+    const r = await rawBlobPost(hub!.port, hub!.token, [
+      `Content-Length: ${MAX_BLOB_BYTES + 1}`,
+      "Content-Type: multipart/form-data; boundary=x",
+    ], "");
+    try {
+      expect(r.status).toBe(413);
+      expect(r.ms).toBeLessThan(1200);
+      expect(r.raw).toMatch(/ATTACHMENT_TOO_LARGE/);
+    } finally {
+      r.socket.destroy();
+      ws.close();
+    }
+  });
+
+  test("missing Content-Length is rejected without waiting for a body", async () => {
+    const { ws } = await start();
+    const r = await rawBlobPost(hub!.port, hub!.token, [
+      "Transfer-Encoding: chunked",
+      "Content-Type: multipart/form-data; boundary=x",
+    ], "");
+    try {
+      expect(r.status).toBe(400);
+      expect(r.ms).toBeLessThan(1200);
+    } finally {
+      r.socket.destroy();
+      ws.close();
+    }
+  });
+
+  test("in-flight blob reads are counted before the body is consumed", async () => {
+    const { api, ws } = await start();
+    const held: Socket[] = [];
+    try {
+      for (let i = 0; i < 2; i++) {
+        const sock = await new Promise<Socket>((resolve, reject) => {
+          const s = createConnection({ host: "127.0.0.1", port: hub!.port }, () => resolve(s));
+          s.on("error", reject);
+        });
+        sock.write(
+          `POST /api/blobs HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer ${hub!.token}\r\nContent-Length: 64\r\nContent-Type: multipart/form-data; boundary=x\r\n\r\n`,
+        );
+        held.push(sock);
+      }
+      await new Promise((r) => setTimeout(r, 80));
+      const fd = new FormData();
+      fd.append("file", new File([PNG_1x1], "a.png", { type: "image/png" }));
+      const third = await api("/api/blobs", { method: "POST", body: fd });
+      expect(third.status).toBe(429);
+    } finally {
+      for (const sock of held) sock.destroy();
+      ws.close();
+    }
   });
 
   test("rejects oversize blob with 413", async () => {

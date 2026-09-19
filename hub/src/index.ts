@@ -9,7 +9,7 @@ import { SseHub } from "./sse";
 import { ingestEvent } from "./ingest";
 import { handleWsMessage, type WsData } from "./ws";
 import { limitsFromEnv, httpStatusForRunError, type ConcurrencyLimits } from "./concurrency";
-import { BlobStore } from "./blobs";
+import { BlobStore, MAX_BLOB_BYTES, isInlineRenderMime, responseContentType } from "./blobs";
 import { assertPromptSnippets, fillSnippetIds, readUiPrefs, writeUiPrefs, mergeUiPrefs } from "./uiPrefs";
 import { JoinTickets } from "./joinTickets";
 import { startRelayClient } from "./relayClient";
@@ -116,20 +116,35 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
   });
 
   app.post("/api/blobs", async (c) => {
-    const body = await c.req.parseBody();
-    const file = body["file"];
-    if (!(file instanceof File)) return c.json({ error: "INVALID" }, 400);
-    const bytes = Buffer.from(await file.arrayBuffer());
-    const { blob, error, status } = blobs.put(bytes, file.type || "", file.name || "");
-    if (error) return c.json({ error }, (status as 400 | 413 | 429) ?? 400);
-    return c.json({ blob }, 201);
+    const rawLen = c.req.header("content-length");
+    if (rawLen == null || rawLen === "") return c.json({ error: "INVALID" }, 400);
+    const len = Number(rawLen);
+    if (!Number.isFinite(len) || len <= 0) return c.json({ error: "INVALID" }, 400);
+    if (len > MAX_BLOB_BYTES) return c.json({ error: "ATTACHMENT_TOO_LARGE" }, 413);
+    const gate = blobs.beginUpload();
+    if (gate.error) return c.json({ error: gate.error }, (gate.status as 429) ?? 429);
+    try {
+      const body = await c.req.parseBody();
+      const file = body["file"];
+      if (!(file instanceof File)) return c.json({ error: "INVALID" }, 400);
+      const bytes = Buffer.from(await file.arrayBuffer());
+      const { blob, error, status } = blobs.put(bytes, file.type || "", file.name || "");
+      if (error) return c.json({ error }, (status as 400 | 413 | 429) ?? 400);
+      return c.json({ blob }, 201);
+    } finally {
+      blobs.endUpload();
+    }
   });
   app.get("/api/blobs/:id", (c) => {
     const hit = blobs.get(c.req.param("id"));
     if (!hit) return c.json({ error: "ATTACHMENT_NOT_FOUND" }, 404);
-    return new Response(hit.bytes, {
-      headers: { "content-type": hit.mime, "cache-control": "private, max-age=3600" },
-    });
+    const headers: Record<string, string> = {
+      "content-type": responseContentType(hit.mime),
+      "x-content-type-options": "nosniff",
+      "cache-control": "private, max-age=3600",
+    };
+    if (!isInlineRenderMime(hit.mime)) headers["content-disposition"] = "attachment";
+    return new Response(hit.bytes, { headers });
   });
 
   app.post("/api/runs", async (c) => {

@@ -440,9 +440,19 @@ export default function RunDetail({
             ? <Button variant="outline" onClick={() => { api.unarchive(run.id).then((res) => { if (res?.run) setRun(res.run); onChanged(); }); }}>取消隐藏</Button>
             : ["dispatched", "binding", "running", "created"].includes(run.status) ? null
             : <Button variant="outline" onClick={() => api.archive(run.id).then(() => { onChanged(); onClose(); })}>隐藏</Button>}
-          <Button variant="outline" asChild>
-            <a href={`/api/audit/export?token=${encodeURIComponent(getToken())}`}>导出审计</a>
-          </Button>
+          <Button variant="outline" onClick={() => {
+            void (async () => {
+              const r = await fetch("/api/audit/export", { headers: { authorization: `Bearer ${getToken()}` } });
+              if (!r.ok) return;
+              const blob = await r.blob();
+              const href = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = href;
+              a.download = "armada-audit.jsonl";
+              a.click();
+              URL.revokeObjectURL(href);
+            })();
+          }}>导出审计</Button>
         </div>
         {cancelError && <div className={`mt-2 text-destructive ${UI_TYPE}`}>{cancelError}</div>}
         {retryError && <div className={`mt-2 text-destructive ${UI_TYPE}`}>{retryError}</div>}

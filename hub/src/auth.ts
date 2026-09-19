@@ -19,11 +19,19 @@ export function loadToken(home: string): string {
   return readFileSync(p, "utf8").trim();
 }
 
+export function allowsQueryToken(method: string, path: string): boolean {
+  if (method.toUpperCase() !== "GET") return false;
+  if (path === "/api/events" || path === "/api/audit/export") return true;
+  return /^\/api\/runs\/[^/]+\/stream$/.test(path);
+}
+
 export const authMiddleware = (token: string) =>
   createMiddleware(async (c, next) => {
     const bearer = c.req.header("authorization");
-    const query = new URL(c.req.url).searchParams.get("token");
-    const ok = bearer === `Bearer ${token}` || query === token;
+    const url = new URL(c.req.url);
+    const query = url.searchParams.get("token");
+    const queryOk = allowsQueryToken(c.req.method, url.pathname) && query === token;
+    const ok = bearer === `Bearer ${token}` || queryOk;
     if (!ok) return c.json({ error: "unauthorized" }, 401);
     await next();
   });
