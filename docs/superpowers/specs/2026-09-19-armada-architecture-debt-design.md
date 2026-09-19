@@ -175,7 +175,7 @@ flowchart TD
 | **P1-e** | 8 | H10+P14 overlay attach 可观测 + hubUrl 校正 | attach 时 UI 明示非本应用 spawn；Cursor hubUrl 与看板一致 | 打包验收 |
 | **P2-a** | 9 | B4+B5+P12 CDP 写入按 cid；Plan 卡内配对 | 真机：续聊回车进对的 composer；两张 Plan 点第二张 Build | **可行性闸** |
 | **P2-b** | 10 | P4+P5+H11 中转指纹 + markOpened 有条件 + Android 同源 | identical 内容不广播；详情打开不每帧写 UserDefaults | P0-b 的活动时间可一并做 |
-| **P3** | 11 | 其余 Important/Minor：seq 归属、ack 关联键、死代码、CSP origin | 见 §7.4 | 部分需拍板 |
+| **P3** | 11 | 其余 Important/Minor + §7.5 漏网项 | 见 §7.4–7.5 | 部分需拍板 |
 
 v1 = P0 全部。v1.5 = P1。v2 = P2（含 CDP 真机）。P3 按拍板插入，不阻塞 v1。
 
@@ -254,7 +254,76 @@ v1 = P0 全部。v1.5 = P1。v2 = P2（含 CDP 真机）。P3 按拍板插入，
 | P17 | 安全 | postMessage 不校验 origin；CSP `http://*:*` | 校验 currentBoardOrigin；CSP 收敛 | 否 |
 | P18 | 其他 | cid 唯一约束抛到 WS 无 catch | `onRunBound` 先 `getActiveByConversation` → BIND_AMBIGUOUS | 否 |
 | P19 | parity | 关卡/改名/审计导出/标未读不对称 | 规格写明 App v1 不做或补 snap+路由 | **产品** |
-| m\* | 其他 | 原子写配置、register 形状校验、死函数、zinc 残留等 | 跟所属 P0–P2 顺手或单独清洁 PR | 不单独插队 |
+
+### 7.5 覆盖核对（对合并审查 + 四层原文）
+
+合并进聊天的 **K1–K7 / B1–B13 / H1–H12 / P1–P19 共 51 条：全部在 §7.1–7.4**。下面是四层原文里有、初稿压成 `m*` 或未单独成行的项。优先级默认 **P3**；标了「可并入」的跟对应主 ID 同批，不单独插队。
+
+**有意不进本债（不是漏）：** 手机发图 / `cmd.blobPut` / snap `attachments`（另文 `2026-09-19-armada-mobile-image-send-design.md`）。P2 只收 `title`/`conversationId`。启发式清单里判定 ✅ 合规的条目（首次 bind 的 prompt 全等、jsonl `turn_ended` 停跑等）不是债。
+
+#### 扩展 Minor（原文 Ext m1–m11）
+
+| ID | 问题 | 长期方案 | 并入 |
+| --- | --- | --- | --- |
+| Ext-m1 | `DISPATCH_TIMEOUT_MS` 手抄；hub 从上次 progress 起算，扩展从 `dispatchedAt` 起算 | 照 `BIND_TIMEOUT_MS` 导出共享，或 `run.start` 带 `expires_at` | — |
+| Ext-m2 | `shouldUnfollowOnHookStop` 恒 false，13 行清理永不执行 | 删死分支，注释留「绝不 unfollow」 | — |
+| Ext-m3 | `shouldSynthesizeTranscriptStop` 恒 true | 删函数与守卫 | — |
+| Ext-m4 | `normalizePrompt` 导入未使用 | 删 | — |
+| Ext-m5 | Ask/Plan 题干用英文 UI 正则剥噪声 | 常量集中 + locale 注释；提取失败保留原文 | B11 |
+| Ext-m6 | 文件 mention `[class*='menu-item']` + 子串命中首项 | 全等/endsWith 文件名；多命中 fail-closed | — |
+| Ext-m7 | 8×400ms / 800+400+700 硬编码当完成闸 | 具名常量；超时 reason 带轮数 | — |
+| Ext-m8 | Ask 控件 eval 畸形值也 `ok: true` | 确认 absent vs 读不到；后者重试到超时 | K3 |
+| Ext-m9 | 复刻 Cursor `sanitizeFileName`，前缀可能命中另一份计划 | 多命中记日志；注释锁定验证过的 Cursor 版本 | — |
+| Ext-m10 | 扩展 WS `?token=` 且未 encode | Authorization / subprotocol；至少编码 | K7 |
+| Ext-m11 | hook stop 删 `askLastByRun` 不删 `askPlanTextByRun` | 两 map 同生命周期 | — |
+
+启发式清单里未升格成 B 的三条：
+
+| ID | 问题 | 长期方案 |
+| --- | --- | --- |
+| B14 | 注入残留认领：空白折叠后与 `lastSubmittedPrompt` 全等 → OWNED 整框替换（cid 已知仍用文本） | 叠加 cid 限定；无 cid 才允许文本认领 |
+| B15 | `/^Build(\s\|$)/` 当 Plan presence+点击闸（英文按钮文案） | 有真机 fixture 暂留；长期用 `data-tone=plan` + cid，文案只展示 |
+| B16 | 剪贴板 ack 在 stdout 找 `"OK"` / `"O\0K"`，无关联 id | 与 B10 同形：ack 带关联键；PS 异常走超时 |
+
+#### 中转 / App Minor（原文 Rel M1–M9 + I9）
+
+| ID | 问题 | 长期方案 | 并入 |
+| --- | --- | --- | --- |
+| Rel-M1 | `/answer` `/cancel` 跳过 fleet 归属与 `checkRate` | 与 followup/retry/archive 同一前置 | K6 |
+| Rel-M2 | `UPDATE runs` 无 `AND fleet_id=?`，跨舰队可搬行（id 不可猜） | WHERE 加上 fleet | — |
+| Rel-M3 | hub secret 走 WS query | 改 header/subprotocol | K7 |
+| Rel-M4 | relay 丢掉 hub 的 `canRetry` 再抄状态清单重算 | 持久化转发 hub 值 | K1/H5 |
+| Rel-M5 | APNs `badge: 1` 写死 | 不带角标或带真实未读数 | — |
+| Rel-M6 | iOS 永远报 `environment: production`，sandbox token 登记成功永不投递 | Debug/TestFlight 报 sandbox | — |
+| Rel-M7 | `queued` 状态词三份副本 | 与 H6 同一导出 | H6 |
+| Rel-M8 | admin token 打 stdout | 只写一次文件，日志打指纹 | — |
+| Rel-M9 | `sseClients` 无每舰队上限 | 每舰队连接上限 + 超限踢最旧 | P6 |
+| Rel-I9 | 体积闸只看 Content-Length 且只装在 dispatch；followup/snippets 无闸 | 缺头/chunked 拒或限流读；三路由共用 | P16 |
+
+#### Hub Minor（原文 Hub m2–m9；m1=H6，m8⊂K7）
+
+| ID | 问题 | 长期方案 | 并入 |
+| --- | --- | --- | --- |
+| Hub-m2 | HTTP 层再实现一遍 followup 准入 | 删前置，全部交给 `runs.followup` + `httpStatusForRunError` | K6 |
+| Hub-m3 | `extensionSupportsMultiRunPerWindow` 末句恒真 | 显式 `MIN_MULTI_RUN_EXT_VERSION` 或规格登记 | — |
+| Hub-m4 | `register` 不校验 machineId/windowId/os | 形状校验失败 `close(4001)` | — |
+| Hub-m5 | 四处配置就地 `writeFileSync` | 共用 `writeFileAtomic` | — |
+| Hub-m6 | stop 未知 status 静默 return，无审计 | `decideStop` 归一化/拒绝并给 audit 码 | P9 同批规格 |
+| Hub-m7 | `POST /api/runs` 畸形 json → 500 | 统一 `readJson` → 400 INVALID | — |
+| Hub-m9 | `claimOutbound` 按 prompt 全等认领（规格已选，有 120s 兜底） | **本轮不改**；真机出现卡跑再换成 gen/turn 键 | 明确推迟 |
+
+#### Web / 桌面 Minor + 规格不一致 + 未编号 parity
+
+| ID | 问题 | 长期方案 | 并入 |
+| --- | --- | --- | --- |
+| Web-M1 | Board 仅存两处 zinc class | 换成 shadcn token | — |
+| Web-M3 | hub `import` web `boardState`；`chatView` 相对 import 扩展 | 版本常量/imageMarkers 放中立模块 | H9 |
+| X2 | 规格写 finalText 仅终态；代码只在 `completed` 读 events，`aborted/error/cancelled` App 无正文 | 规格改口或代码放开终态集 | K1 同批 |
+| X5b | Cursor Reload 整套无规格文件 | 补规格或标明「仅操作员命令、无设计文」 | H1 |
+| Par-1 | App 无 `GET /api/runs/:id/events`，只有单轮 `finalText` | 规格写 App v1 不做完整线程，或补事件分页 | P19 |
+| Par-2 | `extension_version` 在 snap.workspaces，App DTO 不解析 → 落后机 Ask 静默不可用 | DTO 解码 + 落后提示 | P19 |
+| Par-3 | `queueMessageDefaultBehavior` 已解码无渲染 | 与 P7 同批给「队列 vs 打断」面 | P7 |
+| Par-4 | `COLUMN_MAP` / `canRetry` / `isLive` / `queuedOutbound` 看板与 App 手工同步，无跨语言契约测 | 照 `decideOccupancy` TS/Rust 对齐测 | H5/H6 |
 
 ---
 
@@ -301,3 +370,4 @@ v1 = P0 全部。v1.5 = P1。v2 = P2（含 CDP 真机）。P3 按拍板插入，
 | 日期 | 变更 |
 | --- | --- |
 | 2026-09-19 | 初稿。汇总 HEAD `b49123f` 四层审查；长期方案按共享边界收口；优先级 P0 安全与快照 → P1 契约 → P2 CDP/性能 → P3 拍板项。 |
+| 2026-09-19 | 补 §7.5：四层原文 Minor / 规格 X2 / 未编号 parity。合并审查 51 条主 ID 已齐；原先 `m*` 一行改为可追踪子 ID。 |
