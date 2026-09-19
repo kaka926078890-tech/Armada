@@ -45,7 +45,7 @@ cp -R "$ROOT/hub/web/dist/." "$DEST/hub/web/dist/"
 
 # hub/src/relayClient.ts imports ../../relay/src/uri and ../web/src/chatView.
 # Packaged layout is Resources/{hub,relay,extension} so those paths must exist.
-echo "==> copy relay + hub/web/src imported by hub"
+echo "==> copy relay + hub/web/src + desktop-core imported by hub"
 if [[ ! -d "$ROOT/relay/src" ]]; then
   echo "error: missing $ROOT/relay/src (required by packaged hub)" >&2
   exit 1
@@ -54,10 +54,15 @@ if [[ ! -d "$ROOT/hub/web/src" ]]; then
   echo "error: missing $ROOT/hub/web/src (required by packaged hub)" >&2
   exit 1
 fi
-rm -rf "$DEST/relay"
-mkdir -p "$DEST/relay/src" "$DEST/hub/web/src"
+if [[ ! -d "$ROOT/desktop-core/src" ]]; then
+  echo "error: missing $ROOT/desktop-core/src (required by packaged hub)" >&2
+  exit 1
+fi
+rm -rf "$DEST/relay" "$DEST/desktop-core"
+mkdir -p "$DEST/relay/src" "$DEST/hub/web/src" "$DEST/desktop-core/src"
 cp -R "$ROOT/relay/src/." "$DEST/relay/src/"
 cp -R "$ROOT/hub/web/src/." "$DEST/hub/web/src/"
+cp -R "$ROOT/desktop-core/src/." "$DEST/desktop-core/src/"
 
 # hub/src imports these via ../../extension/src/* (repo layout). Packaged
 # layout is Resources/{hub,extension} so the same relative path must exist.

@@ -6,7 +6,7 @@ import { join } from "path";
 const ROOT = join(import.meta.dir, "../..");
 const BUNDLE_HUB = join(ROOT, "desktop/scripts/bundle-hub.sh");
 /** hub/src/index.ts imports these trees outside hub/src; packaged dest must mirror the repo. */
-const EXTRA_TREES = ["relay/src", "hub/web/src"] as const;
+const EXTRA_TREES = ["relay/src", "hub/web/src", "desktop-core/src"] as const;
 const EXTENSION_FILES = [
   "promptNormalize.ts",
   "workspacePath.ts",
@@ -28,8 +28,8 @@ function materializeSidecar(dest: string, extras: boolean) {
   }
 }
 
-async function importRelayClient(dest: string) {
-  const proc = Bun.spawn(["bun", "--eval", "await import('./src/relayClient.ts')"], {
+async function importHubModule(dest: string, spec: string) {
+  const proc = Bun.spawn(["bun", "--eval", `await import('${spec}')`], {
     cwd: join(dest, "hub"),
     stdout: "pipe",
     stderr: "pipe",
@@ -56,9 +56,21 @@ describe("packaged sidecar hub", () => {
     const dest = mkdtempSync(join(tmpdir(), "armada-sidecar-miss-"));
     try {
       materializeSidecar(dest, false);
-      const r = await importRelayClient(dest);
+      const r = await importHubModule(dest, "./src/relayClient.ts");
       expect(r.code).not.toBe(0);
       expect(r.stderr).toContain("relay/src/uri");
+    } finally {
+      rmSync(dest, { recursive: true, force: true });
+    }
+  });
+
+  test("cursorReloadStore cannot load from a hub-only dest", async () => {
+    const dest = mkdtempSync(join(tmpdir(), "armada-sidecar-reload-miss-"));
+    try {
+      materializeSidecar(dest, false);
+      const r = await importHubModule(dest, "./src/cursorReloadStore.ts");
+      expect(r.code).not.toBe(0);
+      expect(r.stderr).toContain("desktop-core/src/cursorReload");
     } finally {
       rmSync(dest, { recursive: true, force: true });
     }
@@ -68,7 +80,19 @@ describe("packaged sidecar hub", () => {
     const dest = mkdtempSync(join(tmpdir(), "armada-sidecar-ok-"));
     try {
       materializeSidecar(dest, true);
-      const r = await importRelayClient(dest);
+      const r = await importHubModule(dest, "./src/relayClient.ts");
+      expect(r.stderr).toBe("");
+      expect(r.code).toBe(0);
+    } finally {
+      rmSync(dest, { recursive: true, force: true });
+    }
+  });
+
+  test("cursorReloadStore loads when extra trees mirror the repo", async () => {
+    const dest = mkdtempSync(join(tmpdir(), "armada-sidecar-reload-ok-"));
+    try {
+      materializeSidecar(dest, true);
+      const r = await importHubModule(dest, "./src/cursorReloadStore.ts");
       expect(r.stderr).toBe("");
       expect(r.code).toBe(0);
     } finally {
