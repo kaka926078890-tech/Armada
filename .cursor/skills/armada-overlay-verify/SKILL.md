@@ -13,7 +13,7 @@ Acceptance is **overlay-installed `/Applications/Armada.app`**, then a **spawned
 2. `cd armada/desktop && bun run tauri build`
 3. `ditto` the bundle onto `/Applications/Armada.app`
 4. `open /Applications/Armada.app`
-5. Wait until `lsof -nP -iTCP:7380 -sTCP:LISTEN` shows **`/Applications/Armada.app/Contents/Resources/bun`**. The desktop shell persists the board in `localStorage` and calls `restoreOwnedHub()` even when that session is missing (Mac create path) — **do not wait for a click on 创建舰队**.
+5. Wait until `ps -ww -p "$(lsof -t -nP -iTCP:7380 -sTCP:LISTEN)" -o args=` contains **`/Applications/Armada.app/Contents/Resources/bun`**. `lsof` COMMAND is just `bun` — do not match the bundle path on that column. The desktop shell persists the board in `localStorage` and calls `restoreOwnedHub()` even when that session is missing (Mac create path) — **do not wait for a click on 创建舰队**.
 6. Notify:
 
 ```bash
