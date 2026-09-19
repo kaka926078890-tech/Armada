@@ -46,4 +46,14 @@ describe("httpStatusForRunError", () => {
     expect(httpStatusForRunError("OUTBOUND_LIMIT")).toBe(429);
     expect(httpStatusForRunError("OUTBOUND_TEXT_ONLY")).toBe(409);
   });
+
+  test("ASK_* and occupancy conflicts are 409", () => {
+    expect(httpStatusForRunError("ASK_INVALID_OPTION")).toBe(409);
+    expect(httpStatusForRunError("ASK_IN_FLIGHT")).toBe(409);
+    expect(httpStatusForRunError("NO_PENDING_ASK")).toBe(409);
+    expect(httpStatusForRunError("ASK_MISMATCH")).toBe(409);
+    expect(httpStatusForRunError("ALREADY_ACTIVE")).toBe(409);
+    expect(httpStatusForRunError("RUN_BUSY")).toBe(409);
+    expect(httpStatusForRunError("ALREADY_TERMINAL")).toBe(409);
+  });
 });

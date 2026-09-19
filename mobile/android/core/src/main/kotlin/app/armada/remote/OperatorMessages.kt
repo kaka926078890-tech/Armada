@@ -25,6 +25,11 @@ fun operatorMessage(code: String): String = when (code) {
     "MACHINE_OFFLINE" -> "机器离线"
     "RUN_LIMIT" -> "这台机器任务数已满"
     "WINDOW_BUSY" -> "该窗口正忙"
+    "ASK_INVALID_OPTION" -> "选项无效，请改选或 Skip"
+    "ASK_IN_FLIGHT" -> "正在提交，请稍候"
+    "NO_PENDING_ASK" -> "当前没有待回答的问题"
+    "ASK_MISMATCH" -> "问题已更新，请刷新后再答"
+    "NO_ASSISTANT_BODY" -> "任务已完成，正文尚未生成"
     else -> code
 }
 

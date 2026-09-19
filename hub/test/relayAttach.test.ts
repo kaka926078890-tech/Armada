@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync } from "fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { createServer, type HubServer } from "../src/index";
@@ -185,5 +185,49 @@ describe("relay attach (HTTP hub)", () => {
     const listed = await (await fetch(`http://127.0.0.1:${relay!.port}/mobile/runs?archived=1`, { headers })).json() as any;
     expect(listed.runs.map((r: any) => r.runId)).toContain(runId);
     ext.close();
+  });
+
+  test("cursor-reload get/post via attach does not hang", async () => {
+    const relayHome = mkdtempSync(join(tmpdir(), "armada-relay-"));
+    const hubHome = mkdtempSync(join(tmpdir(), "armada-hub-"));
+    relay = createRelayServer({
+      port: 0, hostname: "127.0.0.1", home: relayHome,
+      publicBase: "http://127.0.0.1", adminToken: "adm",
+    });
+    const fleet = relay.createFleet();
+    hub = createServer({ port: 0, home: hubHome });
+    attach = attachWithConfig(
+      { relay: `http://127.0.0.1:${relay.port}`, fleet: fleet.fleet, secret: fleet.hubSecret },
+      { hubPort: hub.port, token: hub.token, pollMs: 50 },
+    );
+    const headers = { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" };
+    await waitUntil(async () => {
+      const j = await (await fetch(`http://127.0.0.1:${relay!.port}/mobile/workspaces`, { headers })).json() as any;
+      return j.hubOffline === false;
+    });
+    const t0 = Date.now();
+    const get = await fetch(`http://127.0.0.1:${relay.port}/mobile/cursor-reload`, { headers });
+    expect(get.status).toBe(200);
+    expect(await get.json()).toMatchObject({ needed: false });
+    expect(Date.now() - t0).toBeLessThan(3000);
+    const post = await fetch(`http://127.0.0.1:${relay.port}/mobile/cursor-reload`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ action: "when-idle" }),
+    });
+    expect(post.status).toBe(200);
+    expect(await post.json()).toMatchObject({ needed: true, pending: { action: "when-idle" } });
+    expect(Date.now() - t0).toBeLessThan(3000);
+  });
+
+  test("attach command matrix matches client including Reload and ping", () => {
+    const attachSrc = readFileSync(join(import.meta.dir, "../src/relayAttach.ts"), "utf8");
+    const clientSrc = readFileSync(join(import.meta.dir, "../src/relayClient.ts"), "utf8");
+    const handlerSrc = readFileSync(join(import.meta.dir, "../src/relayCommandHandler.ts"), "utf8");
+    expect(attachSrc).toContain("createRelayCommandHandler");
+    expect(clientSrc).toContain("createRelayCommandHandler");
+    expect(attachSrc).toContain("startRelayHeartbeat");
+    expect(clientSrc).toContain("startRelayHeartbeat");
+    expect(handlerSrc).toMatch(/\.ping\s*\(/);
   });
 });

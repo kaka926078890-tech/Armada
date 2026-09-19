@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync } from "fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { createServer, type HubServer } from "../src/index";
@@ -500,5 +500,30 @@ describe("hub outbound to relay", () => {
       return j.status === "completed" && j.finalText === "迟到正文";
     });
     ext.close();
+  });
+
+  test("onCommand uses shared createRelayCommandHandler including Reload", () => {
+    const src = readFileSync(join(import.meta.dir, "../src/relayClient.ts"), "utf8");
+    expect(src).toContain("createRelayCommandHandler");
+    const handler = readFileSync(join(import.meta.dir, "../src/relayCommandHandler.ts"), "utf8");
+    for (const cmd of [
+      "cmd.dispatch", "cmd.followup", "cmd.retry", "cmd.answer", "cmd.cancel",
+      "cmd.archive", "cmd.unarchive", "cmd.promptSnippetsGet", "cmd.promptSnippetsPut",
+      "cmd.cursorReloadGet", "cmd.cursorReloadPost", "UNKNOWN_CMD",
+    ]) {
+      expect(handler).toContain(cmd);
+    }
+  });
+
+  test("unknown cmd.* replies UNKNOWN_CMD without calling hub", async () => {
+    const { createRelayCommandHandler } = await import("../src/relayCommandHandler");
+    const sent: object[] = [];
+    const handle = createRelayCommandHandler({
+      hubFetch: async () => { throw new Error("hubFetch must not run"); },
+      snapOf: async () => null,
+      send: (msg) => sent.push(msg),
+    });
+    await handle({ type: "cmd.notARealCommand", requestId: "req-1" });
+    expect(sent).toEqual([{ type: "cmd.result", requestId: "req-1", ok: false, error: "UNKNOWN_CMD" }]);
   });
 });

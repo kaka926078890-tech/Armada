@@ -24,6 +24,15 @@ class OperatorMessagesTest {
     }
 
     @Test
+    fun askAndEmptyBodyMatchDesktop() {
+        assertEquals("选项无效，请改选或 Skip", operatorMessage("ASK_INVALID_OPTION"))
+        assertEquals("正在提交，请稍候", operatorMessage("ASK_IN_FLIGHT"))
+        assertEquals("当前没有待回答的问题", operatorMessage("NO_PENDING_ASK"))
+        assertEquals("问题已更新，请刷新后再答", operatorMessage("ASK_MISMATCH"))
+        assertEquals("任务已完成，正文尚未生成", operatorMessage("NO_ASSISTANT_BODY"))
+    }
+
+    @Test
     fun appendsSnippetBodyLikeIos() {
         assertEquals("提示", appendSnippetBody("", "提示 \n"))
         assertEquals("已有\n提示", appendSnippetBody("已有", "提示 \n"))

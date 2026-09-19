@@ -1161,3 +1161,186 @@ describe("mobile stream", () => {
     await sse.cancel();
   });
 });
+
+describe("relay HTTP map and snap fingerprint", () => {
+  test("followup ASK_INVALID_OPTION is 409 not 502", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    ws.addEventListener("message", (e) => {
+      const msg = JSON.parse(String(e.data));
+      if (msg.type === "cmd.followup") {
+        ws.send(JSON.stringify({
+          type: "cmd.result",
+          requestId: msg.requestId,
+          ok: false,
+          error: "ASK_INVALID_OPTION",
+        }));
+      }
+    });
+    ws.send(JSON.stringify({
+      type: "snap.run",
+      run: {
+        runId: "r-1",
+        machineId: "m-1",
+        workspaceRoot: "/Users/me/proj",
+        prompt: "hello fleet",
+        status: "completed",
+        finalText: "好了",
+        updatedAt: Date.now(),
+      },
+    }));
+    await Bun.sleep(40);
+    const r = await fetch(url(s, "/mobile/runs/r-1/followup"), {
+      method: "POST",
+      headers: { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ prompt: "继续" }),
+    });
+    expect(r.status).toBe(409);
+    expect(await r.json()).toEqual({ error: "ASK_INVALID_OPTION" });
+    ws.close();
+  });
+
+  test("answer ASK_INVALID_OPTION is 409 not 502", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    ws.addEventListener("message", (e) => {
+      const msg = JSON.parse(String(e.data));
+      if (msg.type === "cmd.answer") {
+        ws.send(JSON.stringify({
+          type: "cmd.result",
+          requestId: msg.requestId,
+          ok: false,
+          error: "ASK_INVALID_OPTION",
+        }));
+      }
+    });
+    await Bun.sleep(50);
+    const r = await fetch(url(s, "/mobile/runs/r-1/answer"), {
+      method: "POST",
+      headers: { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ request_id: "x" }),
+    });
+    expect(r.status).toBe(409);
+    expect(await r.json()).toEqual({ error: "ASK_INVALID_OPTION" });
+    ws.close();
+  });
+
+  test("answer HUB_TIMEOUT is 502 not 409", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    ws.addEventListener("message", (e) => {
+      const msg = JSON.parse(String(e.data));
+      if (msg.type === "cmd.answer") {
+        ws.send(JSON.stringify({
+          type: "cmd.result",
+          requestId: msg.requestId,
+          ok: false,
+          error: "HUB_TIMEOUT",
+        }));
+      }
+    });
+    await Bun.sleep(50);
+    const r = await fetch(url(s, "/mobile/runs/r-1/answer"), {
+      method: "POST",
+      headers: { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" },
+      body: "{}",
+    });
+    expect(r.status).toBe(502);
+    expect(await r.json()).toEqual({ error: "HUB_TIMEOUT" });
+    ws.close();
+  });
+
+  test("cancel HUB_TIMEOUT is 502 not 409", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    ws.addEventListener("message", (e) => {
+      const msg = JSON.parse(String(e.data));
+      if (msg.type === "cmd.cancel") {
+        ws.send(JSON.stringify({
+          type: "cmd.result",
+          requestId: msg.requestId,
+          ok: false,
+          error: "HUB_TIMEOUT",
+        }));
+      }
+    });
+    await Bun.sleep(50);
+    const r = await fetch(url(s, "/mobile/runs/r-1/cancel"), {
+      method: "POST",
+      headers: { authorization: `Bearer ${fleet.operatorToken}` },
+    });
+    expect(r.status).toBe(502);
+    expect(await r.json()).toEqual({ error: "HUB_TIMEOUT" });
+    ws.close();
+  });
+
+  test("identical snap does not bump updated_at or rebroadcast", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    const ac = new AbortController();
+    const res = await fetch(url(s, "/mobile/stream"), {
+      headers: { authorization: `Bearer ${fleet.operatorToken}` },
+      signal: ac.signal,
+    });
+    const sse = openSse(res);
+    await sse.waitUntil((ev) => ev.some((e) => (e as { type?: string }).type === "workspaces"));
+    const snap = {
+      runId: "r-fp",
+      machineId: "m-1",
+      workspaceRoot: "/ws/a",
+      prompt: "hi",
+      status: "running",
+      updatedAt: 1000,
+    };
+    ws.send(JSON.stringify({ type: "snap.run", run: snap }));
+    await sse.waitUntil((ev) => ev.some((e) => (e as { run?: { runId?: string } }).run?.runId === "r-fp"));
+    const runEvents = () => sse.events.filter((e) => (e as { run?: { runId?: string } }).run?.runId === "r-fp");
+    expect(runEvents()).toHaveLength(1);
+    const headers = { authorization: `Bearer ${fleet.operatorToken}` };
+    const first = await (await fetch(url(s, "/mobile/runs/r-fp"), { headers })).json() as { updatedAt: number };
+    ws.send(JSON.stringify({ type: "snap.run", run: { ...snap, updatedAt: 9999 } }));
+    await Bun.sleep(80);
+    expect(runEvents()).toHaveLength(1);
+    const second = await (await fetch(url(s, "/mobile/runs/r-fp"), { headers })).json() as { updatedAt: number };
+    expect(second.updatedAt).toBe(first.updatedAt);
+    ac.abort();
+    await sse.cancel();
+    ws.close();
+  });
+
+  test("pendingAsk request_id change bumps updated_at", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    const base = {
+      runId: "r-ask",
+      machineId: "m-1",
+      workspaceRoot: "/ws/a",
+      prompt: "hi",
+      status: "running",
+      updatedAt: 1,
+    };
+    ws.send(JSON.stringify({ type: "snap.run", run: base }));
+    await Bun.sleep(40);
+    const headers = { authorization: `Bearer ${fleet.operatorToken}` };
+    ws.send(JSON.stringify({
+      type: "snap.run",
+      run: { ...base, pendingAsk: { request_id: "ask-1", questions: [] }, updatedAt: 2 },
+    }));
+    await Bun.sleep(40);
+    const t1 = (await (await fetch(url(s, "/mobile/runs/r-ask"), { headers })).json() as { updatedAt: number }).updatedAt;
+    ws.send(JSON.stringify({
+      type: "snap.run",
+      run: { ...base, pendingAsk: { request_id: "ask-2", questions: [] }, updatedAt: 3 },
+    }));
+    await Bun.sleep(40);
+    const t2 = (await (await fetch(url(s, "/mobile/runs/r-ask"), { headers })).json() as { updatedAt: number }).updatedAt;
+    expect(t2).not.toBe(t1);
+    ws.close();
+  });
+});

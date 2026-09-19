@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { classifyRelayHttp, NETWORK_INTERCEPT_COPY, PAIR_INVITE_COPY } from "../src/relayHttpError";
+import { readFileSync } from "fs";
+import { join } from "path";
+import { classifyRelayHttp, NETWORK_INTERCEPT_COPY, PAIR_INVITE_COPY, operatorCopy } from "../src/relayHttpError";
 
 describe("classifyRelayHttp", () => {
   test("JSON 403 OPERATOR_REQUIRED is the pair-invite copy, not HTTP 403", () => {
@@ -30,5 +32,25 @@ describe("classifyRelayHttp", () => {
     expect(classifyRelayHttp(502, '{"error":"HUB_TIMEOUT"}').message).toBe("中台处理超时，请再发一次");
     expect(classifyRelayHttp(429, '{"error":"RATE_LIMIT"}').message).toBe("点得太快，请稍后再发");
     expect(classifyRelayHttp(400, '{"error":"EMPTY_PROMPT"}').message).toBe("提示词是空的");
+  });
+
+  test("ASK_* and NO_ASSISTANT_BODY have Chinese operator copy", () => {
+    expect(operatorCopy("ASK_INVALID_OPTION")).toBe("选项无效，请改选或 Skip");
+    expect(operatorCopy("ASK_IN_FLIGHT")).toBe("正在提交，请稍候");
+    expect(operatorCopy("NO_PENDING_ASK")).toBe("当前没有待回答的问题");
+    expect(operatorCopy("ASK_MISMATCH")).toBe("问题已更新，请刷新后再答");
+    expect(operatorCopy("NO_ASSISTANT_BODY")).toBe("任务已完成，正文尚未生成");
+    expect(classifyRelayHttp(409, '{"error":"ASK_INVALID_OPTION"}').message).toBe("选项无效，请改选或 Skip");
+  });
+
+  test("iOS and Android operatorMessage cover the same ASK_* codes", () => {
+    const root = join(import.meta.dir, "../..");
+    const swift = readFileSync(join(root, "mobile/ios/ArmadaRemote/RelayAPI.swift"), "utf8");
+    const kt = readFileSync(join(root, "mobile/android/core/src/main/kotlin/app/armada/remote/OperatorMessages.kt"), "utf8");
+    for (const code of ["ASK_INVALID_OPTION", "ASK_IN_FLIGHT", "NO_PENDING_ASK", "ASK_MISMATCH", "NO_ASSISTANT_BODY"]) {
+      expect(swift).toContain(`case "${code}"`);
+      expect(kt).toContain(`"${code}"`);
+      expect(operatorCopy(code)).not.toBe(code);
+    }
   });
 });

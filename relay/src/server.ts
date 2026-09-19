@@ -7,6 +7,7 @@ import { decodeWorkspaceId, encodeWorkspaceId, formatOpUri, formatPairUri } from
 import { createApnsSender, type ApnsConfig } from "./apns";
 import { createFcmSender, isFcmToken, type FcmConfig } from "./fcm";
 import { notifyEdges, type NotifyEdge } from "./notifyEdge";
+import { httpStatusForRunError } from "../../hub/src/concurrency";
 
 export const PROTOCOL_VERSION = 1;
 const MAX_BODY = 20 * 1024 * 1024;
@@ -227,6 +228,28 @@ export function createRelayServer(opts: {
     };
   }
 
+  function runContentFp(input: {
+    status: string;
+    prompt: string;
+    finalText: string | null;
+    error: string | null;
+    pendingAsk: unknown;
+    outbound: unknown;
+    archived: boolean;
+    canRetry: boolean;
+  }): string {
+    return JSON.stringify({
+      status: input.status,
+      prompt: input.prompt ?? "",
+      finalText: input.finalText ?? null,
+      error: input.error ?? null,
+      pendingAsk: input.pendingAsk ?? null,
+      outbound: input.outbound ?? [],
+      archived: input.archived,
+      canRetry: input.canRetry,
+    });
+  }
+
   function applyRunSnap(fleetId: string, snap: RunSnap) {
     const status = snap.status;
     const finalText = snap.finalText ?? null;
@@ -235,8 +258,19 @@ export function createRelayServer(opts: {
     const pendingAsk = snap.pendingAsk == null ? null : JSON.stringify(snap.pendingAsk);
     const outbound = Array.isArray(snap.outbound) ? JSON.stringify(snap.outbound) : null;
     const queueMode = typeof snap.queueMessageDefaultBehavior === "string" ? snap.queueMessageDefaultBehavior : null;
-    const existing = db.query("SELECT id, archived_at, notified_status, notified_ask_id FROM runs WHERE id=?1").get(snap.runId) as
-      | { id: string; archived_at?: number | null; notified_status?: string | null; notified_ask_id?: string | null }
+    const existing = db.query("SELECT * FROM runs WHERE id=?1").get(snap.runId) as
+      | {
+        id: string;
+        status?: string;
+        prompt?: string;
+        final_text?: string | null;
+        error?: string | null;
+        pending_ask?: string | null;
+        outbound?: string | null;
+        archived_at?: number | null;
+        notified_status?: string | null;
+        notified_ask_id?: string | null;
+      }
       | undefined;
     const existingArchived = existing?.archived_at && Number(existing.archived_at) > 0 ? Number(existing.archived_at) : null;
     const archivedAt = snap.archived === true
@@ -244,6 +278,30 @@ export function createRelayServer(opts: {
       : snap.archived === false
         ? null
         : existingArchived;
+    const canRetry = snap.canRetry ?? ["error", "unknown", "aborted"].includes(String(status ?? ""));
+    const nextFp = runContentFp({
+      status,
+      prompt: snap.prompt,
+      finalText,
+      error,
+      pendingAsk: snap.pendingAsk ?? null,
+      outbound: Array.isArray(snap.outbound) ? snap.outbound : [],
+      archived: archivedAt != null,
+      canRetry,
+    });
+    if (existing) {
+      const prevFp = runContentFp({
+        status: String(existing.status ?? ""),
+        prompt: existing.prompt ?? "",
+        finalText: existing.final_text ?? null,
+        error: existing.error ?? null,
+        pendingAsk: existing.pending_ask ? JSON.parse(existing.pending_ask) : null,
+        outbound: existing.outbound ? JSON.parse(existing.outbound) : [],
+        archived: existingArchived != null,
+        canRetry: ["error", "unknown", "aborted"].includes(String(existing.status ?? "")),
+      });
+      if (prevFp === nextFp) return existing;
+    }
     const prev = {
       notifiedStatus: existing?.notified_status ?? null,
       notifiedAskId: existing?.notified_ask_id ?? null,
@@ -348,19 +406,11 @@ export function createRelayServer(opts: {
     });
   }
 
-  function hubCmdStatus(err: string): 400 | 404 | 409 | 429 | 500 | 502 | 503 {
+  function hubCmdStatus(err: string): 400 | 404 | 409 | 413 | 429 | 500 | 502 | 503 {
     if (err === "HUB_OFFLINE" || err === "READ_FAIL") return 503;
+    if (err === "HUB_TIMEOUT") return 502;
     if (err === "WRITE_FAIL") return 500;
-    if (err === "RUN_LIMIT" || err === "RATE_LIMIT" || err === "OUTBOUND_LIMIT") return 429;
-    if (err === "NOT_FOUND") return 404;
-    if ([
-      "PROMPT_COLLISION", "CONVERSATION_BUSY", "INJECT_SLOT_BUSY", "WINDOW_BUSY",
-      "NO_CONVERSATION", "OUTBOUND_TEXT_ONLY", "INVALID_STATE",
-    ].includes(err)) return 409;
-    if (err === "WORKSPACE_NOT_OPEN" || err === "MACHINE_OFFLINE" || err === "CLOSED" || err === "EMPTY_PROMPT" || err === "INVALID" || err === "CDP_NOT_READY" || err === "SNIPPET_INVALID" || err === "SNIPPET_LIMIT") {
-      return 400;
-    }
-    return 502;
+    return httpStatusForRunError(err);
   }
 
   function checkRate(token: string): boolean {
@@ -677,7 +727,10 @@ export function createRelayServer(opts: {
     const sent = sendHub(fleet.id, { type: "cmd.answer", requestId, runId: c.req.param("id"), body });
     if (!sent) return c.json({ error: "HUB_OFFLINE" }, 503);
     const result = await waitHub(requestId);
-    if (!result.ok) return c.json({ error: result.error ?? "HUB_TIMEOUT" }, 409);
+    if (!result.ok) {
+      const err = result.error ?? "HUB_TIMEOUT";
+      return c.json({ error: err }, hubCmdStatus(err) as 400);
+    }
     if (result.run) applyRunSnap(fleet.id, result.run);
     return c.json({ ok: true }, 202);
   });
@@ -689,7 +742,10 @@ export function createRelayServer(opts: {
     const sent = sendHub(fleet.id, { type: "cmd.cancel", requestId, runId: c.req.param("id") });
     if (!sent) return c.json({ error: "HUB_OFFLINE" }, 503);
     const result = await waitHub(requestId);
-    if (!result.ok) return c.json({ error: result.error ?? "HUB_TIMEOUT" }, 409);
+    if (!result.ok) {
+      const err = result.error ?? "HUB_TIMEOUT";
+      return c.json({ error: err }, hubCmdStatus(err) as 400);
+    }
     if (result.run) applyRunSnap(fleet.id, result.run);
     return c.json({ ok: true });
   });

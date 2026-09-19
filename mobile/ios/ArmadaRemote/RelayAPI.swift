@@ -296,6 +296,11 @@ enum RelayAPIError: LocalizedError {
         case "MACHINE_OFFLINE": return "机器离线"
         case "RUN_LIMIT": return "这台机器任务数已满"
         case "WINDOW_BUSY": return "该窗口正忙"
+        case "ASK_INVALID_OPTION": return "选项无效，请改选或 Skip"
+        case "ASK_IN_FLIGHT": return "正在提交，请稍候"
+        case "NO_PENDING_ASK": return "当前没有待回答的问题"
+        case "ASK_MISMATCH": return "问题已更新，请刷新后再答"
+        case "NO_ASSISTANT_BODY": return "任务已完成，正文尚未生成"
         default: return code
         }
     }

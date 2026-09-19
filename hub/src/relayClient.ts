@@ -1,17 +1,17 @@
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import type { Database } from "bun:sqlite";
-import { decodeWorkspaceId, originOf } from "../../relay/src/uri";
+import { originOf } from "../../relay/src/uri";
 import { eventsToChat, lastTurnAssistantBody } from "../web/src/chatView";
 import type { RunEvent } from "../web/src/types";
 import { canRetryStatus, TERMINAL_STATUSES } from "./concurrency";
+import { createRelayCommandHandler, startRelayHeartbeat } from "./relayCommandHandler";
 import type { Registry } from "./registry";
 import type { RunService } from "./runs";
 import type { SseHub } from "./sse";
 
 const HEX64 = /^[a-f0-9]{64}$/;
 const FLEET_RE = /^[a-z0-9-]{8,64}$/;
-const HEARTBEAT_MS = 25_000;
 const MAX_BACKOFF_MS = 30_000;
 
 export type RelayConfig = { relay: string; fleet: string; secret: string };
@@ -127,7 +127,7 @@ export function startRelayClient(opts: {
 
   let stopped = false;
   let ws: WebSocket | null = null;
-  let heartbeat: ReturnType<typeof setInterval> | null = null;
+  let heartbeat: (() => void) | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let backoff = 1000;
 
@@ -193,116 +193,7 @@ export function startRelayClient(opts: {
       },
     });
 
-  const onCommand = async (msg: any) => {
-    const requestId = msg.requestId;
-    const fail = (error: string) => send({ type: "cmd.result", requestId, ok: false, error });
-    try {
-      if (msg.type === "cmd.cursorReloadGet") {
-        const r = await hubFetch("/api/cursor-reload");
-        const body = await r.json().catch(() => ({})) as any;
-        if (!r.ok) return fail(body.error ?? "HUB_ERROR");
-        send({ type: "cmd.result", requestId, ok: true, cursorReload: body });
-        return;
-      }
-      if (msg.type === "cmd.cursorReloadPost") {
-        const r = await hubFetch("/api/cursor-reload", {
-          method: "POST",
-          body: JSON.stringify({ action: msg.action, vsix: msg.vsix, notBefore: msg.notBefore, machineId: msg.machineId }),
-        });
-        const body = await r.json().catch(() => ({})) as any;
-        if (!r.ok) return fail(body.error ?? "HUB_ERROR");
-        send({ type: "cmd.result", requestId, ok: true, cursorReload: body });
-        return;
-      }
-      if (msg.type === "cmd.promptSnippetsGet") {
-        const r = await hubFetch("/api/prompt-snippets");
-        const body = await r.json().catch(() => ({})) as any;
-        if (!r.ok) return fail(body.error ?? "HUB_ERROR");
-        send({ type: "cmd.result", requestId, ok: true, snippets: body.snippets ?? [] });
-        return;
-      }
-      if (msg.type === "cmd.promptSnippetsPut") {
-        const r = await hubFetch("/api/prompt-snippets", {
-          method: "PUT",
-          body: JSON.stringify({ snippets: msg.snippets }),
-        });
-        const body = await r.json().catch(() => ({})) as any;
-        if (!r.ok) return fail(body.error ?? "HUB_ERROR");
-        send({ type: "cmd.result", requestId, ok: true, snippets: body.snippets ?? [] });
-        return;
-      }
-      if (msg.type === "cmd.dispatch") {
-        const decoded = typeof msg.workspaceId === "string" ? decodeWorkspaceId(msg.workspaceId) : null;
-        if (!decoded) return fail("INVALID");
-        const r = await hubFetch("/api/runs", {
-          method: "POST",
-          body: JSON.stringify({ machineId: decoded.machineId, workspaceRoot: decoded.workspaceRoot, prompt: msg.prompt ?? "" }),
-        });
-        const body = await r.json().catch(() => ({})) as any;
-        if (!r.ok) return fail(body.error ?? "HUB_ERROR");
-        const run = snapOf(body.run.id);
-        send({ type: "cmd.result", requestId, ok: true, run });
-        if (run) send({ type: "snap.run", run });
-        return;
-      }
-      if (msg.type === "cmd.followup") {
-        if (typeof msg.runId !== "string" || !msg.runId) return fail("INVALID");
-        const r = await hubFetch(`/api/runs/${encodeURIComponent(msg.runId)}/followup`, {
-          method: "POST",
-          body: JSON.stringify({ prompt: msg.prompt ?? "" }),
-        });
-        const body = await r.json().catch(() => ({})) as any;
-        if (!r.ok) return fail(body.error ?? "HUB_ERROR");
-        const run = snapOf(msg.runId);
-        send({ type: "cmd.result", requestId, ok: true, run });
-        if (run) send({ type: "snap.run", run });
-        return;
-      }
-      if (msg.type === "cmd.retry") {
-        if (typeof msg.runId !== "string" || !msg.runId) return fail("INVALID");
-        const r = await hubFetch(`/api/runs/${encodeURIComponent(msg.runId)}/retry`, { method: "POST" });
-        const body = await r.json().catch(() => ({})) as any;
-        if (!r.ok) return fail(body.error ?? "HUB_ERROR");
-        const run = snapOf(msg.runId);
-        send({ type: "cmd.result", requestId, ok: true, run });
-        if (run) send({ type: "snap.run", run });
-        return;
-      }
-      if (msg.type === "cmd.answer") {
-        const r = await hubFetch(`/api/runs/${encodeURIComponent(msg.runId)}/answer-ask`, {
-          method: "POST",
-          body: JSON.stringify(msg.body ?? {}),
-        });
-        const body = await r.json().catch(() => ({})) as any;
-        if (!r.ok) return fail(body.error ?? "HUB_ERROR");
-        const run = snapOf(msg.runId);
-        send({ type: "cmd.result", requestId, ok: true, run });
-        if (run) send({ type: "snap.run", run });
-        return;
-      }
-      if (msg.type === "cmd.cancel") {
-        const r = await hubFetch(`/api/runs/${encodeURIComponent(msg.runId)}/cancel`, { method: "POST" });
-        const body = await r.json().catch(() => ({})) as any;
-        if (!r.ok) return fail(body.error ?? "HUB_ERROR");
-        const run = snapOf(msg.runId);
-        send({ type: "cmd.result", requestId, ok: true, run });
-        if (run) send({ type: "snap.run", run });
-        return;
-      }
-      if (msg.type === "cmd.archive" || msg.type === "cmd.unarchive") {
-        if (typeof msg.runId !== "string" || !msg.runId) return fail("INVALID");
-        const action = msg.type === "cmd.archive" ? "archive" : "unarchive";
-        const r = await hubFetch(`/api/runs/${encodeURIComponent(msg.runId)}/${action}`, { method: "POST" });
-        const body = await r.json().catch(() => ({})) as any;
-        if (!r.ok) return fail(body.error ?? "HUB_ERROR");
-        const run = snapOf(msg.runId);
-        send({ type: "cmd.result", requestId, ok: true, run });
-        if (run) send({ type: "snap.run", run });
-      }
-    } catch {
-      fail("HUB_ERROR");
-    }
-  };
+  const onCommand = createRelayCommandHandler({ hubFetch, snapOf, send });
 
   const connect = () => {
     if (stopped) return;
@@ -311,10 +202,8 @@ export function startRelayClient(opts: {
     next.addEventListener("open", () => {
       backoff = 1000;
       pushWorkspaces();
-      if (heartbeat) clearInterval(heartbeat);
-      heartbeat = setInterval(() => {
-        try { next.ping(); } catch { /* ignore */ }
-      }, HEARTBEAT_MS);
+      heartbeat?.();
+      heartbeat = startRelayHeartbeat(next);
     });
     next.addEventListener("message", (e) => {
       let msg: any;
@@ -322,7 +211,7 @@ export function startRelayClient(opts: {
       void onCommand(msg);
     });
     const retry = () => {
-      if (heartbeat) { clearInterval(heartbeat); heartbeat = null; }
+      heartbeat?.(); heartbeat = null;
       if (stopped) return;
       const wait = backoff;
       backoff = Math.min(MAX_BACKOFF_MS, backoff * 2);
@@ -340,7 +229,7 @@ export function startRelayClient(opts: {
       opts.sse.onEvent = prevEvent;
       for (const t of pushSoon.values()) clearTimeout(t);
       pushSoon.clear();
-      if (heartbeat) clearInterval(heartbeat);
+      heartbeat?.();
       if (reconnectTimer) clearTimeout(reconnectTimer);
       try { ws?.close(); } catch { /* ignore */ }
     },
