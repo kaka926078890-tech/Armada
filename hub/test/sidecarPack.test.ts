@@ -119,6 +119,13 @@ describe("packaged sidecar hub", () => {
       "Armada.dmg",
       "AuthKey_TEST.p8",
       ".env",
+      "secrets.env",
+      "N-Armada.log",
+      "relay.json",
+      "hub.db",
+      "pending-reload.json",
+      "credentials.json",
+      "service-account.json",
     ]) {
       expect(ignored(rel), rel).toBe(true);
     }

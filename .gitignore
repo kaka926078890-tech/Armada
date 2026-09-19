@@ -21,10 +21,12 @@ desktop/src-tauri/resources/*
 *.dmg
 *.xcarchive
 
-# Secrets / machine-local config
+# Secrets / machine-local config (live operator data lives in ~/.armada, never here)
 .env
 .env.*
+*.env
 !.env.example
+*.log
 *.p8
 *.p12
 *.pem
@@ -32,6 +34,13 @@ desktop/src-tauri/resources/*
 *.jks
 *.keystore
 google-services.json
+credentials.json
+*-credentials.json
+service-account.json
+*-service-account.json
+relay.json
+hub.db
+pending-reload.json
 
 mobile/ios/build/
 xcuserdata/
