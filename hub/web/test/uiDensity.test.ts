@@ -151,12 +151,34 @@ describe("App UI density is one scale", () => {
     expect(android).toContain("size(32.dp)");
   });
 
+  test("workspace archive is a column chip, not a nav title that covers 派发", () => {
+    const ios = readFileSync(join(repoRoot, "mobile/ios/ArmadaRemote/Screens.swift"), "utf8");
+    const android = androidUi();
+    const client = readFileSync(join(repoRoot, "mobile/android/app/src/main/java/app/armada/remote/RelayClient.kt"), "utf8");
+    const iosHome = ios.slice(ios.indexOf("struct WorkspaceHome"), ios.indexOf("struct PromptSnippetChips"));
+    const workspace = android.slice(android.indexOf("fun WorkspaceScreen"), android.indexOf("fun RunRow"));
+    const nav = android.slice(android.indexOf("fun IosNavBar"), android.indexOf("fun GroupedSection"));
+    expect(client).toContain("withContext(Dispatchers.IO)");
+    expect(client).toMatch(/private suspend fun send\(/);
+    expect(nav).toContain("weight(1f)");
+    expect(nav).toContain("TextOverflow.Ellipsis");
+    expect(nav).not.toContain("padding(horizontal = 72.dp)");
+    expect(workspace).toContain("NavAction(\"派发\"");
+    expect(workspace).not.toContain("hideLabel");
+    expect(workspace).toContain("已隐藏");
+    const iosToolbar = iosHome.slice(iosHome.indexOf(".toolbar"));
+    expect(iosToolbar).not.toContain("hideLabel");
+    expect(iosToolbar).not.toContain("查看已隐藏");
+    expect(iosToolbar).toContain("派发");
+    expect(iosHome).toContain("已隐藏");
+  });
+
   test("Android chrome matches iOS grouped list, capsule composer, swipe, icon action bar", () => {
     const android = androidUi();
     const composer = android.slice(android.indexOf("fun ComposerBar"), android.indexOf("fun UnreadBadge"));
     const workspace = android.slice(android.indexOf("fun WorkspaceScreen"), android.indexOf("fun RunRow"));
     const actionBar = android.slice(android.indexOf("fun DetailActionBar"), android.indexOf("fun AskBlock"));
-    expect(android).toContain("查看已隐藏");
+    expect(android).toContain("已隐藏");
     expect(android).toContain("F2F2F7");
     expect(android).toContain("1C1C1E");
     expect(composer).toContain("IosTextField");

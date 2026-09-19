@@ -31,9 +31,8 @@ fun detailPromptShownHeight(contentHeight: Float, cap: Float = DETAIL_PROMPT_MAX
 
 fun detailReplyShownHeight(contentHeight: Float): Float = maxOf(contentHeight, 80f)
 
-fun hideArchiveLabel(hiddenCount: Int, showingArchived: Boolean): String {
-    if (showingArchived) return "返回看板"
-    return if (hiddenCount > 0) "查看已隐藏 $hiddenCount" else "查看已隐藏"
+fun archiveChipSelected(showingArchived: Boolean, columnSelected: Boolean): Boolean {
+    return showingArchived.not() && columnSelected
 }
 
 /** Compact activity age for kanban cards. Null if the snap has no clock. */

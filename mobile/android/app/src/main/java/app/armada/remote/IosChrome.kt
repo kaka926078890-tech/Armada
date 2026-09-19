@@ -46,6 +46,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -160,32 +162,43 @@ fun IosNavBar(
     largeTitle: Boolean = false,
 ) {
     Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background)) {
-        Box(
+        Row(
             Modifier
                 .fillMaxWidth()
                 .height(46.dp)
                 .padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (leading != null) {
-                Text(
-                    leading.title,
-                    color = if (leading.enabled) AccentBlue else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
-                    modifier = Modifier
-                        .align(Alignment.CenterStart)
-                        .clickable(enabled = leading.enabled, onClick = leading.onClick)
-                        .padding(horizontal = 8.dp, vertical = 10.dp),
-                    maxLines = 1,
-                )
+            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                if (leading != null) {
+                    Text(
+                        leading.title,
+                        color = if (leading.enabled) AccentBlue else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+                        modifier = Modifier
+                            .clickable(enabled = leading.enabled, onClick = leading.onClick)
+                            .padding(horizontal = 8.dp, vertical = 10.dp),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
             if (!largeTitle) {
                 Text(
                     title,
-                    modifier = Modifier.align(Alignment.Center).padding(horizontal = 72.dp),
+                    modifier = Modifier.weight(1.6f),
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
                 )
+            } else {
+                Spacer(Modifier.weight(0.2f))
             }
-            Row(Modifier.align(Alignment.CenterEnd), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(
+                Modifier.weight(1f),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 trailing.forEach { action ->
                     Text(
                         action.title,
@@ -206,6 +219,7 @@ fun IosNavBar(
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }

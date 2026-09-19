@@ -1,5 +1,7 @@
 package app.armada.remote
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -28,7 +30,7 @@ class RelayClient(base: String, private val token: String) {
         .build()
     private val sseHttp = http.newBuilder().readTimeout(90, TimeUnit.SECONDS).build()
 
-    fun workspaces(): Pair<Boolean, List<WorkspaceDto>> {
+    suspend fun workspaces(): Pair<Boolean, List<WorkspaceDto>> {
         val o = JSONObject(get("/mobile/workspaces"))
         val list = o.optJSONArray("workspaces") ?: JSONArray()
         val ws = buildList {
@@ -37,7 +39,7 @@ class RelayClient(base: String, private val token: String) {
         return o.optBoolean("hubOffline") to ws
     }
 
-    fun cursorReload(): CursorReloadDto {
+    suspend fun cursorReload(): CursorReloadDto {
         val o = JSONObject(get("/mobile/cursor-reload"))
         val pending = o.optJSONObject("pending")
         return CursorReloadDto(
@@ -47,7 +49,7 @@ class RelayClient(base: String, private val token: String) {
         )
     }
 
-    fun setCursorReload(action: String, machineId: String? = null): CursorReloadDto {
+    suspend fun setCursorReload(action: String, machineId: String? = null): CursorReloadDto {
         val body = JSONObject().put("action", action)
         if (machineId != null) body.put("machineId", machineId)
         val o = JSONObject(send("/mobile/cursor-reload", "POST", body.toString(), listOf(200)))
@@ -59,7 +61,7 @@ class RelayClient(base: String, private val token: String) {
         )
     }
 
-    fun runs(hidden: Boolean = false): List<RunDto> {
+    suspend fun runs(hidden: Boolean = false): List<RunDto> {
         val o = JSONObject(get(runsListPath(50, hidden)))
         val arr = o.optJSONArray("runs") ?: JSONArray()
         val all = buildList {
@@ -68,49 +70,49 @@ class RelayClient(base: String, private val token: String) {
         return if (hidden) all.filter { it.isArchived } else all.filter { !it.isArchived }
     }
 
-    fun run(id: String): RunDto = parseRun(JSONObject(get("/mobile/runs/$id")))
+    suspend fun run(id: String): RunDto = parseRun(JSONObject(get("/mobile/runs/$id")))
 
-    fun dispatch(workspaceId: String, prompt: String): RunDto {
+    suspend fun dispatch(workspaceId: String, prompt: String): RunDto {
         val body = JSONObject().put("workspaceId", workspaceId).put("prompt", prompt)
         return parseRun(JSONObject(send("/mobile/runs", "POST", body.toString(), listOf(201))).getJSONObject("run"))
     }
 
-    fun followup(runId: String, prompt: String): RunDto {
+    suspend fun followup(runId: String, prompt: String): RunDto {
         val body = JSONObject().put("prompt", prompt)
         return parseRun(JSONObject(send("/mobile/runs/$runId/followup", "POST", body.toString(), listOf(200, 201))).getJSONObject("run"))
     }
 
-    fun retry(runId: String): RunDto =
+    suspend fun retry(runId: String): RunDto =
         parseRun(JSONObject(send("/mobile/runs/$runId/retry", "POST", "{}", listOf(200))).getJSONObject("run"))
 
-    fun archive(runId: String): RunDto =
+    suspend fun archive(runId: String): RunDto =
         parseRun(JSONObject(send("/mobile/runs/$runId/archive", "POST", "{}", listOf(200))).getJSONObject("run"))
 
-    fun unarchive(runId: String): RunDto =
+    suspend fun unarchive(runId: String): RunDto =
         parseRun(JSONObject(send("/mobile/runs/$runId/unarchive", "POST", "{}", listOf(200))).getJSONObject("run"))
 
-    fun answer(runId: String, body: JSONObject) {
+    suspend fun answer(runId: String, body: JSONObject) {
         send("/mobile/runs/$runId/answer", "POST", body.toString(), listOf(202, 200), allowEmpty = true)
     }
 
-    fun cancel(runId: String) {
+    suspend fun cancel(runId: String) {
         send("/mobile/runs/$runId/cancel", "POST", "{}", listOf(200), allowEmpty = true)
     }
 
-    fun registerPushToken(fcm: String) {
+    suspend fun registerPushToken(fcm: String) {
         val body = JSONObject().put("token", fcm).put("environment", "production").put("platform", "fcm")
         send("/mobile/push-token", "POST", body.toString(), listOf(204), allowEmpty = true)
     }
 
-    fun deletePushToken(fcm: String) {
+    suspend fun deletePushToken(fcm: String) {
         val body = JSONObject().put("token", fcm)
         send("/mobile/push-token", "DELETE", body.toString(), listOf(204), allowEmpty = true)
     }
 
-    fun promptSnippets(): List<PromptSnippet> =
+    suspend fun promptSnippets(): List<PromptSnippet> =
         parsePromptSnippets(JSONObject(get("/mobile/prompt-snippets")))
 
-    fun putPromptSnippets(snippets: List<PromptSnippet>): List<PromptSnippet> {
+    suspend fun putPromptSnippets(snippets: List<PromptSnippet>): List<PromptSnippet> {
         val items = JSONArray()
         snippets.forEach { snippet ->
             items.put(
@@ -143,22 +145,22 @@ class RelayClient(base: String, private val token: String) {
         })
     }
 
-    private fun get(path: String): String = send(path, "GET", null, listOf(200))
+    private suspend fun get(path: String): String = send(path, "GET", null, listOf(200))
 
-    private fun send(path: String, method: String, body: String?, ok: List<Int>, allowEmpty: Boolean = false): String {
-        val b = Request.Builder().url(base + path).header("Authorization", "Bearer $token")
-        if (body != null) {
-            b.method(method, body.toRequestBody(jsonType)).header("Content-Type", "application/json")
-        } else {
-            b.method(method, null)
+    private suspend fun send(path: String, method: String, body: String?, ok: List<Int>, allowEmpty: Boolean = false): String =
+        withContext(Dispatchers.IO) {
+            val b = Request.Builder().url(base + path).header("Authorization", "Bearer $token")
+            if (body != null) {
+                b.method(method, body.toRequestBody(jsonType)).header("Content-Type", "application/json")
+            } else {
+                b.method(method, null)
+            }
+            http.newCall(b.build()).execute().use { resp ->
+                val text = resp.body?.string().orEmpty()
+                if (resp.code !in ok) throw RelayException(classifyHttp(resp.code, text))
+                if (text.isBlank() && allowEmpty) "{}" else text
+            }
         }
-        http.newCall(b.build()).execute().use { resp ->
-            val text = resp.body?.string().orEmpty()
-            if (resp.code !in ok) throw RelayException(classifyHttp(resp.code, text))
-            if (text.isBlank() && allowEmpty) return "{}"
-            return text
-        }
-    }
 }
 
 private fun parsePromptSnippets(o: JSONObject): List<PromptSnippet> {

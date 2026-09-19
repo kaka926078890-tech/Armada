@@ -52,10 +52,10 @@ class ChromeLogicTest {
     }
 
     @Test
-    fun hideArchiveLabelMatchesIos() {
-        assertEquals("查看已隐藏", hideArchiveLabel(0, showingArchived = false))
-        assertEquals("查看已隐藏 3", hideArchiveLabel(3, showingArchived = false))
-        assertEquals("返回看板", hideArchiveLabel(3, showingArchived = true))
+    fun archiveChipDoesNotStaySelectedWithHiddenView() {
+        assertTrue(archiveChipSelected(showingArchived = false, columnSelected = true))
+        assertFalse(archiveChipSelected(showingArchived = true, columnSelected = true))
+        assertFalse(archiveChipSelected(showingArchived = false, columnSelected = false))
     }
 
     @Test

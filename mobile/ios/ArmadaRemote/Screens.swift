@@ -408,13 +408,17 @@ struct WorkspaceHome: View {
         liveWorkspace(id: workspace.workspaceId, slots: session.workspaces, fallback: workspace)
     }
 
-    private var hideLabel: String {
-        let n = session.runs(in: live, archived: true).count
-        return n > 0 ? "查看已隐藏 \(n)" : "查看已隐藏"
+    private var openRuns: [RunDTO] {
+        session.runs(in: live, archived: false)
+    }
+
+    private var hiddenN: Int {
+        session.runs(in: live, archived: true).count
     }
 
     var filtered: [RunDTO] {
-        boardRuns.filter { $0.column == tab }
+        if showArchived { return boardRuns }
+        return boardRuns.filter { $0.column == tab }
     }
 
     var body: some View {
@@ -422,27 +426,45 @@ struct WorkspaceHome: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(BoardColumn.allCases) { col in
-                        let n = boardRuns.filter { $0.column == col }.count
+                        let n = openRuns.filter { $0.column == col }.count
+                        let selected = !showArchived && tab == col
                         Button {
+                            showArchived = false
                             tab = col
                         } label: {
                             HStack(spacing: 4) {
                                 Text(col.title)
                                 if n > 0 { Text("\(n)").font(.caption2) }
-                                if columnHasAlert(boardRuns, column: col, isUnread: session.isUnread) {
+                                if columnHasAlert(openRuns, column: col, isUnread: session.isUnread) {
                                     Circle().fill(Color.red).frame(width: 7, height: 7)
                                 }
                             }
-                            .font(.subheadline.weight(tab == col ? .semibold : .regular))
+                            .font(.subheadline.weight(selected ? .semibold : .regular))
                             .lineLimit(1)
                             .fixedSize(horizontal: true, vertical: false)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 7)
-                            .background(tab == col ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.12))
+                            .background(selected ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.12))
                             .clipShape(Capsule())
                         }
                         .buttonStyle(.plain)
                     }
+                    Button {
+                        showArchived = true
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("已隐藏")
+                            if hiddenN > 0 { Text("\(hiddenN)").font(.caption2) }
+                        }
+                        .font(.subheadline.weight(showArchived ? .semibold : .regular))
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(showArchived ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.12))
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
@@ -459,7 +481,7 @@ struct WorkspaceHome: View {
                         .listRowBackground(Color.clear)
                 }
                 if filtered.isEmpty {
-                    Text("这一列还没有任务").foregroundStyle(.secondary)
+                    Text(showArchived ? "还没有已隐藏的任务" : "这一列还没有任务").foregroundStyle(.secondary)
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
                 }
@@ -515,13 +537,7 @@ struct WorkspaceHome: View {
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                HStack(spacing: 12) {
-                    Button(showArchived ? "返回看板" : hideLabel) { showArchived.toggle() }
-                    if !showArchived {
-                        Button("派发") { showDispatch = true }
-                            .disabled(!live.canInject)
-                    }
-                }
+                Button("派发") { showDispatch = true }
             }
         }
         .sheet(isPresented: $showDispatch) {

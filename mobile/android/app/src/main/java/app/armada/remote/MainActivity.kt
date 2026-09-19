@@ -359,11 +359,12 @@ fun WorkspaceScreen(vm: SessionVm, state: UiState, workspace: WorkspaceDto, onBa
     var showArchived by remember { mutableStateOf(false) }
     var showDispatch by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    val src = if (showArchived) state.board.hidden else state.board.runs
-    val boardRuns = src.filter { it.machineId == workspace.machineId && it.workspaceRoot == workspace.workspaceRoot }
-    val filtered = boardRuns.filter { it.column == tab }
-    val hiddenN = state.board.hidden.count { it.machineId == workspace.machineId && it.workspaceRoot == workspace.workspaceRoot }
-    val hideLabel = hideArchiveLabel(hiddenN, showArchived)
+    val sameSlot: (RunDto) -> Boolean = { it.machineId == workspace.machineId && it.workspaceRoot == workspace.workspaceRoot }
+    val openRuns = state.board.runs.filter(sameSlot)
+    val hiddenRuns = state.board.hidden.filter(sameSlot)
+    val boardRuns = if (showArchived) hiddenRuns else openRuns
+    val filtered = if (showArchived) boardRuns else boardRuns.filter { it.column == tab }
+    val hiddenN = hiddenRuns.size
     fun archive(run: RunDto, hide: Boolean) {
         vm.hideLocal(run.runId, hide)
         scope.launch {
@@ -383,10 +384,7 @@ fun WorkspaceScreen(vm: SessionVm, state: UiState, workspace: WorkspaceDto, onBa
                 IosNavBar(
                     title = workspace.label,
                     leading = NavAction("‹ 舰队", onClick = onBack),
-                    trailing = buildList {
-                        add(NavAction(hideLabel) { showArchived = !showArchived })
-                        if (!showArchived) add(NavAction("派发", enabled = workspace.canInject) { showDispatch = true })
-                    },
+                    trailing = listOf(NavAction("派发") { showDispatch = true }),
                 )
                 HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
             }
@@ -406,13 +404,16 @@ fun WorkspaceScreen(vm: SessionVm, state: UiState, workspace: WorkspaceDto, onBa
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 BoardColumn.entries.forEach { col ->
-                    val n = boardRuns.count { it.column == col }
-                    val selected = tab == col
-                    val alert = columnHasAlert(boardRuns, col) { vm.isUnread(it) }
+                    val n = openRuns.count { it.column == col }
+                    val selected = archiveChipSelected(showArchived, tab == col)
+                    val alert = columnHasAlert(openRuns, col) { vm.isUnread(it) }
                     Row(
                         Modifier.clip(RoundedCornerShape(50))
                             .background(if (selected) AccentBlue.copy(alpha = 0.18f) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f))
-                            .clickable { tab = col }
+                            .clickable {
+                                showArchived = false
+                                tab = col
+                            }
                             .heightIn(min = 36.dp)
                             .padding(horizontal = 12.dp, vertical = 7.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -433,6 +434,25 @@ fun WorkspaceScreen(vm: SessionVm, state: UiState, workspace: WorkspaceDto, onBa
                         }
                     }
                 }
+                Row(
+                    Modifier.clip(RoundedCornerShape(50))
+                        .background(if (showArchived) AccentBlue.copy(alpha = 0.18f) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f))
+                        .clickable { showArchived = true }
+                        .heightIn(min = 36.dp)
+                        .padding(horizontal = 12.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "已隐藏",
+                        fontSize = 15.sp,
+                        fontWeight = if (showArchived) FontWeight.SemiBold else FontWeight.Normal,
+                        maxLines = 1,
+                    )
+                    if (hiddenN > 0) {
+                        Spacer(Modifier.width(4.dp))
+                        Text("$hiddenN", fontSize = 11.sp)
+                    }
+                }
             }
             LazyColumn(Modifier.weight(1f)) {
                 state.lastError?.let { item { Text(it, color = StatusRed, modifier = Modifier.padding(20.dp), style = MaterialTheme.typography.bodySmall) } }
@@ -448,7 +468,7 @@ fun WorkspaceScreen(vm: SessionVm, state: UiState, workspace: WorkspaceDto, onBa
                 }
                 if (filtered.isEmpty()) {
                     item {
-                        Text("这一列还没有任务", modifier = Modifier.padding(20.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(if (showArchived) "还没有已隐藏的任务" else "这一列还没有任务", modifier = Modifier.padding(20.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 } else {
                     items(filtered, key = { it.runId }) { run ->
