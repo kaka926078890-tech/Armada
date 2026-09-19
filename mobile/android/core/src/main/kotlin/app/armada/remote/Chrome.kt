@@ -30,3 +30,13 @@ fun detailPromptShownHeight(contentHeight: Float, cap: Float = DETAIL_PROMPT_MAX
 }
 
 fun detailReplyShownHeight(contentHeight: Float): Float = maxOf(contentHeight, 80f)
+
+fun hideArchiveLabel(hiddenCount: Int, showingArchived: Boolean): String {
+    if (showingArchived) return "返回看板"
+    return if (hiddenCount > 0) "查看已隐藏 $hiddenCount" else "查看已隐藏"
+}
+
+fun unreadBadgeText(count: Int): String? {
+    if (count <= 0) return null
+    return if (count > 99) "99+" else "$count"
+}

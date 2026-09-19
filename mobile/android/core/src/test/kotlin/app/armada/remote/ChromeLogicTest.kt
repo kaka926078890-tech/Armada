@@ -50,4 +50,18 @@ class ChromeLogicTest {
         assertTrue(columnHasAlert(listOf(ask, done), BoardColumn.Running) { false })
         assertFalse(columnHasAlert(listOf(ask, done), BoardColumn.Completed) { it.runId == "r1" && it.status == "completed" })
     }
+
+    @Test
+    fun hideArchiveLabelMatchesIos() {
+        assertEquals("查看已隐藏", hideArchiveLabel(0, showingArchived = false))
+        assertEquals("查看已隐藏 3", hideArchiveLabel(3, showingArchived = false))
+        assertEquals("返回看板", hideArchiveLabel(3, showingArchived = true))
+    }
+
+    @Test
+    fun unreadBadgeTextMatchesIos() {
+        assertEquals(null, unreadBadgeText(0))
+        assertEquals("1", unreadBadgeText(1))
+        assertEquals("99+", unreadBadgeText(100))
+    }
 }

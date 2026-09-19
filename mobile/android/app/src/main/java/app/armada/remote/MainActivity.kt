@@ -26,7 +26,6 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -35,30 +34,23 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -75,12 +67,13 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -121,33 +114,10 @@ class MainActivity : ComponentActivity() {
 val LocalAppTheme = compositionLocalOf { "dark" }
 val LocalFontScale = compositionLocalOf { "normal" }
 
-val AccentBlue = Color(0xFF599CE7)
-val PlanYellow = Color(0xFFF1B467)
-val StatusGreen = Color(0xFF22C55E)
-val StatusRed = Color(0xFFDC2626)
-val StatusBlue = Color(0xFF3B82F6)
-val StatusGray = Color(0xFF9CA3AF)
-val StatusOrange = Color(0xFFF59E0B)
-
 fun appearanceTextScale(scale: String): Float = when (scale) {
     "large" -> 1.25f
     "xlarge" -> 1.5f
     else -> 1f
-}
-
-fun armadaColorScheme(dark: Boolean) = (if (dark) darkColorScheme() else lightColorScheme()).copy(
-    primary = AccentBlue,
-    onPrimary = Color.White,
-    secondary = AccentBlue,
-    tertiary = AccentBlue,
-)
-
-fun statusColor(status: String) = when (statusTint(status)) {
-    "green" -> StatusGreen
-    "blue" -> StatusBlue
-    "red" -> StatusRed
-    "gray" -> StatusGray
-    else -> StatusOrange
 }
 
 @Composable
@@ -155,12 +125,14 @@ fun AppearanceRoot(vm: SessionVm) {
     val theme by vm.theme.collectAsState()
     val fontScale by vm.fontScale.collectAsState()
     val textScale = appearanceTextScale(fontScale)
-    val scheme = armadaColorScheme(theme != "light")
+    val dark = theme != "light"
+    val scheme = armadaColorScheme(dark)
     val density = LocalDensity.current
     MaterialTheme(colorScheme = scheme) {
         CompositionLocalProvider(
             LocalAppTheme provides theme,
             LocalFontScale provides fontScale,
+            LocalIosFill provides iosFill(dark),
             LocalDensity provides Density(density = density.density, fontScale = textScale),
         ) { Root(vm) }
     }
@@ -186,119 +158,41 @@ fun Root(vm: SessionVm) {
 }
 
 @Composable
-fun BarButton(
-    text: String,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-    filled: Boolean = false,
-    danger: Boolean = false,
-    compact: Boolean = false,
-    expand: Boolean = false,
-    fillColor: Color? = null,
-    textColor: Color? = null,
-    onClick: () -> Unit,
-) {
-    val fg = textColor ?: when {
-        danger || filled -> Color.White
-        else -> MaterialTheme.colorScheme.onSurface
-    }
-    val bg = fillColor ?: when {
-        danger -> StatusRed
-        filled -> AccentBlue
-        else -> MaterialTheme.colorScheme.surfaceVariant
-    }
-    val shape = RoundedCornerShape(10.dp)
-    Box(
-        modifier
-            .then(if (expand) Modifier.fillMaxWidth() else Modifier)
-            .heightIn(min = if (compact) 32.dp else 36.dp)
-            .alpha(if (enabled) 1f else 0.4f)
-            .clip(shape)
-            .background(bg)
-            .then(
-                if (!filled && !danger) Modifier.border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.18f), shape)
-                else Modifier,
-            )
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = if (compact) 12.dp else 14.dp, vertical = 8.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(text, color = fg, style = MaterialTheme.typography.labelLarge, maxLines = 1)
-    }
-}
-
-@Composable
-fun ComposerBar(
-    value: String,
-    onValueChange: (String) -> Unit,
-    sending: Boolean,
-    listening: Boolean,
-    canSend: Boolean,
-    enabledMic: Boolean,
-    onMic: () -> Unit,
-    onSend: () -> Unit,
-) {
-    Row(
-        Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.Bottom,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        BarButton(if (listening) "停止" else "语音", compact = true, enabled = enabledMic, onClick = onMic)
-        OutlinedTextField(
-            value = value,
-            onValueChange = onValueChange,
-            modifier = Modifier.weight(1f).heightIn(min = 36.dp, max = 144.dp),
-            placeholder = { Text("输入提示词") },
-            readOnly = listening || sending,
-            shape = RoundedCornerShape(20.dp),
-            minLines = 1,
-            maxLines = 6,
-        )
-        Box(
-            Modifier
-                .size(32.dp)
-                .clip(CircleShape)
-                .background(if (canSend) AccentBlue else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f))
-                .clickable(enabled = canSend, onClick = onSend),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(if (sending) "…" else "↑", color = Color.White, style = MaterialTheme.typography.labelLarge)
-        }
-    }
-}
-
-@Composable
-fun ToolbarText(
-    text: String,
-    enabled: Boolean = true,
-    accent: Boolean = false,
-    onClick: () -> Unit,
-) {
-    TextButton(onClick = onClick, enabled = enabled) {
-        Text(
-            text,
-            color = if (!enabled) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f) else if (accent) AccentBlue else MaterialTheme.colorScheme.onSurface,
-            maxLines = 1,
-        )
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
 fun BindScreen(vm: SessionVm, state: UiState) {
     var paste by remember { mutableStateOf("") }
-    Scaffold(topBar = { TopAppBar(title = { Text("绑定") }) }) { pad ->
-        Column(Modifier.padding(pad).padding(16.dp)) {
-            OutlinedTextField(
-                value = paste,
-                onValueChange = { paste = it },
-                label = { Text("armada-relay://op?…") },
-                modifier = Modifier.fillMaxWidth().height(160.dp),
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            Column(Modifier.statusBarsPadding()) {
+                IosNavBar("绑定")
+                HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+            }
+        },
+    ) { pad ->
+        Column(Modifier.padding(pad).verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+            GroupedSection("粘贴 App 邀请") {
+                IosTextField(
+                    value = paste,
+                    onValueChange = { paste = it },
+                    placeholder = "armada-relay://op?…",
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp).padding(16.dp),
+                    minLines = 4,
+                    maxLines = 8,
+                )
+                GroupedDivider()
+                Box(Modifier.padding(16.dp)) {
+                    BarButton("绑定", filled = true, expand = true, enabled = paste.isNotBlank()) { vm.bind(paste) }
+                }
+            }
+            state.bindError?.let {
+                Text(it, color = StatusRed, modifier = Modifier.padding(horizontal = 20.dp))
+            }
+            Text(
+                "绑定后按「机器 → 工作区」选仓。点进仓看任务，顶部派发。",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
             )
-            Spacer(Modifier.height(12.dp))
-            BarButton("绑定", filled = true, expand = true, enabled = paste.isNotBlank()) { vm.bind(paste) }
-            state.bindError?.let { Text(it, color = Color.Red, modifier = Modifier.padding(top = 8.dp)) }
-            Text("绑定后按「机器 → 工作区」选仓。点进仓看任务，顶部派发。", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 16.dp))
         }
     }
 }
@@ -346,53 +240,67 @@ fun FleetNav(vm: SessionVm, state: UiState) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FleetScreen(vm: SessionVm, state: UiState, onOpen: (WorkspaceDto) -> Unit, onRefresh: () -> Unit, onSettings: () -> Unit) {
     val groups = state.workspaces.groupBy { it.machineId }
-    Scaffold(topBar = {
-        TopAppBar(
-            title = { Text("舰队") },
-            navigationIcon = { ToolbarText("解绑", onClick = { vm.unbind() }) },
-            actions = {
-                ToolbarText("设置", onClick = onSettings)
-                ToolbarText("刷新", accent = true, onClick = onRefresh)
-            },
-        )
-    }) { pad ->
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            Column(Modifier.statusBarsPadding()) {
+                IosNavBar(
+                    title = "舰队",
+                    leading = NavAction("解绑") { vm.unbind() },
+                    trailing = listOf(
+                        NavAction("设置", onClick = onSettings),
+                        NavAction("刷新", onClick = onRefresh),
+                    ),
+                )
+                HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+            }
+        },
+    ) { pad ->
         LazyColumn(Modifier.padding(pad)) {
-            if (state.hubOffline) item { Text("中台离线或没有打开的仓", modifier = Modifier.padding(16.dp), color = Color.Gray) }
+            if (state.hubOffline) {
+                item {
+                    Text(
+                        "中台离线或没有打开的仓",
+                        modifier = Modifier.padding(20.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
             groups.forEach { (mid, slots) ->
                 item {
                     val name = slots.firstOrNull { it.machineName.isNotEmpty() }?.machineName ?: mid
                     val online = slots.any { it.online }
-                    Row(Modifier.padding(16.dp, 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(8.dp).clip(CircleShape).background(if (online) StatusGreen else StatusGray))
-                        Spacer(Modifier.width(8.dp))
-                        Text(name, style = MaterialTheme.typography.titleSmall)
-                    }
-                }
-                items(slots, key = { it.workspaceId }) { w ->
-                    val unread = state.board.runs.filter { it.machineId == w.machineId && it.workspaceRoot == w.workspaceRoot }.count { vm.isUnread(it) }
-                    val live = state.board.runs.any { it.machineId == w.machineId && it.workspaceRoot == w.workspaceRoot && it.isLive }
-                    Row(Modifier.fillMaxWidth().clickable { onOpen(w) }.padding(24.dp, 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(w.label)
-                                if (live) {
-                                    Spacer(Modifier.width(8.dp))
-                                    CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp)
-                                }
-                            }
-                            Text(w.workspaceRoot, style = MaterialTheme.typography.bodySmall, color = Color.Gray, maxLines = 1)
-                        }
-                        if (unread > 0) {
-                            Box(
-                                Modifier.background(StatusRed, RoundedCornerShape(10.dp)).padding(horizontal = 5.dp, vertical = 2.dp)
-                                    .heightIn(min = 18.dp),
-                                contentAlignment = Alignment.Center,
+                    GroupedSection(
+                        header = name,
+                        headerLeading = {
+                            Box(Modifier.size(8.dp).clip(CircleShape).background(if (online) StatusGreen else StatusGray))
+                        },
+                    ) {
+                        slots.forEachIndexed { index, w ->
+                            val unread = state.board.runs.filter { it.machineId == w.machineId && it.workspaceRoot == w.workspaceRoot }.count { vm.isUnread(it) }
+                            val live = state.board.runs.any { it.machineId == w.machineId && it.workspaceRoot == w.workspaceRoot && it.isLive }
+                            if (index > 0) GroupedDivider()
+                            Row(
+                                Modifier.fillMaxWidth().clickable { onOpen(w) }.padding(horizontal = 16.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Text(if (unread > 99) "99+" else "$unread", color = Color.White, style = MaterialTheme.typography.labelSmall)
+                                Text("–", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Spacer(Modifier.width(8.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(w.label, fontSize = 17.sp)
+                                        if (live) {
+                                            Spacer(Modifier.width(6.dp))
+                                            CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp, color = AccentBlue)
+                                        }
+                                    }
+                                    Text(w.workspaceRoot, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                                }
+                                UnreadBadge(unread)
+                                Text("›", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 8.dp))
                             }
                         }
                     }
@@ -402,7 +310,6 @@ fun FleetScreen(vm: SessionVm, state: UiState, onOpen: (WorkspaceDto) -> Unit, o
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WorkspaceScreen(vm: SessionVm, state: UiState, workspace: WorkspaceDto, onBack: () -> Unit, onOpenRun: (String) -> Unit) {
     var tab by remember { mutableStateOf(BoardColumn.Completed) }
@@ -413,21 +320,35 @@ fun WorkspaceScreen(vm: SessionVm, state: UiState, workspace: WorkspaceDto, onBa
     val boardRuns = src.filter { it.machineId == workspace.machineId && it.workspaceRoot == workspace.workspaceRoot }
     val filtered = boardRuns.filter { it.column == tab }
     val hiddenN = state.board.hidden.count { it.machineId == workspace.machineId && it.workspaceRoot == workspace.workspaceRoot }
-    val hideLabel = when {
-        showArchived -> "返回看板"
-        hiddenN > 0 -> "已隐藏 $hiddenN"
-        else -> "已隐藏"
+    val hideLabel = hideArchiveLabel(hiddenN, showArchived)
+    fun archive(run: RunDto, hide: Boolean) {
+        vm.hideLocal(run.runId, hide)
+        scope.launch {
+            try {
+                val next = if (hide) vm.api().archive(run.runId) else vm.api().unarchive(run.runId)
+                vm.hideLocal(run.runId, hide, next)
+                vm.refresh()
+            } catch (_: Exception) {
+                vm.revertHide(run.runId)
+            }
+        }
     }
-    Scaffold(topBar = {
-        TopAppBar(
-            title = { Text(workspace.label, maxLines = 1) },
-            navigationIcon = { ToolbarText("返回", onClick = onBack) },
-            actions = {
-                ToolbarText(hideLabel, onClick = { showArchived = !showArchived })
-                if (!showArchived) ToolbarText("派发", accent = true, enabled = workspace.canInject, onClick = { showDispatch = true })
-            },
-        )
-    }) { pad ->
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            Column(Modifier.statusBarsPadding()) {
+                IosNavBar(
+                    title = workspace.label,
+                    leading = NavAction("返回", onClick = onBack),
+                    trailing = buildList {
+                        add(NavAction(hideLabel) { showArchived = !showArchived })
+                        if (!showArchived) add(NavAction("派发", enabled = workspace.canInject) { showDispatch = true })
+                    },
+                )
+                HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+            }
+        },
+    ) { pad ->
         Column(Modifier.padding(pad).fillMaxSize()) {
             if (!workspace.canInject) {
                 Text(
@@ -453,10 +374,15 @@ fun WorkspaceScreen(vm: SessionVm, state: UiState, workspace: WorkspaceDto, onBa
                             .padding(horizontal = 12.dp, vertical = 7.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(col.title, style = if (selected) MaterialTheme.typography.labelLarge else MaterialTheme.typography.bodyMedium, maxLines = 1)
+                        Text(
+                            col.title,
+                            fontSize = 15.sp,
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                            maxLines = 1,
+                        )
                         if (n > 0) {
                             Spacer(Modifier.width(4.dp))
-                            Text("$n", style = MaterialTheme.typography.labelSmall)
+                            Text("$n", fontSize = 11.sp)
                         }
                         if (alert) {
                             Spacer(Modifier.width(4.dp))
@@ -465,57 +391,51 @@ fun WorkspaceScreen(vm: SessionVm, state: UiState, workspace: WorkspaceDto, onBa
                     }
                 }
             }
-            state.lastError?.let { Text(it, color = StatusRed, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall) }
-            if (showArchived) Text("已隐藏的任务仍保留，可取消隐藏。", modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
-            if (filtered.isEmpty()) Text("这一列还没有任务", modifier = Modifier.padding(16.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
             LazyColumn(Modifier.weight(1f)) {
-                items(filtered, key = { it.runId }) { run ->
-                    val unread = vm.isUnread(run)
-                    Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Box(Modifier.weight(1f).clickable { onOpenRun(run.runId) }) {
-                            RunRow(run, unread)
-                        }
-                        Column(horizontalAlignment = Alignment.End) {
-                            if (vm.canMarkUnread(run)) {
-                                TextButton(onClick = { vm.markUnread(run.runId, hold = false) }) { Text("未读") }
-                            }
-                            if (run.showsArchive && !showArchived) {
-                                TextButton(
-                                    onClick = {
-                                        vm.hideLocal(run.runId, true)
-                                        scope.launch {
-                                            try {
-                                                val next = vm.api().archive(run.runId)
-                                                vm.hideLocal(run.runId, true, next)
-                                                vm.refresh()
-                                            } catch (_: Exception) {
-                                                vm.revertHide(run.runId)
-                                            }
-                                        }
-                                    },
-                                    colors = ButtonDefaults.textButtonColors(contentColor = StatusRed),
-                                ) { Text("隐藏") }
-                            }
-                            if (showArchived) {
-                                TextButton(onClick = {
-                                    vm.hideLocal(run.runId, false)
-                                    scope.launch {
-                                        try {
-                                            val next = vm.api().unarchive(run.runId)
-                                            vm.hideLocal(run.runId, false, next)
-                                            vm.refresh()
-                                        } catch (_: Exception) {
-                                            vm.revertHide(run.runId)
-                                        }
+                state.lastError?.let { item { Text(it, color = StatusRed, modifier = Modifier.padding(20.dp), style = MaterialTheme.typography.bodySmall) } }
+                if (showArchived) {
+                    item {
+                        Text(
+                            "已隐藏的任务仍保留，可取消隐藏。",
+                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                if (filtered.isEmpty()) {
+                    item {
+                        Text("这一列还没有任务", modifier = Modifier.padding(20.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                } else {
+                    item {
+                        GroupedSection {
+                            filtered.forEachIndexed { index, run ->
+                                val unread = vm.isUnread(run)
+                                if (index > 0) GroupedDivider()
+                                SwipeActionRow(
+                                    leading = if (vm.canMarkUnread(run)) {
+                                        SwipeAction("标为未读", StatusOrange) { vm.markUnread(run.runId, hold = false) }
+                                    } else null,
+                                    trailing = listOfNotNull(
+                                        when {
+                                            showArchived -> SwipeAction("取消隐藏", StatusGray) { archive(run, false) }
+                                            run.showsArchive -> SwipeAction("隐藏", StatusRed) { archive(run, true) }
+                                            else -> null
+                                        },
+                                    ),
+                                ) {
+                                    Row(
+                                        Modifier.fillMaxWidth().clickable { onOpenRun(run.runId) }.padding(horizontal = 16.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Box(Modifier.weight(1f)) { RunRow(run, unread) }
+                                        Text("›", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 8.dp))
                                     }
-                                }) { Text("取消隐藏") }
+                                }
                             }
                         }
                     }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
                 }
             }
         }
@@ -572,7 +492,7 @@ fun DispatchModal(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = MaterialTheme.colorScheme.surface,
+        containerColor = MaterialTheme.colorScheme.background,
     ) {
         DispatchSheet(
             vm,
@@ -608,57 +528,87 @@ fun DispatchSheet(vm: SessionVm, workspace: WorkspaceDto, followupRunId: String?
         if (granted) speech.start(prompt) else err = dictationMessage("MIC_DENIED")
     }
     val trimmed = prompt.trim()
-    Column(
-        Modifier.fillMaxWidth().navigationBarsPadding().imePadding().verticalScroll(rememberScrollState()).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Text(if (followupRunId == null) "派发任务" else "续聊", style = MaterialTheme.typography.titleLarge)
-        TextButton(onClick = { speech.release(); onDismiss() }, modifier = Modifier.align(Alignment.End)) { Text("取消") }
-        Text("${workspace.machineName} · ${workspace.label}", style = MaterialTheme.typography.bodySmall)
-        if (followupRunId != null) Text("在当前对话里继续，不会新开一条任务", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
-        if (!workspace.canInject) Text(operatorMessage("CDP_NOT_READY"), color = Color.Red, style = MaterialTheme.typography.bodySmall)
-        if (state.snippets.isNotEmpty()) {
-            Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+    val canSend = workspace.canInject && !sending && !listening && trimmed.isNotEmpty()
+    fun send() {
+        if (listening) {
+            speech.stop()
+            return
+        }
+        if (!canSend) return
+        sending = true
+        scope.launch {
+            try {
+                val run = if (followupRunId != null) vm.api().followup(followupRunId, trimmed) else vm.api().dispatch(workspace.workspaceId, trimmed)
+                vm.refresh()
+                onSent(run.column)
+            } catch (e: Exception) {
+                err = e.message
+            } finally {
+                sending = false
+            }
+        }
+    }
+    Column(Modifier.fillMaxWidth().navigationBarsPadding().imePadding()) {
+        IosNavBar(
+            title = if (followupRunId == null) "派发任务" else "续聊",
+            leading = NavAction("取消") { speech.release(); onDismiss() },
+            trailing = listOf(NavAction(if (sending) "发送中…" else if (followupRunId == null) "派发" else "发送", enabled = canSend, onClick = { send() })),
+        )
+        HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+        Column(Modifier.verticalScroll(rememberScrollState())) {
+            if (!workspace.canInject) {
+                GroupedSection { Text(operatorMessage("CDP_NOT_READY"), color = StatusRed, modifier = Modifier.padding(16.dp)) }
+            }
+            err?.let { GroupedSection { Text(it, color = StatusRed, modifier = Modifier.padding(16.dp)) } }
+            GroupedSection(header = if (workspace.machineName.isEmpty()) workspace.label else "${workspace.machineName} · ${workspace.label}") {
+                Text(workspace.workspaceRoot, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(16.dp))
+                if (followupRunId != null) {
+                    GroupedDivider()
+                    Text("在当前对话里继续，不会新开一条任务", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(16.dp))
+                }
+            }
+            GroupedSection(
+                header = "Prompt",
+                footer = "语音只写入提示词，不会自动发送。",
             ) {
-                state.snippets.forEach { snippet ->
-                    BarButton(snippet.title, compact = true) {
-                        prompt = appendSnippetBody(prompt, snippet.body)
+                if (state.snippets.isNotEmpty()) {
+                    Row(
+                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        state.snippets.forEach { snippet ->
+                            BarButton(snippet.title, compact = true) {
+                                prompt = appendSnippetBody(prompt, snippet.body)
+                            }
+                        }
                     }
+                    GroupedDivider()
+                }
+                Text(
+                    if (trimmed.isEmpty()) "粘贴或语音后应显示字数" else "${prompt.length} 字",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(16.dp),
+                )
+                if (listening) {
+                    GroupedDivider()
+                    Text("正在听…说完点停止，改完再派发", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(16.dp))
                 }
             }
         }
-        Text(if (trimmed.isEmpty()) "粘贴或语音后应显示字数" else "${prompt.length} 字", style = MaterialTheme.typography.bodySmall)
-        if (listening) Text("正在听…说完点停止，改完再派发", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
-        err?.let { Text(it, color = Color.Red) }
         ComposerBar(
             value = prompt,
             onValueChange = { prompt = it },
             sending = sending,
             listening = listening,
-            canSend = workspace.canInject && !sending && !listening && trimmed.isNotEmpty(),
+            canSend = canSend,
             enabledMic = !sending,
             onMic = {
                 if (listening) speech.stop()
                 else if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) speech.start(prompt)
                 else micPerm.launch(Manifest.permission.RECORD_AUDIO)
             },
-            onSend = {
-                if (listening) speech.stop()
-                sending = true
-                scope.launch {
-                    try {
-                        val run = if (followupRunId != null) vm.api().followup(followupRunId, trimmed) else vm.api().dispatch(workspace.workspaceId, trimmed)
-                        vm.refresh()
-                        onSent(run.column)
-                    } catch (e: Exception) {
-                        err = e.message
-                    } finally {
-                        sending = false
-                    }
-                }
-            },
+            onSend = { send() },
         )
     }
 }
@@ -669,6 +619,7 @@ fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String, onBack: () -> 
     var run by remember { mutableStateOf(state.board.runs.find { it.runId == runId } ?: state.board.hidden.find { it.runId == runId }) }
     var err by remember { mutableStateOf<String?>(null) }
     var showFollow by remember { mutableStateOf(false) }
+    var copied by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val ctx = LocalContext.current
     val slot = run?.let { r -> state.workspaces.firstOrNull { it.machineId == r.machineId && it.workspaceRoot == r.workspaceRoot } }
@@ -710,14 +661,18 @@ fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String, onBack: () -> 
         }
     }
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
-            TopAppBar(
-                title = { Text("详情") },
-                navigationIcon = { ToolbarText("返回", onClick = onBack) },
-                actions = {
-                    ToolbarText("续聊", accent = true, enabled = slot?.canInject == true && run?.canFollowup == true) { showFollow = true }
-                },
-            )
+            Column(Modifier.statusBarsPadding()) {
+                IosNavBar(
+                    title = "详情",
+                    leading = NavAction("返回", onClick = onBack),
+                    trailing = listOf(
+                        NavAction("续聊", enabled = slot?.canInject == true && run?.canFollowup == true) { showFollow = true },
+                    ),
+                )
+                HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+            }
         },
         bottomBar = bar@{
             val r = run ?: return@bar
@@ -725,7 +680,13 @@ fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String, onBack: () -> 
                 copy = {
                     val cm = ctx.getSystemService(ClipboardManager::class.java)
                     cm.setPrimaryClip(ClipData.newPlainText("finalText", r.finalText ?: ""))
+                    copied = true
+                    scope.launch {
+                        delay(1500)
+                        copied = false
+                    }
                 },
+                copied = copied,
                 unread = if (vm.canMarkUnread(r)) ({ vm.markUnread(runId, hold = true) }) else null,
                 hide = if (r.isArchived) {
                     {
@@ -844,41 +805,13 @@ fun DetailReplyBlock(text: String?, isLive: Boolean) {
 }
 
 @Composable
-fun DetailActionBar(copy: () -> Unit, unread: (() -> Unit)?, hide: (() -> Unit)?, hideTitle: String) {
-    val items = buildList {
-        add("复制正文" to copy)
-        if (unread != null) add("标为未读" to unread)
-        if (hide != null) add(hideTitle to hide)
-    }
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-            .padding(4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        items.forEachIndexed { index, (title, action) ->
-            if (index > 0) {
-                Box(Modifier.width(1.dp).height(28.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f)))
-            }
-            Box(
-                Modifier.weight(1f).heightIn(min = 52.dp).clickable(onClick = action),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(title, color = AccentBlue, style = MaterialTheme.typography.labelLarge, maxLines = 1)
-            }
-        }
-    }
-}
-
-@Composable
 fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend () -> Unit) {
     val scope = rememberCoroutineScope()
     var optionId by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf<String?>(null) }
     var err by remember { mutableStateOf<String?>(null) }
     val plan = isPlanAsk(ask)
-    Box(Modifier.fillMaxWidth().height(IntrinsicSize.Min).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant)) {
+    Box(Modifier.fillMaxWidth().height(IntrinsicSize.Min).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surface)) {
         Box(
             Modifier.align(Alignment.CenterStart).padding(vertical = 10.dp, horizontal = 4.dp)
                 .width(4.dp).fillMaxHeight().clip(RoundedCornerShape(1.5.dp))
@@ -933,7 +866,7 @@ fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend (
                                 .padding(horizontal = 10.dp, vertical = 8.dp)
                                 .heightIn(min = 36.dp),
                         ) {
-                            Text(o.label.ifEmpty { o.id.uppercase() }, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                            Text(o.label.ifEmpty { o.id.uppercase() }, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = FontFamily.Monospace)
                             Spacer(Modifier.width(8.dp))
                             Text(askOptionBody(o.label, o.text))
                         }
@@ -1038,50 +971,56 @@ fun MarkdownFrame(text: String, heightDp: Float? = null, onHeight: ((Float) -> U
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(vm: SessionVm, onBack: () -> Unit) {
     val state by vm.state.collectAsState()
     val theme by vm.theme.collectAsState()
     val fontScale by vm.fontScale.collectAsState()
     LaunchedEffect(Unit) { vm.loadSnippets() }
-    Scaffold(topBar = {
-        TopAppBar(
-            title = { Text("设置") },
-            navigationIcon = { ToolbarText("返回", onClick = onBack) },
-        )
-    }) { pad ->
-        Column(
-            Modifier.padding(pad).padding(16.dp).verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            Text("外观")
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                BarButton("黑夜", filled = theme == "dark", compact = true) { vm.setAppearanceTheme("dark") }
-                BarButton("明亮", filled = theme == "light", compact = true) { vm.setAppearanceTheme("light") }
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            Column(Modifier.statusBarsPadding()) {
+                IosNavBar("设置", leading = NavAction("返回", onClick = onBack))
+                HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
             }
-            Text("字号")
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                BarButton("正常", filled = fontScale == "normal", compact = true) { vm.setAppearanceFontScale("normal") }
-                BarButton("大", filled = fontScale == "large", compact = true) { vm.setAppearanceFontScale("large") }
-                BarButton("超大", filled = fontScale == "xlarge", compact = true) { vm.setAppearanceFontScale("xlarge") }
+        },
+    ) { pad ->
+        Column(Modifier.padding(pad).verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+            GroupedSection("外观") {
+                Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    BarButton("黑夜", modifier = Modifier.weight(1f), filled = theme == "dark", compact = true, expand = true) { vm.setAppearanceTheme("dark") }
+                    BarButton("明亮", modifier = Modifier.weight(1f), filled = theme == "light", compact = true, expand = true) { vm.setAppearanceTheme("light") }
+                }
             }
-            Text("快捷提示词")
-            state.lastError?.let { Text(it, color = Color.Red, style = MaterialTheme.typography.bodySmall) }
-            if (state.snippets.isEmpty()) {
-                Text("还没有快捷提示词，请在中台添加", color = Color.Gray)
-            } else {
-                state.snippets.forEach { snippet ->
-                    androidx.compose.runtime.key(snippet.id) {
-                        PromptSnippetSettingsRow(
-                            snippet = snippet,
-                            onSave = { next ->
-                                vm.saveSnippets(state.snippets.map { if (it.id == next.id) next else it })
-                            },
-                            onDelete = {
-                                vm.saveSnippets(state.snippets.filter { it.id != snippet.id })
-                            },
-                        )
+            GroupedSection("字号") {
+                Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    BarButton("正常", modifier = Modifier.weight(1f), filled = fontScale == "normal", compact = true, expand = true) { vm.setAppearanceFontScale("normal") }
+                    BarButton("大", modifier = Modifier.weight(1f), filled = fontScale == "large", compact = true, expand = true) { vm.setAppearanceFontScale("large") }
+                    BarButton("超大", modifier = Modifier.weight(1f), filled = fontScale == "xlarge", compact = true, expand = true) { vm.setAppearanceFontScale("xlarge") }
+                }
+            }
+            GroupedSection("快捷提示词") {
+                state.lastError?.let {
+                    Text(it, color = StatusRed, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(16.dp))
+                    GroupedDivider()
+                }
+                if (state.snippets.isEmpty()) {
+                    Text("还没有快捷提示词，请在中台添加", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp))
+                } else {
+                    state.snippets.forEachIndexed { index, snippet ->
+                        if (index > 0) GroupedDivider()
+                        androidx.compose.runtime.key(snippet.id) {
+                            PromptSnippetSettingsRow(
+                                snippet = snippet,
+                                onSave = { next ->
+                                    vm.saveSnippets(state.snippets.map { if (it.id == next.id) next else it })
+                                },
+                                onDelete = {
+                                    vm.saveSnippets(state.snippets.filter { it.id != snippet.id })
+                                },
+                            )
+                        }
                     }
                 }
             }
@@ -1100,23 +1039,10 @@ fun PromptSnippetSettingsRow(
     var busy by remember { mutableStateOf(false) }
     var rowError by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
-    Column(
-        Modifier.fillMaxWidth().border(1.dp, Color.Gray, RoundedCornerShape(8.dp)).padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        OutlinedTextField(
-            value = title,
-            onValueChange = { title = it },
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("标题") },
-        )
-        OutlinedTextField(
-            value = body,
-            onValueChange = { body = it },
-            modifier = Modifier.fillMaxWidth().height(120.dp),
-            label = { Text("提示词") },
-        )
-        rowError?.let { Text(it, color = Color.Red, style = MaterialTheme.typography.bodySmall) }
+    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        IosTextField(title, { title = it }, "标题", Modifier.fillMaxWidth())
+        IosTextField(body, { body = it }, "提示词", Modifier.fillMaxWidth().height(90.dp), minLines = 3, maxLines = 8)
+        rowError?.let { Text(it, color = StatusRed, style = MaterialTheme.typography.bodySmall) }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
             BarButton("删除", enabled = !busy, danger = true, compact = true) {
                 busy = true
