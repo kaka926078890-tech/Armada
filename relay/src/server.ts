@@ -261,7 +261,7 @@ export function createRelayServer(opts: {
     const status = snap.status;
     const finalText = snap.finalText ?? null;
     const error = snap.error ?? null;
-    const now = snap.updatedAt ?? Date.now();
+    const now = Date.now();
     const pendingAsk = snap.pendingAsk == null ? null : JSON.stringify(snap.pendingAsk);
     const outbound = Array.isArray(snap.outbound) ? JSON.stringify(snap.outbound) : null;
     const queueMode = typeof snap.queueMessageDefaultBehavior === "string" ? snap.queueMessageDefaultBehavior : null;

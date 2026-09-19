@@ -4,6 +4,7 @@ import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import { segmentChat, processFoldLabel, type ChatBlock } from "../chatView";
 import { Button } from "./ui/button";
+import { Textarea } from "./ui/textarea";
 import { UI_BODY, UI_META, UI_OPTION_OFF, UI_OPTION_ON, UI_TYPE } from "../ui";
 
 function ThoughtLive({ text }: { text: string }) {
@@ -181,8 +182,9 @@ function CopyIconButton({ text }: { text: string }) {
 
 export type AnswerAskBody = {
   request_id: string;
-  action: "continue" | "skip";
+  action: "continue" | "skip" | "freeform";
   answers?: { question_id: string; option_ids: string[] }[];
+  text?: string;
 };
 
 export function isPlanAsk(block: { askKind?: string }): boolean {
@@ -200,6 +202,15 @@ export function askContinueLabel(plan: boolean, busy: boolean): string {
 
 export function askSkipLabel(busy: boolean): string {
   return busy ? "Skipping..." : "Skip";
+}
+
+export function askContinueAnswers(
+  block: { askKind?: string; options: { id: string }[] },
+  picked: string,
+): { question_id: string; option_ids: string[] }[] {
+  const id = isPlanAsk(block) ? (block.options[0]?.id || "build") : picked.trim();
+  if (!id) return [];
+  return [{ question_id: "q0", option_ids: [id] }];
 }
 
 /** Cursor's card body is plan.overview, stored on the Build option. Do not hide it. */
@@ -223,24 +234,29 @@ function AskCard({ block, onAnswerAsk }: {
   block: Extract<ChatBlock, { kind: "ask" }>;
   onAnswerAsk?: (body: AnswerAskBody) => Promise<boolean | void> | boolean | void;
 }) {
-  const [picked, setPicked] = useState(block.options[0]?.id ?? "");
-  const [busyAction, setBusyAction] = useState<"continue" | "skip" | null>(null);
+  const [picked, setPicked] = useState("");
+  const [freeform, setFreeform] = useState("");
+  const [busyAction, setBusyAction] = useState<"continue" | "skip" | "freeform" | null>(null);
   const pending = block.action === "pending" || block.action === "submit_failed" || block.action === "submitting";
   const wait = busyAction !== null || block.action === "submitting";
-  const continueBusy = busyAction === "continue" || (block.action === "submitting" && busyAction !== "skip");
+  const continueBusy = busyAction === "continue" || busyAction === "freeform" || (block.action === "submitting" && busyAction !== "skip");
   const skipBusy = busyAction === "skip";
   const interactive = pending && !!onAnswerAsk;
   const plan = isPlanAsk(block);
   const showContinue = continueAllowed(block);
   const overview = plan ? planOverviewOf(block) : "";
-  const submit = async (action: "continue" | "skip") => {
+  const chips = block.options.filter((o) => o.freeform !== true);
+  const typed = freeform.trim();
+  const canSubmit = plan || !!picked || !!typed;
+  const submit = async (action: "continue" | "skip" | "freeform") => {
     if (!onAnswerAsk || wait) return;
     setBusyAction(action);
     try {
       const ok = await onAnswerAsk({
         request_id: block.request_id,
         action,
-        answers: action === "continue" ? [{ question_id: "q0", option_ids: [picked] }] : [],
+        answers: action === "continue" ? askContinueAnswers(block, picked) : [],
+        ...(action === "freeform" ? { text: typed } : {}),
       });
       if (ok === false) setBusyAction(null);
     } catch {
@@ -267,7 +283,7 @@ function AskCard({ block, onAnswerAsk }: {
       ) : null}
       {plan ? null : (
       <div className="mt-2.5 flex flex-col gap-2">
-        {block.options.map((o) => {
+        {chips.map((o) => {
           const on = picked === o.id;
           return (
             <button
@@ -275,7 +291,7 @@ function AskCard({ block, onAnswerAsk }: {
               type="button"
               disabled={!interactive || wait}
               aria-pressed={on}
-              onClick={(e) => { stopCard(e); setPicked(o.id); }}
+              onClick={(e) => { stopCard(e); setPicked(o.id); setFreeform(""); }}
               className={on ? UI_OPTION_ON : UI_OPTION_OFF}
             >
               <span className="text-muted-foreground font-mono mr-1.5">{o.label}</span>
@@ -283,6 +299,18 @@ function AskCard({ block, onAnswerAsk }: {
             </button>
           );
         })}
+        <Textarea
+          placeholder="Other..."
+          value={freeform}
+          disabled={!interactive || wait}
+          rows={2}
+          className="min-h-8"
+          onChange={(e) => {
+            const v = e.target.value;
+            setFreeform(v);
+            if (v.trim()) setPicked("");
+          }}
+        />
       </div>
       )}
       {block.action === "resolved" ? (
@@ -309,9 +337,9 @@ function AskCard({ block, onAnswerAsk }: {
           <Button
             type="button"
             variant={plan ? "plan" : "default"}
-            disabled={wait || (!plan && !picked)}
+            disabled={wait || (!plan && !canSubmit)}
             aria-busy={continueBusy}
-            onClick={(e) => { stopCard(e); void submit("continue"); }}
+            onClick={(e) => { stopCard(e); void submit(typed ? "freeform" : "continue"); }}
           >
             {continueBusy ? <AskSpinner /> : null}
             {askContinueLabel(plan, continueBusy)}

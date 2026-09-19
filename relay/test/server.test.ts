@@ -1566,13 +1566,13 @@ describe("relay HTTP map and snap fingerprint", () => {
     const headers = { authorization: `Bearer ${fleet.operatorToken}` };
     ws.send(JSON.stringify({
       type: "snap.run",
-      run: { ...base, pendingAsk: { request_id: "ask-1", questions: [] }, updatedAt: 2 },
+      run: { ...base, pendingAsk: { request_id: "ask-1", questions: [] } },
     }));
     await Bun.sleep(40);
     const t1 = (await (await fetch(url(s, "/mobile/runs/r-ask"), { headers })).json() as { updatedAt: number }).updatedAt;
     ws.send(JSON.stringify({
       type: "snap.run",
-      run: { ...base, pendingAsk: { request_id: "ask-2", questions: [] }, updatedAt: 3 },
+      run: { ...base, pendingAsk: { request_id: "ask-2", questions: [] } },
     }));
     await Bun.sleep(40);
     const t2 = (await (await fetch(url(s, "/mobile/runs/r-ask"), { headers })).json() as { updatedAt: number }).updatedAt;

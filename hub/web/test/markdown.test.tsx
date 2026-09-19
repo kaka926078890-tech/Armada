@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import ChatThread, { AssistantMarkdown, askContinueLabel, askSkipLabel, continueAllowed, isPlanAsk, planOverviewOf } from "../src/components/ChatThread";
+import ChatThread, { AssistantMarkdown, askContinueAnswers, askContinueLabel, askSkipLabel, continueAllowed, isPlanAsk, planOverviewOf } from "../src/components/ChatThread";
 import type { ChatBlock } from "../src/chatView";
 
 describe("AssistantMarkdown", () => {
@@ -127,6 +127,13 @@ describe("ask / plan action buttons", () => {
     expect(askContinueLabel(true, false)).toBe("Build");
     expect(askContinueLabel(true, true)).toBe("Building...");
     expect(askContinueLabel(false, false)).toBe("Continue");
+    expect(askContinueAnswers({ askKind: "plan", options: [{ id: "build" }] }, "")).toEqual([
+      { question_id: "q0", option_ids: ["build"] },
+    ]);
+    expect(askContinueAnswers({ options: [{ id: "a" }] }, "a")).toEqual([
+      { question_id: "q0", option_ids: ["a"] },
+    ]);
+    expect(askContinueAnswers({ options: [{ id: "a" }] }, "")).toEqual([]);
     expect(askContinueLabel(false, true)).toBe("Continuing...");
     expect(askSkipLabel(false)).toBe("Skip");
     expect(askSkipLabel(true)).toBe("Skipping...");
@@ -195,6 +202,30 @@ describe("ask / plan action buttons", () => {
     );
     expect(html).toContain("Skip");
     expect(html).not.toContain("Continue");
+  });
+
+  test("Ask card always has Other input and hides the freeform letter chip", () => {
+    const html = renderToStaticMarkup(
+      <ChatThread
+        blocks={[{
+          kind: "ask",
+          seq: 1,
+          request_id: "ask-1",
+          prompt: "选一个",
+          options: [
+            { id: "a", label: "A", text: "甲" },
+            { id: "d", label: "D", text: "Other...", freeform: true },
+          ],
+          action: "pending",
+        }]}
+        onAnswerAsk={async () => true}
+      />,
+    );
+    expect(html).toContain("placeholder=\"Other...\"");
+    expect(html).toContain(">A</span>");
+    expect(html).toContain("甲");
+    expect(html).not.toMatch(/>D<\/span>/);
+    expect(html).toContain("Continue");
   });
 
   test("plan card renders captured overview, not just Created Plan filename", () => {

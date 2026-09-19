@@ -161,12 +161,15 @@ describe("runToSnap", () => {
     expect(runToSnap(base, []).archived).toBe(false);
   });
 
-  test("cmd.result snaps skip run_events unless the card is completed", () => {
+  test("cmd.result snaps skip run_events unless the card is terminal", () => {
     expect(loadEventsForSnap("dispatched")).toBe(false);
     expect(loadEventsForSnap("binding")).toBe(false);
     expect(loadEventsForSnap("running")).toBe(false);
     expect(loadEventsForSnap("queued")).toBe(false);
     expect(loadEventsForSnap("completed")).toBe(true);
+    expect(loadEventsForSnap("error")).toBe(true);
+    expect(loadEventsForSnap("aborted")).toBe(true);
+    expect(loadEventsForSnap("cancelled")).toBe(true);
     const long = "长文".repeat(4000);
     const snap = runToSnap({
       id: "r-1", machine_id: "m-1", workspace_root: "/ws/a", prompt: long, status: "dispatched", created_at: 1,

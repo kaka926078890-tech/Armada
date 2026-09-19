@@ -85,9 +85,9 @@ export function hubWsUrl(cfg: RelayConfig): string {
   return u.toString();
 }
 
-/** cmd.result / live snaps must not scan transcript jsonl. Only completed cards need finalText. */
+/** Live snaps must not scan transcript jsonl. Terminal cards may need finalText. */
 export function loadEventsForSnap(status: string): boolean {
-  return status === "completed";
+  return (TERMINAL_STATUSES as readonly string[]).includes(status);
 }
 
 export function runToSnap(run: any, events: RunEvent[]): RunSnap {
