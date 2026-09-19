@@ -68,6 +68,7 @@ final class Session: ObservableObject {
     private var pendingArchive = Set<String>()
     private var pendingUnarchive = Set<String>()
     private var unreadHold = Set<String>()
+    private var lastBadge = -1
     private let readKey = "armada.readAt"
     private let pushTokenKey = "armada.pushToken"
 
@@ -124,6 +125,7 @@ final class Session: ObservableObject {
         OperatorKeychain.delete()
         workspaces = []; runs = []; hiddenRuns = []; snippets = []
         pendingArchive = []; pendingUnarchive = []
+        lastBadge = -1
         refreshSeq += 1
         snippetsSeq += 1
         pendingOpenRunId = nil
@@ -279,7 +281,7 @@ final class Session: ObservableObject {
             if workspaces != ws.workspaces { workspaces = ws.workspaces }
             if cursorReload != reloadState { cursorReload = reloadState }
             adoptFetchedLists(runs: newRuns, hidden: newHidden)
-            lastError = nil
+            if optionalChanged(lastError, nil) { lastError = nil }
             if let id = watchingId {
                 markOpened(id)
             } else {
@@ -325,12 +327,18 @@ final class Session: ObservableObject {
         }
         pendingArchive = stillArchive
         pendingUnarchive = stillUnarchive
-        if runs != nextRuns { runs = nextRuns }
-        if hiddenRuns != nextHidden { hiddenRuns = nextHidden }
+        if runs.count != nextRuns.count || !zip(runs, nextRuns).allSatisfy(runContentEquals) {
+            runs = nextRuns
+        }
+        if hiddenRuns.count != nextHidden.count || !zip(hiddenRuns, nextHidden).allSatisfy(runContentEquals) {
+            hiddenRuns = nextHidden
+        }
     }
 
     func applyBadge() {
         let n = workspaces.reduce(0) { $0 + unreadCount(in: $1) }
+        guard shouldUpdateBadge(current: lastBadge, next: n) else { return }
+        lastBadge = n
         // APNs writes badge:1 on the icon without going through App state; always reconcile.
         UNUserNotificationCenter.current().setBadgeCount(n)
     }
@@ -404,13 +412,13 @@ final class Session: ObservableObject {
         if frame.type == "workspaces", let list = frame.workspaces, let offline = frame.hubOffline {
             if hubOffline != offline { hubOffline = offline }
             if workspaces != list { workspaces = list }
-            lastError = nil
+            if optionalChanged(lastError, nil) { lastError = nil }
             applyBadge()
             return
         }
         if frame.type == "run", let run = frame.run {
             applyStreamRun(run)
-            lastError = nil
+            if optionalChanged(lastError, nil) { lastError = nil }
             applyBadge()
         }
     }
@@ -422,17 +430,20 @@ final class Session: ObservableObject {
         if pendingUnarchive.contains(run.runId) && !run.isArchived { pendingUnarchive.remove(run.runId) }
         let prior = runs.first { $0.runId == run.runId } ?? hiddenRuns.first { $0.runId == run.runId }
         let adopted = coalesceFinalText(run, prior: prior)
+        if let prior, runContentEquals(prior, adopted), prior.isArchived == adopted.isArchived {
+            return
+        }
         if adopted.isArchived {
             if let i = runs.firstIndex(where: { $0.runId == adopted.runId }) { runs.remove(at: i) }
             if let i = hiddenRuns.firstIndex(where: { $0.runId == adopted.runId }) {
-                if hiddenRuns[i] != adopted { hiddenRuns[i] = adopted }
+                if !runContentEquals(hiddenRuns[i], adopted) { hiddenRuns[i] = adopted }
             } else {
                 hiddenRuns.insert(adopted, at: 0)
             }
         } else {
             if let i = hiddenRuns.firstIndex(where: { $0.runId == adopted.runId }) { hiddenRuns.remove(at: i) }
             if let i = runs.firstIndex(where: { $0.runId == adopted.runId }) {
-                if runs[i] != adopted { runs[i] = adopted }
+                if !runContentEquals(runs[i], adopted) { runs[i] = adopted }
             } else {
                 runs.insert(adopted, at: 0)
             }

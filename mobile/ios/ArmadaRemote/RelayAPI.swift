@@ -168,6 +168,23 @@ func coalesceFinalText(_ incoming: RunDTO, prior: RunDTO?) -> RunDTO {
     return next
 }
 
+/// 中转每次 upsert 都刷新 `updatedAt`；内容没变时不得触发 `@Published`。与 Android `runContentEquals` 对齐。
+func runContentEquals(_ a: RunDTO, _ b: RunDTO) -> Bool {
+    var x = a
+    var y = b
+    x.updatedAt = nil
+    y.updatedAt = nil
+    return x == y
+}
+
+func optionalChanged(_ current: String?, _ incoming: String?) -> Bool {
+    current != incoming
+}
+
+func shouldUpdateBadge(current: Int, next: Int) -> Bool {
+    current != next
+}
+
 /// 由忙入闲时详情强制 GET /:id。与 Android `detailShouldReload` 对齐。
 func detailShouldReload(local: RunDTO?, streamed: RunDTO) -> Bool {
     guard let local, local.runId == streamed.runId else { return false }

@@ -48,6 +48,15 @@ class BoardLogicTest {
     }
 
     @Test
+    fun applyStreamRunSkipsUpdatedAtOnly() {
+        val first = run("r1", false).copy(status = "running", updatedAt = 1)
+        val start = BoardLists(listOf(first), emptyList(), emptySet(), emptySet())
+        val next = applyStreamRun(start, first.copy(updatedAt = 99))
+        assertTrue(next === start)
+        assertEquals(1, next.runs.single().updatedAt)
+    }
+
+    @Test
     fun applyStreamRunFollowupKeepsBodyUntilNewFinalText() {
         val start = BoardLists(
             listOf(run("r1", false).copy(status = "completed", finalText = "上一折")),

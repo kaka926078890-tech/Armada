@@ -146,6 +146,26 @@ class ModelsTest {
     }
 
     @Test
+    fun runContentEqualsIgnoresUpdatedAtOnly() {
+        val a = run("running").copy(updatedAt = 1)
+        val b = run("running").copy(updatedAt = 99)
+        assertTrue(runContentEquals(a, b))
+        assertFalse(runContentEquals(a, b.copy(status = "completed")))
+        assertFalse(runContentEquals(a, b.copy(prompt = "other")))
+        assertFalse(runContentEquals(a, b.copy(finalText = "x")))
+    }
+
+    @Test
+    fun optionalChangedAndBadgeSkipNoops() {
+        assertFalse(optionalChanged(null, null))
+        assertFalse(optionalChanged("e", "e"))
+        assertTrue(optionalChanged("e", null))
+        assertTrue(optionalChanged(null, "e"))
+        assertFalse(shouldUpdateBadge(0, 0))
+        assertTrue(shouldUpdateBadge(0, 2))
+    }
+
+    @Test
     fun liveWorkspacePrefersSessionSlotOverStaleSnapshot() {
         val stale = WorkspaceDto("w", "m", "/p", "p", online = true, cdpReady = false)
         val live = stale.copy(cdpReady = true)

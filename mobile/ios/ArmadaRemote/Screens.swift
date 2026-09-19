@@ -622,12 +622,8 @@ struct ComposerBar: View {
             }
             .buttonStyle(.plain)
             .disabled(sending)
-            TextField("输入提示词", text: $text, axis: .vertical)
-                .textFieldStyle(.plain)
-                .lineLimit(1...6)
-                .disabled(listening || sending)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+            ComposerField(text: $text, placeholder: "输入提示词", enabled: !listening && !sending)
+                .padding(.horizontal, 8)
                 .frame(minHeight: 36)
                 .background(Color(.secondarySystemFill), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             Button(action: onSend) {
@@ -653,6 +649,7 @@ struct DispatchSheet: View {
     var followupRunId: String? = nil
     var onDone: (BoardColumn) -> Void
     @StateObject private var speech = PromptSpeech()
+    @State private var prompt = ""
     @State private var sending = false
     @State private var err: String?
     @Environment(\.dismiss) private var dismiss
@@ -662,7 +659,7 @@ struct DispatchSheet: View {
     }
 
     private var trimmed: String {
-        speech.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        prompt.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private var canSend: Bool { live.canInject && !sending && !speech.listening && !trimmed.isEmpty }
@@ -695,12 +692,9 @@ struct DispatchSheet: View {
                     PromptSnippetChips(
                         snippets: session.snippets,
                         onAppend: { body in
-                            speech.prompt = appendSnippetBody(speech.prompt, body)
+                            prompt = appendSnippetBody(prompt, body)
                         }
                     )
-                    Text(trimmed.isEmpty ? "粘贴或语音后应显示字数" : "\(speech.prompt.count) 字")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                     if speech.listening {
                         Text("正在听…说完点停止，改完再派发")
                             .font(.caption)
@@ -714,11 +708,11 @@ struct DispatchSheet: View {
             }
             .safeAreaInset(edge: .bottom) {
                 ComposerBar(
-                    text: $speech.prompt,
+                    text: $prompt,
                     sending: sending,
                     listening: speech.listening,
                     canSend: canSend,
-                    onMic: { speech.toggle() },
+                    onMic: { toggleMic() },
                     onSend: { Task { await send() } }
                 )
                 .background(.bar)
@@ -739,13 +733,30 @@ struct DispatchSheet: View {
                 }
             }
             .onDisappear { speech.release() }
+            .onChange(of: speech.prompt) { _, next in
+                if speech.listening { prompt = next }
+            }
+            .onChange(of: speech.listening) { _, listening in
+                if !listening { prompt = speech.prompt }
+            }
             .task { await session.loadSnippets() }
+        }
+    }
+
+    private func toggleMic() {
+        if speech.listening {
+            speech.stop()
+            prompt = speech.prompt
+        } else {
+            speech.prompt = prompt
+            speech.toggle()
         }
     }
 
     private func send() async {
         if speech.listening {
             speech.stop()
+            prompt = speech.prompt
             return
         }
         let text = trimmed

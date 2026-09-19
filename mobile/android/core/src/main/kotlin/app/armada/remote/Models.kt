@@ -114,6 +114,13 @@ fun coalesceFinalText(incoming: RunDto, prior: RunDto?): RunDto {
     return if (incoming.finalText == null && !prev.isNullOrEmpty()) incoming.copy(finalText = prev) else incoming
 }
 
+/** 中转每次 upsert 都刷新 updatedAt；内容没变时不得当新快照，否则 App 整树重绘、输入法组合态被拆。 */
+fun runContentEquals(a: RunDto, b: RunDto): Boolean = a.copy(updatedAt = null) == b.copy(updatedAt = null)
+
+fun optionalChanged(current: String?, incoming: String?): Boolean = current != incoming
+
+fun shouldUpdateBadge(current: Int, next: Int): Boolean = current != next
+
 fun keepListBodies(incoming: List<RunDto>, prior: List<RunDto>): List<RunDto> {
     val old = prior.associateBy { it.runId }
     return incoming.map { r -> coalesceFinalText(r, old[r.runId]) }
