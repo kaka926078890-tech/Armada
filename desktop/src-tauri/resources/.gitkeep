@@ -1,2 +1,2 @@
 # Pack-time output of desktop/scripts/bundle-hub.sh lives next to this file.
-# Do not commit bun, hub/node_modules, or generated copies.
+# Ignore everything else in this directory (hub, bun, vsix, desktop-core copies).

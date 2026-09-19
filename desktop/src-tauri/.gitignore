@@ -6,12 +6,7 @@
 # will have schema files for capabilities auto-completion
 /gen/schemas
 
-# Pack-time sidecar from desktop/scripts/bundle-hub.sh (do not commit bun/node_modules)
-/resources/hub/
-/resources/relay/
-/resources/bun
-/resources/scripts/
-/resources/hooks/
-/resources/*.vsix
-/resources/extension/
-/resources/bun.path
+# Pack-time sidecar from desktop/scripts/bundle-hub.sh.
+# Only .gitkeep is source; hub/relay/extension/desktop-core/bun/vsix are copies.
+/resources/*
+!/resources/.gitkeep

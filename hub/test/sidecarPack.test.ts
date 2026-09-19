@@ -99,4 +99,31 @@ describe("packaged sidecar hub", () => {
       rmSync(dest, { recursive: true, force: true });
     }
   });
+
+  test("pack-time resources copies and installers are gitignored; .gitkeep is not", () => {
+    const ignored = (rel: string) =>
+      Bun.spawnSync(["git", "check-ignore", "-q", "--", rel], { cwd: ROOT }).exitCode === 0;
+    for (const rel of [
+      "desktop/src-tauri/resources/desktop-core/src/cursorReload.ts",
+      "desktop/src-tauri/resources/hub/src/index.ts",
+      "desktop/src-tauri/resources/relay/src/server.ts",
+      "desktop/src-tauri/resources/extension/src/promptNormalize.ts",
+      "desktop/src-tauri/resources/bun",
+      "desktop/src-tauri/resources/bun.exe",
+      "desktop/src-tauri/resources/armada-agent-0.4.28.vsix",
+      "mobile/android/app/google-services.json",
+      "mobile/android/local.properties",
+      "mobile/android/app/release.keystore",
+      "ArmadaRemote.apk",
+      "ArmadaRemote.ipa",
+      "Armada.dmg",
+      "AuthKey_TEST.p8",
+      ".env",
+    ]) {
+      expect(ignored(rel), rel).toBe(true);
+    }
+    expect(ignored("desktop/src-tauri/resources/.gitkeep")).toBe(false);
+    expect(ignored("desktop-core/src/cursorReload.ts")).toBe(false);
+    expect(ignored("mobile/ios/ExportOptions.plist")).toBe(false);
+  });
 });

@@ -1,6 +1,5 @@
 node_modules/
 dist/
-*.vsix
 hub/web/dist/
 extension/hooks/
 hooks/armada-spool.exe
@@ -8,12 +7,33 @@ _spool_exe_test/
 _spool_exe_test2/
 .DS_Store
 .armada/
-desktop/src-tauri/resources/hub/
-desktop/src-tauri/resources/bun
-desktop/src-tauri/resources/bun.exe
-desktop/src-tauri/resources/scripts/
-desktop/src-tauri/resources/hooks/
-desktop/src-tauri/resources/*.vsix
-desktop/src-tauri/resources/bun.path
-mobile/ios/build/
+
+# Pack-time sidecar from desktop/scripts/bundle-hub.sh (keep only .gitkeep)
+desktop/src-tauri/resources/*
+!desktop/src-tauri/resources/.gitkeep
+
+# Installers / archives (never commit a built SKU)
+*.vsix
+*.apk
+*.aab
+*.apks
+*.ipa
+*.dmg
+*.xcarchive
+
+# Secrets / machine-local config
+.env
+.env.*
+!.env.example
 *.p8
+*.p12
+*.pem
+*.mobileprovision
+*.jks
+*.keystore
+google-services.json
+
+mobile/ios/build/
+xcuserdata/
+*.xcuserstate
+DerivedData/

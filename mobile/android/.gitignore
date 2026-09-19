@@ -1,7 +1,14 @@
 .gradle/
+.kotlin/
 **/build/
 local.properties
 *.iml
 .idea/
 .DS_Store
 google-services.json
+*.apk
+*.aab
+*.apks
+*.jks
+*.keystore
+signing.properties
