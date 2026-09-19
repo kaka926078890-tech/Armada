@@ -13,39 +13,45 @@ import { PromptSnippetBar } from "./PromptSnippetBar";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Textarea } from "./ui/textarea";
+import { parseStoredWidth, pxFromRatio, ratioFromPx } from "../detailWidth";
 import { UI_META, UI_TYPE } from "../ui";
 
-const DEFAULT_W = 576;
-const MIN_W = 400;
 let widthPatchTimer: ReturnType<typeof setTimeout> | null = null;
 
-function loadDetailWidth(): number {
-  try {
-    const n = Number(localStorage.getItem(WIDTH_KEY));
-    if (Number.isFinite(n) && n >= MIN_W) return n;
-  } catch { /* ignore */ }
-  return DEFAULT_W;
+function viewportWidth(): number {
+  return typeof window === "undefined" ? 1440 : window.innerWidth;
 }
 
-function persistDetailWidth(n: number): void {
-  try { localStorage.setItem(WIDTH_KEY, String(n)); } catch { /* ignore */ }
+function loadDetailRatio(): number {
+  try {
+    return parseStoredWidth(localStorage.getItem(WIDTH_KEY), viewportWidth()).ratio;
+  } catch {
+    return parseStoredWidth(null, viewportWidth()).ratio;
+  }
+}
+
+function persistDetailRatio(ratio: number): void {
+  try { localStorage.setItem(WIDTH_KEY, String(ratio)); } catch { /* ignore */ }
   if (widthPatchTimer) clearTimeout(widthPatchTimer);
   widthPatchTimer = setTimeout(() => {
     widthPatchTimer = null;
-    void api.putUiPrefs({ detailWidth: n }).catch(() => {});
+    void api.putUiPrefs({ detailWidth: ratio }).catch(() => {});
   }, 200);
 }
 
-function clampWidth(n: number): number {
-  const max = typeof window === "undefined" ? 960 : Math.max(MIN_W, Math.floor(window.innerWidth * 0.92));
-  return Math.min(max, Math.max(MIN_W, Math.round(n)));
-}
-
 function DrawerShell({ children }: { children: ReactNode }) {
-  const [width, setWidth] = useState(loadDetailWidth);
+  const [ratio, setRatio] = useState(loadDetailRatio);
+  const [vw, setVw] = useState(viewportWidth);
   const dragRef = useRef<{ x: number; w: number } | null>(null);
+  const width = pxFromRatio(ratio, vw);
   const widthRef = useRef(width);
   widthRef.current = width;
+
+  useEffect(() => {
+    const onResize = () => setVw(viewportWidth());
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -55,12 +61,12 @@ function DrawerShell({ children }: { children: ReactNode }) {
   const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
     const d = dragRef.current;
     if (!d) return;
-    setWidth(clampWidth(d.w + (d.x - e.clientX)));
+    setRatio(ratioFromPx(d.w + (d.x - e.clientX), viewportWidth()));
   };
   const onPointerUp = () => {
     if (!dragRef.current) return;
     dragRef.current = null;
-    persistDetailWidth(widthRef.current);
+    persistDetailRatio(ratioFromPx(widthRef.current, viewportWidth()));
   };
 
   return (

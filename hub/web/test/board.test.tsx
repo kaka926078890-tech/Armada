@@ -102,6 +102,8 @@ describe("Board unread chrome", () => {
       />,
     );
     expect(html).toContain("重试");
+    expect(html).not.toContain("absolute top-1.5 right-1.5");
+    expect(html).not.toContain("pr-16");
   });
 
   test("card on a stale Windows extension names the vsix gap", () => {

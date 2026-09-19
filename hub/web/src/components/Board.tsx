@@ -73,7 +73,7 @@ export default function Board({ runs, machines, selected, onSelect, showArchived
               const editing = editingId === r.id;
               const lag = lagOf(r.machine_id);
               return (
-                <Card key={r.id} size="sm" className={`group relative min-w-0 text-left gap-0 py-0 ring-0 ${cardChromeClass(chrome, selected === r.id)}`}>
+                <Card key={r.id} size="sm" className={`min-w-0 text-left gap-0 py-0 ring-0 ${cardChromeClass(chrome, selected === r.id)}`}>
                   {editing ? (
                     <CardContent className="px-2.5 py-2">
                       <Input
@@ -90,7 +90,7 @@ export default function Board({ runs, machines, selected, onSelect, showArchived
                     </CardContent>
                   ) : (
                     <button onClick={() => onSelect(r.id)} className="w-full min-w-0 text-left px-2.5 py-2">
-                      <div className={`${UI_TYPE} font-medium leading-snug text-foreground pr-16 break-words line-clamp-3`}>{v.title}</div>
+                      <div className={`${UI_TYPE} font-medium leading-snug text-foreground break-words line-clamp-3`}>{v.title}</div>
                       <div className={`${UI_META} text-muted-foreground mt-1 truncate`}>{nameOf(r.machine_id)} · {workspaceFolderName(r.workspace_root)}</div>
                       {lag ? (
                         <div className={`${UI_META} text-amber-400 mt-1 leading-snug`}>{lag}</div>
@@ -111,7 +111,7 @@ export default function Board({ runs, machines, selected, onSelect, showArchived
                     </button>
                   )}
                   {!editing && (
-                    <div className="absolute top-1.5 right-1.5 flex gap-1 opacity-0 group-hover:opacity-100">
+                    <div className="px-2.5 pb-2 flex flex-wrap gap-1">
                       <Button type="button" size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); startEdit(r); }}>
                         改标题
                       </Button>

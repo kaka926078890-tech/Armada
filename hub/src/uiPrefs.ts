@@ -30,7 +30,7 @@ export const UI_PREFS_DEFAULTS: UiPrefs = {
   selectedWorkspace: null,
   readRuns: {},
   readRunsSeeded: false,
-  detailWidth: 576,
+  detailWidth: 0.4,
   promptSnippets: [],
 };
 
@@ -89,8 +89,16 @@ export function fillSnippetIds(items: Array<{ id?: string; title: string; body: 
 }
 
 const READ_RUNS_CAP = 5000;
-const WIDTH_MIN = 400;
-const WIDTH_MAX = 2000;
+const DETAIL_RATIO_MIN = 0.22;
+const DETAIL_RATIO_MAX = 0.92;
+const DETAIL_RATIO_DEFAULT = 0.4;
+const DETAIL_LEGACY_VW = 1440;
+
+function normalizeDetailWidth(raw: unknown): number {
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) return DETAIL_RATIO_DEFAULT;
+  if (raw <= 1.5) return Math.min(DETAIL_RATIO_MAX, Math.max(DETAIL_RATIO_MIN, raw));
+  return Math.min(DETAIL_RATIO_MAX, Math.max(DETAIL_RATIO_MIN, raw / DETAIL_LEGACY_VW));
+}
 
 export function isWorkspaceKey(raw: unknown): raw is string {
   if (typeof raw !== "string" || !raw) return false;
@@ -120,9 +128,7 @@ export function normalizeUiPrefs(raw: unknown): UiPrefs {
     ? o.fontScale
     : "normal";
   const selectedWorkspace = isWorkspaceKey(o.selectedWorkspace) ? o.selectedWorkspace : null;
-  const detailWidth = typeof o.detailWidth === "number" && Number.isFinite(o.detailWidth)
-    ? Math.min(WIDTH_MAX, Math.max(WIDTH_MIN, Math.round(o.detailWidth)))
-    : 576;
+  const detailWidth = normalizeDetailWidth(o.detailWidth);
   return {
     version: 1,
     theme,

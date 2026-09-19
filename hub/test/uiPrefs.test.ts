@@ -30,8 +30,10 @@ describe("isWorkspaceKey / normalizeUiPrefs", () => {
     expect(n).toEqual({
       ...UI_PREFS_DEFAULTS,
       readRuns: { a: 1 },
-      detailWidth: 400,
+      detailWidth: 0.4,
     });
+    expect(normalizeUiPrefs({ detailWidth: 0.5 }).detailWidth).toBe(0.5);
+    expect(normalizeUiPrefs({ detailWidth: 576 }).detailWidth).toBeCloseTo(576 / 1440);
   });
 
   test("clamps illegal fontScale to normal", () => {

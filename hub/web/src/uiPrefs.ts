@@ -1,4 +1,5 @@
 import { applyFontScale, applyTheme, loadFontScale, loadTheme, saveFontScale, saveTheme, type FontScale, type ThemeName } from "./theme";
+import { DEFAULT_RATIO, parseStoredWidth } from "./detailWidth";
 
 export type PromptSnippet = { id: string; title: string; body: string };
 
@@ -22,7 +23,7 @@ export const UI_PREFS_DEFAULTS: UiPrefs = {
   selectedWorkspace: null,
   readRuns: {},
   readRunsSeeded: false,
-  detailWidth: 576,
+  detailWidth: 0.4,
   promptSnippets: [],
 };
 
@@ -39,10 +40,9 @@ export function loadLocalUiPrefsMirror(): UiPrefs {
   if (!readRuns || typeof readRuns !== "object" || Array.isArray(readRuns)) readRuns = {};
   let readRunsSeeded = false;
   try { readRunsSeeded = localStorage.getItem(READ_SEEDED) === "1"; } catch { /* ignore */ }
-  let detailWidth = UI_PREFS_DEFAULTS.detailWidth;
+  let detailWidth = DEFAULT_RATIO;
   try {
-    const n = Number(localStorage.getItem(WIDTH_KEY));
-    if (Number.isFinite(n) && n >= 400) detailWidth = Math.min(2000, Math.round(n));
+    detailWidth = parseStoredWidth(localStorage.getItem(WIDTH_KEY), 1440).ratio;
   } catch { /* ignore */ }
   return {
     version: 1,
