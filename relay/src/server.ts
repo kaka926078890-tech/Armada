@@ -45,6 +45,8 @@ export type RunSnap = {
   machineId: string;
   workspaceRoot: string;
   prompt: string;
+  title?: string | null;
+  conversationId?: string | null;
   status: string;
   finalText?: string | null;
   error?: string | null;
@@ -52,6 +54,7 @@ export type RunSnap = {
   outbound?: OutboundSnap[];
   queueMessageDefaultBehavior?: string | null;
   archived?: boolean;
+  canRetry?: boolean;
   updatedAt?: number;
 };
 
@@ -237,6 +240,8 @@ export function createRelayServer(opts: {
     outbound: unknown;
     archived: boolean;
     canRetry: boolean;
+    title: string;
+    conversationId: string;
   }): string {
     return JSON.stringify({
       status: input.status,
@@ -247,6 +252,8 @@ export function createRelayServer(opts: {
       outbound: input.outbound ?? [],
       archived: input.archived,
       canRetry: input.canRetry,
+      title: input.title,
+      conversationId: input.conversationId,
     });
   }
 
@@ -258,11 +265,17 @@ export function createRelayServer(opts: {
     const pendingAsk = snap.pendingAsk == null ? null : JSON.stringify(snap.pendingAsk);
     const outbound = Array.isArray(snap.outbound) ? JSON.stringify(snap.outbound) : null;
     const queueMode = typeof snap.queueMessageDefaultBehavior === "string" ? snap.queueMessageDefaultBehavior : null;
+    const title = typeof snap.title === "string" ? snap.title : null;
+    const conversationId = typeof snap.conversationId === "string" && snap.conversationId.trim()
+      ? snap.conversationId.trim()
+      : null;
     const existing = db.query("SELECT * FROM runs WHERE id=?1").get(snap.runId) as
       | {
         id: string;
         status?: string;
         prompt?: string;
+        title?: string | null;
+        conversation_id?: string | null;
         final_text?: string | null;
         error?: string | null;
         pending_ask?: string | null;
@@ -288,6 +301,8 @@ export function createRelayServer(opts: {
       outbound: Array.isArray(snap.outbound) ? snap.outbound : [],
       archived: archivedAt != null,
       canRetry,
+      title: title ?? "",
+      conversationId: conversationId ?? "",
     });
     if (existing) {
       const prevFp = runContentFp({
@@ -299,6 +314,8 @@ export function createRelayServer(opts: {
         outbound: existing.outbound ? JSON.parse(existing.outbound) : [],
         archived: existingArchived != null,
         canRetry: ["error", "unknown", "aborted"].includes(String(existing.status ?? "")),
+        title: existing.title ?? "",
+        conversationId: existing.conversation_id ?? "",
       });
       if (prevFp === nextFp) return existing;
     }
@@ -308,12 +325,12 @@ export function createRelayServer(opts: {
     };
     if (existing) {
       db.query(`UPDATE runs SET fleet_id=?2, machine_id=?3, workspace_root=?4, prompt=?5, status=?6,
-        final_text=?7, error=?8, pending_ask=?9, outbound=?11, queue_message_default_behavior=?12, archived_at=?13, updated_at=?10 WHERE id=?1`)
-        .run(snap.runId, fleetId, snap.machineId, snap.workspaceRoot, snap.prompt, status, finalText, error, pendingAsk, now, outbound, queueMode, archivedAt);
+        final_text=?7, error=?8, pending_ask=?9, outbound=?11, queue_message_default_behavior=?12, archived_at=?13, updated_at=?10, title=?14, conversation_id=?15 WHERE id=?1`)
+        .run(snap.runId, fleetId, snap.machineId, snap.workspaceRoot, snap.prompt, status, finalText, error, pendingAsk, now, outbound, queueMode, archivedAt, title, conversationId);
     } else {
-      db.query(`INSERT INTO runs (id, fleet_id, machine_id, workspace_root, prompt, status, final_text, error, pending_ask, outbound, queue_message_default_behavior, archived_at, updated_at, created_at)
-        VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?11,?12,?13,?10,?10)`)
-        .run(snap.runId, fleetId, snap.machineId, snap.workspaceRoot, snap.prompt, status, finalText, error, pendingAsk, now, outbound, queueMode, archivedAt);
+      db.query(`INSERT INTO runs (id, fleet_id, machine_id, workspace_root, prompt, status, final_text, error, pending_ask, outbound, queue_message_default_behavior, archived_at, updated_at, created_at, title, conversation_id)
+        VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?11,?12,?13,?10,?10,?14,?15)`)
+        .run(snap.runId, fleetId, snap.machineId, snap.workspaceRoot, snap.prompt, status, finalText, error, pendingAsk, now, outbound, queueMode, archivedAt, title, conversationId);
     }
     const decided = notifyEdges(prev, {
       prompt: snap.prompt,
@@ -325,7 +342,7 @@ export function createRelayServer(opts: {
       .run(snap.runId, decided.notifiedStatus, decided.notifiedAskId);
     dispatchEdges(fleetId, snap.runId, decided.edges);
     const row = db.query("SELECT * FROM runs WHERE id=?1").get(snap.runId);
-    sseBroadcast(fleetId, sseEvent({ type: "run", run: runToJson(row) }));
+    sseBroadcast(fleetId, sseEvent({ type: "run", run: runToJson(row, true) }));
     return row;
   }
 
@@ -335,6 +352,8 @@ export function createRelayServer(opts: {
       machineId: row.machine_id,
       workspaceRoot: row.workspace_root,
       prompt: row.prompt,
+      title: row.title ?? null,
+      conversationId: row.conversation_id ?? null,
       status: row.status,
       finalText: forList ? null : row.final_text,
       error: row.error,
@@ -384,7 +403,7 @@ export function createRelayServer(opts: {
   function streamRuns(fleetId: string): object[] {
     const open = db.query("SELECT * FROM runs WHERE fleet_id=?1 AND archived_at IS NULL ORDER BY updated_at DESC LIMIT 50").all(fleetId);
     const hidden = db.query("SELECT * FROM runs WHERE fleet_id=?1 AND archived_at IS NOT NULL ORDER BY updated_at DESC LIMIT 50").all(fleetId);
-    return [...open, ...hidden].map(runToJson);
+    return [...open, ...hidden].map((row) => runToJson(row, true));
   }
 
   function sendHub(fleetId: string, msg: object): boolean {

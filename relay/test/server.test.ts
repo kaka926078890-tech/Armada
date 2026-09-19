@@ -1126,6 +1126,62 @@ describe("mobile stream", () => {
     ws.close();
   });
 
+  test("SSE dump and broadcasts strip finalText; GET detail keeps it", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    ws.send(JSON.stringify({
+      type: "snap.run",
+      run: {
+        runId: "r-body",
+        machineId: "m-1",
+        workspaceRoot: "/Users/me/proj",
+        prompt: "hello",
+        status: "completed",
+        finalText: "SECRET_SSE_BODY",
+        updatedAt: Date.now(),
+      },
+    }));
+    await Bun.sleep(40);
+    const headers = { authorization: `Bearer ${fleet.operatorToken}` };
+    const ac = new AbortController();
+    const res = await fetch(url(s, "/mobile/stream"), {
+      headers,
+      signal: ac.signal,
+    });
+    const sse = openSse(res);
+    await sse.waitUntil((ev) => ev.some((e) => (e as { run?: { runId?: string } }).run?.runId === "r-body"));
+    const dumped = sse.events.find((e) => (e as { run?: { runId?: string } }).run?.runId === "r-body") as {
+      run: { finalText: string | null };
+    };
+    expect(dumped.run.finalText).toBeNull();
+    const detail = await (await fetch(url(s, "/mobile/runs/r-body"), { headers })).json() as { finalText: string };
+    expect(detail.finalText).toBe("SECRET_SSE_BODY");
+    ws.send(JSON.stringify({
+      type: "snap.run",
+      run: {
+        runId: "r-body",
+        machineId: "m-1",
+        workspaceRoot: "/Users/me/proj",
+        prompt: "hello",
+        status: "completed",
+        finalText: "SECRET_SSE_BODY_V2",
+        updatedAt: Date.now() + 1,
+      },
+    }));
+    await sse.waitUntil((ev) => ev.filter((e) => (e as { run?: { runId?: string } }).run?.runId === "r-body").length >= 2);
+    const broadcast = sse.events.filter((e) => (e as { run?: { runId?: string } }).run?.runId === "r-body").at(-1) as {
+      run: { finalText: string | null; status: string };
+    };
+    expect(broadcast.run.finalText).toBeNull();
+    expect(broadcast.run.status).toBe("completed");
+    const again = await (await fetch(url(s, "/mobile/runs/r-body"), { headers })).json() as { finalText: string };
+    expect(again.finalText).toBe("SECRET_SSE_BODY_V2");
+    ac.abort();
+    await sse.cancel();
+    ws.close();
+  });
+
   test("hub close emits workspaces hubOffline", async () => {
     const s = start();
     const fleet = s.createFleet();
@@ -1341,6 +1397,53 @@ describe("relay HTTP map and snap fingerprint", () => {
     await Bun.sleep(40);
     const t2 = (await (await fetch(url(s, "/mobile/runs/r-ask"), { headers })).json() as { updatedAt: number }).updatedAt;
     expect(t2).not.toBe(t1);
+    ws.close();
+  });
+
+  test("persists snap title and conversationId for App GET/SSE", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    const headers = { authorization: `Bearer ${fleet.operatorToken}` };
+    ws.send(JSON.stringify({
+      type: "snap.run",
+      run: {
+        runId: "r-cid",
+        machineId: "m-1",
+        workspaceRoot: "/ws/a",
+        prompt: "第一句很长",
+        title: "短标题",
+        conversationId: "cid-9",
+        status: "running",
+        updatedAt: 1,
+      },
+    }));
+    await Bun.sleep(40);
+    const got = await (await fetch(url(s, "/mobile/runs/r-cid"), { headers })).json() as {
+      title?: string; conversationId?: string | null; updatedAt: number;
+    };
+    expect(got.title).toBe("短标题");
+    expect(got.conversationId).toBe("cid-9");
+    const t1 = got.updatedAt;
+    ws.send(JSON.stringify({
+      type: "snap.run",
+      run: {
+        runId: "r-cid",
+        machineId: "m-1",
+        workspaceRoot: "/ws/a",
+        prompt: "第一句很长",
+        title: "改名",
+        conversationId: "cid-9",
+        status: "running",
+        updatedAt: 2,
+      },
+    }));
+    await Bun.sleep(40);
+    const renamed = await (await fetch(url(s, "/mobile/runs/r-cid"), { headers })).json() as {
+      title?: string; updatedAt: number;
+    };
+    expect(renamed.title).toBe("改名");
+    expect(renamed.updatedAt).not.toBe(t1);
     ws.close();
   });
 });
