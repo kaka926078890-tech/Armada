@@ -134,6 +134,24 @@ class ModelsTest {
     }
 
     @Test
+    fun shouldStampReadAtOnlyWhenActivityAdvancesPastSeen() {
+        assertTrue(shouldStampReadAt(null, 10))
+        assertTrue(shouldStampReadAt(null, null))
+        assertFalse(shouldStampReadAt(20.0, 10))
+        assertFalse(shouldStampReadAt(20.0, 20))
+        assertFalse(shouldStampReadAt(20.0, null))
+        assertTrue(shouldStampReadAt(20.0, 21))
+    }
+
+    @Test
+    fun shouldStampReadAtSkipsUpdatedAtOnlyAfterWallClockStamp() {
+        val seen = stampReadAt(1000.0, 20)
+        assertFalse(shouldStampReadAt(seen, 20))
+        assertFalse(shouldStampReadAt(seen, 99))
+        assertTrue(shouldStampReadAt(seen, 1001))
+    }
+
+    @Test
     fun watchingCompleteWithoutRestampStaysUnread() {
         val done = run("completed").copy(updatedAt = 20)
         assertTrue(isUnread(done, mapOf("r1" to 5.0)))

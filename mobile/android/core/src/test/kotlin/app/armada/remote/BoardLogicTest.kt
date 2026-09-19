@@ -2,6 +2,7 @@ package app.armada.remote
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class BoardLogicTest {
@@ -54,6 +55,61 @@ class BoardLogicTest {
         val next = applyStreamRun(start, first.copy(updatedAt = 99))
         assertTrue(next === start)
         assertEquals(1, next.runs.single().updatedAt)
+    }
+
+    @Test
+    fun adoptFetchedListsReturnsSameInstanceWhenOnlyUpdatedAtChanges() {
+        val first = run("r1", false).copy(status = "running", updatedAt = 1)
+        val hid = run("h1", true).copy(updatedAt = 2)
+        val start = BoardLists(listOf(first), listOf(hid), emptySet(), emptySet())
+        val next = adoptFetchedLists(
+            start,
+            listOf(first.copy(updatedAt = 99)),
+            listOf(hid.copy(updatedAt = 100)),
+        )
+        assertTrue(next === start)
+        assertTrue(next.runs === start.runs)
+        assertTrue(next.hidden === start.hidden)
+        assertEquals(1, next.runs.single().updatedAt)
+        assertEquals(2, next.hidden.single().updatedAt)
+    }
+
+    @Test
+    fun adoptFetchedListsAdoptsStatusChange() {
+        val first = run("r1", false).copy(status = "running", updatedAt = 1)
+        val start = BoardLists(listOf(first), emptyList(), emptySet(), emptySet())
+        val next = adoptFetchedLists(start, listOf(first.copy(status = "completed", updatedAt = 2)), emptyList())
+        assertFalse(next === start)
+        assertEquals("completed", next.runs.single().status)
+        assertEquals(2, next.runs.single().updatedAt)
+    }
+
+    @Test
+    fun adoptFetchedListsKeepsRunIdentityWhenOnlyHiddenChanges() {
+        val live = run("a", false).copy(status = "running", updatedAt = 1)
+        val hid = run("b", true).copy(status = "error", updatedAt = 1)
+        val start = BoardLists(listOf(live), listOf(hid), emptySet(), emptySet())
+        val next = adoptFetchedLists(
+            start,
+            listOf(live.copy(updatedAt = 50)),
+            listOf(hid.copy(status = "completed", updatedAt = 2)),
+        )
+        assertTrue(next.runs === start.runs)
+        assertFalse(next.hidden === start.hidden)
+        assertEquals("completed", next.hidden.single().status)
+        assertEquals(1, next.runs.single().updatedAt)
+    }
+
+    @Test
+    fun adoptFetchedListsClearsPendingWithoutReplacingUnchangedLists() {
+        val hidden = run("r1", true).copy(updatedAt = 1)
+        val start = BoardLists(emptyList(), listOf(hidden), setOf("r1"), emptySet())
+        val next = adoptFetchedLists(start, emptyList(), listOf(hidden.copy(updatedAt = 99)))
+        assertFalse(next === start)
+        assertTrue(next.runs === start.runs)
+        assertTrue(next.hidden === start.hidden)
+        assertTrue(next.pendingArchive.isEmpty())
+        assertEquals(1, next.hidden.single().updatedAt)
     }
 
     @Test

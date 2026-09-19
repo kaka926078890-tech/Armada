@@ -147,6 +147,7 @@ class SessionVm(app: Application) : AndroidViewModel(app) {
         if (!shouldStampOpened(unreadHold, runId)) return
         val activity = _state.value.board.runs.find { it.runId == runId }?.activityTs
             ?: _state.value.board.hidden.find { it.runId == runId }?.activityTs
+        if (!shouldStampReadAt(readAt[runId], activity)) return
         readAt[runId] = stampReadAt(System.currentTimeMillis().toDouble(), activity)
         store.saveReadAt(readAt)
         _state.value = _state.value.copy(readRev = _state.value.readRev + 1)

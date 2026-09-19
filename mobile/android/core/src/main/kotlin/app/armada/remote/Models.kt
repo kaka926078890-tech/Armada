@@ -138,6 +138,11 @@ fun stampReadAt(nowMs: Double, activityTs: Long?): Double {
     return maxOf(nowMs, (activityTs ?: 0L).toDouble())
 }
 
+fun shouldStampReadAt(seen: Double?, activityTs: Long?): Boolean {
+    if (seen == null) return true
+    return (activityTs ?: 0L).toDouble() > seen
+}
+
 fun isUnread(run: RunDto, readAt: Map<String, Double>): Boolean {
     val seen = readAt[run.runId]
     if (run.pendingAsk != null) {

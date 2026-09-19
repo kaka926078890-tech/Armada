@@ -463,6 +463,10 @@ final class Session: ObservableObject {
         }
         let activity = runs.first { $0.runId == runId }?.activityTs
             ?? hiddenRuns.first { $0.runId == runId }?.activityTs
+        guard shouldStampReadAt(seen: readAt[runId], activityTs: activity) else {
+            applyBadge()
+            return
+        }
         readAt[runId] = stampReadAt(nowMs: Date().timeIntervalSince1970 * 1000, activityTs: activity)
         persistRead()
         applyBadge()

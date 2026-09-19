@@ -171,6 +171,11 @@ func shouldStampOpened(unreadHold: Set<String>, runId: String) -> Bool {
     !unreadHold.contains(runId)
 }
 
+func shouldStampReadAt(seen: Double?, activityTs: Int?) -> Bool {
+    guard let seen else { return true }
+    return Double(activityTs ?? 0) > seen
+}
+
 /// SSE / 列表会省略 `finalText`；本地已有正文时不得冲掉。与 Android `coalesceFinalText` 对齐。
 func coalesceFinalText(_ incoming: RunDTO, prior: RunDTO?) -> RunDTO {
     guard incoming.finalText == nil, let prev = prior?.finalText, !prev.isEmpty else { return incoming }

@@ -128,5 +128,16 @@ fun adoptFetchedLists(
             if (local != null && nextRuns.none { it.runId == id }) nextRuns.add(0, local)
         }
     }
-    return BoardLists(nextRuns, nextHidden, stillA, stillU)
+    val runsUnchanged = nextRuns.size == current.runs.size &&
+        nextRuns.zip(current.runs).all { (a, b) -> runContentEquals(a, b) }
+    val hiddenUnchanged = nextHidden.size == current.hidden.size &&
+        nextHidden.zip(current.hidden).all { (a, b) -> runContentEquals(a, b) }
+    val pendingUnchanged = stillA == current.pendingArchive && stillU == current.pendingUnarchive
+    if (runsUnchanged && hiddenUnchanged && pendingUnchanged) return current
+    return BoardLists(
+        if (runsUnchanged) current.runs else nextRuns,
+        if (hiddenUnchanged) current.hidden else nextHidden,
+        stillA,
+        stillU,
+    )
 }
