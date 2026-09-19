@@ -193,8 +193,11 @@ struct RunRow: View {
     let run: RunDTO
     let unread: Bool
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Circle().fill(statusColor(run.status)).frame(width: 8, height: 8).padding(.top, 6)
+        HStack(alignment: .top, spacing: 0) {
+            RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                .fill(runRowChrome(run, unread: unread) ?? .clear)
+                .frame(width: 3)
+                .padding(.vertical, 2)
             VStack(alignment: .leading, spacing: 4) {
                 Text(run.prompt).font(.system(size: 17)).lineLimit(2)
                 Text(run.pendingAsk != nil && run.status == "running" ? "待处理"
@@ -203,6 +206,7 @@ struct RunRow: View {
                     .font(.system(size: 13))
                     .foregroundStyle(captionColor)
             }
+            .padding(.leading, 13)
             Spacer(minLength: 8)
             if unread {
                 Circle().fill(run.status == "completed" && run.pendingAsk == nil ? Color.green : Color.red).frame(width: 7, height: 7).padding(.top, 8)
@@ -396,14 +400,7 @@ struct WorkspaceHome: View {
                     NavigationLink(value: AppRoute.run(run.runId)) {
                         RunRow(run: run, unread: session.isUnread(run))
                     }
-                    .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                        if session.canMarkUnread(run) {
-                            Button("标为未读") {
-                                session.markUnread(run.runId, hold: false)
-                            }
-                            .tint(.orange)
-                        }
-                    }
+                    .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 16))
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                         if showArchived {
                             Button("取消隐藏") {
@@ -415,6 +412,12 @@ struct WorkspaceHome: View {
                                 session.applyLocalArchive(run.runId, archived: true)
                                 Task { await hide(run.runId) }
                             }
+                        }
+                        if session.canMarkUnread(run) {
+                            Button("标为未读") {
+                                session.markUnread(run.runId, hold: false)
+                            }
+                            .tint(.orange)
                         }
                     }
                 }
