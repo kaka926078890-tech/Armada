@@ -7,39 +7,60 @@ import { materializeInboxFile, uniqueInboxFilename } from "./workspaceInbox";
 
 const CANCEL_RECORD_WINDOW_MS = 20_000;
 
-/**
- * 一次 `beforeSubmitPrompt` 归属于 Armada 自身注入的时间宽限。
- * spool → forwarder 轮询为 1s（`extension.ts` 的 `spoolPoll`）；5s 给积压留 5 倍余量。
- */
-const INJECT_ATTRIBUTION_MS = 5_000;
-
 export class CancelWatcher {
-  private records = new Map<string, { cid: string; prompt: string; at: number; count: number }>();
-  /** Armada 自己最后一次把 prompt 提交进 composer 的时刻，按 runId。 */
-  private lastInjectAt = new Map<string, number>();
+  private records = new Map<string, { cid: string; liveGen?: string; at: number; count: number }>();
+  /** Our Enter has no UUID yet: the next owner BSP for this run is the injection. */
+  private expectNext = new Set<string>();
+  /** Hub-issued gen, or the UUID filled from that next BSP. */
+  private expectedGen = new Map<string, string>();
 
   /** Called by Executor right after our own submit lands (CDP enter or clipboard paste). */
-  noteInjection(runId: string, nowMs: number): void {
-    for (const [id, at] of this.lastInjectAt) {
-      if (nowMs - at > CANCEL_RECORD_WINDOW_MS) this.lastInjectAt.delete(id);
+  noteInjection(runId: string, expectedGenerationId?: string): void {
+    if (typeof expectedGenerationId === "string" && expectedGenerationId) {
+      this.expectedGen.set(runId, expectedGenerationId);
+      this.expectNext.delete(runId);
+      return;
     }
-    this.lastInjectAt.set(runId, nowMs);
+    this.expectNext.add(runId);
   }
 
-  record(runId: string, conversationId: string, prompt: string, nowMs: number): void {
-    this.records.set(runId, { cid: conversationId, prompt, at: nowMs, count: 0 });
+  /** Owner BSP landed for this run. Fills the expected-next slot even if cancel has not been recorded yet. */
+  noteBsp(runId: string, generationId: string): void {
+    if (!generationId || this.expectedGen.has(runId) || !this.expectNext.has(runId)) return;
+    this.expectedGen.set(runId, generationId);
+    this.expectNext.delete(runId);
+  }
+
+  record(runId: string, conversationId: string, liveGenerationId: string | undefined, nowMs: number): void {
+    this.records.set(runId, {
+      cid: conversationId,
+      liveGen: liveGenerationId || undefined,
+      at: nowMs,
+      count: 0,
+    });
   }
 
   shouldCancelAgain(ev: { hook: string; raw: any }, nowMs: number): string | null {
     if (ev.hook !== "beforeSubmitPrompt") return null;
+    const cid = ev.raw?.conversation_id;
+    const gen = typeof ev.raw?.generation_id === "string" ? ev.raw.generation_id : "";
     for (const [runId, r] of this.records) {
-      if (ev.raw?.conversation_id !== r.cid) continue;
-      if (ev.raw?.prompt !== r.prompt) continue;
-      if (nowMs - r.at > CANCEL_RECORD_WINDOW_MS) { this.records.delete(runId); continue; }
-      // 只有 Armada 自己迟到的注入才归我们收拾。人手动重发同一段文字形状一致
-      // （同 cid、同 prompt、全新 generation_id），取消它会打断用户自己的轮次。
-      const injectedAt = this.lastInjectAt.get(runId);
-      if (injectedAt === undefined || nowMs - injectedAt > INJECT_ATTRIBUTION_MS) continue;
+      if (cid !== r.cid) continue;
+      if (nowMs - r.at > CANCEL_RECORD_WINDOW_MS) {
+        this.records.delete(runId);
+        this.expectNext.delete(runId);
+        this.expectedGen.delete(runId);
+        continue;
+      }
+      const known = this.expectedGen.get(runId);
+      const waiting = this.expectNext.has(runId);
+      const matchLive = !!(r.liveGen && gen === r.liveGen);
+      const matchExpected = !!(gen && ((known && gen === known) || (waiting && !matchLive)));
+      if (!matchExpected && !matchLive) continue;
+      if (waiting && gen && !matchLive) {
+        this.expectedGen.set(runId, gen);
+        this.expectNext.delete(runId);
+      }
       if (r.count >= 2) return null;
       r.count += 1;
       return r.cid;
@@ -59,7 +80,7 @@ export interface ExecutorDeps {
   addPending?: (run: PendingRun) => void;
   /** Drop a pending entry on INJECT_FAILED after it was already added. */
   removePending?: (runId: string) => void;
-  /** Our own submit landed. Only such submits may be re-cancelled after run.cancel. */
+  /** Our own submit landed. Next owner BSP (or this hub gen) is the injection identity. */
   onInjected?: (runId: string) => void;
   /**
    * 注入前探 9222。不通则禁止 createNew / openComposer，也不能用剪贴板冒充已发送。
@@ -97,9 +118,10 @@ export interface ExecutorDeps {
   cdpLockPath?: string;
   answerAskCdp?: (args: {
     workspaceRoot: string;
-    action: "continue" | "skip";
+    action: "continue" | "skip" | "freeform";
     letter?: string;
     kind?: "plan";
+    text?: string;
   }) => Promise<{ ok: boolean; reason?: string }>;
 }
 
@@ -427,9 +449,10 @@ export class Executor {
     conversationId: string;
     workspaceRoot: string;
     request_id: string;
-    action: "continue" | "skip";
+    action: "continue" | "skip" | "freeform";
     answers?: { question_id: string; option_ids: string[] }[];
     kind?: "plan";
+    text?: string;
   }): Promise<void> {
     const vscode = vs();
     const lock = await acquireCdpLock({
@@ -453,6 +476,10 @@ export class Executor {
         this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: "ASK_INVALID_OPTION" });
         return;
       }
+      if (msg.action === "freeform" && !String(msg.text ?? "").trim()) {
+        this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: "ASK_TEXT_EMPTY" });
+        return;
+      }
       if (!this.deps.answerAskCdp) {
         this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: "ASK_WIDGET_NOT_FOUND" });
         return;
@@ -461,6 +488,7 @@ export class Executor {
         workspaceRoot: msg.workspaceRoot,
         action: msg.action,
         letter,
+        text: msg.text,
         ...(msg.kind === "plan" ? { kind: "plan" as const } : {}),
       });
       if (!r.ok) {

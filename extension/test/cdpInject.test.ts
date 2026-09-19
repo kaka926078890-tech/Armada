@@ -489,6 +489,10 @@ function mockAskDoc(letters: string[], selected?: string, innerText = FIXTURE_TE
         parentElement: null,
       }
       : null,
+    querySelector(sel: string) {
+      if (sel === "button.composer-questionnaire-toolbar-option-letter") return btns[0] ?? null;
+      return null;
+    },
     querySelectorAll(sel: string) {
       if (sel === "button.composer-questionnaire-toolbar-option-letter") return btns;
       return [];
@@ -517,6 +521,86 @@ function runAskClick(letters: string[], letter: string) {
   return { result: String(fn(letter)), btns: document.btns };
 }
 
+/** Cursor workbench: Skip is `.composer-skip-button`; Other is letter + textarea, not the last Skip letter. */
+function currentCursorAskDoc() {
+  const skip = { className: "composer-skip-button", innerText: "Skip" };
+  const letters = ["A", "B", "C", "D"].map((L, i) => {
+    const freeform = i === 3;
+    const parent = {
+      className: freeform
+        ? "composer-questionnaire-toolbar-option composer-questionnaire-toolbar-option-freeform"
+        : "composer-questionnaire-toolbar-option",
+      parentElement: null as { className: string; parentElement: null } | null,
+    };
+    const btn = {
+      innerText: L,
+      className: "composer-questionnaire-toolbar-option-letter",
+      parentElement: parent,
+      focused: false,
+      clicked: false,
+      focus() { this.focused = true; },
+      click() { this.clicked = true; },
+      getAttribute() { return null; },
+    };
+    return btn;
+  });
+  const textarea = {
+    className: "composer-questionnaire-toolbar-freeform-input",
+    placeholder: "Other...",
+    focused: false,
+    focus() { this.focused = true; },
+    parentElement: letters[3]!.parentElement,
+  };
+  (letters[3]!.parentElement as { querySelector?: (sel: string) => unknown }).querySelector = (sel: string) => {
+    if (sel === "button.composer-questionnaire-toolbar-option-letter") return letters[3];
+    if (sel === "textarea.composer-questionnaire-toolbar-freeform-input") return textarea;
+    return null;
+  };
+  const bar = {
+    className: "composer-questionnaire-toolbar",
+    innerText: "Questions 1 of 1 1. 你接受哪条？ A 合同 B spawn-plan C 再讲清楚 D Other... Skip Esc Continue",
+    parentElement: null,
+    querySelector(sel: string) {
+      if (sel === ".composer-skip-button") return skip;
+      if (sel === "textarea.composer-questionnaire-toolbar-freeform-input") return textarea;
+      if (sel === "button.composer-questionnaire-toolbar-option-letter") return letters[0];
+      return null;
+    },
+    querySelectorAll(sel: string) {
+      if (sel === "button.composer-questionnaire-toolbar-option-letter") return letters;
+      return [];
+    },
+    scrollIntoView() {},
+  };
+  return {
+    btns: letters,
+    textarea,
+    querySelector(sel: string) {
+      if (sel === ".composer-questionnaire-toolbar") return bar;
+      return null;
+    },
+    querySelectorAll() { return []; },
+  };
+}
+
+function runCurrentCursorAskInspect() {
+  const document = currentCursorAskDoc();
+  const fn = new Function("document", `return (${ASK_INSPECT_JS});`)(document);
+  return {
+    result: fn() as {
+      present: boolean;
+      options: { id: string; label: string; text: string; freeform?: boolean }[];
+      skip_unidentified?: boolean;
+    },
+    btns: document.btns,
+  };
+}
+
+function runAskClickOnDoc(document: ReturnType<typeof currentCursorAskDoc>, letter: string) {
+  const fn = new Function("document", `return (${ASK_CLICK_LETTER_JS});`)(document);
+  return { result: String(fn(letter)), btns: document.btns };
+}
+
 describe("AskQuestion toolbar JS", () => {
   test("inspect drops the Skip letter and keeps A/B/C from the CDP fixture", () => {
     const { result } = runAskInspect(["A", "B", "C", "Skip"]);
@@ -540,10 +624,10 @@ describe("AskQuestion toolbar JS", () => {
     expect(result.skip_unidentified).toBeFalsy();
   });
 
-  test("inspect keeps every letter and sets skip_unidentified when Skip cannot be identified", () => {
+  test("inspect without skip button or Skip text drops the last letter", () => {
     const { result } = runAskInspect(["A", "B"]);
-    expect(result.options.map((o) => o.id)).toEqual(["a", "b"]);
-    expect(result.skip_unidentified).toBe(true);
+    expect(result.options.map((o) => o.id)).toEqual(["a"]);
+    expect(result.skip_unidentified).toBeFalsy();
   });
 
   test("inspect returns data-composer-id from the owning composer-bar", () => {
@@ -640,6 +724,18 @@ describe("AskQuestion toolbar JS", () => {
     expect(d.result).toBe("NO_LETTER");
     expect(d.btns[3]?.clicked).toBe(false);
   });
+
+  test("current Cursor: Skip is composer-skip-button; D freeform letter is a real option", () => {
+    const { result, btns } = runCurrentCursorAskInspect();
+    expect(result.present).toBe(true);
+    expect(result.options.map((o) => o.id)).toEqual(["a", "b", "c", "d"]);
+    expect(result.options[3]).toMatchObject({ id: "d", label: "D", freeform: true });
+    expect(result.options.slice(0, 3).every((o) => o.freeform !== true)).toBe(true);
+    expect(result.skip_unidentified).toBeFalsy();
+    const clickD = runAskClickOnDoc(currentCursorAskDoc(), "D");
+    expect(clickD.result).toBe("OK");
+    expect(btns[3]?.clicked || clickD.btns[3]?.clicked).toBe(true);
+  });
 });
 
 describe("AskQuestion CDP driver", () => {
@@ -718,6 +814,20 @@ describe("AskQuestion CDP driver", () => {
     expect(evals.some((e) => e.includes("armadaDraftHit"))).toBe(false);
   });
 
+  test("freeform focuses Other textarea then insertText and Enter, never composer JS", async () => {
+    const log: CallLog[] = [];
+    const driver = createAskQuestionDriver(deps({
+      connect: async () => mockSession(["OK", { present: false }], log),
+    }));
+    const r = await driver.submit("/Users/x/armada-test-ws", "freeform", undefined, undefined, "走平台合同");
+    expect(r.ok).toBe(true);
+    expect(log.some((c) => c.method === "Input.insertText" && c.params?.text === "走平台合同")).toBe(true);
+    expect(log.some((c) => c.method === "Input.dispatchKeyEvent" && c.params?.key === "Enter")).toBe(true);
+    const evals = log.filter((c) => c.method === "Runtime.evaluate").map((c) => String(c.params?.expression ?? ""));
+    expect(evals.some((e) => e.includes("composer-questionnaire-toolbar-freeform-input"))).toBe(true);
+    expect(evals.some((e) => e.includes("armadaDraftHit"))).toBe(false);
+  });
+
   test("skip sends Escape not Enter", async () => {
     const log: CallLog[] = [];
     const driver = createAskQuestionDriver(deps({
@@ -778,7 +888,7 @@ describe("AskQuestion CDP driver", () => {
 
   test("extension forwards kind into askDriver.submit", () => {
     const src = readFileSync(join(import.meta.dir, "../src/extension.ts"), "utf8");
-    expect(src).toMatch(/askDriver\.submit\(\s*workspaceRoot,\s*action,\s*letter,\s*kind\s*\)/);
+    expect(src).toMatch(/askDriver\.submit\(\s*workspaceRoot,\s*action,\s*letter,\s*kind/);
   });
 });
 
@@ -811,17 +921,27 @@ function mockPlanDoc(opts: { filename: string; build: boolean; composerId?: stri
     },
     parentElement: null as null,
   };
+  let name: {
+    innerText: string;
+    getAttribute: (n: string) => string | null;
+    parentElement: unknown;
+  };
   const card = {
     getAttribute(name: string) {
       return name === "data-component" ? "transcript-card-root" : null;
     },
     innerText: `Created Plan\n${opts.filename}\n\n${opts.overview ?? "overview"}\n\nView Plan\nBuild\n⌘⏎`,
     parentElement: bar,
+    querySelector(sel: string) {
+      if (sel === "[data-testid=composer-plan-filename]") return name;
+      if (sel === "[data-component=split-button][data-tone=plan]") return split;
+      return null;
+    },
   };
-  const name = {
+  name = {
     innerText: opts.filename,
-    getAttribute(name: string) {
-      return name === "data-testid" ? "composer-plan-filename" : null;
+    getAttribute(n: string) {
+      return n === "data-testid" ? "composer-plan-filename" : null;
     },
     parentElement: card,
   };
@@ -831,6 +951,11 @@ function mockPlanDoc(opts: { filename: string; build: boolean; composerId?: stri
       if (sel === "[data-testid=composer-plan-filename]") return name;
       if (sel === "[data-component=split-button][data-tone=plan]") return split;
       return null;
+    },
+    querySelectorAll(sel: string) {
+      if (sel === "[data-testid=composer-plan-filename]") return [name];
+      if (sel === "[data-component=split-button][data-tone=plan]") return split ? [split] : [];
+      return [];
     },
   };
 }
@@ -891,7 +1016,96 @@ describe("Created Plan / Build JS", () => {
     expect(click()).toBe("OK");
     expect(live.buildBtn.clicked).toBe(true);
   });
+
+  test("inspect pairs filename with Build inside the same card and picks the last live card", () => {
+    const live = mockTwoPlanCards({
+      cards: [
+        { filename: "Old Plan", buildText: "Building..." },
+        { filename: "New Plan", buildText: "Build\n⌘⏎" },
+      ],
+    });
+    const inspect = new Function("document", `return (${PLAN_INSPECT_JS});`)(live);
+    expect(inspect()).toMatchObject({
+      present: true,
+      filename: "New Plan",
+    });
+  });
 });
+
+function mockTwoPlanCards(opts: {
+  cards: { filename: string; buildText: string; composerId?: string }[];
+}) {
+  const made = opts.cards.map((cardOpts) => {
+    const buildBtn = {
+      innerText: cardOpts.buildText,
+      clicked: false,
+      focused: false,
+      focus() { this.focused = true; },
+      click() { this.clicked = true; },
+    };
+    const split = {
+      getAttribute(name: string) {
+        if (name === "data-component") return "split-button";
+        if (name === "data-tone") return "plan";
+        return null;
+      },
+      querySelectorAll(sel: string) {
+        if (sel === "button") return [buildBtn];
+        return [];
+      },
+    };
+    const bar = {
+      className: "composer-bar editor",
+      getAttribute(name: string) {
+        return name === "data-composer-id" ? (cardOpts.composerId ?? null) : null;
+      },
+      parentElement: null as null,
+    };
+    let name: {
+      innerText: string;
+      getAttribute: (n: string) => string | null;
+      parentElement: unknown;
+    };
+    const card = {
+      getAttribute(name: string) {
+        return name === "data-component" ? "transcript-card-root" : null;
+      },
+      innerText: `Created Plan\n${cardOpts.filename}\n\noverview\n\nView Plan\n${cardOpts.buildText}`,
+      parentElement: bar,
+      querySelector(sel: string) {
+        if (sel === "[data-testid=composer-plan-filename]") return name;
+        if (sel === "[data-component=split-button][data-tone=plan]") return split;
+        return null;
+      },
+      querySelectorAll(sel: string) {
+        if (sel === "button") return [buildBtn];
+        if (sel === "[data-testid=composer-plan-filename]") return [name];
+        return [];
+      },
+    };
+    name = {
+      innerText: cardOpts.filename,
+      getAttribute(n: string) {
+        return n === "data-testid" ? "composer-plan-filename" : null;
+      },
+      parentElement: card,
+    };
+    return { name, card, split, buildBtn };
+  });
+  return {
+    cards: made,
+    querySelector(sel: string) {
+      if (sel === "[data-testid=composer-plan-filename]") return made[0]?.name ?? null;
+      if (sel === "[data-component=split-button][data-tone=plan]") return made[0]?.split ?? null;
+      return null;
+    },
+    querySelectorAll(sel: string) {
+      if (sel === "[data-testid=composer-plan-filename]") return made.map((c) => c.name);
+      if (sel === "[data-component=split-button][data-tone=plan]") return made.map((c) => c.split);
+      return [];
+    },
+  };
+}
 
 function mockWinPlanDoc(opts: { filename: string; buildText: string; composerId?: string }) {
   const buildBtn = {
@@ -951,6 +1165,11 @@ function mockWinPlanDoc(opts: { filename: string; buildText: string; composerId?
       if (sel === "[data-testid=composer-plan-filename]") return name;
       if (sel === "[data-component=split-button][data-tone=plan]") return null;
       return null;
+    },
+    querySelectorAll(sel: string) {
+      if (sel === "[data-testid=composer-plan-filename]") return [name];
+      if (sel === "[data-component=split-button][data-tone=plan]") return [];
+      return [];
     },
   };
 }

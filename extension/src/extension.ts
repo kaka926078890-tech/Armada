@@ -289,7 +289,7 @@ export function activate(context: vscode.ExtensionContext): void {
       const i = pendingRuns.findIndex((r) => r.runId === runId);
       if (i >= 0) pendingRuns.splice(i, 1);
     },
-    onInjected: (runId) => cancelWatcher.noteInjection(runId, Date.now()),
+    onInjected: (runId) => cancelWatcher.noteInjection(runId),
     probeCdp: async () => {
       const ok = await probeCdpReady({ port: config.cdpPort });
       return ok ? { ok: true } : { ok: false, reason: "CDP_UNREACHABLE" };
@@ -348,8 +348,8 @@ export function activate(context: vscode.ExtensionContext): void {
       else log("composer finish ok");
       return r.ok;
     },
-    answerAskCdp: async ({ workspaceRoot, action, letter, kind }) => {
-      const r = await askDriver.submit(workspaceRoot, action, letter, kind);
+    answerAskCdp: async ({ workspaceRoot, action, letter, kind, text }) => {
+      const r = await askDriver.submit(workspaceRoot, action, letter, kind, text);
       if (!r.ok) log(`ask submit failed: ${r.reason}`);
       else log(`ask submit ok action=${action}`);
       return r;
@@ -372,12 +372,16 @@ export function activate(context: vscode.ExtensionContext): void {
       } else if (match) {
         applyBinding(match, "hook");
       }
-      const reCancel = cancelWatcher.shouldCancelAgain({ hook: ev.hook, raw: ev.raw }, Date.now());
-      if (reCancel) void executor.cancel(reCancel);
-      rememberSubagent(childConversations, boundRuns, ev.hook, ev.raw);
       const cid = (ev.raw as any)?.conversation_id as string | undefined;
       const runId = (match && "run" in match ? match.run.runId : undefined)
         ?? runIdForHook(boundRuns, childConversations, cid);
+      if (runId && ev.hook === "beforeSubmitPrompt") {
+        const gen = typeof (ev.raw as any)?.generation_id === "string" ? (ev.raw as any).generation_id : "";
+        if (gen) cancelWatcher.noteBsp(runId, gen);
+      }
+      const reCancel = cancelWatcher.shouldCancelAgain({ hook: ev.hook, raw: ev.raw }, Date.now());
+      if (reCancel) void executor.cancel(reCancel);
+      rememberSubagent(childConversations, boundRuns, ev.hook, ev.raw);
       if (runId) {
         noteOwnerBsp(lastGenerationId, runId, ev.hook, ev.raw as any, boundRuns.get(runId)?.conversationId);
       }
@@ -659,10 +663,11 @@ export function activate(context: vscode.ExtensionContext): void {
           break;
         case "run.cancel": {
           const b = boundRuns.get(msg.runId);
+          const liveGen = lastGenerationId.get(msg.runId);
           clearGeneration(lastGenerationId, msg.runId);
           const cid = msg.conversationId ?? b?.conversationId;
           if (cid) {
-            cancelWatcher.record(msg.runId, cid, b?.prompt ?? "", Date.now());
+            cancelWatcher.record(msg.runId, cid, liveGen, Date.now());
             void executor.cancel(cid).catch((e) => log(`cancel error: ${String(e)}`));
           }
           break;

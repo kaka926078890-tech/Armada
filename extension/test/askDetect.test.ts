@@ -86,6 +86,25 @@ describe("parseAskInspect", () => {
     });
     expect(got).toMatchObject({ present: true, skip_unidentified: true });
   });
+
+  test("keeps freeform flag on Other option", () => {
+    const got = parseAskInspect({
+      present: true,
+      prompt: "选一个",
+      conversation_id: "cid-1",
+      options: [
+        { id: "a", label: "A", text: "甲" },
+        { id: "d", label: "D", text: "Other...", freeform: true },
+      ],
+    });
+    expect(got).toMatchObject({
+      present: true,
+      options: [
+        { id: "a", label: "A", text: "甲" },
+        { id: "d", label: "D", text: "Other...", freeform: true },
+      ],
+    });
+  });
 });
 
 describe("askPollActions", () => {

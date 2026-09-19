@@ -272,24 +272,49 @@ function defaultConnect(wsUrl: string, timeoutMs: number): Promise<CdpSession> {
 
 const ASK_ESC = /[.*+?^${}()|[\\]\\\\]/g;
 
-/** Skip 用 aria-label/文案 /skip/i 识别；单按钮一律当选项；识别不出则全留并标 skip_unidentified。不按「最后一个」切。 */
-export const ASK_LETTER_BUTTONS_JS = `function armadaLetterButtons(btns) {
+/** Skip: aria/文案 /skip/i，或 `.composer-skip-button`。Other: 祖先 `option-freeform`。都没有才回退「最后一个 letter」。 */
+export const ASK_LETTER_BUTTONS_JS = `function armadaLetterButtons(btns, bar) {
   function skipish(b) {
     var aria = "";
     try { aria = b && b.getAttribute ? String(b.getAttribute("aria-label") || "") : ""; } catch (e) {}
     var text = String((b && b.innerText) || "");
     return /skip/i.test(aria) || /skip/i.test(text);
   }
+  function isFreeform(b) {
+    var n = b;
+    for (var i = 0; i < 6 && n; i++) {
+      var cls = n.className != null ? String(n.className) : "";
+      if (/\\bcomposer-questionnaire-toolbar-option-freeform\\b/.test(cls)) return true;
+      n = n.parentElement;
+    }
+    return false;
+  }
+  var skipBtn = null;
+  try { skipBtn = bar && bar.querySelector ? bar.querySelector(".composer-skip-button") : null; } catch (e) {}
   if (!btns.length) return { real: [], skip: null, skip_unidentified: false };
-  if (btns.length === 1) return { real: btns.slice(), skip: null, skip_unidentified: false };
+  if (btns.length === 1) return { real: btns.slice(), skip: skipBtn, skip_unidentified: false };
   var real = [];
   var skip = null;
+  var hasFreeform = false;
   for (var i = 0; i < btns.length; i++) {
-    if (skipish(btns[i])) { if (!skip) skip = btns[i]; }
-    else real.push(btns[i]);
+    if (skipish(btns[i])) { if (!skip) skip = btns[i]; continue; }
+    if (isFreeform(btns[i])) hasFreeform = true;
+    real.push(btns[i]);
   }
-  if (!skip) return { real: btns.slice(), skip: null, skip_unidentified: true };
-  return { real: real, skip: skip, skip_unidentified: false };
+  if (skip) return { real: real, skip: skip, skip_unidentified: false };
+  if (skipBtn) return { real: real, skip: skipBtn, skip_unidentified: false };
+  if (hasFreeform) return { real: real, skip: skipBtn, skip_unidentified: false };
+  if (btns.length >= 2) return { real: btns.slice(0, -1), skip: btns[btns.length - 1], skip_unidentified: false };
+  return { real: btns.slice(), skip: null, skip_unidentified: true };
+}
+function armadaIsFreeformLetter(b) {
+  var n = b;
+  for (var i = 0; i < 6 && n; i++) {
+    var cls = n.className != null ? String(n.className) : "";
+    if (/\\bcomposer-questionnaire-toolbar-option-freeform\\b/.test(cls)) return true;
+    n = n.parentElement;
+  }
+  return false;
 }`;
 
 /** Questions 探测。cid：toolbar 祖先 → 包含 toolbar 的 [data-composer-id] → 唯一可见输入框祖先（Windows 控件常不在 composer 树上）。 */
@@ -331,7 +356,7 @@ export const ASK_INSPECT_JS = `function () {
     if (unique && seen) conversation_id = seen;
   }
   var btns = Array.prototype.slice.call(bar.querySelectorAll("button.composer-questionnaire-toolbar-option-letter"));
-  var classified = armadaLetterButtons(btns);
+  var classified = armadaLetterButtons(btns, bar);
   var real = classified.real;
   var skip = classified.skip;
   var letters = real.map(function (b) { return String(b.innerText || "").trim(); });
@@ -352,19 +377,25 @@ export const ASK_INSPECT_JS = `function () {
       var m = raw.match(new RegExp("(?:^|\\\\s)" + esc(L) + "\\\\s+([\\\\s\\\\S]*?)(?=\\\\s+" + esc(next) + "(?:\\\\s|$)|$)"));
       if (m && m[1]) text = m[1].replace(/\\s+Skip\\s+Esc\\s+Continue[\\s\\S]*$/i, "").trim() || L;
     }
-    options.push({ id: L.toLowerCase(), label: L, text: text });
+    var opt = { id: L.toLowerCase(), label: L, text: text };
+    if (armadaIsFreeformLetter(real[i])) {
+      opt.freeform = true;
+      if (!text || text === L) opt.text = "Other...";
+    }
+    options.push(opt);
   }
   var out = { present: true, prompt: prompt || "Questions", options: options, conversation_id: conversation_id };
   if (classified.skip_unidentified) out.skip_unidentified = true;
   return out;
 }`;
 
-/** 点目标字母；禁止点最后一个 Skip letter。 */
+/** 点目标字母；禁止点 Skip 控件。 */
 export const ASK_CLICK_LETTER_JS = `function (letter) {
+  ${ASK_LETTER_BUTTONS_JS}
   var bar = document.querySelector(".composer-questionnaire-toolbar");
   if (!bar) return "GONE";
   var btns = Array.prototype.slice.call(bar.querySelectorAll("button.composer-questionnaire-toolbar-option-letter"));
-  var real = btns.length >= 2 ? btns.slice(0, -1) : [];
+  var real = armadaLetterButtons(btns, bar).real;
   var want = String(letter || "").trim().toUpperCase();
   var btn = null;
   for (var i = 0; i < real.length; i++) {
@@ -377,27 +408,42 @@ export const ASK_CLICK_LETTER_JS = `function (letter) {
   return "OK";
 }`;
 
+/** 点 Other 字母并聚焦自由输入。禁止走 composer insertText。 */
+export const ASK_FOCUS_FREEFORM_JS = `function () {
+  var bar = document.querySelector(".composer-questionnaire-toolbar");
+  if (!bar) return "GONE";
+  var input = bar.querySelector("textarea.composer-questionnaire-toolbar-freeform-input");
+  if (!input) return "NO_FREEFORM";
+  var opt = input.closest ? input.closest(".composer-questionnaire-toolbar-option-freeform") : input.parentElement;
+  var letter = opt && opt.querySelector ? opt.querySelector("button.composer-questionnaire-toolbar-option-letter") : null;
+  if (letter && typeof letter.click === "function") letter.click();
+  if (typeof input.focus === "function") input.focus();
+  return "OK";
+}`;
+
 /** Mac：`[data-component=split-button][data-tone=plan]`。Windows 真机 2026-09-15：无 data-tone，Build 在 class `ui-split-button` 的普通 BUTTON。闸是主按钮文案 `Build`，不含 `Building`。 */
 const PLAN_FIND_BUILD_JS = `function planIsBuildLabel(t) {
   var s = String(t || "").replace(/\\s+/g, " ").trim();
   return /^Build(\\s|$)/.test(s);
 }
-function planFindBuild(doc) {
-  var name = doc.querySelector("[data-testid=composer-plan-filename]");
-  if (!name) return null;
-  var split = doc.querySelector("[data-component=split-button][data-tone=plan]");
+function planCardOf(el) {
+  var card = el;
+  for (var c = 0; c < 40 && card; c++) {
+    if (card.getAttribute && card.getAttribute("data-component") === "transcript-card-root") return card;
+    card = card.parentElement;
+  }
+  return null;
+}
+function planFindBuildInCard(card) {
+  if (!card) return null;
+  var split = card.querySelector ? card.querySelector("[data-component=split-button][data-tone=plan]") : null;
   if (split && split.querySelectorAll) {
     var macBtns = split.querySelectorAll("button");
     for (var i = 0; i < macBtns.length; i++) {
       if (planIsBuildLabel(macBtns[i].innerText)) return macBtns[i];
     }
   }
-  var card = name;
-  for (var c = 0; c < 40 && card; c++) {
-    if (card.getAttribute && card.getAttribute("data-component") === "transcript-card-root") break;
-    card = card.parentElement;
-  }
-  if (!card || !card.querySelectorAll) return null;
+  if (!card.querySelectorAll) return null;
   var winBtns = card.querySelectorAll("button");
   for (var j = 0; j < winBtns.length; j++) {
     if (!planIsBuildLabel(winBtns[j].innerText)) continue;
@@ -406,13 +452,27 @@ function planFindBuild(doc) {
     if (/\\bui-split-button\\b/.test(cls)) return winBtns[j];
   }
   return null;
+}
+function planFindLive(doc) {
+  var names = doc.querySelectorAll ? doc.querySelectorAll("[data-testid=composer-plan-filename]") : [];
+  var lastName = null;
+  var lastBtn = null;
+  for (var i = 0; i < names.length; i++) {
+    var btn = planFindBuildInCard(planCardOf(names[i]));
+    if (btn) { lastName = names[i]; lastBtn = btn; }
+  }
+  return { name: lastName, btn: lastBtn };
+}
+function planFindBuild(doc) {
+  return planFindLive(doc).btn;
 }`;
 
 /** Created Plan 探测。闸是 Build 主按钮，不是 filename / View Plan（点过 Build 后卡片仍可能留着）。Mac middleware + Windows Win Destop 2026-09-15。 */
 export const PLAN_INSPECT_JS = `function () {
   ${PLAN_FIND_BUILD_JS}
-  var name = document.querySelector("[data-testid=composer-plan-filename]");
-  var btn = planFindBuild(document);
+  var hit = planFindLive(document);
+  var name = hit.name;
+  var btn = hit.btn;
   if (!name || !btn) return { present: false };
   var filename = String(name.innerText || "").replace(/\\s+/g, " ").trim() || "Plan";
   var conversation_id = "";
@@ -507,9 +567,10 @@ export function createAskQuestionDriver(deps: CdpSubmitterDeps) {
 
   async function submit(
     workspaceRoot: string,
-    action: "continue" | "skip",
+    action: "continue" | "skip" | "freeform",
     letter?: string,
     kind?: "plan",
+    text?: string,
   ): Promise<CdpSubmitResult> {
     const hit = await connectWorkspacePage(deps, workspaceRoot);
     if (!hit.ok) return { ok: false, reason: hit.reason };
@@ -529,7 +590,15 @@ export function createAskQuestionDriver(deps: CdpSubmitterDeps) {
         }
         return { ok: false, reason: "ASK_SUBMIT_FAILED" };
       }
-      if (action === "continue") {
+      if (action === "freeform") {
+        const focused = String(await hit.session.call("Runtime.evaluate", {
+          expression: `(${ASK_FOCUS_FREEFORM_JS})()`,
+          returnByValue: true,
+        }).then((x) => x?.result?.value));
+        if (focused !== "OK") return { ok: false, reason: focused === "GONE" ? "ASK_WIDGET_NOT_FOUND" : "ASK_INVALID_OPTION" };
+        await hit.session.call("Input.insertText", { text: String(text || "") });
+        await dispatchKey(hit.session, "Enter");
+      } else if (action === "continue") {
         const clicked = String(await hit.session.call("Runtime.evaluate", {
           expression: `(${ASK_CLICK_LETTER_JS})(${JSON.stringify(String(letter || "").toUpperCase())})`,
           returnByValue: true,

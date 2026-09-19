@@ -1,6 +1,6 @@
 import { latestRunIdForConversation } from "./binding";
 
-export type AskInspectOption = { id: string; label: string; text: string };
+export type AskInspectOption = { id: string; label: string; text: string; freeform?: boolean };
 
 export type AskInspect =
   | { present: false }
@@ -71,7 +71,9 @@ export function parseAskInspect(raw: unknown): AskInspect {
     const label = typeof r.label === "string" && r.label.trim() ? r.label.trim() : id.toUpperCase();
     const text = typeof r.text === "string" && r.text.trim() ? r.text.trim() : label;
     if (!id) continue;
-    options.push({ id, label, text });
+    const opt: AskInspectOption = { id, label, text };
+    if (r.freeform === true) opt.freeform = true;
+    options.push(opt);
   }
   return {
     present: true,
