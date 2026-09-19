@@ -616,6 +616,51 @@ describe("AskQuestion toolbar JS", () => {
 });
 
 describe("AskQuestion CDP driver", () => {
+  test("inspect: fetchJson throw is unknown not absent", async () => {
+    const driver = createAskQuestionDriver(deps({
+      fetchJson: async () => { throw new Error("ECONNREFUSED"); },
+    }));
+    expect(await driver.inspect("/Users/x/armada-test-ws")).toEqual({
+      unknown: true, reason: "CDP_UNREACHABLE",
+    });
+  });
+
+  test("inspect: connect throw is unknown not absent", async () => {
+    const driver = createAskQuestionDriver(deps({
+      connect: async () => { throw new Error("boom"); },
+    }));
+    const hit = await driver.inspect("/Users/x/armada-test-ws");
+    expect(hit).toMatchObject({ unknown: true });
+    expect(hit).not.toEqual({ present: false });
+  });
+
+  test("inspect: eval throw is unknown not absent", async () => {
+    const driver = createAskQuestionDriver(deps({
+      connect: async () => ({
+        async call() { throw new Error("eval fail"); },
+        close() {},
+      }),
+    }));
+    const hit = await driver.inspect("/Users/x/armada-test-ws");
+    expect(hit).toMatchObject({ unknown: true });
+    expect(hit).not.toEqual({ present: false });
+  });
+
+  test("inspect connect throw plus pending does not resolve via askPollActions", async () => {
+    const { askPollActions } = await import("../src/askDetect");
+    const driver = createAskQuestionDriver(deps({
+      connect: async () => { throw new Error("boom"); },
+    }));
+    const inspect = await driver.inspect("/Users/x/armada-test-ws");
+    const acts = askPollActions(
+      new Map([["r-1", { conversationId: "cid-1" }]]),
+      new Map([["r-1", "ask-1"]]),
+      inspect,
+      () => "x",
+    );
+    expect(acts).toEqual([]);
+  });
+
   test("continue clicks letter then CDP Enter, never composer insertText/ENTER JS", async () => {
     const log: CallLog[] = [];
     const driver = createAskQuestionDriver(deps({

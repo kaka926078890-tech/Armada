@@ -4,6 +4,7 @@ export type AskInspectOption = { id: string; label: string; text: string };
 
 export type AskInspect =
   | { present: false }
+  | { unknown: true; reason: string }
   | {
     present: true;
     prompt: string;
@@ -12,6 +13,26 @@ export type AskInspect =
     kind?: "plan";
     filename?: string;
   };
+
+function isAskUnknown(inspect: AskInspect): inspect is { unknown: true; reason: string } {
+  return "unknown" in inspect && inspect.unknown === true;
+}
+
+/** present:true wins. unknown only if no successful inspect. Confirmed false otherwise. */
+export function coalesceAskInspect(hits: AskInspect[]): AskInspect {
+  let unknown: { unknown: true; reason: string } | undefined;
+  let sawConfirmed = false;
+  for (const hit of hits) {
+    if (isAskUnknown(hit)) {
+      unknown = hit;
+      continue;
+    }
+    sawConfirmed = true;
+    if (hit.present) return hit;
+  }
+  if (!sawConfirmed && unknown) return unknown;
+  return { present: false };
+}
 
 export type PlanInspect =
   | { present: false }
@@ -34,6 +55,9 @@ export type AskPollAct =
 export function parseAskInspect(raw: unknown): AskInspect {
   if (!raw || typeof raw !== "object") return { present: false };
   const o = raw as Record<string, unknown>;
+  if (o.unknown === true) {
+    return { unknown: true, reason: typeof o.reason === "string" && o.reason.trim() ? o.reason.trim() : "unknown" };
+  }
   if (o.present !== true) return { present: false };
   const prompt = typeof o.prompt === "string" && o.prompt.trim() ? o.prompt.trim() : "Questions";
   const conversation_id = typeof o.conversation_id === "string" ? o.conversation_id.trim() : "";
@@ -88,6 +112,7 @@ export function nextAskAction(
   now = Date.now(),
   prevPlanText?: string,
 ): { type: "askQuestion"; payload: PendingAskPayload } | { type: "askQuestionResolved"; request_id: string } | null {
+  if (isAskUnknown(inspect)) return null;
   if (!inspect.present) {
     if (!prevRequestId) return null;
     return { type: "askQuestionResolved", request_id: prevRequestId };
@@ -140,6 +165,7 @@ export function askPollActions(
   stopped: Iterable<string> = [],
   prevPlanTextByRun: Iterable<[string, string]> = [],
 ): AskPollAct[] {
+  if (isAskUnknown(inspect)) return [];
   const dead = inspect.present && inspect.kind === "plan" ? new Set<string>() : new Set(stopped);
   const live = [...bound].filter(([id]) => !dead.has(id));
   const widgetCid = inspect.present ? inspect.conversation_id : undefined;

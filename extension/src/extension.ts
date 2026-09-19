@@ -10,7 +10,7 @@ import { SpoolForwarder } from "./spool";
 import { matchHookToPending, claimConversation, eventBelongsToWindow, transcriptPathBelongsToCid, runIdForHook, rememberSubagent, isAmbiguousMatch, dropPendingRuns, type PendingRun, type BindingMatch } from "./binding";
 import { TranscriptTailer, shouldUnfollowOnHookStop } from "./transcript";
 import { Executor, CancelWatcher } from "./executor";
-import { createCdpSubmitter, createImagePaster, createFileMentionPaster, createComposerFinisher, createAskQuestionDriver, probeCdpReady } from "./cdpInject";
+import { createCdpSubmitter, createImagePaster, createFileMentionPaster, createComposerFinisher, createAskQuestionDriver, probeCdpReady, type AskCdpInspect } from "./cdpInject";
 import { createOsClipboardWriter, writeOsImageClipboard } from "./osClipboard";
 import { mergeHooks, hooksDriftHash, spoolScriptName, shouldInstallArmadaHooks } from "./hooksInstall";
 import { collectTranscriptViews, matchTranscriptToPending, stopPayloadFromTranscriptLine, stopFromTranscriptFileContent, transcriptsDirForWorkspace, isWithinTranscriptBindWindow, FollowupStopGuard, listSubagentTranscripts, childCidFromSubagentPath, decideLateTranscriptAttach, transcriptJsonlPath } from "./transcriptBind";
@@ -18,7 +18,7 @@ import { TranscriptDirWatcher, debounceLeading, watchTranscriptDir, watchFileSiz
 import { createExtSeq } from "./extSeq";
 import { hubRunsNeedingTranscriptFollow, shouldArmFollowupStopOnAdopt } from "./adoptRuns";
 import { noteOwnerBsp, clearGeneration, synthesizedStopPayload, noteHubGeneration, onFollowupBindGeneration, shouldSynthesizeTranscriptStop } from "./generationStamp";
-import { parseAskInspect, askPollActions } from "./askDetect";
+import { parseAskInspect, askPollActions, coalesceAskInspect } from "./askDetect";
 import { enrichPlanAsk, planDirsFor } from "./planFile";
 import { PENDING_RELOAD_NAME, decideWindowReload, parsePendingReload, windowHasInFlightArmadaRun } from "../../desktop-core/src/cursorReload";
 
@@ -466,49 +466,58 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   }, TRANSCRIPT_WATCHDOG_MS);
 
+  let askPolling = false;
   const pollAskQuestions = async (): Promise<void> => {
-    if (boundRuns.size === 0) return;
-    const roots = workspaces();
-    if (roots.length === 0) return;
-    let inspectRaw: unknown = { present: false };
-    let inspectRoot = "";
-    for (const root of roots) {
-      const hit = await askDriver.inspect(root);
-      if (hit.present) { inspectRaw = hit; inspectRoot = root; break; }
-    }
-    let inspect = parseAskInspect(inspectRaw);
-    if (inspect.present && inspect.kind === "plan") {
-      inspect = enrichPlanAsk(inspect, planDirsFor(homedir(), inspectRoot));
-    }
-    const acts = askPollActions(
-      boundRuns, askLastByRun, inspect,
-      (runId) => `ask-${runId}-${nextExtSeq()}`, Date.now(), stopSent,
-      askPlanTextByRun,
-    );
-    for (const act of acts) {
-      if (act.type === "askQuestion") {
-        askLastByRun.set(act.runId, act.payload.request_id);
-        if (act.payload.kind === "plan") {
-          askPlanTextByRun.set(act.runId, act.payload.questions[0]?.options[0]?.text ?? "");
+    if (askPolling) return;
+    askPolling = true;
+    try {
+      if (boundRuns.size === 0) return;
+      const roots = workspaces();
+      if (roots.length === 0) return;
+      const hits: { root: string; inspect: AskCdpInspect }[] = [];
+      for (const root of roots) {
+        const hit = await askDriver.inspect(root);
+        hits.push({ root, inspect: hit });
+        if (hit.present) break;
+      }
+      const inspectRaw: unknown = coalesceAskInspect(hits.map((h) => h.inspect));
+      const inspectRoot = hits.find((h) => h.inspect.present)?.root ?? "";
+      let inspect = parseAskInspect(inspectRaw);
+      if (inspect.present && inspect.kind === "plan") {
+        inspect = enrichPlanAsk(inspect, planDirsFor(homedir(), inspectRoot));
+      }
+      const acts = askPollActions(
+        boundRuns, askLastByRun, inspect,
+        (runId) => `ask-${runId}-${nextExtSeq()}`, Date.now(), stopSent,
+        askPlanTextByRun,
+      );
+      for (const act of acts) {
+        if (act.type === "askQuestion") {
+          askLastByRun.set(act.runId, act.payload.request_id);
+          if (act.payload.kind === "plan") {
+            askPlanTextByRun.set(act.runId, act.payload.questions[0]?.options[0]?.text ?? "");
+          }
+          const owner = boundRuns.get(act.runId);
+          core.enqueue({
+            type: "run.event", runId: act.runId, conversationId: owner?.conversationId ?? act.payload.conversation_id,
+            source: "cdp", hookEventName: "askQuestion",
+            payload: act.payload, ts: Date.now(), seq: nextExtSeq(),
+          });
+          log(`askQuestion ${act.runId} ${act.payload.request_id} cid=${act.payload.conversation_id}`);
+          continue;
         }
+        askLastByRun.delete(act.runId);
+        askPlanTextByRun.delete(act.runId);
         const owner = boundRuns.get(act.runId);
         core.enqueue({
-          type: "run.event", runId: act.runId, conversationId: owner?.conversationId ?? act.payload.conversation_id,
-          source: "cdp", hookEventName: "askQuestion",
-          payload: act.payload, ts: Date.now(), seq: nextExtSeq(),
+          type: "run.event", runId: act.runId, conversationId: owner?.conversationId,
+          source: "cdp", hookEventName: "askQuestionResolved",
+          payload: { request_id: act.request_id, via: "cdp", conversation_id: owner?.conversationId }, ts: Date.now(), seq: nextExtSeq(),
         });
-        log(`askQuestion ${act.runId} ${act.payload.request_id} cid=${act.payload.conversation_id}`);
-        continue;
+        log(`askQuestionResolved ${act.runId} ${act.request_id}`);
       }
-      askLastByRun.delete(act.runId);
-      askPlanTextByRun.delete(act.runId);
-      const owner = boundRuns.get(act.runId);
-      core.enqueue({
-        type: "run.event", runId: act.runId, conversationId: owner?.conversationId,
-        source: "cdp", hookEventName: "askQuestionResolved",
-        payload: { request_id: act.request_id, via: "cdp", conversation_id: owner?.conversationId }, ts: Date.now(), seq: nextExtSeq(),
-      });
-      log(`askQuestionResolved ${act.runId} ${act.request_id}`);
+    } finally {
+      askPolling = false;
     }
   };
   const askPoll = setInterval(() => { void pollAskQuestions(); }, 2000);

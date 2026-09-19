@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { askPollActions, nextAskAction, parseAskInspect, parsePlanInspect, planInspectToAsk } from "../src/askDetect";
+import { askPollActions, coalesceAskInspect, nextAskAction, parseAskInspect, parsePlanInspect, planInspectToAsk } from "../src/askDetect";
 
 describe("nextAskAction", () => {
   const inspect = {
@@ -20,6 +20,11 @@ describe("nextAskAction", () => {
       type: "askQuestionResolved", request_id: "ask-1",
     });
     expect(nextAskAction(null, { present: false }, () => "x")).toBeNull();
+  });
+
+  test("unknown inspect keeps pending and does not resolve", () => {
+    expect(nextAskAction("ask-1", { unknown: true, reason: "CDP_UNREACHABLE" }, () => "x")).toBeNull();
+    expect(nextAskAction(null, { unknown: true, reason: "CDP_CONNECT_FAIL" }, () => "x")).toBeNull();
   });
 
   test("no options does not emit", () => {
@@ -53,6 +58,12 @@ describe("parseAskInspect", () => {
   test("drops absent and empty", () => {
     expect(parseAskInspect(null)).toEqual({ present: false });
     expect(parseAskInspect({ present: false })).toEqual({ present: false });
+  });
+
+  test("preserves unknown so CDP failure is not absent", () => {
+    expect(parseAskInspect({ unknown: true, reason: "CDP_UNREACHABLE" })).toEqual({
+      unknown: true, reason: "CDP_UNREACHABLE",
+    });
   });
 
   test("keeps conversation_id from composer-bar", () => {
@@ -174,6 +185,46 @@ describe("askPollActions", () => {
     const bound = new Map([["r-1", { conversationId: "cid-1" }]]);
     const acts = askPollActions(bound, new Map([["r-1", "ask-1"]]), { present: false }, () => "x");
     expect(acts).toEqual([{ type: "askQuestionResolved", runId: "r-1", request_id: "ask-1" }]);
+  });
+
+  test("unknown inspect with pending does not emit resolved", () => {
+    const bound = new Map([["r-1", { conversationId: "cid-1" }]]);
+    const acts = askPollActions(
+      bound,
+      new Map([["r-1", "ask-1"]]),
+      { unknown: true, reason: "CDP_UNREACHABLE" },
+      () => "x",
+    );
+    expect(acts).toEqual([]);
+  });
+});
+
+describe("coalesceAskInspect", () => {
+  test("present true wins over unknown and false", () => {
+    const present = {
+      present: true as const,
+      prompt: "q",
+      conversation_id: "cid-1",
+      options: [{ id: "a", label: "A", text: "甲" }],
+    };
+    expect(coalesceAskInspect([
+      { unknown: true, reason: "WINDOW_TARGET_NOT_FOUND" },
+      present,
+    ])).toEqual(present);
+  });
+
+  test("confirmed false is not overwritten by unknown from another root", () => {
+    expect(coalesceAskInspect([
+      { unknown: true, reason: "WINDOW_TARGET_NOT_FOUND" },
+      { present: false },
+    ])).toEqual({ present: false });
+  });
+
+  test("all unknown stays unknown", () => {
+    expect(coalesceAskInspect([
+      { unknown: true, reason: "CDP_UNREACHABLE" },
+      { unknown: true, reason: "CDP_CONNECT_FAIL" },
+    ])).toEqual({ unknown: true, reason: "CDP_CONNECT_FAIL" });
   });
 });
 

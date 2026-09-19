@@ -422,7 +422,7 @@ export const PLAN_CLICK_BUILD_JS = `function () {
   return "OK";
 }`;
 
-export type AskCdpInspect = { present: false } | {
+export type AskCdpInspect = { present: false } | { unknown: true; reason: string } | {
   present: true;
   prompt: string;
   conversation_id: string;
@@ -469,7 +469,7 @@ export function createAskQuestionDriver(deps: CdpSubmitterDeps) {
 
   async function inspect(workspaceRoot: string): Promise<AskCdpInspect> {
     const hit = await connectWorkspacePage(deps, workspaceRoot);
-    if (!hit.ok) return { present: false };
+    if (!hit.ok) return { unknown: true, reason: hit.reason };
     try {
       const v = await hit.session.call("Runtime.evaluate", {
         expression: `(${ASK_INSPECT_JS})()`, returnByValue: true,
@@ -500,8 +500,8 @@ export function createAskQuestionDriver(deps: CdpSubmitterDeps) {
         conversation_id: typeof plan.conversation_id === "string" ? plan.conversation_id.trim() : "",
         options: [{ id: "build", label: "Build", text: overview || "Build" }],
       };
-    } catch {
-      return { present: false };
+    } catch (e) {
+      return { unknown: true, reason: `CDP_EVAL_FAIL:${String(e)}` };
     } finally {
       hit.session.close();
     }
