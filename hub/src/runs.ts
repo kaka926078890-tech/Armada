@@ -64,16 +64,13 @@ export class RunService {
   }
 
   private setStatus(id: string, status: string, extra: Record<string, unknown> = {}, actor = "hub") {
-    const prev = this.get(id);
-    if (prev && this.terminal(status) && !this.terminal(prev.status) && this.blobs) {
-      this.blobs.applyRefDelta(parseAttachmentIds(prev.attachments), []);
-    }
     const sets = ["status=?2"]; const vals: unknown[] = [id, status];
     for (const [k, v] of Object.entries(extra)) { sets.push(`${k}=?${vals.length + 1}`); vals.push(v); }
     if (["completed", "aborted", "error", "cancelled", "unknown"].includes(status) && !("ended_at" in extra)) {
       sets.push(`ended_at=?${vals.length + 1}`); vals.push(Date.now());
     }
     this.db.query(`UPDATE runs SET ${sets.join(", ")} WHERE id=?1`).run(...vals as any);
+    this.blobs?.syncRefsFromRuns();
     if (this.terminal(status) || status !== "running") {
       this.db.query("UPDATE runs SET pending_ask=NULL WHERE id=?1").run(id);
       this.clearAskInFlight(id);
@@ -374,7 +371,7 @@ export class RunService {
     this.db.query(`INSERT INTO runs (id, machine_id, window_id, workspace_root, prompt, status, conversation_id, parent_run_id, created_at, queued_at, dispatch_seq, attachments)
                    VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)`)
       .run(id, machineId, win.windowId, workspaceRoot, prompt, status, opts.conversationId ?? null, opts.parentRunId ?? null, now, status === "queued" ? now : null, nextSeq, attachmentsJson);
-    this.blobs?.applyRefDelta([], attachmentIds);
+    this.blobs?.syncRefsFromRuns();
     this.audit("operator", "run.create", id, { machineId, workspaceRoot, via: opts.via ?? "new", status });
     if (status === "dispatched") {
       this.attachHubGenerationIfWindows(id, machineId);
@@ -969,7 +966,6 @@ export class RunService {
       return { error: "PROMPT_COLLISION" };
     }
 
-    this.blobs?.applyRefDelta(parseAttachmentIds(run.attachments), attachmentIds);
     this.setStatus(runId, "dispatched", {
       ended_at: null, end_reason: null, started_at: Date.now(), window_id: win.windowId,
       prompt, attachments: JSON.stringify(attachmentIds),
@@ -1081,7 +1077,6 @@ export class RunService {
     const slotFree = this.injectSlotCount(run.machine_id) === 0;
     const canStartNow = slotFree && this.windowCanAcceptStart(run.machine_id, win.windowId);
     const now = Date.now();
-    this.blobs?.applyRefDelta([], attachmentIds);
     this.cancelRequested.delete(run.id);
     this.retireLiveGeneration(run.id);
     if (canStartNow) {

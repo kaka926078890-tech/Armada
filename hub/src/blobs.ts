@@ -167,6 +167,26 @@ export class BlobStore {
     }
   }
 
+  /** refcount = runs whose attachments JSON currently lists the sha; unref_at only stamps when first hitting 0. */
+  syncRefsFromRuns(now = Date.now()): void {
+    const runRows = this.db.query("SELECT attachments FROM runs").all() as { attachments: string }[];
+    const counts = new Map<string, number>();
+    for (const r of runRows) {
+      const seen = new Set<string>();
+      for (const id of parseAttachmentIds(r.attachments)) {
+        if (seen.has(id)) continue;
+        seen.add(id);
+        counts.set(id, (counts.get(id) ?? 0) + 1);
+      }
+    }
+    const blobs = this.db.query("SELECT sha256, unref_at FROM blobs").all() as { sha256: string; unref_at: number | null }[];
+    for (const row of blobs) {
+      const refcount = counts.get(row.sha256) ?? 0;
+      const unrefAt = refcount > 0 ? null : (row.unref_at ?? now);
+      this.db.query("UPDATE blobs SET refcount=?1, unref_at=?2 WHERE sha256=?3").run(refcount, unrefAt, row.sha256);
+    }
+  }
+
   sweep(now = Date.now(), ttlMs = 24 * 60 * 60 * 1000): void {
     const rows = this.db.query(
       "SELECT sha256, created_at, unref_at FROM blobs WHERE refcount<=0",

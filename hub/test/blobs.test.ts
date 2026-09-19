@@ -1,5 +1,5 @@
 import { describe, expect, test, afterEach } from "bun:test";
-import { mkdtempSync } from "fs";
+import { existsSync, mkdtempSync } from "fs";
 import { createConnection, type Socket } from "net";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -384,6 +384,39 @@ describe("blobs + image runs", () => {
     const recorded = afterAck.filter((e) => e.source === "hub" && e.hook_event_name === "beforeSubmitPrompt");
     expect(recorded).toHaveLength(1);
     expect(JSON.parse(recorded[0].payload).attachmentIds).toEqual([blob.id]);
+    ws.close();
+  });
+
+  test("completed then followup same sha survives 25h sweep", async () => {
+    const { api, ws, home } = await start();
+    const fd = new FormData();
+    fd.append("file", new File([PNG_1x1], "a.png", { type: "image/png" }));
+    const { blob } = await (await api("/api/blobs", { method: "POST", body: fd })).json() as any;
+
+    const created = await api("/api/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "first", attachmentIds: [blob.id] }),
+    });
+    const { run } = await created.json() as any;
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId: run.id, conversationId: "cid-1", transcriptPath: null, promptMatch: true }));
+    ws.send(JSON.stringify({
+      type: "run.event", runId: run.id, source: "hook", hookEventName: "stop",
+      payload: { status: "completed" }, ts: Date.now(), seq: 1,
+    }));
+    await new Promise((r) => setTimeout(r, 120));
+
+    const fu = await api(`/api/runs/${run.id}/followup`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ prompt: "again", attachmentIds: [blob.id] }),
+    });
+    expect(fu.status).toBe(200);
+
+    const store = new blobMod.BlobStore(hub!.db, home);
+    store.sweep(Date.now() + 25 * 60 * 60 * 1000);
+    expect(existsSync(join(home, "blobs", blob.id))).toBe(true);
     ws.close();
   });
 });
