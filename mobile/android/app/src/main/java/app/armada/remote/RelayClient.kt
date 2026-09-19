@@ -200,6 +200,8 @@ fun parseRun(o: JSONObject) = RunDto(
     canRetry = if (o.has("canRetry")) o.optBoolean("canRetry") else null,
     archived = if (o.has("archived")) o.optBoolean("archived") else null,
     updatedAt = if (o.has("updatedAt")) o.optLong("updatedAt") else null,
+    title = o.optNullableString("title"),
+    conversationId = o.optNullableString("conversationId"),
 )
 
 private fun parseAsk(o: JSONObject): PendingAskDto {

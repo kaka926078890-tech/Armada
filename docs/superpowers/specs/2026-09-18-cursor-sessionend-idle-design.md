@@ -50,6 +50,19 @@
 
 ingest：`sessionEnd` 若映射非空 → `onStopEvent`。sweep 对 running 回放**最新一条** sessionEnd（旧 hub 已入库的 `r-a0bc34a5`）。
 
+### 3.1 `STOP_SESSION_GEN`（现网审计码；本规格不改 `decideStop`）
+
+`hub/src/generationOwnership.ts` 已有 gen 键审计：`stop` 的 `generation_id` ≠ live gen，但 `liveTurnSettled`（本轮已有 afterAgentResponse）时 **apply**，audit = `STOP_SESSION_GEN`。这是 sidecar / session 收口，不是新的停跑出口。
+
+| 条件 | action | audit |
+| --- | --- | --- |
+| stop gen ≠ live **且** `liveTurnSettled` | apply | `STOP_SESSION_GEN` |
+| 同上但无 settled | ignore | `STOP_GEN_MISMATCH` |
+| 本会 apply 的 completed/success（含 `STOP_SESSION_GEN`）且存在 `queued` | ignore | `QUEUE_DRAIN`（见 running-followup 4.5） |
+| 本会 apply 且 child jsonl 未收口 | ignore | `BG_DRAIN` |
+
+禁止为本码再给 `decideStop` 加出口；补规格即可。
+
 ## 4. 验收
 
 - 夹具 `r-a0bc34a5` generating → 仍 running；随后 user_close+aborted → completed。
@@ -68,3 +81,4 @@ ingest：`sessionEnd` 若映射非空 → `onStopEvent`。sweep 对 running 回�
 | 日期 | 变更 |
 | --- | --- |
 | 2026-09-18 | 初稿并落地。真机两条 sessionEnd。不改 `decideStop`。 |
+| 2026-09-19 | 补 `STOP_SESSION_GEN` 决策表（现网审计码）。不改 `decideStop` 代码。 |

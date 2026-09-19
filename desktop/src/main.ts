@@ -18,6 +18,8 @@ import {
   noShareIpCopy,
   parseBoardSession,
   parseDesktopBoardRequest,
+  boardFrameOrigin,
+  isTrustedBoardMessageOrigin,
   parsePastedJoin,
   fleetErrorCopy,
   recreateFleetCopy,
@@ -72,6 +74,7 @@ const BOARD_SESSION_KEY = "armada.boardSession";
 let lastBoard = parseBoardSession(
   typeof localStorage === "undefined" ? null : localStorage.getItem(BOARD_SESSION_KEY),
 );
+let currentBoardOrigin: string | null = null;
 let reopenCount = 0;
 let lastReopenAt: number | null = null;
 
@@ -244,6 +247,7 @@ function clearBoardSession() {
 
 function openBoard(origin: string, token: string, fromNeedToken = false) {
   persistBoard(origin, token);
+  currentBoardOrigin = boardFrameOrigin(origin);
   if (!fromNeedToken) {
     reopenCount = 0;
     lastReopenAt = null;
@@ -334,10 +338,10 @@ type OpenRunPayload = { runId: string; machineId: string; workspaceRoot: string 
 let pendingOpenRun: OpenRunPayload | null = null;
 
 function postOpenRun(frame: HTMLIFrameElement, payload: OpenRunPayload): boolean {
-  if (!frame.contentWindow) return false;
+  if (!frame.contentWindow || !currentBoardOrigin) return false;
   frame.contentWindow.postMessage(
     { source: "armada-desktop-host", type: "open-run", ...payload },
-    "*",
+    currentBoardOrigin,
   );
   return true;
 }
@@ -366,6 +370,7 @@ function wireRunAlertClick() {
 
 function leaveBoard() {
   clearBoardSession();
+  currentBoardOrigin = null;
   const frame = boardEl();
   if (frame) {
     frame.hidden = true;
@@ -505,6 +510,7 @@ window.addEventListener("DOMContentLoaded", () => {
   window.addEventListener("message", (e) => {
     const frame = boardEl();
     if (!frame || e.source !== frame.contentWindow) return;
+    if (!isTrustedBoardMessageOrigin(e.origin, currentBoardOrigin)) return;
     const req = parseDesktopBoardRequest(e.data);
     if (!req) return;
     if (req.type === "get-share-link") {

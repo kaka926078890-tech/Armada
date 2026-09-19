@@ -96,6 +96,8 @@ struct RunDTO: Decodable, Identifiable, Hashable {
     var canRetry: Bool?
     var archived: Bool?
     var updatedAt: Int?
+    var title: String?
+    var conversationId: String?
     var id: String { runId }
 
     var isLive: Bool {
@@ -113,7 +115,12 @@ struct RunDTO: Decodable, Identifiable, Hashable {
     }
 
     var canFollowup: Bool {
-        pendingAsk == nil
+        pendingAsk == nil && !(conversationId ?? "").isEmpty
+    }
+
+    var displayTitle: String {
+        let named = (title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return named.isEmpty ? prompt : named
     }
 
     var showsRetry: Bool {

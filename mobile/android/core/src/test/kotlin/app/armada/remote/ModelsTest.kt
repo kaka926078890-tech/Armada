@@ -6,8 +6,18 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class ModelsTest {
-    private fun run(status: String, archived: Boolean? = false, ask: PendingAskDto? = null, finalText: String? = null) =
-        RunDto("r1", "m1", "/proj", "do it", status, finalText, pendingAsk = ask, archived = archived, updatedAt = 10)
+    private fun run(
+        status: String,
+        archived: Boolean? = false,
+        ask: PendingAskDto? = null,
+        finalText: String? = null,
+        conversationId: String? = null,
+        title: String? = null,
+    ) = RunDto(
+        "r1", "m1", "/proj", "do it", status, finalText,
+        pendingAsk = ask, archived = archived, updatedAt = 10,
+        title = title, conversationId = conversationId,
+    )
 
     @Test
     fun columnsMatchIos() {
@@ -20,14 +30,18 @@ class ModelsTest {
 
     @Test
     fun followupAndArchiveGates() {
-        val live = run("running")
+        val live = run("running", conversationId = "cid-1")
         assertTrue(live.isLive)
         assertTrue(live.canFollowup)
         assertFalse(live.showsArchive)
+        assertFalse(run("running").canFollowup)
+        assertFalse(run("completed").canFollowup)
         val done = run("completed")
         assertTrue(done.showsArchive)
-        val asking = run("running", ask = PendingAskDto("q", emptyList()))
+        val asking = run("running", ask = PendingAskDto("q", emptyList()), conversationId = "cid-1")
         assertFalse(asking.canFollowup)
+        assertEquals("短标题", run("running", title = "短标题").displayTitle)
+        assertEquals("do it", run("running").displayTitle)
     }
 
     @Test

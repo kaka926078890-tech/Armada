@@ -8,6 +8,7 @@ import type { RunRow } from "./boardState";
 import {
   decodeWorkspaceKey, encodeWorkspaceKey, filterRunsByWorkspace, listWorkspaceSlots, sortConversations,
   workspaceFolderName, resolveSelectedWorkspace,
+  BOARD_SSE_DEBOUNCE_MS, boardSseShouldRefresh,
 } from "./boardState";
 import { applyAlertOpen } from "./alertOpen";
 import Sidebar from "./components/Sidebar";
@@ -247,8 +248,19 @@ export default function App() {
   useEffect(() => {
     if (!authed) return;
     const es = new EventSource(`/api/events?token=${encodeURIComponent(getToken())}`);
-    es.onmessage = () => refresh();
-    return () => es.close();
+    let t: ReturnType<typeof setTimeout> | null = null;
+    es.onmessage = (e) => {
+      if (!boardSseShouldRefresh(e.data)) return;
+      if (t) clearTimeout(t);
+      t = setTimeout(() => {
+        t = null;
+        refresh();
+      }, BOARD_SSE_DEBOUNCE_MS);
+    };
+    return () => {
+      if (t) clearTimeout(t);
+      es.close();
+    };
   }, [authed, refresh]);
 
   useEffect(() => {

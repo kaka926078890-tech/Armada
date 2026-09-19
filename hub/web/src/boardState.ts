@@ -23,6 +23,26 @@ export function runDisplayName(run: Pick<RunRow, "title" | "prompt">): string {
   return (run.title ?? "").trim() || run.prompt.trim();
 }
 
+/** Board EventSource: skip jsonl `run.event` floods; merge status edges. */
+export const BOARD_SSE_DEBOUNCE_MS = 250;
+
+const BOARD_SSE_REFRESH_TYPES = new Set([
+  "machine.updated",
+  "run.status",
+  "run.archived",
+  "run.ask",
+  "run.outbound",
+]);
+
+export function boardSseShouldRefresh(raw: string): boolean {
+  try {
+    const t = (JSON.parse(raw) as { type?: unknown }).type;
+    return typeof t === "string" && BOARD_SSE_REFRESH_TYPES.has(t);
+  } catch {
+    return false;
+  }
+}
+
 export type ColumnKey = "waiting" | "running" | "completed" | "cancelled" | "error";
 
 const COLUMN_MAP: Record<string, ColumnKey> = {

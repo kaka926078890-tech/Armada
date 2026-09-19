@@ -175,6 +175,26 @@ describe("runToSnap", () => {
     expect(snap.prompt).toBe(long);
     expect(snap.finalText).toBeNull();
   });
+
+  test("title uses runDisplayName helper and conversationId is cid or null", () => {
+    const named = runToSnap({
+      id: "r-1", machine_id: "m-1", workspace_root: "/ws/a",
+      prompt: "第一句很长", title: "短标题", conversation_id: "cid-9",
+      status: "running", created_at: 1,
+    }, []);
+    expect(named.title).toBe("短标题");
+    expect(named.conversationId).toBe("cid-9");
+    const fallback = runToSnap({
+      id: "r-1", machine_id: "m-1", workspace_root: "/ws/a",
+      prompt: "hi", status: "completed", created_at: 1,
+    }, []);
+    expect(fallback.title).toBe("hi");
+    expect(fallback.conversationId).toBeNull();
+    expect(runToSnap({
+      id: "r-1", machine_id: "m-1", workspace_root: "/ws/a",
+      prompt: "hi", conversation_id: "  ", status: "running", created_at: 1,
+    }, []).conversationId).toBeNull();
+  });
 });
 
 describe("hub outbound to relay", () => {

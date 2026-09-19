@@ -80,6 +80,8 @@ data class RunDto(
     val canRetry: Boolean? = null,
     val archived: Boolean? = null,
     val updatedAt: Long? = null,
+    val title: String? = null,
+    val conversationId: String? = null,
 ) {
     val isLive: Boolean
         get() = status in setOf("created", "queued", "dispatched", "binding", "running")
@@ -87,7 +89,8 @@ data class RunDto(
     val showsArchive: Boolean get() = !isLive && !isArchived
     val queuedOutbound: List<OutboundDto>
         get() = (outbound ?: emptyList()).filter { it.state == "queued" || (it.state == "injecting" && it.expectedMode == "queue") }
-    val canFollowup: Boolean get() = pendingAsk == null
+    val canFollowup: Boolean get() = pendingAsk == null && !conversationId.isNullOrBlank()
+    val displayTitle: String get() = title?.trim()?.takeIf { it.isNotEmpty() } ?: prompt
     val showsRetry: Boolean
         get() = canRetry ?: (status in setOf("error", "unknown", "aborted"))
     val displayError: String?

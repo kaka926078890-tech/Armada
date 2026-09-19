@@ -7,6 +7,7 @@ import {
   workspaceHasUnread, workspaceUnreadCount, formatUnreadCount, canArchiveRun, canRetryRun, isHubArchived,
   workspaceFolderName, workspaceHasLiveRun, resolveSelectedWorkspace, isUnreadNeedInput, cardChromeClass, cardChromeOf, columnHasAlert,
   extensionLagNotice, REQUIRED_EXTENSION_VERSION, type RunRow,
+  BOARD_SSE_DEBOUNCE_MS, boardSseShouldRefresh,
 } from "../src/boardState";
 
 const base: RunRow = {
@@ -318,5 +319,25 @@ describe("extensionLagNotice", () => {
   test("required version tracks the shipped vsix", () => {
     const pkg = JSON.parse(readFileSync(join(import.meta.dir, "../../../extension/package.json"), "utf8")) as { version: string };
     expect(REQUIRED_EXTENSION_VERSION).toBe(pkg.version);
+  });
+});
+
+describe("board SSE refresh filter", () => {
+  test("refreshes machine/run status edges, not jsonl run.event", () => {
+    expect(BOARD_SSE_DEBOUNCE_MS).toBe(250);
+    expect(boardSseShouldRefresh(JSON.stringify({ type: "machine.updated" }))).toBe(true);
+    expect(boardSseShouldRefresh(JSON.stringify({ type: "run.status" }))).toBe(true);
+    expect(boardSseShouldRefresh(JSON.stringify({ type: "run.archived" }))).toBe(true);
+    expect(boardSseShouldRefresh(JSON.stringify({ type: "run.ask" }))).toBe(true);
+    expect(boardSseShouldRefresh(JSON.stringify({ type: "run.outbound" }))).toBe(true);
+    expect(boardSseShouldRefresh(JSON.stringify({ type: "run.event" }))).toBe(false);
+    expect(boardSseShouldRefresh("not-json")).toBe(false);
+  });
+
+  test("App.tsx filters and debounces the board EventSource", () => {
+    const app = readFileSync(join(import.meta.dir, "../src/App.tsx"), "utf8");
+    expect(app).toContain("boardSseShouldRefresh");
+    expect(app).toContain("BOARD_SSE_DEBOUNCE_MS");
+    expect(app).not.toMatch(/es\.onmessage = \(\) => refresh\(\)/);
   });
 });

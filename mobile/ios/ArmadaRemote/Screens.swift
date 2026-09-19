@@ -208,7 +208,7 @@ struct RunRow: View {
                 .fill(runRowChrome(run, unread: unread) ?? .clear)
                 .frame(width: 3)
             VStack(alignment: .leading, spacing: 8) {
-                Text(run.prompt)
+                Text(run.displayTitle)
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.primary)
                     .lineLimit(3)

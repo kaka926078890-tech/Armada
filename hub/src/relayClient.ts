@@ -3,6 +3,7 @@ import { join } from "path";
 import type { Database } from "bun:sqlite";
 import { originOf } from "../../relay/src/uri";
 import { eventsToChat, lastTurnAssistantBody } from "../web/src/chatView";
+import { runDisplayName } from "../web/src/boardState";
 import type { RunEvent } from "../web/src/types";
 import { canRetryStatus, TERMINAL_STATUSES } from "./concurrency";
 import { createRelayCommandHandler, startRelayHeartbeat } from "./relayCommandHandler";
@@ -29,6 +30,8 @@ export type RunSnap = {
   machineId: string;
   workspaceRoot: string;
   prompt: string;
+  title: string;
+  conversationId: string | null;
   status: string;
   finalText?: string | null;
   error?: string | null;
@@ -96,11 +99,16 @@ export function runToSnap(run: any, events: RunEvent[]): RunSnap {
   const mode = typeof run.queue_message_default_behavior === "string" ? run.queue_message_default_behavior
     : typeof run.queueMessageDefaultBehavior === "string" ? run.queueMessageDefaultBehavior
     : null;
+  const cid = typeof run.conversation_id === "string" && run.conversation_id.trim()
+    ? run.conversation_id.trim()
+    : null;
   return {
     runId: run.id,
     machineId: run.machine_id,
     workspaceRoot: run.workspace_root,
     prompt: run.prompt ?? "",
+    title: runDisplayName({ title: run.title, prompt: run.prompt ?? "" }),
+    conversationId: cid,
     status,
     finalText,
     error,

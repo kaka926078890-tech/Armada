@@ -540,7 +540,7 @@ fun RunRow(run: RunDto, unread: Boolean) {
         )
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(run.prompt, maxLines = 3, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Text(run.displayTitle, maxLines = 3, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
             Row(
                 Modifier.padding(top = 8.dp).fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
