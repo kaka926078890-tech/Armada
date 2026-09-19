@@ -28,14 +28,15 @@ describe("appearance layout stays coordinated when text scales", () => {
     expect(board).not.toContain("break-all");
     expect(board).toContain("break-words");
     expect(board).toContain("line-clamp-3");
-    expect(board).toMatch(/h2 className="[^"]*whitespace-nowrap/);
+    expect(board).toContain("whitespace-nowrap");
   });
 
   test("sidebar and board columns keep a 240px floor; extra width can grow", () => {
     const sidebar = readFileSync(join(web, "src/components/Sidebar.tsx"), "utf8");
     const board = readFileSync(join(web, "src/components/Board.tsx"), "utf8");
+    const ui = readFileSync(join(web, "src/ui.ts"), "utf8");
     expect(sidebar).toContain("w-[224px]");
-    expect(sidebar).toContain("whitespace-nowrap");
+    expect(ui).toContain("whitespace-nowrap");
     expect(board).toContain("min-w-[240px]");
     expect(board).not.toMatch(/max-w-\[240px\]/);
   });

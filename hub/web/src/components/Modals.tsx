@@ -7,6 +7,7 @@ import { appendSnippetBody } from "../promptSnippets";
 import type { PromptSnippet } from "../uiPrefs";
 import type { Machine } from "../types";
 import { PromptSnippetBar } from "./PromptSnippetBar";
+import { UI_BTN_GHOST, UI_BTN_PRIMARY, UI_META, UI_OVERLAY, UI_PANEL, UI_SELECT, UI_TEXTAREA, UI_TYPE } from "../ui";
 
 const ERR: Record<string, string> = {
   RUN_LIMIT: "已达该机或该工作区并行上限",
@@ -87,21 +88,21 @@ export function DispatchModal({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="w-[32rem] rounded-lg bg-zinc-900 border border-zinc-700 p-4 flex flex-col gap-3" onClick={(e) => e.stopPropagation()}>
-        <h2 className="font-bold">派发任务</h2>
+    <div className={UI_OVERLAY} onClick={onClose}>
+      <div className={`w-[32rem] ${UI_PANEL} p-4 flex flex-col gap-3`} onClick={(e) => e.stopPropagation()}>
+        <h2 className={`font-bold ${UI_TYPE}`}>派发任务</h2>
         {locked ? (
-          <div className="text-[13px] text-zinc-300 px-2 py-1.5 rounded bg-zinc-950 border border-zinc-800">
+          <div className={`${UI_TYPE} text-zinc-300 px-3 h-8 flex items-center rounded-lg bg-zinc-950 border border-zinc-800`}>
             当前工作区：{presetLabel ?? workspace}
           </div>
         ) : (
           <>
             <select value={machineId} onChange={(e) => { setMachineId(e.target.value); setWorkspace(""); }}
-              className="px-2 py-1.5 rounded bg-zinc-950 border border-zinc-700">
+              className={UI_SELECT}>
               {online.map((m) => <option key={m.id} value={m.id}>{m.name}({m.os})</option>)}
             </select>
             <select value={workspace} onChange={(e) => setWorkspace(e.target.value)}
-              className="px-2 py-1.5 rounded bg-zinc-950 border border-zinc-700">
+              className={UI_SELECT}>
               <option value="">选择工作区…</option>
               {workspaces.map((w) => <option key={w} value={w}>{w}</option>)}
             </select>
@@ -126,7 +127,7 @@ export function DispatchModal({
         />
         <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={8}
           placeholder="提示词（Markdown 原文；Enter 派发，Shift+Enter 换行）"
-          className="px-2 py-1.5 rounded bg-zinc-950 border border-zinc-700 font-mono text-[13px] leading-relaxed min-h-[8rem] resize-y"
+          className={`w-full ${UI_TEXTAREA} font-mono min-h-[8rem] resize-y`}
           onKeyDown={(e) => {
             if (!isFollowupSendEnter(e)) return;
             e.preventDefault();
@@ -150,7 +151,7 @@ export function DispatchModal({
           e.target.value = "";
         }} />
         {files.length > 0 && (
-          <div className="text-[12px] text-zinc-400 flex flex-col gap-1">
+          <div className={`${UI_META} text-zinc-400 flex flex-col gap-1`}>
             {files.map((f, i) => (
               <div key={i} className="flex justify-between gap-2">
                 <span className="truncate">{f.name || "粘贴的图片"}</span>
@@ -161,9 +162,9 @@ export function DispatchModal({
         )}
         {error && <div className="text-red-400 text-sm">{error}</div>}
         <div className="flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="px-3 py-1.5 rounded bg-zinc-800">取消</button>
+          <button type="button" onClick={onClose} className={UI_BTN_GHOST}>取消</button>
           <button type="button" disabled={!canDispatch} onClick={() => submitDispatch()}
-            className="px-3 py-1.5 rounded bg-sky-600 hover:bg-sky-500 disabled:opacity-40">
+            className={UI_BTN_PRIMARY}>
             {sending ? "派发中…" : "派发"}
           </button>
         </div>

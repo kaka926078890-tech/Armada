@@ -10,6 +10,7 @@ import { endFollowupSend, isFollowupSendEnter, tryBeginFollowupSend } from "../f
 import { WIDTH_KEY, type PromptSnippet } from "../uiPrefs";
 import { appendSnippetBody } from "../promptSnippets";
 import { PromptSnippetBar } from "./PromptSnippetBar";
+import { UI_BTN, UI_BTN_GHOST, UI_BTN_PRIMARY, UI_INPUT, UI_META, UI_TEXTAREA, UI_TYPE } from "../ui";
 
 const DEFAULT_W = 576;
 const MIN_W = 400;
@@ -372,7 +373,7 @@ export default function RunDetail({
         {editingTitle ? (
           <input
             autoFocus
-            className="min-w-0 flex-1 bg-zinc-900 border border-zinc-700 rounded px-1.5 py-0.5 text-[13px] text-zinc-100"
+            className={`min-w-0 flex-1 ${UI_INPUT}`}
             value={titleDraft}
             onChange={(e) => setTitleDraft(e.target.value)}
             onBlur={commitTitle}
@@ -384,7 +385,7 @@ export default function RunDetail({
         ) : (
           <button
             type="button"
-            className="font-medium text-[13px] truncate text-left min-w-0 flex-1 hover:text-sky-300"
+            className={`font-medium ${UI_TYPE} truncate text-left min-w-0 flex-1 hover:text-sky-300`}
             title={`${titleText}（点击修改标题）`}
             onClick={() => { setTitleDraft(runDisplayName(run)); setEditingTitle(true); }}
           >
@@ -394,7 +395,7 @@ export default function RunDetail({
         <span className={`text-xs shrink-0 ${active ? "text-sky-400" : "text-zinc-500"}`}>{STATUS[run.status] ?? run.status}</span>
         <button onClick={onClose} className="ml-auto text-zinc-500 hover:text-zinc-200">✕</button>
       </div>
-      <div className="px-4 py-2 text-[11px] text-zinc-500 border-b border-zinc-800/80">
+      <div className={`px-4 py-2 ${UI_META} text-zinc-500 border-b border-zinc-800/80`}>
         <div className="truncate" title={run.workspace_root}>{workspaceFolderName(run.workspace_root)}</div>
         {titleError && <div className="mt-1 text-red-400">{titleError}</div>}
         {!injectReady && <div className="mt-1 text-red-400">{CDP_NOT_READY_COPY}</div>}
@@ -406,9 +407,9 @@ export default function RunDetail({
               onChanged();
             }).catch((err) => setCancelError(String(err)));
           }}
-            className="px-2 py-1 rounded-md bg-red-950/80 hover:bg-red-900 text-red-200">取消</button>}
+            className={`${UI_BTN} bg-red-950/80 hover:bg-red-900 text-red-200`}>取消</button>}
           {["error", "unknown"].includes(run.status) && <button onClick={() => api.close(run.id).then(onChanged)}
-            className="px-2 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700">人工关闭</button>}
+            className={UI_BTN_GHOST}>人工关闭</button>}
           {canRetryRun(run) && <button disabled={!injectReady} onClick={() => {
             setRetryError("");
             api.retry(run.id).then((r) => {
@@ -428,13 +429,13 @@ export default function RunDetail({
               onChanged();
             }).catch((err) => setRetryError(String(err)));
           }}
-            className="px-2 py-1 rounded-md bg-sky-800 hover:bg-sky-700 text-sky-100 disabled:opacity-40">重试</button>}
+            className={`${UI_BTN} bg-sky-800 hover:bg-sky-700 text-sky-100`}>重试</button>}
           {run.archived_at
-            ? <button onClick={() => { api.unarchive(run.id).then((res) => { if (res?.run) setRun(res.run); onChanged(); }); }} className="px-2 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700">取消隐藏</button>
+            ? <button onClick={() => { api.unarchive(run.id).then((res) => { if (res?.run) setRun(res.run); onChanged(); }); }} className={UI_BTN_GHOST}>取消隐藏</button>
             : ["dispatched", "binding", "running", "created"].includes(run.status) ? null
-            : <button onClick={() => api.archive(run.id).then(() => { onChanged(); onClose(); })} className="px-2 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700">隐藏</button>}
+            : <button onClick={() => api.archive(run.id).then(() => { onChanged(); onClose(); })} className={UI_BTN_GHOST}>隐藏</button>}
           <a href={`/api/audit/export?token=${encodeURIComponent(getToken())}`}
-            className="px-2 py-1 rounded-md bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300">导出审计</a>
+            className={`${UI_BTN_GHOST} text-zinc-300`}>导出审计</a>
         </div>
         {cancelError && <div className="mt-2 text-red-400 text-sm">{cancelError}</div>}
         {retryError && <div className="mt-2 text-red-400 text-sm">{retryError}</div>}
@@ -459,7 +460,7 @@ export default function RunDetail({
             type="button"
             disabled={loadingOlder}
             onClick={loadOlder}
-            className="w-full mb-3 py-1.5 text-[12px] text-zinc-500 hover:text-zinc-300 disabled:opacity-40"
+            className={`w-full mb-3 h-8 ${UI_META} text-zinc-500 hover:text-zinc-300 disabled:opacity-40`}
           >
             {loadingOlder ? "加载更早对话…" : "加载更早对话"}
           </button>
@@ -482,7 +483,7 @@ export default function RunDetail({
         />
         {queued.length > 0 && (
           <div className="mt-3 rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2" aria-label="Queued messages">
-            <div className="text-[11px] text-zinc-500 mb-1">
+            <div className={`${UI_META} text-zinc-500 mb-1`}>
               {queued.length} Queued Message{queued.length > 1 ? "s" : ""}
             </div>
             <div className="flex flex-col gap-1.5">
@@ -524,9 +525,9 @@ export default function RunDetail({
               }}
               rows={3}
               placeholder={run.pending_ask ? (run.pending_ask.kind === "plan" ? "请先点上方 Build…" : "请先回答上方选择题…") : run.status === "running" ? "Add a follow-up…" : "续聊同一对话…（Enter 发送，Shift+Enter 换行；可粘贴截图）"}
-              className="flex-1 min-h-[4.5rem] max-h-48 resize-y px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-[13px] placeholder:text-zinc-600 leading-relaxed"
+              className={`flex-1 min-h-[4.5rem] max-h-48 resize-y ${UI_TEXTAREA} bg-zinc-900 placeholder:text-zinc-600`}
             />
-            <button type="submit" disabled={!injectReady || sending || (!followup.trim() && followupFiles.length === 0)} className="px-3 py-2 rounded-lg bg-sky-700 hover:bg-sky-600 text-[13px] shrink-0 disabled:opacity-40">发送</button>
+            <button type="submit" disabled={!injectReady || sending || (!followup.trim() && followupFiles.length === 0)} className={`${UI_BTN_PRIMARY} shrink-0`}>发送</button>
           </div>
           <input type="file" accept={CONSOLE_ACCEPT} multiple onChange={(e) => {
             const picked = [...(e.target.files ?? [])];

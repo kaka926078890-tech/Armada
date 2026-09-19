@@ -110,7 +110,7 @@ struct VolumeButton: View {
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
             }
-            .frame(maxWidth: expand ? .infinity : nil, minHeight: compact ? 32 : 44)
+            .frame(maxWidth: expand ? .infinity : nil, minHeight: compact ? 32 : 36)
             .padding(.horizontal, compact ? 12 : 14)
             .foregroundStyle(fg)
             .background(bg, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
@@ -194,7 +194,6 @@ struct RunRow: View {
     let unread: Bool
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            accent
             Circle().fill(statusColor(run.status)).frame(width: 8, height: 8).padding(.top, 6)
             VStack(alignment: .leading, spacing: 4) {
                 Text(run.prompt).lineLimit(2)
@@ -210,15 +209,6 @@ struct RunRow: View {
             }
         }
         .padding(.vertical, 2)
-    }
-
-    @ViewBuilder
-    private var accent: some View {
-        let c = runRowChrome(run, unread: unread)
-        RoundedRectangle(cornerRadius: 1.5)
-            .fill(c ?? Color.clear)
-            .frame(width: 3)
-            .padding(.vertical, 2)
     }
 
     private var captionColor: Color {
@@ -654,18 +644,12 @@ struct DetailPromptCard: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 0) {
-            Color.accentColor.frame(width: 3)
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text("提示词")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    if overflows {
-                        VolumeButton(title: expanded ? "收起" : "展开", kind: .quiet, compact: true, expand: false) {
-                            withAnimation(.easeInOut(duration: 0.2)) { expanded.toggle() }
-                        }
+        HStack(alignment: .top, spacing: 8) {
+            Spacer(minLength: 36)
+            VStack(alignment: .trailing, spacing: 6) {
+                if overflows {
+                    VolumeButton(title: expanded ? "收起" : "展开", kind: .quiet, compact: true, expand: false) {
+                        withAnimation(.easeInOut(duration: 0.2)) { expanded.toggle() }
                     }
                 }
                 MarkdownWebView(text: text, height: $contentHeight)
@@ -676,22 +660,20 @@ struct DetailPromptCard: View {
                         if overflows && !expanded {
                             LinearGradient(
                                 colors: [
-                                    Color(.secondarySystemBackground).opacity(0),
-                                    Color(.secondarySystemBackground),
+                                    Color.accentColor.opacity(0.0),
+                                    Color.accentColor.opacity(0.22),
                                 ],
                                 startPoint: .top,
                                 endPoint: .bottom
                             )
-                            .frame(height: 36)
+                            .frame(height: 28)
                             .allowsHitTesting(false)
                         }
                     }
             }
             .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.accentColor.opacity(0.18), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .onChange(of: text) { _, _ in expanded = false }
     }
 }
@@ -702,24 +684,17 @@ struct DetailReplyBlock: View {
     @Binding var height: CGFloat
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Text("回复")
-                    .font(.subheadline.weight(.semibold))
-                Rectangle()
-                    .fill(Color.primary.opacity(0.12))
-                    .frame(height: 1)
-            }
+        VStack(alignment: .leading, spacing: 8) {
             if let text, !text.isEmpty {
                 MarkdownWebView(text: text, height: $height)
                     .frame(height: max(height, 80))
             } else if isLive {
-                Text("还没有终态正文").foregroundStyle(.secondary)
+                Text("还没有终态正文").font(.subheadline).foregroundStyle(.secondary)
             } else {
-                Text("没有正文").foregroundStyle(.secondary)
+                Text("没有正文").font(.subheadline).foregroundStyle(.secondary)
             }
         }
-        .padding(.top, 8)
+        .padding(.top, 4)
     }
 }
 
@@ -991,10 +966,10 @@ struct AskView: View {
                         Text(busyAction == "continue" ? "Building..." : "Build")
                             .font(.body.weight(.semibold))
                     }
-                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .frame(maxWidth: .infinity, minHeight: 36)
                 }
                 .buttonStyle(.borderedProminent)
-                .controlSize(.large)
+                .controlSize(.regular)
                 .tint(Self.planYellow)
                 .foregroundStyle(.black)
                 .disabled(busyAction != nil)
@@ -1019,14 +994,14 @@ struct AskView: View {
                                     .fixedSize(horizontal: false, vertical: true)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             }
-                            .padding(.vertical, 12)
+                            .padding(.vertical, 8)
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         .disabled(busyAction != nil)
                         .foregroundStyle(.primary)
-                        .padding(.horizontal, 12)
-                        .frame(minHeight: 44)
+                        .padding(.horizontal, 10)
+                        .frame(minHeight: 36)
                         .background(
                             RoundedRectangle(cornerRadius: 10)
                                 .fill(optionId == o.id ? Self.accentBlue.opacity(0.12) : Color.clear)
@@ -1045,12 +1020,12 @@ struct AskView: View {
                         HStack(spacing: 8) {
                             if busyAction == "skip" { ProgressView() }
                             Text(busyAction == "skip" ? "Skipping..." : "跳过")
-                                .font(.body.weight(.medium))
+                                .font(.subheadline.weight(.medium))
                         }
-                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .frame(maxWidth: .infinity, minHeight: 36)
                     }
                     .buttonStyle(.bordered)
-                    .controlSize(.large)
+                    .controlSize(.regular)
                     .disabled(busyAction != nil)
                     Button {
                         Task { await submit(action: "continue") }
@@ -1058,12 +1033,12 @@ struct AskView: View {
                         HStack(spacing: 8) {
                             if busyAction == "continue" { ProgressView().tint(.white) }
                             Text(busyAction == "continue" ? "Continuing..." : "继续")
-                                .font(.body.weight(.semibold))
+                                .font(.subheadline.weight(.semibold))
                         }
-                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .frame(maxWidth: .infinity, minHeight: 36)
                     }
                     .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
+                    .controlSize(.regular)
                     .tint(Self.accentBlue)
                     .disabled(optionId == nil || busyAction != nil)
                 }

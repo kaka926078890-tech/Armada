@@ -45,7 +45,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -150,12 +149,6 @@ fun statusColor(status: String) = when (statusTint(status)) {
     else -> StatusOrange
 }
 
-fun rowChromeColor(chrome: RowChrome) = when (chrome) {
-    RowChrome.Red -> StatusRed
-    RowChrome.Green -> StatusGreen
-    RowChrome.None -> Color.Transparent
-}
-
 @Composable
 fun AppearanceRoot(vm: SessionVm) {
     val theme by vm.theme.collectAsState()
@@ -217,7 +210,7 @@ fun BarButton(
     Box(
         modifier
             .then(if (expand) Modifier.fillMaxWidth() else Modifier)
-            .heightIn(min = if (compact) 32.dp else 44.dp)
+            .heightIn(min = if (compact) 32.dp else 36.dp)
             .alpha(if (enabled) 1f else 0.4f)
             .clip(shape)
             .background(bg)
@@ -262,7 +255,7 @@ fun BindScreen(vm: SessionVm, state: UiState) {
                 modifier = Modifier.fillMaxWidth().height(160.dp),
             )
             Spacer(Modifier.height(12.dp))
-            Button(onClick = { vm.bind(paste) }, enabled = paste.isNotBlank(), modifier = Modifier.fillMaxWidth().height(48.dp), colors = ButtonDefaults.buttonColors(containerColor = AccentBlue, contentColor = Color.White)) { Text("绑定") }
+            BarButton("绑定", filled = true, expand = true, enabled = paste.isNotBlank()) { vm.bind(paste) }
             state.bindError?.let { Text(it, color = Color.Red, modifier = Modifier.padding(top = 8.dp)) }
             Text("绑定后按「机器 → 工作区」选仓。点进仓看任务，顶部派发。", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 16.dp))
         }
@@ -511,8 +504,6 @@ fun RunRow(run: RunDto, unread: Boolean) {
         else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
     }
     Row(verticalAlignment = Alignment.Top) {
-        Box(Modifier.width(3.dp).height(36.dp).clip(RoundedCornerShape(1.5.dp)).background(rowChromeColor(runRowChrome(run, unread))))
-        Spacer(Modifier.width(10.dp))
         Box(Modifier.padding(top = 6.dp).size(8.dp).clip(CircleShape).background(statusColor(run.status)))
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
@@ -779,23 +770,20 @@ fun DetailPromptCard(text: String) {
     var expanded by remember(text) { mutableStateOf(false) }
     val overflows = contentH > DETAIL_PROMPT_MAX_HEIGHT
     val shown = if (expanded) maxOf(contentH, 24f) else detailPromptShownHeight(contentH)
-    val card = MaterialTheme.colorScheme.surfaceVariant
-    Row(
-        Modifier.fillMaxWidth().height(IntrinsicSize.Min).clip(RoundedCornerShape(12.dp)).background(card),
-    ) {
-        Box(Modifier.width(3.dp).fillMaxHeight().background(AccentBlue))
-        Column(Modifier.weight(1f).padding(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("提示词", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
-                Spacer(Modifier.weight(1f))
-                if (overflows) BarButton(if (expanded) "收起" else "展开", compact = true) { expanded = !expanded }
-            }
-            Box(Modifier.fillMaxWidth().height(shown.dp).clip(RoundedCornerShape(4.dp))) {
+    val bubble = AccentBlue.copy(alpha = 0.18f)
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+        Spacer(Modifier.weight(0.22f))
+        Column(
+            Modifier.weight(0.78f).clip(RoundedCornerShape(18.dp)).background(bubble).padding(12.dp),
+            horizontalAlignment = Alignment.End,
+        ) {
+            if (overflows) BarButton(if (expanded) "收起" else "展开", compact = true) { expanded = !expanded }
+            Box(Modifier.fillMaxWidth().height(shown.dp)) {
                 MarkdownFrame(text, heightDp = maxOf(contentH, 24f), onHeight = { contentH = it })
                 if (overflows && !expanded) {
                     Box(
-                        Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(36.dp)
-                            .background(Brush.verticalGradient(listOf(card.copy(alpha = 0f), card))),
+                        Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(28.dp)
+                            .background(Brush.verticalGradient(listOf(bubble.copy(alpha = 0f), bubble))),
                     )
                 }
             }
@@ -806,12 +794,7 @@ fun DetailPromptCard(text: String) {
 @Composable
 fun DetailReplyBlock(text: String?, isLive: Boolean) {
     var height by remember(text) { mutableFloatStateOf(80f) }
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("回复", style = MaterialTheme.typography.titleSmall)
-            Spacer(Modifier.width(8.dp))
-            Box(Modifier.weight(1f).height(1.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)))
-        }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (!text.isNullOrEmpty()) {
             MarkdownFrame(text, heightDp = detailReplyShownHeight(height), onHeight = { height = it })
         } else {
@@ -900,12 +883,13 @@ fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend (
                     q.options.forEach { o ->
                         val selected = optionId == o.id
                         Row(
-                            Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                            Modifier.fillMaxWidth().padding(vertical = 2.dp)
                                 .clip(RoundedCornerShape(10.dp))
                                 .background(if (selected) AccentBlue.copy(alpha = 0.12f) else Color.Transparent)
                                 .border(if (selected) 2.dp else 1.dp, if (selected) AccentBlue else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
                                 .clickable(enabled = busy == null) { optionId = o.id }
-                                .padding(12.dp),
+                                .padding(horizontal = 10.dp, vertical = 8.dp)
+                                .heightIn(min = 36.dp),
                         ) {
                             Text(o.label.ifEmpty { o.id.uppercase() }, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
                             Spacer(Modifier.width(8.dp))

@@ -3,6 +3,7 @@ import Markdown from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import { segmentChat, processFoldLabel, type ChatBlock } from "../chatView";
+import { ASK_CONTINUE_BTN, ASK_PLAN_BTN, ASK_SKIP_BTN, UI_META, UI_OPTION_OFF, UI_OPTION_ON } from "../ui";
 
 function ThoughtLive({ text }: { text: string }) {
   return <div className="text-[12px] text-zinc-500 whitespace-pre-wrap leading-relaxed">{text}</div>;
@@ -183,11 +184,7 @@ export type AnswerAskBody = {
   answers?: { question_id: string; option_ids: string[] }[];
 };
 
-/** Cursor plan Build is yellow primary; Ask Continue is accent blue. Size matches the IDE split-button, not a 12px chip. */
-export const ASK_PRIMARY_BTN = "inline-flex items-center justify-center gap-2 min-h-9 min-w-[128px] px-4 rounded-lg text-[13px] font-medium disabled:opacity-70";
-export const ASK_PLAN_BTN = `${ASK_PRIMARY_BTN} bg-[#F1B467] text-[#1a1a1a] hover:bg-[#f6c57e]`;
-export const ASK_CONTINUE_BTN = `${ASK_PRIMARY_BTN} bg-[#599CE7] text-white hover:bg-[#7aafeb]`;
-export const ASK_SKIP_BTN = "inline-flex items-center justify-center min-h-9 px-4 rounded-lg text-[13px] font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-200 disabled:opacity-70";
+export { ASK_CONTINUE_BTN, ASK_PLAN_BTN, ASK_SKIP_BTN };
 
 export function isPlanAskOptions(options: { id: string }[]): boolean {
   return options.length === 1 && options[0]?.id === "build";
@@ -252,10 +249,10 @@ function AskCard({ block, onAnswerAsk }: {
   };
   return (
     <div
-      className={`rounded-lg border border-zinc-800 bg-zinc-900/60 pl-3 pr-3 py-3 border-l-[3px] ${plan ? "border-l-[#F1B467]" : "border-l-[#599CE7]"}`}
+      className={`rounded-xl border border-zinc-800 bg-zinc-900/60 pl-3 pr-3 py-3 border-l-[3px] ${plan ? "border-l-[#F1B467]" : "border-l-[#599CE7]"}`}
       onClick={(e) => e.stopPropagation()}
     >
-      <div className="text-[11px] uppercase tracking-wide text-zinc-500 mb-1">{plan ? "Created Plan" : "Questions"}</div>
+      <div className={`${UI_META} uppercase tracking-wide text-zinc-500 mb-1`}>{plan ? "Created Plan" : "Questions"}</div>
       <div className="text-[13px] text-zinc-200 leading-relaxed">
         <AssistantMarkdown text={block.prompt} />
       </div>
@@ -275,7 +272,7 @@ function AskCard({ block, onAnswerAsk }: {
               disabled={!interactive || wait}
               aria-pressed={on}
               onClick={(e) => { stopCard(e); setPicked(o.id); }}
-              className={`w-full min-h-11 px-3 py-2.5 rounded-lg border text-left text-[13px] text-zinc-200 disabled:opacity-70 ${on ? "border-[#599CE7] bg-[#599CE7]/10" : "border-zinc-800 hover:border-zinc-700 bg-zinc-950/40"}`}
+              className={on ? UI_OPTION_ON : UI_OPTION_OFF}
             >
               <span className="text-zinc-500 font-mono mr-1.5">{o.label}</span>
               {o.text}

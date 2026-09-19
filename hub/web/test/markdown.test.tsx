@@ -51,7 +51,7 @@ describe("user bubble markdown", () => {
 });
 
 describe("ask / plan action buttons", () => {
-  test("plan Build matches Cursor yellow split-button size, not a 12px chip", () => {
+  test("plan Build uses the shared 32px control, not a 12px chip or 44px row", () => {
     const html = renderToStaticMarkup(
       <ChatThread
         blocks={[{
@@ -66,11 +66,12 @@ describe("ask / plan action buttons", () => {
       />,
     );
     expect(html).toContain("Build");
-    expect(html).toContain("min-h-9");
-    expect(html).toContain("min-w-[128px]");
+    expect(html).toContain("h-8");
     expect(html).toContain("#F1B467");
     expect(html).toContain("border-l-[#F1B467]");
-    expect(html).not.toContain("px-2.5 py-1");
+    expect(html).not.toContain("min-h-11");
+    expect(html).not.toContain("min-h-9");
+    expect(html).not.toContain("min-w-[128px]");
     expect(html).not.toContain("Building...");
     expect(html).toContain("overview");
   });
@@ -94,7 +95,7 @@ describe("ask / plan action buttons", () => {
     expect(html).toContain("aria-busy");
   });
 
-  test("step-mode Continue matches Cursor accent size and large option rows", () => {
+  test("step-mode Continue / Skip / options share the 32px control", () => {
     const html = renderToStaticMarkup(
       <ChatThread
         blocks={[{
@@ -110,10 +111,11 @@ describe("ask / plan action buttons", () => {
     );
     expect(html).toContain("Continue");
     expect(html).toContain("Skip");
-    expect(html).toContain("min-h-9");
-    expect(html).toContain("min-h-11");
+    expect(html).toContain("h-8");
+    expect(html).toContain("min-h-8");
     expect(html).toContain("#599CE7");
-    expect(html).not.toContain("px-2.5 py-1");
+    expect(html).not.toContain("min-h-11");
+    expect(html).not.toContain("min-h-9");
   });
 
   test("labels match Cursor Building... / Continuing... while in-flight", () => {

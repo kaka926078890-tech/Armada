@@ -2,10 +2,7 @@ import { useEffect, useState } from "react";
 import type { FontScale, ThemeName } from "../theme";
 import { snippetOperatorMessage } from "../promptSnippets";
 import type { PromptSnippet } from "../uiPrefs";
-
-const SEG = "px-2 py-0.5 rounded border text-[12px] whitespace-nowrap";
-const ON = "border-sky-600 bg-sky-900/40 text-zinc-100";
-const OFF = "border-zinc-700 text-zinc-400 hover:text-zinc-100";
+import { UI_BTN_DANGER, UI_BTN_GHOST, UI_BTN_PRIMARY, UI_BTN_SEGMENT_OFF, UI_BTN_SEGMENT_ON, UI_INPUT, UI_LABEL, UI_META, UI_OVERLAY, UI_PANEL, UI_TEXTAREA, UI_TYPE } from "../ui";
 
 function SnippetRow({
   snippet, onSave, onDelete,
@@ -40,28 +37,28 @@ function SnippetRow({
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
       <label className="flex flex-col gap-1">
-        <span className="text-[11px] font-medium text-zinc-500">标题</span>
+        <span className={UI_LABEL}>标题</span>
         <input
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          className="h-8 px-2.5 rounded-md bg-zinc-950 border border-zinc-700 text-[13px] outline-none focus:border-sky-500"
+          className={UI_INPUT}
           aria-label="标题"
         />
       </label>
       <label className="flex flex-col gap-1">
-        <span className="text-[11px] font-medium text-zinc-500">提示词</span>
+        <span className={UI_LABEL}>提示词</span>
         <textarea
           value={body}
           onChange={(e) => setBody(e.target.value)}
           rows={3}
-          className="px-2.5 py-2 rounded-md bg-zinc-950 border border-zinc-700 text-[13px] leading-relaxed resize-y outline-none focus:border-sky-500"
+          className={`${UI_TEXTAREA} resize-y`}
           aria-label="提示词"
         />
       </label>
       {error && <div className="text-red-400 text-sm">{error}</div>}
       <div className="flex justify-end gap-2">
-        <button type="button" disabled={busy} className="h-7 px-2.5 rounded-md text-[12px] text-red-300 hover:bg-red-950/40 disabled:opacity-40" onClick={() => void run(onDelete)}>删除</button>
-        <button type="button" disabled={busy} className="h-7 px-2.5 rounded-md text-[12px] bg-sky-600 hover:bg-sky-500 text-white disabled:opacity-40" onClick={() => void run(() => onSave({ ...snippet, title, body }))}>保存</button>
+        <button type="button" disabled={busy} className={UI_BTN_DANGER} onClick={() => void run(onDelete)}>删除</button>
+        <button type="button" disabled={busy} className={UI_BTN_PRIMARY} onClick={() => void run(() => onSave({ ...snippet, title, body }))}>保存</button>
       </div>
     </div>
   );
@@ -89,35 +86,35 @@ export default function SettingsModal({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
+    <div className={UI_OVERLAY} onClick={onClose}>
       <div
-        className="w-[28rem] max-h-[80vh] overflow-y-auto rounded-lg bg-zinc-900 border border-zinc-700 p-4 flex flex-col gap-4"
+        className={`w-[28rem] max-h-[80vh] overflow-y-auto ${UI_PANEL} p-4 flex flex-col gap-4`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between">
-          <h2 className="font-bold text-[13px]">设置</h2>
-          <button type="button" className={`${SEG} ${OFF}`} onClick={onClose}>完成</button>
+          <h2 className={`font-bold ${UI_TYPE}`}>设置</h2>
+          <button type="button" className={UI_BTN_GHOST} onClick={onClose}>完成</button>
         </div>
         <div>
-          <div className="text-[11px] uppercase tracking-wide text-zinc-500 mb-1.5">外观</div>
+          <div className={`${UI_LABEL} uppercase tracking-wide mb-1.5`}>外观</div>
           <div className="flex gap-1.5">
-            <button type="button" className={`${SEG} ${theme === "dark" ? ON : OFF}`} onClick={() => onTheme("dark")}>黑夜</button>
-            <button type="button" className={`${SEG} ${theme === "light" ? ON : OFF}`} onClick={() => onTheme("light")}>明亮</button>
+            <button type="button" className={theme === "dark" ? UI_BTN_SEGMENT_ON : UI_BTN_SEGMENT_OFF} onClick={() => onTheme("dark")}>黑夜</button>
+            <button type="button" className={theme === "light" ? UI_BTN_SEGMENT_ON : UI_BTN_SEGMENT_OFF} onClick={() => onTheme("light")}>明亮</button>
           </div>
         </div>
         <div>
-          <div className="text-[11px] uppercase tracking-wide text-zinc-500 mb-1.5">字号</div>
+          <div className={`${UI_LABEL} uppercase tracking-wide mb-1.5`}>字号</div>
           <div className="flex gap-1.5">
-            <button type="button" className={`${SEG} ${fontScale === "normal" ? ON : OFF}`} onClick={() => onFontScale("normal")}>正常</button>
-            <button type="button" className={`${SEG} ${fontScale === "large" ? ON : OFF}`} onClick={() => onFontScale("large")}>大</button>
-            <button type="button" className={`${SEG} ${fontScale === "xlarge" ? ON : OFF}`} onClick={() => onFontScale("xlarge")}>超大</button>
+            <button type="button" className={fontScale === "normal" ? UI_BTN_SEGMENT_ON : UI_BTN_SEGMENT_OFF} onClick={() => onFontScale("normal")}>正常</button>
+            <button type="button" className={fontScale === "large" ? UI_BTN_SEGMENT_ON : UI_BTN_SEGMENT_OFF} onClick={() => onFontScale("large")}>大</button>
+            <button type="button" className={fontScale === "xlarge" ? UI_BTN_SEGMENT_ON : UI_BTN_SEGMENT_OFF} onClick={() => onFontScale("xlarge")}>超大</button>
           </div>
         </div>
         <div>
-          <div className="text-[11px] uppercase tracking-wide text-zinc-500 mb-1.5">快捷提示词</div>
-          {snippetError && <div className="text-red-400 text-sm mb-1.5">{snippetError}</div>}
+          <div className={`${UI_LABEL} uppercase tracking-wide mb-1.5`}>快捷提示词</div>
+          {snippetError && <div className="text-red-400 text-[13px] mb-1.5">{snippetError}</div>}
           {snippets.length === 0 ? (
-            <div className="text-[12px] text-zinc-500">还没有快捷提示词，在输入框上方点添加</div>
+            <div className={`${UI_META} text-zinc-500`}>还没有快捷提示词，在输入框上方点添加</div>
           ) : (
             <div className="flex flex-col gap-2">
               {snippets.map((s) => (

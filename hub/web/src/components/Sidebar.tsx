@@ -5,13 +5,14 @@ import {
   encodeWorkspaceKey, extensionLagNotice, filterRunsByWorkspace, formatUnreadCount, groupSlotsByMachine,
   workspaceFolderName, workspaceHasLiveRun, workspaceUnreadCount, type WorkspaceSlot,
 } from "../boardState";
+import { UI_BTN_GHOST, UI_BTN_PRIMARY, UI_INPUT, UI_META, UI_TYPE } from "../ui";
 
 function UnreadCount({ n }: { n: number }) {
   const label = formatUnreadCount(n);
   if (!label) return null;
   return (
     <span
-      className="ml-auto shrink-0 min-w-[1.125rem] h-[1.125rem] px-1 rounded-full bg-red-500 text-white text-[11px] font-medium leading-[1.125rem] text-center tabular-nums"
+      className="ml-auto shrink-0 min-w-[1.125rem] h-[1.125rem] px-1 rounded-full bg-red-500 text-white text-[12px] font-medium leading-[1.125rem] text-center tabular-nums"
       title={`${n} 个终态未读`}
     >
       {label}
@@ -74,25 +75,13 @@ export default function Sidebar({
     <aside className="w-[224px] shrink-0 border-r border-zinc-800/80 flex flex-col bg-zinc-950">
       {showDesktopActions ? (
         <div className="mx-3 mt-3 mb-1.5 flex flex-col gap-1.5">
-          <button
-            type="button"
-            onClick={onOpenWorkspace}
-            className="px-3 py-2 rounded-md border border-zinc-700 hover:bg-zinc-900 text-[13px] whitespace-nowrap"
-          >
+          <button type="button" onClick={onOpenWorkspace} className={`${UI_BTN_GHOST} w-full`}>
             打开工作区
           </button>
-          <button
-            type="button"
-            onClick={onRepairCdp}
-            className="px-3 py-2 rounded-md border border-zinc-700 hover:bg-zinc-900 text-[13px] whitespace-nowrap"
-          >
+          <button type="button" onClick={onRepairCdp} className={`${UI_BTN_GHOST} w-full`}>
             修复调试口
           </button>
-          <button
-            type="button"
-            onClick={onGetShareLink}
-            className="px-3 py-2 rounded-md border border-zinc-700 hover:bg-zinc-900 text-[13px] whitespace-nowrap"
-          >
+          <button type="button" onClick={onGetShareLink} className={`${UI_BTN_GHOST} w-full`}>
             获取分享链接
           </button>
         </div>
@@ -101,11 +90,11 @@ export default function Sidebar({
         type="button"
         disabled={!canDispatch}
         onClick={onDispatch}
-        className={`mx-3 mb-1 px-3 py-2 rounded-md bg-sky-700 hover:bg-sky-600 text-[13px] whitespace-nowrap disabled:opacity-40 disabled:hover:bg-sky-700 ${showDesktopActions ? "mt-0" : "mt-3"}`}
+        className={`${UI_BTN_PRIMARY} mx-3 mb-1 w-[calc(100%-1.5rem)] ${showDesktopActions ? "mt-0" : "mt-3"}`}
       >
         + 派发任务
       </button>
-      <div className="px-3 pt-1.5 pb-1 text-[11px] uppercase tracking-wide text-zinc-600">机器</div>
+      <div className={`px-3 pt-1.5 pb-1 ${UI_META} uppercase tracking-wide text-zinc-600`}>机器</div>
       <div className="flex-1 overflow-y-auto">
         {groups.length === 0 && (
           <div className="px-3 py-4 text-[12px] text-zinc-600">暂无在线工作区</div>
@@ -115,7 +104,7 @@ export default function Sidebar({
           return (
           <div key={g.machineId} className="pb-2">
             <div className="group px-3 py-1.5 flex items-center gap-2">
-              <span className={g.online ? "text-emerald-400 text-[10px]" : "text-zinc-600 text-[10px]"}>●</span>
+              <span className={g.online ? "text-emerald-400 text-[12px]" : "text-zinc-600 text-[12px]"}>●</span>
               {editingId === g.machineId ? (
                 <input
                   autoFocus
@@ -128,7 +117,7 @@ export default function Sidebar({
                     if (e.key === "Enter") { e.preventDefault(); commit(g.machineId); }
                     if (e.key === "Escape") setEditingId(null);
                   }}
-                  className="min-w-0 flex-1 text-[13px] font-medium bg-zinc-900 border border-zinc-700 rounded px-1 py-0.5"
+                  className={`min-w-0 flex-1 ${UI_TYPE} font-medium ${UI_INPUT}`}
                 />
               ) : (
                 <>
@@ -145,7 +134,7 @@ export default function Sidebar({
               )}
             </div>
             {lag ? (
-              <div className="pl-7 pr-3 pb-1 text-[10px] text-amber-400 leading-snug">{lag}</div>
+              <div className={`pl-7 pr-3 pb-1 ${UI_META} text-amber-400 leading-snug`}>{lag}</div>
             ) : null}
             {g.workspaces.map((s) => {
               const key = encodeWorkspaceKey(s.machineId, s.root);
@@ -158,7 +147,7 @@ export default function Sidebar({
                   onClick={() => onSelectWorkspace(key)}
                   className={`w-full text-left pl-7 pr-3 py-1 flex items-center gap-1.5 ${key === selectedKey ? "bg-zinc-900 text-zinc-100" : "hover:bg-zinc-900/50 text-zinc-400"}`}
                 >
-                  <span className="text-zinc-600 text-[11px] shrink-0">–</span>
+                  <span className="text-zinc-600 text-[12px] shrink-0">–</span>
                   <span className="min-w-0 flex-1 flex items-center gap-1.5">
                     <span className="min-w-0 truncate text-[13px]" title={s.root}>{workspaceFolderName(s.root)}</span>
                     {live ? <LiveSpinner /> : null}
