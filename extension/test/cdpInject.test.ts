@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "fs";
+import { join } from "path";
+import { parsePlanInspect, planInspectToAsk } from "../src/askDetect";
 import {
   createCdpSubmitter,
   createImagePaster,
@@ -456,7 +459,7 @@ describe("createFileMentionPaster", () => {
 
 const FIXTURE_TEXT = "Questions 1 of 1 1. 这是本机验证用的 Questions 框。请任选一项并点 Continue；后台正在用 CDP 抓 DOM。 A 选项 A（验证单选） B 选项 B C Skip 也行，只要框出现过 D Skip Esc Continue ⏎";
 
-function mockAskDoc(letters: string[], selected?: string, innerText = FIXTURE_TEXT, composerId?: string) {
+function mockAskDoc(letters: string[], selected?: string, innerText = FIXTURE_TEXT, composerId?: string, ariaByLetter: Record<string, string> = {}) {
   const btns = letters.map((L) => ({
     innerText: L,
     className: L === selected
@@ -466,6 +469,10 @@ function mockAskDoc(letters: string[], selected?: string, innerText = FIXTURE_TE
     clicked: false,
     focus() { this.focused = true; },
     click() { this.clicked = true; },
+    getAttribute(name: string) {
+      if (name === "aria-label") return ariaByLetter[L] ?? null;
+      return null;
+    },
   }));
   const bar: {
     className: string;
@@ -498,10 +505,10 @@ function mockAskDoc(letters: string[], selected?: string, innerText = FIXTURE_TE
   };
 }
 
-function runAskInspect(letters: string[], composerId?: string) {
-  const document = mockAskDoc(letters, "A", FIXTURE_TEXT, composerId);
+function runAskInspect(letters: string[], composerId?: string, ariaByLetter?: Record<string, string>) {
+  const document = mockAskDoc(letters, "A", FIXTURE_TEXT, composerId, ariaByLetter);
   const fn = new Function("document", `return (${ASK_INSPECT_JS});`)(document);
-  return { result: fn() as { present: boolean; prompt: string; conversation_id?: string; options: { id: string; label: string; text: string }[] }, btns: document.btns };
+  return { result: fn() as { present: boolean; prompt: string; conversation_id?: string; options: { id: string; label: string; text: string }[]; skip_unidentified?: boolean }, btns: document.btns };
 }
 
 function runAskClick(letters: string[], letter: string) {
@@ -512,11 +519,31 @@ function runAskClick(letters: string[], letter: string) {
 
 describe("AskQuestion toolbar JS", () => {
   test("inspect drops the Skip letter and keeps A/B/C from the CDP fixture", () => {
-    const { result } = runAskInspect(["A", "B", "C", "D"]);
+    const { result } = runAskInspect(["A", "B", "C", "Skip"]);
     expect(result.present).toBe(true);
     expect(result.options.map((o) => o.id)).toEqual(["a", "b", "c"]);
+    expect(result.skip_unidentified).toBeFalsy();
     expect(result.prompt).toContain("这是本机验证用的 Questions 框");
     expect(result.options[0]?.text).toContain("选项 A");
+  });
+
+  test("inspect with one letter button keeps that option", () => {
+    const { result } = runAskInspect(["A"]);
+    expect(result.present).toBe(true);
+    expect(result.options.map((o) => o.id)).toEqual(["a"]);
+    expect(result.skip_unidentified).toBeFalsy();
+  });
+
+  test("inspect identifies Skip by aria-label when innerText is not Skip", () => {
+    const { result } = runAskInspect(["A", "B", "C"], undefined, { B: "Skip this question" });
+    expect(result.options.map((o) => o.id)).toEqual(["a", "c"]);
+    expect(result.skip_unidentified).toBeFalsy();
+  });
+
+  test("inspect keeps every letter and sets skip_unidentified when Skip cannot be identified", () => {
+    const { result } = runAskInspect(["A", "B"]);
+    expect(result.options.map((o) => o.id)).toEqual(["a", "b"]);
+    expect(result.skip_unidentified).toBe(true);
   });
 
   test("inspect returns data-composer-id from the owning composer-bar", () => {
@@ -644,6 +671,22 @@ describe("AskQuestion CDP driver", () => {
     const hit = await driver.inspect("/Users/x/armada-test-ws");
     expect(hit).toMatchObject({ unknown: true });
     expect(hit).not.toEqual({ present: false });
+  });
+
+  test("plan inspect maps CDP value through planInspectToAsk(parsePlanInspect)", async () => {
+    const raw = {
+      present: true,
+      filename: "Markdown date line",
+      overview: "在任意一份现有 markdown 文件末尾追加一行日期",
+      conversation_id: "17ce6eee-b18a-4550-9548-b1b50040ca27",
+    };
+    const driver = createAskQuestionDriver(deps({
+      connect: async () => mockSession([{ present: false }, raw]),
+    }));
+    expect(await driver.inspect("/Users/x/armada-test-ws")).toEqual(planInspectToAsk(parsePlanInspect(raw)));
+    const src = readFileSync(join(import.meta.dir, "../src/cdpInject.ts"), "utf8");
+    expect(src).toMatch(/planInspectToAsk\s*\(\s*parsePlanInspect\s*\(/);
+    expect(src).not.toMatch(/prompt:\s*`Created Plan: \$\{filename\}`/);
   });
 
   test("inspect connect throw plus pending does not resolve via askPollActions", async () => {

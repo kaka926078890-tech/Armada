@@ -79,7 +79,6 @@ export interface ExecutorDeps {
   ) => Promise<boolean | { ok: boolean; reason?: string }>;
   imagePaste?: boolean;
   fetchBlob?: (id: string) => Promise<{ bytes: Buffer; mime: string }>;
-  writeClipboard?: (bytes: Buffer, mime: string) => void;
   autoSubmitImages?: (
     workspaceRoot: string,
     prompt: string,
@@ -267,7 +266,7 @@ export class Executor {
     const files = attachments.filter((a) => !isImageAtt(a));
     try {
       if (images.length) {
-        if (!this.deps.fetchBlob || !this.deps.autoSubmitImages || !this.deps.writeClipboard) {
+        if (!this.deps.fetchBlob || !this.deps.autoSubmitImages) {
           return { ok: false, reason: "IMAGE_PASTE_FAILED" };
         }
         this.noteProgress(runId, "blobs");

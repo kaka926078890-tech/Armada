@@ -12,6 +12,7 @@ export type AskInspect =
     options: AskInspectOption[];
     kind?: "plan";
     filename?: string;
+    skip_unidentified?: boolean;
   };
 
 function isAskUnknown(inspect: AskInspect): inspect is { unknown: true; reason: string } {
@@ -79,6 +80,7 @@ export function parseAskInspect(raw: unknown): AskInspect {
     options,
     ...(o.kind === "plan" ? { kind: "plan" as const } : {}),
     ...(typeof o.filename === "string" && o.filename.trim() ? { filename: o.filename.trim() } : {}),
+    ...(o.skip_unidentified === true ? { skip_unidentified: true } : {}),
   };
 }
 

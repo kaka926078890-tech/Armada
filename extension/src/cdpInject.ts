@@ -18,6 +18,7 @@
  * - 草稿匹配认完整 prompt 后缀(剪贴板追加后 prompt 在末尾);禁止 16 字任意位置子串。
  */
 
+import { parseAskInspect, parsePlanInspect, planInspectToAsk, type AskInspect } from "./askDetect";
 import { pickCdpPage } from "./cdpPage";
 
 export interface CdpSubmitResult {
@@ -271,8 +272,29 @@ function defaultConnect(wsUrl: string, timeoutMs: number): Promise<CdpSession> {
 
 const ASK_ESC = /[.*+?^${}()|[\\]\\\\]/g;
 
-/** Questions 探测。最后一个 letter 是 Skip 控件，不得算作选项。cid：toolbar 祖先 → 包含 toolbar 的 [data-composer-id] → 唯一可见输入框祖先（Windows 控件常不在 composer 树上）。 */
+/** Skip 用 aria-label/文案 /skip/i 识别；单按钮一律当选项；识别不出则全留并标 skip_unidentified。不按「最后一个」切。 */
+export const ASK_LETTER_BUTTONS_JS = `function armadaLetterButtons(btns) {
+  function skipish(b) {
+    var aria = "";
+    try { aria = b && b.getAttribute ? String(b.getAttribute("aria-label") || "") : ""; } catch (e) {}
+    var text = String((b && b.innerText) || "");
+    return /skip/i.test(aria) || /skip/i.test(text);
+  }
+  if (!btns.length) return { real: [], skip: null, skip_unidentified: false };
+  if (btns.length === 1) return { real: btns.slice(), skip: null, skip_unidentified: false };
+  var real = [];
+  var skip = null;
+  for (var i = 0; i < btns.length; i++) {
+    if (skipish(btns[i])) { if (!skip) skip = btns[i]; }
+    else real.push(btns[i]);
+  }
+  if (!skip) return { real: btns.slice(), skip: null, skip_unidentified: true };
+  return { real: real, skip: skip, skip_unidentified: false };
+}`;
+
+/** Questions 探测。cid：toolbar 祖先 → 包含 toolbar 的 [data-composer-id] → 唯一可见输入框祖先（Windows 控件常不在 composer 树上）。 */
 export const ASK_INSPECT_JS = `function () {
+  ${ASK_LETTER_BUTTONS_JS}
   function composerIdFromNode(start) {
     var n = start;
     for (var i = 0; i < 40 && n; i++) {
@@ -309,8 +331,9 @@ export const ASK_INSPECT_JS = `function () {
     if (unique && seen) conversation_id = seen;
   }
   var btns = Array.prototype.slice.call(bar.querySelectorAll("button.composer-questionnaire-toolbar-option-letter"));
-  var real = btns.length >= 2 ? btns.slice(0, -1) : [];
-  var skip = btns.length ? btns[btns.length - 1] : null;
+  var classified = armadaLetterButtons(btns);
+  var real = classified.real;
+  var skip = classified.skip;
   var letters = real.map(function (b) { return String(b.innerText || "").trim(); });
   function esc(s) { return String(s || "").replace(${ASK_ESC}, "\\\\$&"); }
   var raw = String(bar.innerText || "").replace(/\\s+/g, " ").trim();
@@ -331,7 +354,9 @@ export const ASK_INSPECT_JS = `function () {
     }
     options.push({ id: L.toLowerCase(), label: L, text: text });
   }
-  return { present: true, prompt: prompt || "Questions", options: options, conversation_id: conversation_id };
+  var out = { present: true, prompt: prompt || "Questions", options: options, conversation_id: conversation_id };
+  if (classified.skip_unidentified) out.skip_unidentified = true;
+  return out;
 }`;
 
 /** 点目标字母；禁止点最后一个 Skip letter。 */
@@ -422,14 +447,7 @@ export const PLAN_CLICK_BUILD_JS = `function () {
   return "OK";
 }`;
 
-export type AskCdpInspect = { present: false } | { unknown: true; reason: string } | {
-  present: true;
-  prompt: string;
-  conversation_id: string;
-  options: { id: string; label: string; text: string }[];
-  kind?: "plan";
-  filename?: string;
-};
+export type AskCdpInspect = AskInspect;
 
 async function connectWorkspacePage(
   deps: Required<Pick<CdpSubmitterDeps, "port">> & CdpSubmitterDeps,
@@ -471,35 +489,15 @@ export function createAskQuestionDriver(deps: CdpSubmitterDeps) {
     const hit = await connectWorkspacePage(deps, workspaceRoot);
     if (!hit.ok) return { unknown: true, reason: hit.reason };
     try {
-      const v = await hit.session.call("Runtime.evaluate", {
+      const ask = parseAskInspect(await hit.session.call("Runtime.evaluate", {
         expression: `(${ASK_INSPECT_JS})()`, returnByValue: true,
-      }).then((x) => x?.result?.value);
-      const options = v && v.present === true && Array.isArray(v.options) ? v.options : [];
-      const askOptions = options.filter((o: any) => o && typeof o.id === "string").map((o: any) => ({
-        id: String(o.id), label: String(o.label ?? o.id), text: String(o.text ?? o.label ?? o.id),
-      }));
-      if (v && v.present === true && askOptions.length > 0) {
-        return {
-          present: true,
-          prompt: typeof v.prompt === "string" && v.prompt.trim() ? v.prompt.trim() : "Questions",
-          conversation_id: typeof v.conversation_id === "string" ? v.conversation_id.trim() : "",
-          options: askOptions,
-        };
-      }
-      const plan = await hit.session.call("Runtime.evaluate", {
-        expression: `(${PLAN_INSPECT_JS})()`, returnByValue: true,
-      }).then((x) => x?.result?.value);
-      if (!plan || plan.present !== true) return { present: false };
-      const filename = typeof plan.filename === "string" && plan.filename.trim() ? plan.filename.trim() : "Plan";
-      const overview = typeof plan.overview === "string" ? String(plan.overview).replace(/\s+/g, " ").trim() : "";
-      return {
-        present: true,
-        kind: "plan",
-        filename,
-        prompt: `Created Plan: ${filename}`,
-        conversation_id: typeof plan.conversation_id === "string" ? plan.conversation_id.trim() : "",
-        options: [{ id: "build", label: "Build", text: overview || "Build" }],
-      };
+      }).then((x) => x?.result?.value));
+      if (ask.present && ask.options.length > 0) return ask;
+      return planInspectToAsk(parsePlanInspect(
+        await hit.session.call("Runtime.evaluate", {
+          expression: `(${PLAN_INSPECT_JS})()`, returnByValue: true,
+        }).then((x) => x?.result?.value),
+      ));
     } catch (e) {
       return { unknown: true, reason: `CDP_EVAL_FAIL:${String(e)}` };
     } finally {

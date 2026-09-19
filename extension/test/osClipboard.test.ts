@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "fs";
+import { join } from "path";
 import { createOsClipboardWriter, type OsClipboardDeps } from "../src/osClipboard";
 
 function winDeps(spawns: { cmd: string; writes: string[] }[]): OsClipboardDeps {
@@ -42,5 +44,11 @@ describe("createOsClipboardWriter", () => {
     expect(spawns).toHaveLength(1);
     expect(spawns[0]!.cmd).toBe("powershell.exe");
     expect(spawns[0]!.writes.filter((s) => s !== "QUIT\n")).toHaveLength(2);
+  });
+
+  test("writeOsImageClipboard is not a second clipboard writer", () => {
+    const src = readFileSync(join(import.meta.dir, "../src/osClipboard.ts"), "utf8");
+    expect(src).not.toMatch(/export function writeOsImageClipboard/);
+    expect([...src.matchAll(/Clipboard\]::SetImage/g)]).toHaveLength(1);
   });
 });

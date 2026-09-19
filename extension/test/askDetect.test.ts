@@ -75,6 +75,17 @@ describe("parseAskInspect", () => {
     });
     expect(got).toMatchObject({ present: true, conversation_id: "15eba46c-1011-44b3-9535-f00596728279" });
   });
+
+  test("keeps skip_unidentified from inspect parsing", () => {
+    const got = parseAskInspect({
+      present: true,
+      prompt: "选一个",
+      conversation_id: "cid-1",
+      options: [{ id: "a", label: "A", text: "甲" }, { id: "b", label: "B", text: "乙" }],
+      skip_unidentified: true,
+    });
+    expect(got).toMatchObject({ present: true, skip_unidentified: true });
+  });
 });
 
 describe("askPollActions", () => {

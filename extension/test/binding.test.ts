@@ -40,12 +40,16 @@ describe("matchHookToPending", () => {
     }))).toBeNull();
   });
 
-  test("garbled ??? prompt binds the only waiting run as edited", () => {
-    const m = matchHookToPending([P], ev("beforeSubmitPrompt", 1_002_000, {
+  test("garbled ??? prompt does not skip prompt match to bind", () => {
+    expect(matchHookToPending([P], ev("beforeSubmitPrompt", 1_002_000, {
       conversation_id: "c-other", workspace_roots: ["/ws/a"], prompt: "???",
-    }));
-    expect(m?.promptMatch).toBe("edited");
-    expect(m && "run" in m ? m.run.runId : null).toBe("r-1");
+    }))).toBeNull();
+  });
+
+  test("U+FFFD garbled prompt does not skip prompt match to bind", () => {
+    expect(matchHookToPending([P], ev("beforeSubmitPrompt", 1_002_000, {
+      conversation_id: "c-other", workspace_roots: ["/ws/a"], prompt: "你\uFFFD好",
+    }))).toBeNull();
   });
 
   test("garbled ??? with two waiting runs does not guess", () => {

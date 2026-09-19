@@ -71,11 +71,20 @@ describe("Executor image path", () => {
     expect(acks[acks.length - 1]).toEqual({ type: "run.ack", runId: "r1", status: "rejected", reason: "FILE_MENTION_FAILED" });
   });
 
+  test("image paste uses autoSubmitImages without a separate writeClipboard", async () => {
+    const { ex, acks } = makeExec({
+      imagePaste: true,
+      fetchBlob: async () => ({ bytes: Buffer.from("x"), mime: "image/png" }),
+      autoSubmitImages: async () => true,
+    });
+    await ex.startRun({ runId: "r1", workspaceRoot: "/ws/a", prompt: "see", attachments: pngAtt });
+    expect(acks[acks.length - 1]).toEqual({ type: "run.ack", runId: "r1", status: "accepted" });
+  });
+
   test("injectImages failure does not writeText and does not accepted", async () => {
     const { ex, acks } = makeExec({
       imagePaste: true,
       fetchBlob: async () => ({ bytes: Buffer.from("x"), mime: "image/png" }),
-      writeClipboard: () => {},
       autoSubmitImages: async () => false,
     });
     await ex.startRun({ runId: "r1", workspaceRoot: "/ws/a", prompt: "see", attachments: pngAtt });
@@ -88,7 +97,6 @@ describe("Executor image path", () => {
     const { ex, acks } = makeExec({
       imagePaste: true,
       fetchBlob: async () => ({ bytes: Buffer.from("x"), mime: "image/png" }),
-      writeClipboard: () => {},
       autoSubmitImages: async () => false,
       bindKnown: () => { bound += 1; },
     });
@@ -123,7 +131,6 @@ describe("Executor image path", () => {
     const { ex, acks } = makeExec({
       imagePaste: true,
       fetchBlob: async () => ({ bytes: Buffer.from("x"), mime: "image/png" }),
-      writeClipboard: () => {},
       addPending: () => { order.push("pending"); },
       autoSubmitImages: () => new Promise<boolean>((resolve) => {
         order.push("paste");
@@ -150,7 +157,6 @@ describe("Executor image path", () => {
         started += 1;
         gates.push(() => resolve({ bytes: Buffer.from("x"), mime: "image/png" }));
       }),
-      writeClipboard: () => {},
       autoSubmitImages: async () => true,
     });
     const done = ex.startRun({

@@ -11,7 +11,7 @@ import { matchHookToPending, claimConversation, eventBelongsToWindow, transcript
 import { TranscriptTailer, shouldUnfollowOnHookStop } from "./transcript";
 import { Executor, CancelWatcher } from "./executor";
 import { createCdpSubmitter, createImagePaster, createFileMentionPaster, createComposerFinisher, createAskQuestionDriver, probeCdpReady, type AskCdpInspect } from "./cdpInject";
-import { createOsClipboardWriter, writeOsImageClipboard } from "./osClipboard";
+import { createOsClipboardWriter } from "./osClipboard";
 import { mergeHooks, hooksDriftHash, spoolScriptName, shouldInstallArmadaHooks } from "./hooksInstall";
 import { collectTranscriptViews, matchTranscriptToPending, stopPayloadFromTranscriptLine, stopFromTranscriptFileContent, transcriptsDirForWorkspace, isWithinTranscriptBindWindow, FollowupStopGuard, listSubagentTranscripts, childCidFromSubagentPath, decideLateTranscriptAttach, transcriptJsonlPath } from "./transcriptBind";
 import { TranscriptDirWatcher, debounceLeading, watchTranscriptDir, watchFileSize, TRANSCRIPT_WATCHDOG_MS, TRANSCRIPT_WATCH_DEBOUNCE_MS } from "./transcriptWatch";
@@ -316,7 +316,6 @@ export function activate(context: vscode.ExtensionContext): void {
       : undefined,
     imagePaste: config.imagePaste,
     autoEnter: config.autoSubmit,
-    writeClipboard: writeOsImageClipboard,
     fetchBlob: async (id) => {
       const res = await fetch(`http://${config.hubUrl}/api/blobs/${id}`, {
         headers: { authorization: `Bearer ${config.token}` },
