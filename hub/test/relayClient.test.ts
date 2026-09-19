@@ -55,11 +55,13 @@ describe("loadRelayConfig", () => {
 });
 
 describe("runToSnap", () => {
-  test("completed requires assistantBodyText", () => {
+  test("completed with empty body stays completed", () => {
     const run = { id: "r-1", machine_id: "m-1", workspace_root: "/ws/a", prompt: "hi", status: "completed", created_at: 1 };
-    expect(runToSnap(run, []).status).toBe("error");
-    expect(runToSnap(run, []).error).toBe("NO_ASSISTANT_BODY");
-    expect(runToSnap(run, []).canRetry).toBe(true);
+    const empty = runToSnap(run, []);
+    expect(empty.status).toBe("completed");
+    expect(empty.finalText == null || empty.finalText === "").toBe(true);
+    expect(empty.canRetry).toBe(false);
+    expect(empty.error).not.toBe("NO_ASSISTANT_BODY");
     const events = [ev({
       seq: 1, source: "transcript",
       payload: JSON.stringify({ role: "assistant", message: { content: [{ type: "text", text: "全文正文" }] } }),
@@ -70,10 +72,30 @@ describe("runToSnap", () => {
     expect(snap.canRetry).toBe(false);
   });
 
-  test("completed finalText is the matching turn, not the whole thread", () => {
+  test("completed with tool_use on the assistant row stays completed", () => {
+    const run = { id: "r-1", machine_id: "m-1", workspace_root: "/ws/a", prompt: "改文件", status: "completed", created_at: 1 };
+    const events = [ev({
+      seq: 1, source: "transcript",
+      payload: JSON.stringify({
+        role: "assistant",
+        message: {
+          content: [
+            { type: "text", text: "先改文件。" },
+            { type: "tool_use", name: "StrReplace", input: { path: "/ws/a.txt" } },
+          ],
+        },
+      }),
+    })];
+    const snap = runToSnap(run, events);
+    expect(snap.status).toBe("completed");
+    expect(snap.canRetry).toBe(false);
+    expect(snap.error).not.toBe("NO_ASSISTANT_BODY");
+  });
+
+  test("completed finalText is the last turn, not prompt match", () => {
     const run = {
       id: "r-1", machine_id: "m-1", workspace_root: "/ws/a",
-      prompt: "那时还没修好？", status: "completed", created_at: 1,
+      prompt: "更早的任务", status: "completed", created_at: 1,
     };
     const events = [
       ev({ seq: 1, source: "transcript", payload: JSON.stringify({
@@ -415,6 +437,67 @@ describe("hub outbound to relay", () => {
     await waitUntil(async () => {
       const j = await (await fetch(`http://127.0.0.1:${relay!.port}/mobile/runs`, { headers })).json() as any;
       return j.runs.map((r: any) => r.runId).includes(runId);
+    });
+    ext.close();
+  });
+
+  test("terminal run later events push snap with finalText", async () => {
+    const relayHome = mkdtempSync(join(tmpdir(), "armada-relay-"));
+    const hubHome = mkdtempSync(join(tmpdir(), "armada-hub-"));
+    relay = createRelayServer({
+      port: 0, hostname: "127.0.0.1", home: relayHome,
+      publicBase: "http://127.0.0.1", adminToken: "adm",
+    });
+    const fleet = relay.createFleet();
+    writeFileSync(join(hubHome, "relay.json"), JSON.stringify({
+      relay: `http://127.0.0.1:${relay.port}`, fleet: fleet.fleet, secret: fleet.hubSecret,
+    }), { mode: 0o600 });
+
+    hub = createServer({ port: 0, home: hubHome });
+    const ext: WebSocket = await new Promise((res, rej) => {
+      const w = new WebSocket(`ws://127.0.0.1:${hub!.port}/ws?token=${hub!.token}`);
+      w.onopen = () => res(w);
+      w.onerror = rej;
+    });
+    ext.send(JSON.stringify({
+      type: "register", machineId: "m-1", windowId: "w-1", name: "A", os: "darwin",
+      extensionVersion: "0.4.0", openWorkspaces: ["/ws/a"], cdpReady: true,
+    }));
+
+    const headers = { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" };
+    await waitUntil(async () => {
+      const j = await (await fetch(`http://127.0.0.1:${relay!.port}/mobile/workspaces`, { headers })).json() as any;
+      return j.hubOffline === false && j.workspaces?.[0]?.workspaceRoot === "/ws/a";
+    });
+
+    const d = await fetch(`http://127.0.0.1:${relay.port}/mobile/runs`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ workspaceId: encodeWorkspaceId("m-1", "/ws/a"), prompt: "from phone" }),
+    });
+    const body = await d.json() as any;
+    const runId = body.run.runId as string;
+    ext.send(JSON.stringify({ type: "run.ack", runId, status: "accepted" }));
+    ext.send(JSON.stringify({
+      type: "run.bound", runId, conversationId: "cid-late", transcriptPath: null, promptMatch: true,
+    }));
+    await waitUntil(() => hub!.runs.get(runId)?.status === "running");
+    ext.send(JSON.stringify({
+      type: "run.event", runId, source: "hook", hookEventName: "stop",
+      payload: { status: "completed" }, ts: Date.now(), seq: 1,
+    }));
+    await waitUntil(async () => {
+      const j = await (await fetch(`http://127.0.0.1:${relay!.port}/mobile/runs/${runId}`, { headers })).json() as any;
+      return j.status === "completed" && (j.finalText == null || j.finalText === "");
+    });
+
+    ext.send(JSON.stringify({
+      type: "run.event", runId, source: "transcript", seq: 2, ts: Date.now(),
+      payload: { role: "assistant", message: { content: [{ type: "text", text: "迟到正文" }] } },
+    }));
+    await waitUntil(async () => {
+      const j = await (await fetch(`http://127.0.0.1:${relay!.port}/mobile/runs/${runId}`, { headers })).json() as any;
+      return j.status === "completed" && j.finalText === "迟到正文";
     });
     ext.close();
   });

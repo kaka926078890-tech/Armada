@@ -228,14 +228,9 @@ export function createRelayServer(opts: {
   }
 
   function applyRunSnap(fleetId: string, snap: RunSnap) {
-    let status = snap.status;
-    let finalText = snap.finalText ?? null;
-    let error = snap.error ?? null;
-    if (status === "completed" && !(finalText && finalText.length > 0)) {
-      status = "error";
-      error = "NO_ASSISTANT_BODY";
-      finalText = null;
-    }
+    const status = snap.status;
+    const finalText = snap.finalText ?? null;
+    const error = snap.error ?? null;
     const now = snap.updatedAt ?? Date.now();
     const pendingAsk = snap.pendingAsk == null ? null : JSON.stringify(snap.pendingAsk);
     const outbound = Array.isArray(snap.outbound) ? JSON.stringify(snap.outbound) : null;

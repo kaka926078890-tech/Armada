@@ -2,8 +2,9 @@ import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import type { Database } from "bun:sqlite";
 import { decodeWorkspaceId, originOf } from "../../relay/src/uri";
-import { assistantBodyForPrompt, eventsToChat } from "../web/src/chatView";
+import { eventsToChat, lastTurnAssistantBody } from "../web/src/chatView";
 import type { RunEvent } from "../web/src/types";
+import { canRetryStatus, TERMINAL_STATUSES } from "./concurrency";
 import type { Registry } from "./registry";
 import type { RunService } from "./runs";
 import type { SseHub } from "./sse";
@@ -87,17 +88,11 @@ export function loadEventsForSnap(status: string): boolean {
 }
 
 export function runToSnap(run: any, events: RunEvent[]): RunSnap {
-  const body = assistantBodyForPrompt(eventsToChat(events), run.prompt ?? "");
-  let status = String(run.status ?? "unknown");
-  let error = (run.end_reason as string | null) ?? null;
-  let finalText: string | null = null;
-  if (status === "completed") {
-    if (body.length > 0) finalText = body;
-    else {
-      status = "error";
-      error = "NO_ASSISTANT_BODY";
-    }
-  }
+  const body = lastTurnAssistantBody(eventsToChat(events));
+  const status = String(run.status ?? "unknown");
+  const error = (run.end_reason as string | null) ?? null;
+  const terminal = (TERMINAL_STATUSES as readonly string[]).includes(status);
+  const finalText = terminal ? (body || null) : null;
   const mode = typeof run.queue_message_default_behavior === "string" ? run.queue_message_default_behavior
     : typeof run.queueMessageDefaultBehavior === "string" ? run.queueMessageDefaultBehavior
     : null;
@@ -112,7 +107,7 @@ export function runToSnap(run: any, events: RunEvent[]): RunSnap {
     pendingAsk: run.pending_ask ?? null,
     outbound: snapOutbound(run.outbound),
     queueMessageDefaultBehavior: mode,
-    canRetry: ["error", "unknown", "aborted"].includes(status),
+    canRetry: canRetryStatus(status),
     archived: Number(run.archived_at) > 0,
     updatedAt: Number(run.ended_at ?? run.started_at ?? run.created_at ?? Date.now()),
   };
@@ -158,6 +153,16 @@ export function startRelayClient(opts: {
     if (run) send({ type: "snap.run", run });
   };
 
+  const pushSoon = new Map<string, ReturnType<typeof setTimeout>>();
+  const schedulePush = (runId: string) => {
+    const prev = pushSoon.get(runId);
+    if (prev) clearTimeout(prev);
+    pushSoon.set(runId, setTimeout(() => {
+      pushSoon.delete(runId);
+      pushRun(runId);
+    }, 150));
+  };
+
   const prevMachines = opts.registry.onMachinesChanged;
   opts.registry.onMachinesChanged = () => {
     prevMachines?.();
@@ -170,6 +175,12 @@ export function startRelayClient(opts: {
     const t = (event as { type?: string }).type;
     if (t === "machine.updated") pushWorkspaces();
     if (t === "run.status" || t === "run.ask" || t === "run.outbound" || t === "run.archived") pushRun(runId);
+    if (t === "run.event") {
+      const run = opts.runs.get(runId);
+      if (run && (TERMINAL_STATUSES as readonly string[]).includes(String(run.status ?? ""))) {
+        schedulePush(runId);
+      }
+    }
   };
 
   const hubFetch = (path: string, init?: RequestInit) =>
@@ -327,6 +338,8 @@ export function startRelayClient(opts: {
       stopped = true;
       opts.registry.onMachinesChanged = prevMachines;
       opts.sse.onEvent = prevEvent;
+      for (const t of pushSoon.values()) clearTimeout(t);
+      pushSoon.clear();
       if (heartbeat) clearInterval(heartbeat);
       if (reconnectTimer) clearTimeout(reconnectTimer);
       try { ws?.close(); } catch { /* ignore */ }

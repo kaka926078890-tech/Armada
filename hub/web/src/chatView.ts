@@ -564,6 +564,11 @@ export function assistantBodyText(blocks: ChatBlock[]): string {
   return blocks.filter((b) => b.kind === "assistant").map((b) => b.text).join("\n\n").trim();
 }
 
+/** Snap / App 终态正文：最后一折助手，不按 prompt 对齐。 */
+export function lastTurnAssistantBody(blocks: ChatBlock[]): string {
+  return assistantBodyText(splitChatTurns(blocks).at(-1) ?? blocks);
+}
+
 function normPrompt(s: string): string {
   return s.replace(/\s+/g, " ").trim();
 }

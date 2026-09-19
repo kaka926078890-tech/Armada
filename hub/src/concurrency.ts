@@ -3,6 +3,13 @@ export { normalizePrompt };
 
 export const OCCUPYING_STATUSES = ["queued", "dispatched", "binding", "running"] as const;
 export const INJECTING_STATUSES = ["dispatched", "binding"] as const;
+export const RETRY_STATUSES = ["error", "unknown", "aborted"] as const;
+export const TERMINAL_STATUSES = ["completed", "error", "aborted", "cancelled"] as const;
+
+/** Same gate as `runs.retry()`: error / unknown / aborted. */
+export function canRetryStatus(status: string): boolean {
+  return (RETRY_STATUSES as readonly string[]).includes(status);
+}
 
 export interface ConcurrencyLimits {
   maxPerMachine: number;

@@ -52,7 +52,7 @@ export function attachWithConfig(
   };
 
   const fpOf = (row: any) =>
-    `${row.status ?? ""}|${row.ended_at ?? ""}|${row.prompt ?? ""}|${JSON.stringify(row.pending_ask ?? null)}|${JSON.stringify(row.outbound ?? [])}|${row.archived_at ?? ""}`;
+    `${row.status ?? ""}|${row.ended_at ?? ""}|${row.prompt ?? ""}|${JSON.stringify(row.pending_ask ?? null)}|${JSON.stringify(row.outbound ?? [])}|${row.archived_at ?? ""}|${row.finalText ?? row.final_text ?? ""}`;
 
   const pushWorkspaces = async (machines?: any[]) => {
     const list = machines ?? await (await hubFetch("/api/machines")).json().catch(() => null);
@@ -83,19 +83,23 @@ export function attachWithConfig(
       for (const row of runs.slice(0, 30)) {
         if (typeof row?.id !== "string") continue;
         visible.add(row.id);
-        const fp = fpOf(row);
+        const snap = loadEventsForSnap(String(row.status ?? "")) ? await snapOf(row.id) : null;
+        const fp = fpOf({ ...row, finalText: snap?.finalText ?? "" });
         if (lastRunFp.get(row.id) === fp) continue;
         lastRunFp.set(row.id, fp);
-        await pushRun(row.id);
+        if (snap) send({ type: "snap.run", run: snap });
+        else await pushRun(row.id);
       }
       for (const id of [...lastRunFp.keys()]) {
         if (visible.has(id)) continue;
         const row = await (await hubFetch(`/api/runs/${encodeURIComponent(id)}`)).json().catch(() => null);
         if (!row?.id) continue;
-        const fp = fpOf(row);
+        const snap = loadEventsForSnap(String(row.status ?? "")) ? await snapOf(row.id) : null;
+        const fp = fpOf({ ...row, finalText: snap?.finalText ?? "" });
         if (lastRunFp.get(id) === fp) continue;
         lastRunFp.set(id, fp);
-        await pushRun(id);
+        if (snap) send({ type: "snap.run", run: snap });
+        else await pushRun(id);
       }
     } finally {
       polling = false;

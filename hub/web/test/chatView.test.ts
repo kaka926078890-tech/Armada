@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { assistantBodyForPrompt, assistantBodyText, eventsToChat, extractUserText, segmentChat, INITIAL_VISIBLE_TURNS, initialHiddenPrefixTurns, recentTurnsWindow, mergeOutboundChat, mergePendingAsk, queuedOutbound, collapseRepeatedTools, processFoldLabel } from "../src/chatView";
+import { assistantBodyForPrompt, assistantBodyText, lastTurnAssistantBody, eventsToChat, extractUserText, segmentChat, INITIAL_VISIBLE_TURNS, initialHiddenPrefixTurns, recentTurnsWindow, mergeOutboundChat, mergePendingAsk, queuedOutbound, collapseRepeatedTools, processFoldLabel } from "../src/chatView";
 import type { ChatBlock } from "../src/chatView";
 import type { RunEvent } from "../src/types";
 
@@ -634,6 +634,15 @@ describe("segmentChat", () => {
       user(3, "再改一处"), asst(4, "当前折。"),
     ];
     expect(assistantBodyForPrompt(blocks, "请帮我看")).toBe("当前折。");
+  });
+
+  test("lastTurnAssistantBody ignores prompt match and keeps the last turn", () => {
+    const blocks = [
+      user(1, "更早的任务"), asst(2, "那是旧回复。"),
+      user(3, "那时还没修好？"), asst(4, "现在修好了。"),
+    ];
+    expect(lastTurnAssistantBody(blocks)).toBe("现在修好了。");
+    expect(assistantBodyForPrompt(blocks, "更早的任务")).toBe("那是旧回复。");
   });
 });
 

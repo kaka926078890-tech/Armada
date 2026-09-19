@@ -314,7 +314,7 @@ describe("relay serve", () => {
     ws.close();
   });
 
-  test("completed without finalText becomes NO_ASSISTANT_BODY", async () => {
+  test("completed without finalText stays completed", async () => {
     const s = start();
     const fleet = s.createFleet();
     const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
@@ -334,9 +334,10 @@ describe("relay serve", () => {
     const got = await (await fetch(url(s, "/mobile/runs/r-empty"), {
       headers: { authorization: `Bearer ${fleet.operatorToken}` },
     })).json() as any;
-    expect(got.status).toBe("error");
-    expect(got.error).toBe("NO_ASSISTANT_BODY");
-    expect(got.finalText).toBeNull();
+    expect(got.status).toBe("completed");
+    expect(got.error).not.toBe("NO_ASSISTANT_BODY");
+    expect(got.finalText == null || got.finalText === "").toBe(true);
+    expect(got.canRetry).toBe(false);
     ws.close();
   });
 
