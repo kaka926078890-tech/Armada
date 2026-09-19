@@ -194,10 +194,9 @@ struct RunRow: View {
     let unread: Bool
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
-            RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+            Rectangle()
                 .fill(runRowChrome(run, unread: unread) ?? .clear)
                 .frame(width: 3)
-                .padding(.vertical, 2)
             VStack(alignment: .leading, spacing: 4) {
                 Text(run.prompt).font(.system(size: 17)).lineLimit(2)
                 Text(run.pendingAsk != nil && run.status == "running" ? "待处理"
@@ -212,7 +211,6 @@ struct RunRow: View {
                 Circle().fill(run.status == "completed" && run.pendingAsk == nil ? Color.green : Color.red).frame(width: 7, height: 7).padding(.top, 8)
             }
         }
-        .padding(.vertical, 2)
     }
 
     private var captionColor: Color {
@@ -389,18 +387,31 @@ struct WorkspaceHome: View {
             List {
                 if let err = session.lastError {
                     Text(err).foregroundStyle(.red).font(.caption)
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
                 }
                 if showArchived {
                     Text("已隐藏的任务仍保留，可取消隐藏。").font(.caption).foregroundStyle(.secondary)
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
                 }
                 if filtered.isEmpty {
                     Text("这一列还没有任务").foregroundStyle(.secondary)
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
                 }
                 ForEach(filtered, id: \.runId) { run in
                     NavigationLink(value: AppRoute.run(run.runId)) {
                         RunRow(run: run, unread: session.isUnread(run))
+                            .padding(.vertical, 10)
+                            .padding(.trailing, 8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color(.secondarySystemGroupedBackground))
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                     }
-                    .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 16))
+                    .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                         if showArchived {
                             Button("取消隐藏") {
@@ -422,7 +433,9 @@ struct WorkspaceHome: View {
                     }
                 }
             }
-            .listStyle(.insetGrouped)
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .background(Color(.systemGroupedBackground))
         }
         .navigationTitle(live.label)
         .safeAreaInset(edge: .top) {

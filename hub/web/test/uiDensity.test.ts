@@ -116,6 +116,20 @@ describe("App UI density is one scale", () => {
     expect(workspace).not.toContain("leading = if (vm.canMarkUnread");
   });
 
+  test("kanban runs are separate cards, not one grouped section", () => {
+    const ios = readFileSync(join(repoRoot, "mobile/ios/ArmadaRemote/Screens.swift"), "utf8");
+    const android = androidUi();
+    const iosHome = ios.slice(ios.indexOf("struct WorkspaceHome"), ios.indexOf("struct PromptSnippetChips"));
+    const workspace = android.slice(android.indexOf("fun WorkspaceScreen"), android.indexOf("fun RunRow"));
+    expect(iosHome).toContain("listStyle(.plain)");
+    expect(iosHome).not.toContain("listStyle(.insetGrouped)");
+    expect(iosHome).toContain("listRowSeparator(.hidden)");
+    expect(iosHome).toContain("RoundedRectangle");
+    expect(workspace).not.toContain("GroupedSection");
+    expect(workspace).not.toContain("GroupedDivider");
+    expect(workspace).toContain("RoundedCornerShape(10.dp)");
+  });
+
   test("dispatch/followup is a capsule composer, not stacked full-width buttons", () => {
     const ios = readFileSync(join(repoRoot, "mobile/ios/ArmadaRemote/Screens.swift"), "utf8");
     const android = androidUi();

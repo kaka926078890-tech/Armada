@@ -39,6 +39,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -408,30 +409,32 @@ fun WorkspaceScreen(vm: SessionVm, state: UiState, workspace: WorkspaceDto, onBa
                         Text("这一列还没有任务", modifier = Modifier.padding(20.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 } else {
-                    item {
-                        GroupedSection {
-                            filtered.forEachIndexed { index, run ->
-                                val unread = vm.isUnread(run)
-                                if (index > 0) GroupedDivider()
-                                SwipeActionRow(
-                                    trailing = listOfNotNull(
-                                        if (vm.canMarkUnread(run)) {
-                                            SwipeAction("标为未读", StatusOrange) { vm.markUnread(run.runId, hold = false) }
-                                        } else null,
-                                        when {
-                                            showArchived -> SwipeAction("取消隐藏", StatusGray) { archive(run, false) }
-                                            run.showsArchive -> SwipeAction("隐藏", StatusRed) { archive(run, true) }
-                                            else -> null
-                                        },
-                                    ),
+                    items(filtered, key = { it.runId }) { run ->
+                        val unread = vm.isUnread(run)
+                        Box(
+                            Modifier
+                                .padding(horizontal = 16.dp, vertical = 4.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(MaterialTheme.colorScheme.surface),
+                        ) {
+                            SwipeActionRow(
+                                trailing = listOfNotNull(
+                                    if (vm.canMarkUnread(run)) {
+                                        SwipeAction("标为未读", StatusOrange) { vm.markUnread(run.runId, hold = false) }
+                                    } else null,
+                                    when {
+                                        showArchived -> SwipeAction("取消隐藏", StatusGray) { archive(run, false) }
+                                        run.showsArchive -> SwipeAction("隐藏", StatusRed) { archive(run, true) }
+                                        else -> null
+                                    },
+                                ),
+                            ) {
+                                Row(
+                                    Modifier.fillMaxWidth().clickable { onOpenRun(run.runId) }.padding(end = 16.dp, top = 8.dp, bottom = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    Row(
-                                        Modifier.fillMaxWidth().clickable { onOpenRun(run.runId) }.padding(end = 16.dp, top = 8.dp, bottom = 8.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        Box(Modifier.weight(1f)) { RunRow(run, unread) }
-                                        Text("›", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 8.dp))
-                                    }
+                                    Box(Modifier.weight(1f)) { RunRow(run, unread) }
+                                    Text("›", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 8.dp))
                                 }
                             }
                         }
@@ -474,8 +477,6 @@ fun RunRow(run: RunDto, unread: Boolean) {
             Modifier
                 .width(3.dp)
                 .fillMaxHeight()
-                .padding(vertical = 2.dp)
-                .clip(RoundedCornerShape(1.5.dp))
                 .background(chrome),
         )
         Spacer(Modifier.width(13.dp))
