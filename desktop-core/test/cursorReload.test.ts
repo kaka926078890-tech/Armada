@@ -6,6 +6,7 @@ import {
   IDLE_RELOAD_SETTLE_GRACE_MS,
   decideReloadFire,
   decideWindowReload,
+  highestInstalledArmadaAgent,
   noteReloadCommandSettled,
   parsePendingReload,
   parseReloadAttempt,
@@ -150,6 +151,33 @@ describe("decideWindowReload", () => {
     })).toBe("done");
   });
 
+  test("missing when disk is still behind pending vsix", () => {
+    expect(decideWindowReload({
+      pending: { ...pending, vsix: "0.4.34", action: "now" },
+      thisWindowHasLiveRun: false,
+      now: 2000,
+      runningVsix: "0.4.33",
+      installedVsix: "0.4.33",
+    })).toBe("missing");
+    expect(decideWindowReload({
+      pending: { ...pending, vsix: "0.4.34", action: "now" },
+      thisWindowHasLiveRun: true,
+      now: 2000,
+      runningVsix: "0.4.33",
+      installedVsix: null,
+    })).toBe("missing");
+  });
+
+  test("reloads to activate when disk already has pending vsix", () => {
+    expect(decideWindowReload({
+      pending: { ...pending, vsix: "0.4.34" },
+      thisWindowHasLiveRun: false,
+      now: 2000,
+      runningVsix: "0.4.33",
+      installedVsix: "0.4.34",
+    })).toBe("reload");
+  });
+
   test("ignores a pending aimed at a different machine", () => {
     expect(decideWindowReload({
       pending: { ...pending, machineId: "m-win" },
@@ -233,10 +261,22 @@ describe("decideReloadFire", () => {
     expect(r.fire).toBe(true);
   });
 
-  test("expired/done/none never fire", () => {
+  test("expired/done/none/missing never fire", () => {
     expect(decideReloadFire(idle, { decision: "expired", pendingSetAt: setAt }).fire).toBe(false);
     expect(decideReloadFire(idle, { decision: "done", pendingSetAt: setAt }).fire).toBe(false);
     expect(decideReloadFire(idle, { decision: "none", pendingSetAt: null }).fire).toBe(false);
+    expect(decideReloadFire(idle, { decision: "missing", pendingSetAt: setAt }).fire).toBe(false);
+  });
+});
+
+describe("highestInstalledArmadaAgent", () => {
+  test("picks the highest armada-agent dir", () => {
+    expect(highestInstalledArmadaAgent([
+      "armada.armada-agent-0.4.31",
+      "armada.armada-agent-0.4.33",
+      "other.ext-1.0.0",
+    ])).toBe("0.4.33");
+    expect(highestInstalledArmadaAgent([])).toBeNull();
   });
 });
 
@@ -446,7 +486,11 @@ describe("extension delivers hub reload over ws", () => {
     expect(src).toContain("windowHasRecentSettle");
     expect(src).toContain("thisWindowRecentlySettled");
     expect(src).toContain("lastStopAt");
+    expect(src).toContain("installedVsix");
+    expect(src).toContain("highestInstalledArmadaAgent");
     expect(src.match(/persistReloadAttempt\(null\)/g)?.length).toBe(1);
     expect(src).not.toContain("boundRuns.size > 0 || pendingRuns.length > 0");
+    const fire = src.slice(src.indexOf("vsix pending-reload: reloading window"));
+    expect(fire).not.toContain("persistReloadAttempt(null)");
   });
 });

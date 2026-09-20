@@ -216,8 +216,19 @@ export function windowHasRecentSettle(opts: {
  * (pending start / inject), including a just-settled window.
  * `expired` = waited maxWaitMs still busy → notify, do not force.
  * `done` = this window already runs pending.vsix or newer.
+ * `missing` = pending vsix is not on disk; Reload Window cannot install it.
  */
-export type WindowReloadDecision = "none" | "wait" | "reload" | "expired" | "done";
+export type WindowReloadDecision = "none" | "wait" | "reload" | "expired" | "done" | "missing";
+
+export function highestInstalledArmadaAgent(dirNames: Iterable<string>): string | null {
+  let best: string | null = null;
+  for (const name of dirNames) {
+    const m = /^armada\.armada-agent-(\d+\.\d+\.\d+)/.exec(name);
+    if (!m) continue;
+    if (!best || cmpSemver(m[1], best) > 0) best = m[1];
+  }
+  return best;
+}
 
 export function decideWindowReload(opts: {
   pending: PendingReload | null;
@@ -226,6 +237,8 @@ export function decideWindowReload(opts: {
   thisWindowRecentlySettled?: boolean;
   now: number;
   runningVsix?: string;
+  /** When set (including `null`), Reload is refused if disk is still behind pending.vsix. */
+  installedVsix?: string | null;
   maxWaitMs?: number;
   machineId?: string;
 }): WindowReloadDecision {
@@ -233,6 +246,9 @@ export function decideWindowReload(opts: {
   if (!p) return "none";
   if (p.machineId && opts.machineId && p.machineId !== opts.machineId) return "none";
   if (opts.runningVsix && cmpSemver(opts.runningVsix, p.vsix) >= 0) return "done";
+  if (opts.installedVsix !== undefined) {
+    if (!opts.installedVsix || cmpSemver(opts.installedVsix, p.vsix) < 0) return "missing";
+  }
   if (opts.now < p.notBefore) return "wait";
   const composerBusy = opts.thisWindowHasOpenComposerTurn === true;
   const recentlySettled = opts.thisWindowRecentlySettled === true;

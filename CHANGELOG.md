@@ -10,6 +10,10 @@ Armada 按 **面** 发版：扩展、桌面、iOS、Android 可以不同号。RE
 
 ## Unreleased
 
+### 修复
+
+- 中台 pending 的 vsix 本机磁盘还没装上时，扩展不再执行 Reload Window。中台旁有包不够：Reload 装不上缺失扩展，只会把窗口打成死循环（Intel 机 0.4.34 全舰队 pending 已踩过）。
+
 ---
 
 ## 2026-09-20 — 扩展 0.4.35 · iOS TF 24 · Android 0.1.11 · 桌面 0.1.0

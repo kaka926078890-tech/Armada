@@ -144,6 +144,38 @@ describe("GET/POST /api/cursor-reload", () => {
     expect(r.status).toBe(404);
   });
 
+  test("register does not re-push cursorReload when this machine already runs pending vsix", async () => {
+    const { base, tok } = start();
+    await fetch(`${base}/api/cursor-reload`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${tok}`, "content-type": "application/json" },
+      body: JSON.stringify({ action: "when-idle" }),
+    });
+    const sent: unknown[] = [];
+    const ws = { data: { registered: false }, send(raw: string) { sent.push(JSON.parse(raw)); }, close() {} };
+    s!.registry.onRegister(ws, {
+      machineId: "m-current", windowId: "w-1", name: "Mac", os: "darwin",
+      extensionVersion: REQUIRED_EXTENSION_VERSION, openWorkspaces: ["/ws"],
+    });
+    expect(sent.some((m) => (m as { type?: string }).type === "ext.cursorReload")).toBe(false);
+  });
+
+  test("register re-pushes cursorReload when this machine is behind pending vsix", async () => {
+    const { base, tok } = start();
+    await fetch(`${base}/api/cursor-reload`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${tok}`, "content-type": "application/json" },
+      body: JSON.stringify({ action: "when-idle" }),
+    });
+    const sent: unknown[] = [];
+    const ws = { data: { registered: false }, send(raw: string) { sent.push(JSON.parse(raw)); }, close() {} };
+    s!.registry.onRegister(ws, {
+      machineId: "m-old", windowId: "w-1", name: "Mac", os: "darwin",
+      extensionVersion: "0.4.26", openWorkspaces: ["/ws"],
+    });
+    expect(sent.some((m) => (m as { type?: string }).type === "ext.cursorReload")).toBe(true);
+  });
+
   test("POST junk action is 400 INVALID", async () => {
     const { base, tok } = start();
     const r = await fetch(`${base}/api/cursor-reload`, {

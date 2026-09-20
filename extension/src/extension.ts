@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import WebSocket from "ws";
 import { randomUUID } from "crypto";
 import { hostname, homedir } from "os";
-import { readFileSync, openSync, readSync, closeSync, fstatSync, existsSync, mkdirSync, writeFileSync, copyFileSync, unlinkSync } from "fs";
+import { readFileSync, readdirSync, openSync, readSync, closeSync, fstatSync, existsSync, mkdirSync, writeFileSync, copyFileSync, unlinkSync } from "fs";
 import { join } from "path";
 import { loadConfig } from "./config";
 import { WS_HEARTBEAT_MS, WsClientCore } from "./wsClient";
@@ -20,7 +20,7 @@ import { hubRunsNeedingTranscriptFollow, shouldArmFollowupStopOnAdopt } from "./
 import { noteOwnerBsp, clearGeneration, synthesizedStopPayload, noteHubGeneration, onFollowupBindGeneration } from "./generationStamp";
 import { parseAskInspect, askPollActions, coalesceAskInspect } from "./askDetect";
 import { enrichPlanAsk, planDirsFor } from "./planFile";
-import { PENDING_RELOAD_ATTEMPT_NAME, PENDING_RELOAD_NAME, decideReloadFire, decideWindowReload, noteReloadCommandSettled, parsePendingReload, parseReloadAttempt, windowHasInFlightArmadaRun, windowHasOpenComposerTurn, windowHasRecentSettle, type ReloadFireState } from "../../desktop-core/src/cursorReload";
+import { PENDING_RELOAD_ATTEMPT_NAME, PENDING_RELOAD_NAME, decideReloadFire, decideWindowReload, highestInstalledArmadaAgent, noteReloadCommandSettled, parsePendingReload, parseReloadAttempt, windowHasInFlightArmadaRun, windowHasOpenComposerTurn, windowHasRecentSettle, type ReloadFireState } from "../../desktop-core/src/cursorReload";
 
 const EXTENSION_VERSION = "0.4.35";
 
@@ -585,6 +585,13 @@ export function activate(context: vscode.ExtensionContext): void {
     writeFileSync(pendingReloadPath, JSON.stringify(pending), { mode: 0o600 });
   };
   let reloadFire: ReloadFireState = { lastFiredSetAt: null, lastDecision: null, inFlight: false };
+  const installedArmadaAgent = (): string | null => {
+    try {
+      return highestInstalledArmadaAgent(readdirSync(join(homedir(), ".cursor", "extensions")));
+    } catch {
+      return null;
+    }
+  };
   const considerCursorReload = (pending: ReturnType<typeof parsePendingReload>) => {
     if (disposed) return;
     const live = windowHasInFlightArmadaRun({
@@ -601,6 +608,7 @@ export function activate(context: vscode.ExtensionContext): void {
     const now = Date.now();
     const composerBusy = windowHasOpenComposerTurn({ files: composerFiles, now });
     const recentlySettled = windowHasRecentSettle({ files: composerFiles, lastStopAt, now });
+    const diskVsix = installedArmadaAgent();
     const decision = decideWindowReload({
       pending,
       thisWindowHasLiveRun: live,
@@ -608,6 +616,7 @@ export function activate(context: vscode.ExtensionContext): void {
       thisWindowRecentlySettled: recentlySettled,
       now,
       runningVsix: EXTENSION_VERSION,
+      installedVsix: diskVsix,
       machineId: machineId ?? undefined,
     });
     const attempt = decideReloadFire(reloadFire, {
@@ -618,6 +627,10 @@ export function activate(context: vscode.ExtensionContext): void {
     reloadFire = attempt.next;
     if (decision === "expired") {
       log("vsix pending-reload expired; this window still has a live Armada run or open composer turn");
+      return;
+    }
+    if (decision === "missing") {
+      log(`vsix pending-reload skipped; ${pending?.vsix} not installed (running ${EXTENSION_VERSION}, disk ${diskVsix ?? "none"})`);
       return;
     }
     if (!attempt.fire) return;

@@ -15,6 +15,7 @@ import { JoinTickets } from "./joinTickets";
 import { startRelayClient } from "./relayClient";
 import { cursorReloadView, findVsixPack, readPendingReload, vsixPackSearchDirs, writePendingReload } from "./cursorReloadStore";
 import { REQUIRED_EXTENSION_VERSION } from "../web/src/boardState";
+import { cmpSemver } from "../../desktop-core/src/cursorReload";
 
 export interface HubServer {
   server: ReturnType<typeof Bun.serve>;
@@ -47,6 +48,8 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
     const pending = readPendingReload(home);
     if (!pending) return;
     if (pending.machineId && pending.machineId !== machineId) return;
+    const ver = registry.getMachine(machineId)?.extension_version;
+    if (ver && cmpSemver(ver, pending.vsix) >= 0) return;
     registry.sendTo(machineId, windowId, { type: "ext.cursorReload", pending });
   };
 
