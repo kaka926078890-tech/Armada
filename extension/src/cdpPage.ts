@@ -1,7 +1,8 @@
 /**
- * Cursor/VS Code 窗口标题：`file — folder`、Windows `file - folder - Cursor`、或文件夹名。
+ * Cursor/VS Code 窗口标题按官方模板切段：定位产品名 token，只在它左侧全等匹配工作区文件夹。
  * 禁止 title.includes(文件夹)，以免 `armada` 命中 `armada-test-ws`。
- * Windows 真机 2026-09-18：CDP title 末段是应用名 `Cursor`，先剥一层再取文件夹段。
+ * 模板：`${dirty}${activeEditorShort} - ${rootName} - [${profileName} -] ${appName} [- ${remoteName}] [- ${activeEditorState}]`
+ * Mac ` — ` 与 Windows ` - ` 同一套函数；产品名右侧装饰（Untracked / Modified / 1 problem）丢弃。
  */
 
 export type CdpTarget = {
@@ -14,13 +15,21 @@ export type PickCdpPage =
   | { ok: true; wsUrl: string }
   | { ok: false; reason: "WINDOW_TARGET_NOT_FOUND" | "WINDOW_TARGET_AMBIGUOUS" | "NO_WS_URL" };
 
-const APP_SUFFIXES = [" — Cursor", " - Cursor"] as const;
+function splitTitleSegments(title: string): string[] {
+  const t = title.replace(/^[●•]\s*/, "").trim();
+  if (!t) return [];
+  return t.split(/ — | - /);
+}
 
-function stripAppSuffix(title: string): string {
-  for (const suffix of APP_SUFFIXES) {
-    if (title.endsWith(suffix)) return title.slice(0, -suffix.length).trimEnd();
+/** 从右找产品名（先长后短）。`Cursor Agents` 无分隔符是一个 token，不等于 Cursor。 */
+function findProductRange(parts: string[]): { start: number; end: number } | null {
+  for (let i = parts.length - 1; i >= 0; i--) {
+    if (parts[i] === "Visual Studio Code") return { start: i, end: i };
+    if (parts[i] === "Insiders" && i >= 1 && parts[i - 1] === "Code") return { start: i - 1, end: i };
+    if (parts[i] === "OSS" && i >= 1 && parts[i - 1] === "Code") return { start: i - 1, end: i };
+    if (parts[i] === "Cursor") return { start: i, end: i };
   }
-  return title;
+  return null;
 }
 
 export function workspaceFolderName(workspaceRoot: string): string {
@@ -29,12 +38,14 @@ export function workspaceFolderName(workspaceRoot: string): string {
 
 export function titleMatchesWorkspace(title: string, folder: string): boolean {
   if (!folder) return false;
-  const t = stripAppSuffix(title.trim());
-  if (t === folder) return true;
-  for (const sep of [" — ", " - "]) {
-    const i = t.lastIndexOf(sep);
-    if (i >= 0 && t.slice(i + sep.length).trim() === folder) return true;
-  }
+  const parts = splitTitleSegments(title.trim());
+  if (!parts.length) return false;
+  const product = findProductRange(parts);
+  if (!product) return parts[parts.length - 1] === folder;
+  const before = parts.slice(0, product.start);
+  if (!before.length) return false;
+  if (before[before.length - 1] === folder) return true;
+  if (before.length >= 3 && before[before.length - 2] === folder) return true;
   return false;
 }
 

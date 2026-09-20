@@ -105,9 +105,16 @@ export interface ExecutorDeps {
     prompt: string,
     steps: { bytes: Buffer; mime: string }[],
     autoSubmit: boolean,
-  ) => Promise<boolean>;
-  autoSubmitFileMentions?: (workspaceRoot: string, needles: string[]) => Promise<boolean>;
-  finishComposer?: (workspaceRoot: string, prompt: string, autoSubmit: boolean) => Promise<boolean>;
+  ) => Promise<boolean | { ok: boolean; reason?: string }>;
+  autoSubmitFileMentions?: (
+    workspaceRoot: string,
+    needles: string[],
+  ) => Promise<boolean | { ok: boolean; reason?: string }>;
+  finishComposer?: (
+    workspaceRoot: string,
+    prompt: string,
+    autoSubmit: boolean,
+  ) => Promise<boolean | { ok: boolean; reason?: string }>;
   materializeFile?: (workspaceRoot: string, runId: string, name: string, bytes: Buffer) => { needle: string };
   autoEnter?: boolean;
   /**
@@ -301,13 +308,15 @@ export class Executor {
         }));
         const skipFinish = files.length > 0;
         this.noteProgress(runId, "paste");
-        const imgOk = await this.deps.autoSubmitImages(
+        const img = autoSubmitOutcome(await this.deps.autoSubmitImages(
           workspaceRoot,
           skipFinish ? "" : prompt,
           steps,
           skipFinish ? false : this.deps.autoEnter !== false,
-        );
-        if (!imgOk) return { ok: false, reason: "IMAGE_PASTE_FAILED" };
+        ));
+        if (!img.ok) {
+          return { ok: false, reason: isCdpHardFail(img.reason) ? img.reason : "IMAGE_PASTE_FAILED" };
+        }
       }
       if (files.length) {
         if (!this.deps.fetchBlob || !this.deps.autoSubmitFileMentions) {
@@ -331,11 +340,17 @@ export class Executor {
           needles.push(write(workspaceRoot, runId, name, item.blob.bytes).needle);
         }
         this.noteProgress(runId, "paste");
-        const fileOk = await this.deps.autoSubmitFileMentions(workspaceRoot, needles);
-        if (!fileOk) return { ok: false, reason: "FILE_MENTION_FAILED" };
+        const file = autoSubmitOutcome(await this.deps.autoSubmitFileMentions(workspaceRoot, needles));
+        if (!file.ok) {
+          return { ok: false, reason: isCdpHardFail(file.reason) ? file.reason : "FILE_MENTION_FAILED" };
+        }
         if (!this.deps.finishComposer) return { ok: false, reason: "FILE_MENTION_FAILED" };
-        const fin = await this.deps.finishComposer(workspaceRoot, prompt, this.deps.autoEnter !== false);
-        if (!fin) return { ok: false, reason: "FILE_MENTION_FAILED" };
+        const fin = autoSubmitOutcome(await this.deps.finishComposer(
+          workspaceRoot, prompt, this.deps.autoEnter !== false,
+        ));
+        if (!fin.ok) {
+          return { ok: false, reason: isCdpHardFail(fin.reason) ? fin.reason : "FILE_MENTION_FAILED" };
+        }
       }
       return { ok: true };
     } catch {

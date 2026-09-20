@@ -24,6 +24,32 @@ describe("titleMatchesWorkspace", () => {
     expect(titleMatchesWorkspace("a.ts - armada - Cursor", "armada-test-ws")).toBe(false);
     expect(titleMatchesWorkspace("logo.png - work - Cursor", "Cursor")).toBe(false);
   });
+
+  const workWin = "work";
+
+  test("Windows dirty titles drop product-name-right noise (Untracked/Modified/problems)", () => {
+    expect(titleMatchesWorkspace(
+      "2026-09-20-codex-cli-finsafe-integration-issues.md - work - Cursor - Untracked",
+      workWin,
+    )).toBe(true);
+    expect(titleMatchesWorkspace("SKILL.md - work - Cursor - Modified", workWin)).toBe(true);
+    expect(titleMatchesWorkspace("file.ts - work - Cursor - 1 problem", workWin)).toBe(true);
+    expect(titleMatchesWorkspace("file.ts - work - Cursor - Conflict: Both Added", workWin)).toBe(true);
+  });
+
+  test("Mac em-dash, Profile, and Code product names still match folder token", () => {
+    expect(titleMatchesWorkspace("file.ts — work — Cursor", workWin)).toBe(true);
+    expect(titleMatchesWorkspace("file.ts - work - Dev - Cursor", workWin)).toBe(true);
+    expect(titleMatchesWorkspace("file.ts - work - Visual Studio Code", workWin)).toBe(true);
+    expect(titleMatchesWorkspace("file.ts - work - Code - Insiders", workWin)).toBe(true);
+    expect(titleMatchesWorkspace("file.ts - work - Code - OSS", workWin)).toBe(true);
+  });
+
+  test("does not treat first segment, sibling folder, or Cursor Agents as workspace", () => {
+    expect(titleMatchesWorkspace("b.ts - armada-test-ws - Cursor", "armada")).toBe(false);
+    expect(titleMatchesWorkspace("Cursor Agents", workWin)).toBe(false);
+    expect(titleMatchesWorkspace("work - other - Cursor", workWin)).toBe(false);
+  });
 });
 
 describe("pickCdpPage", () => {
@@ -79,5 +105,24 @@ describe("pickCdpPage", () => {
       "C:\\Users\\x\\armada",
     );
     expect(hit).toEqual({ ok: true, wsUrl: "ws://right" });
+  });
+
+  test("picks Windows Untracked title for Desktop/work", () => {
+    const hit = pickCdpPage(
+      [page("2026-09-20-codex-cli-finsafe-integration-issues.md - work - Cursor - Untracked", "ws://win")],
+      "C:\\Users\\PC\\Desktop\\work",
+    );
+    expect(hit).toEqual({ ok: true, wsUrl: "ws://win" });
+  });
+
+  test("two Untracked work pages → WINDOW_TARGET_AMBIGUOUS", () => {
+    const hit = pickCdpPage(
+      [
+        page("a.ts - work - Cursor - Untracked", "ws://one"),
+        page("b.ts - work - Cursor - Untracked", "ws://two"),
+      ],
+      "C:\\Users\\PC\\Desktop\\work",
+    );
+    expect(hit).toEqual({ ok: false, reason: "WINDOW_TARGET_AMBIGUOUS" });
   });
 });

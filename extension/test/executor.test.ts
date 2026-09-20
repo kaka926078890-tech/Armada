@@ -92,6 +92,37 @@ describe("Executor image path", () => {
     expect(clipboardWrites).toEqual([]);
   });
 
+  test("autoSubmitImages WINDOW_TARGET_NOT_FOUND is not rewritten to IMAGE_PASTE_FAILED", async () => {
+    const { ex, acks } = makeExec({
+      imagePaste: true,
+      fetchBlob: async () => ({ bytes: Buffer.from("x"), mime: "image/png" }),
+      autoSubmitImages: async () => ({ ok: false, reason: "WINDOW_TARGET_NOT_FOUND" }),
+    });
+    await ex.startRun({ runId: "r1", workspaceRoot: "/ws/a", prompt: "see", attachments: pngAtt });
+    expect(acks[acks.length - 1]).toEqual({
+      type: "run.ack", runId: "r1", status: "rejected", reason: "WINDOW_TARGET_NOT_FOUND",
+    });
+    expect(clipboardWrites).toEqual([]);
+  });
+
+  test("file mention WINDOW_TARGET_AMBIGUOUS is not rewritten to FILE_MENTION_FAILED", async () => {
+    const { ex, acks } = makeExec({
+      imagePaste: true,
+      fetchBlob: async () => ({ bytes: Buffer.from("hi"), mime: "text/plain" }),
+      autoSubmitFileMentions: async () => ({ ok: false, reason: "WINDOW_TARGET_AMBIGUOUS" }),
+      finishComposer: async () => true,
+      materializeFile: () => ({ needle: "def-notes.txt" }),
+    });
+    await ex.startRun({
+      runId: "r1", workspaceRoot: "/ws/a", prompt: "see",
+      attachments: [{ sha256: "def", mime: "text/plain", id: "def", name: "notes.txt" }],
+    });
+    expect(acks[acks.length - 1]).toEqual({
+      type: "run.ack", runId: "r1", status: "rejected", reason: "WINDOW_TARGET_AMBIGUOUS",
+    });
+    expect(clipboardWrites).toEqual([]);
+  });
+
   test("followup IMAGE_PASTE_FAILED does not bindKnown", async () => {
     let bound = 0;
     const { ex, acks } = makeExec({

@@ -37,6 +37,15 @@ export interface CdpSubmitterDeps {
   connect?: (wsUrl: string, timeoutMs: number) => Promise<CdpSession>;
   sleep?: (ms: number) => Promise<void>;
   log?: (s: string) => void;
+  /** vscode.env.sessionId；缺省时不扫 stamp，选窗只走标题切段。 */
+  windowId?: string;
+}
+
+export const WINDOW_STAMP_ATTR = "data-armada-window-id";
+export const WINDOW_STAMP_READ_EXPRESSION =
+  `document.documentElement.getAttribute(${JSON.stringify(WINDOW_STAMP_ATTR)})`;
+export function windowStampWriteExpression(windowId: string): string {
+  return `document.documentElement.setAttribute(${JSON.stringify(WINDOW_STAMP_ATTR)}, ${JSON.stringify(windowId)})`;
 }
 
 const SEL = 'div.aislash-editor-input[contenteditable="true"], div.tiptap[contenteditable="true"]';
@@ -527,22 +536,72 @@ export const PLAN_CLICK_BUILD_JS = `function () {
 
 export type AskCdpInspect = AskInspect;
 
+async function readWindowStamp(session: CdpSession): Promise<string | null> {
+  try {
+    const v = await session.call("Runtime.evaluate", {
+      expression: WINDOW_STAMP_READ_EXPRESSION,
+      returnByValue: true,
+    });
+    const val = v?.result?.value;
+    return typeof val === "string" && val ? val : null;
+  } catch {
+    return null;
+  }
+}
+
 async function connectWorkspacePage(
   deps: Required<Pick<CdpSubmitterDeps, "port">> & CdpSubmitterDeps,
   workspaceRoot: string,
 ): Promise<{ ok: true; session: CdpSession } | { ok: false; reason: string }> {
   const fetchJson = deps.fetchJson ?? defaultFetchJson;
   const connect = deps.connect ?? defaultConnect;
+  const log = deps.log ?? (() => {});
   let targets: any[];
   try {
     targets = await fetchJson(`http://127.0.0.1:${deps.port}/json`, 1500);
   } catch {
     return { ok: false, reason: "CDP_UNREACHABLE" };
   }
+  const windowId = typeof deps.windowId === "string" ? deps.windowId.trim() : "";
+  if (windowId) {
+    const pages = (Array.isArray(targets) ? targets : []).filter(
+      (t) => t?.type === "page" && typeof t.webSocketDebuggerUrl === "string" && t.webSocketDebuggerUrl,
+    );
+    const opened: CdpSession[] = [];
+    const hits: CdpSession[] = [];
+    for (const t of pages) {
+      try {
+        const session = await connect(String(t.webSocketDebuggerUrl), 2000);
+        opened.push(session);
+        const stamp = await readWindowStamp(session);
+        if (stamp === windowId) hits.push(session);
+      } catch {
+        // 连不上或读失败当未盖章，不据此 AMBIGUOUS
+      }
+    }
+    if (hits.length === 1) {
+      for (const s of opened) {
+        if (s !== hits[0]) s.close();
+      }
+      return { ok: true, session: hits[0]! };
+    }
+    for (const s of opened) s.close();
+    if (hits.length > 1) return { ok: false, reason: "WINDOW_TARGET_AMBIGUOUS" };
+  }
   const picked = pickCdpPage(targets, workspaceRoot);
   if (!picked.ok) return picked;
   try {
     const session = await connect(picked.wsUrl, 2000);
+    if (windowId) {
+      try {
+        await session.call("Runtime.evaluate", {
+          expression: windowStampWriteExpression(windowId),
+          returnByValue: true,
+        });
+      } catch (e) {
+        log(`window stamp write failed: ${String(e)}`);
+      }
+    }
     return { ok: true, session };
   } catch (e) {
     return { ok: false, reason: `CDP_CONNECT_FAIL:${String(e)}` };

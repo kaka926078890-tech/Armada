@@ -22,7 +22,7 @@ import { parseAskInspect, askPollActions, coalesceAskInspect } from "./askDetect
 import { enrichPlanAsk, planDirsFor } from "./planFile";
 import { PENDING_RELOAD_ATTEMPT_NAME, PENDING_RELOAD_NAME, decideReloadFire, decideWindowReload, noteReloadCommandSettled, parsePendingReload, parseReloadAttempt, windowHasInFlightArmadaRun, type ReloadFireState } from "../../desktop-core/src/cursorReload";
 
-const EXTENSION_VERSION = "0.4.32";
+const EXTENSION_VERSION = "0.4.33";
 
 let client: { dispose: () => void } | null = null;
 
@@ -82,11 +82,12 @@ export function activate(context: vscode.ExtensionContext): void {
   const askLastByRun = new Map<string, string>();
   const askPlanTextByRun = new Map<string, string>();
 
-  const cdpSubmit = config.autoSubmit ? createCdpSubmitter({ port: config.cdpPort, log }) : null;
-  const imagePaster = createImagePaster({ port: config.cdpPort, log });
-  const filePaster = createFileMentionPaster({ port: config.cdpPort, log });
-  const composerFinisher = createComposerFinisher({ port: config.cdpPort, log });
-  const askDriver = createAskQuestionDriver({ port: config.cdpPort, log });
+  const cdpDeps = { port: config.cdpPort, log, windowId };
+  const cdpSubmit = config.autoSubmit ? createCdpSubmitter(cdpDeps) : null;
+  const imagePaster = createImagePaster(cdpDeps);
+  const filePaster = createFileMentionPaster(cdpDeps);
+  const composerFinisher = createComposerFinisher(cdpDeps);
+  const askDriver = createAskQuestionDriver(cdpDeps);
   log(`autoSubmit=${config.autoSubmit} imagePaste=${config.imagePaste} cdpPort=${config.cdpPort}`);
 
   // transcript 事件走独立高段,避免与 spool seq 冲突。
@@ -330,7 +331,7 @@ export function activate(context: vscode.ExtensionContext): void {
         const r = await imagePaster(workspaceRoot, prompt, steps, (b, m) => writer.write(b, m), autoSubmit);
         if (!r.ok) log(`image paste failed: ${r.reason}`);
         else log("image paste ok");
-        return r.ok;
+        return r;
       } finally {
         await writer.close();
       }
@@ -339,13 +340,13 @@ export function activate(context: vscode.ExtensionContext): void {
       const r = await filePaster(workspaceRoot, needles);
       if (!r.ok) log(`file mention failed: ${r.reason}`);
       else log("file mention ok");
-      return r.ok;
+      return r;
     },
     finishComposer: async (workspaceRoot, prompt, autoSubmit) => {
       const r = await composerFinisher(workspaceRoot, prompt, autoSubmit);
       if (!r.ok) log(`composer finish failed: ${r.reason}`);
       else log("composer finish ok");
-      return r.ok;
+      return r;
     },
     answerAskCdp: async ({ workspaceRoot, action, letter, kind, text }) => {
       const r = await askDriver.submit(workspaceRoot, action, letter, kind, text);

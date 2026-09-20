@@ -12,6 +12,20 @@ Armada 按 **面** 发版：扩展、桌面、iOS、Android 可以不同号。RE
 
 ---
 
+## 2026-09-20 — 扩展 0.4.33 · iOS TF 22 · Android 0.1.9 · 桌面 0.1.0
+
+### 修复
+
+- Windows 窗口标题带 Untracked / Modified / 1 problem 等装饰时仍能选中工作区页：按官方 `window.title` 模板切段，只在产品名左侧全等匹配文件夹，不再跟装饰文案打地鼠。
+- 连上工作区页后把 `vscode.env.sessionId` 盖到 `document.documentElement[data-armada-window-id]`；之后选页先认盖章，标题只做冷启动。
+- 带图 / 文件提及选窗失败时 Hub ack 透传 `WINDOW_TARGET_*` / `NO_WS_URL` / `CDP_*`，不再一律改写成 `IMAGE_PASTE_FAILED` / `FILE_MENTION_FAILED`。
+
+### 操作员注意
+
+Windows 被控须 **先装** `armada-agent-0.4.33.vsix` 再空闲 Reload。只 Reload 不会从 0.4.32 升上去（同号会被 `skipped-same-version` 跳过）。看板落后会提示「需 0.4.33」。中台须 overlay 到含 `REQUIRED_EXTENSION_VERSION=0.4.33` 的包装 hub，否则 Reload 按钮仍写旧号。桌面仍是 **0.1.0**；iOS TestFlight **22**；Android **0.1.9**（versionCode 10）。
+
+---
+
 ## 2026-09-20 — iOS TF 22 · Android 0.1.9 · 桌面 overlay
 
 ### 新增

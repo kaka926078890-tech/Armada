@@ -405,6 +405,124 @@ describe("createCdpSubmitter", () => {
   });
 });
 
+const STAMP_ATTR = "data-armada-window-id";
+
+function stampSession(opts: {
+  stamp?: string | null;
+  evalResults?: unknown[];
+  log?: CallLog[];
+  closed?: { n: number };
+}): CdpSession {
+  let i = 0;
+  const evalResults = opts.evalResults ?? ["OK", "OK", "OK"];
+  const log = opts.log ?? [];
+  return {
+    async call(method, params) {
+      log.push({ method, params });
+      if (method === "Runtime.evaluate") {
+        const expr = String(params?.expression ?? "");
+        if (expr.includes(STAMP_ATTR)) {
+          if (/setAttribute/.test(expr)) return { result: { value: undefined } };
+          return { result: { value: opts.stamp ?? null } };
+        }
+        const v = evalResults[Math.min(i++, evalResults.length - 1)];
+        return { result: { value: v } };
+      }
+      return {};
+    },
+    close() { if (opts.closed) opts.closed.n += 1; },
+  };
+}
+
+describe("connectWorkspacePage window stamp", () => {
+  const workRoot = "C:\\Users\\PC\\Desktop\\work";
+  const WID = "sess-win-1";
+
+  test("stamp hit wins even when title has no folder (priority over v1)", async () => {
+    const logs = new Map<string, CallLog[]>();
+    const submit = createCdpSubmitter(deps({
+      windowId: WID,
+      fetchJson: async () => [
+        { type: "page", title: "Cursor Agents", webSocketDebuggerUrl: "ws://agents" },
+        { type: "page", title: "unrelated - Cursor - Modified", webSocketDebuggerUrl: "ws://stamped" },
+      ],
+      connect: async (wsUrl) => {
+        const log: CallLog[] = [];
+        logs.set(wsUrl, log);
+        return stampSession({
+          stamp: wsUrl === "ws://stamped" ? WID : null,
+          log,
+        });
+      },
+    }));
+    expect((await submit(workRoot, "hi")).ok).toBe(true);
+    expect(logs.get("ws://stamped")?.some((c) => c.method === "Input.insertText")).toBe(true);
+    expect(logs.get("ws://agents")?.some((c) => c.method === "Input.insertText")).toBe(false);
+  });
+
+  test("two pages with the same stamp → WINDOW_TARGET_AMBIGUOUS and no inject", async () => {
+    const logs: CallLog[] = [];
+    let connected = 0;
+    const submit = createCdpSubmitter(deps({
+      windowId: WID,
+      fetchJson: async () => [
+        { type: "page", title: "Cursor Agents", webSocketDebuggerUrl: "ws://one" },
+        { type: "page", title: "unrelated - Cursor - Modified", webSocketDebuggerUrl: "ws://two" },
+      ],
+      connect: async () => {
+        connected += 1;
+        return stampSession({ stamp: WID, log: logs });
+      },
+    }));
+    expect(await submit(workRoot, "hi")).toEqual({ ok: false, reason: "WINDOW_TARGET_AMBIGUOUS" });
+    expect(connected).toBe(2);
+    expect(logs.some((c) => c.method === "Input.insertText")).toBe(false);
+  });
+
+  test("windowId set, no stamp, dirty title still v1-matches and writes stamp", async () => {
+    const log: CallLog[] = [];
+    const closed = { n: 0 };
+    let connects = 0;
+    const submit = createCdpSubmitter(deps({
+      windowId: WID,
+      fetchJson: async () => [{
+        type: "page",
+        title: "SKILL.md - work - Cursor - Modified",
+        webSocketDebuggerUrl: "ws://work",
+      }],
+      connect: async () => {
+        connects += 1;
+        return stampSession({ stamp: null, evalResults: ["OK", "OK", "OK"], log, closed });
+      },
+    }));
+    expect((await submit(workRoot, "hi")).ok).toBe(true);
+    const writes = log.filter((c) =>
+      c.method === "Runtime.evaluate" && /setAttribute/.test(String(c.params?.expression ?? ""))
+      && String(c.params?.expression ?? "").includes(STAMP_ATTR));
+    expect(writes.length).toBeGreaterThan(0);
+    expect(connects).toBeGreaterThanOrEqual(1);
+  });
+
+  test("no windowId, Untracked title is v1 title-match not stamp", async () => {
+    const log: CallLog[] = [];
+    let connected = 0;
+    const submit = createCdpSubmitter(deps({
+      fetchJson: async () => [{
+        type: "page",
+        title: "SKILL.md - work - Cursor - Untracked",
+        webSocketDebuggerUrl: "ws://work",
+      }],
+      connect: async () => {
+        connected += 1;
+        return mockSession(["OK", "OK", "OK"], log);
+      },
+    }));
+    expect((await submit(workRoot, "hi")).ok).toBe(true);
+    expect(connected).toBe(1);
+    expect(log.some((c) => String(c.params?.expression ?? "").includes(STAMP_ATTR))).toBe(false);
+  });
+});
+
 describe("createImagePaster", () => {
   test("chip count never reaches N → CHIP_COUNT and no Enter", async () => {
     const log: CallLog[] = [];
@@ -904,6 +1022,17 @@ describe("AskQuestion CDP driver", () => {
   test("extension forwards kind into askDriver.submit", () => {
     const src = readFileSync(join(import.meta.dir, "../src/extension.ts"), "utf8");
     expect(src).toMatch(/askDriver\.submit\(\s*workspaceRoot,\s*action,\s*letter,\s*kind/);
+  });
+
+  test("extension shares windowId CDP deps and returns image paste result object", () => {
+    const src = readFileSync(join(import.meta.dir, "../src/extension.ts"), "utf8");
+    expect(src).toMatch(/const cdpDeps = \{ port: config\.cdpPort, log, windowId \}/);
+    expect(src).toMatch(/createCdpSubmitter\(cdpDeps\)/);
+    expect(src).toMatch(/createImagePaster\(cdpDeps\)/);
+    expect(src).toMatch(/createFileMentionPaster\(cdpDeps\)/);
+    expect(src).toMatch(/createComposerFinisher\(cdpDeps\)/);
+    expect(src).toMatch(/createAskQuestionDriver\(cdpDeps\)/);
+    expect(src).toMatch(/image paste failed[\s\S]*return r;/);
   });
 });
 
