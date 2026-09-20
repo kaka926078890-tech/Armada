@@ -225,10 +225,6 @@ export function fleetErrorCopy(raw: string): string {
     const mapped = byCode.get(colon[1]!);
     if (mapped) return mapped;
   }
-  const tokens = blob.split(/[^a-z0-9-]+/).filter(Boolean);
-  for (const [code, msg] of codes) {
-    if (tokens.includes(code)) return msg;
-  }
   return "操作失败";
 }
 

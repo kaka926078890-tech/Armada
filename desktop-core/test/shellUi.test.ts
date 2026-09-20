@@ -256,10 +256,9 @@ describe("fleetErrorCopy", () => {
   test("structured unauthorized is not beaten by substring invalid", () => {
     expect(fleetErrorCopy("invalid")).toBe("链接无效");
     expect(fleetErrorCopy("Command join_fleet failed: invalid")).toBe("链接无效");
-    expect(fleetErrorCopy("invalid ticket unauthorized")).toBe(
-      "加入票据无效或已过期，请让中台重新打开可发现",
-    );
+    expect(fleetErrorCopy("invalid ticket unauthorized")).toBe("操作失败");
     expect(fleetErrorCopy("settings-invalid")).not.toBe("链接无效");
+    expect(fleetErrorCopy("please unauthorized now")).toBe("操作失败");
   });
 });
 
