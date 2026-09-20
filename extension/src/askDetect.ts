@@ -159,7 +159,7 @@ function uniqueBoundRunId(bound: Iterable<[string, { conversationId: string }]>)
   return only;
 }
 
-/** Questions 只挂拥有该 composer cid 的 run。无 cid 时仅唯一仍活的 bound run 可挂；已停跑不得 last-key。Plan/Build 可挂停跑主人以便 hub 复开。 */
+/** Questions 只挂拥有该 composer cid 的 run。无 cid 时仅唯一仍活的 bound run 可挂；已停跑不得 last-key。Plan/Build 可挂停跑主人以便 hub 复开；取消主人必须死，transcript 卡残留不得再挂 pending。 */
 export function askPollActions(
   bound: Iterable<[string, { conversationId: string }]>,
   prevByRun: Iterable<[string, string]>,
@@ -168,9 +168,13 @@ export function askPollActions(
   now = Date.now(),
   stopped: Iterable<string> = [],
   prevPlanTextByRun: Iterable<[string, string]> = [],
+  cancelled: Iterable<string> = [],
 ): AskPollAct[] {
   if (isAskUnknown(inspect)) return [];
-  const dead = inspect.present && inspect.kind === "plan" ? new Set<string>() : new Set(stopped);
+  const cancelledIds = new Set(cancelled);
+  const dead = inspect.present && inspect.kind === "plan"
+    ? cancelledIds
+    : new Set([...stopped, ...cancelledIds]);
   const live = [...bound].filter(([id]) => !dead.has(id));
   const widgetCid = inspect.present ? inspect.conversation_id : undefined;
   const owner = latestRunIdForConversation(live, widgetCid)

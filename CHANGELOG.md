@@ -16,6 +16,7 @@ Armada 按 **面** 发版：扩展、桌面、iOS、Android 可以不同号。RE
 
 ### 修复
 
+- 取消 Plan 后 leftover Build 不再当 pending，也不挂到同窗下一条（Cursor 的 Created Plan transcript 卡本身没有关闭按钮，屏上仍可能留着 View Plan / Build）。
 - 中转限制手机请求体体积；桌面看板 CSP 收到 `http://*:7380`，不再放行任意端口。
 - 看板派发框留在视口内；五列卡片标题过长截断。
 - 中转 run 快照按 `fleet` 隔离；畸形 `register` / JSON 直接 400。

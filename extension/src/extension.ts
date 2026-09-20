@@ -74,6 +74,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const boundPaths = new Map<string, string>();
   const boundWorkspaces = new Map<string, string>();
   const stopSent = new Set<string>();
+  const cancelledRuns = new Set<string>();
   const childConversations = new Map<string, string>();
   const sizeWatches = new Map<string, () => void>();
   const cancelWatcher = new CancelWatcher();
@@ -492,7 +493,7 @@ export function activate(context: vscode.ExtensionContext): void {
       const acts = askPollActions(
         boundRuns, askLastByRun, inspect,
         (runId) => `ask-${runId}-${nextExtSeq()}`, Date.now(), stopSent,
-        askPlanTextByRun,
+        askPlanTextByRun, cancelledRuns,
       );
       for (const act of acts) {
         if (act.type === "askQuestion") {
@@ -699,6 +700,18 @@ export function activate(context: vscode.ExtensionContext): void {
           const b = boundRuns.get(msg.runId);
           const liveGen = lastGenerationId.get(msg.runId);
           clearGeneration(lastGenerationId, msg.runId);
+          cancelledRuns.add(msg.runId);
+          const prevAsk = askLastByRun.get(msg.runId);
+          if (prevAsk) {
+            askLastByRun.delete(msg.runId);
+            askPlanTextByRun.delete(msg.runId);
+            core.enqueue({
+              type: "run.event", runId: msg.runId, conversationId: b?.conversationId,
+              source: "cdp", hookEventName: "askQuestionResolved",
+              payload: { request_id: prevAsk, via: "cancel", conversation_id: b?.conversationId },
+              ts: Date.now(), seq: nextExtSeq(),
+            });
+          }
           const cid = msg.conversationId ?? b?.conversationId;
           if (cid) {
             cancelWatcher.record(msg.runId, cid, liveGen, Date.now());

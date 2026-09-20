@@ -211,6 +211,34 @@ describe("askPollActions", () => {
     ]);
   });
 
+  test("cancelled owner resolves leftover plan and does not attach it to a sibling", () => {
+    const bound = new Map([
+      ["r-plan", { conversationId: "cid-plan" }],
+      ["r-next", { conversationId: "cid-next" }],
+    ]);
+    const plan = {
+      present: true as const,
+      kind: "plan" as const,
+      filename: "R3-overlay",
+      prompt: "Created Plan: R3-overlay",
+      conversation_id: "cid-plan",
+      options: [{ id: "build", label: "Build", text: "Build" }],
+    };
+    const acts = askPollActions(
+      bound,
+      new Map([["r-plan", "ask-old"]]),
+      plan,
+      () => "ask-new",
+      9,
+      [],
+      [],
+      ["r-plan"],
+    );
+    expect(acts).toEqual([
+      { type: "askQuestionResolved", runId: "r-plan", request_id: "ask-old" },
+    ]);
+  });
+
   test("gone widget resolves only the owner that had pending", () => {
     const bound = new Map([["r-1", { conversationId: "cid-1" }]]);
     const acts = askPollActions(bound, new Map([["r-1", "ask-1"]]), { present: false }, () => "x");
