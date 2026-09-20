@@ -1,3 +1,5 @@
+import { LIVE_STATUSES, RETRY_STATUSES, isStatus } from "../../src/runStatus";
+
 export interface RunRow {
   id: string; machine_id: string; window_id: string | null; workspace_root: string;
   prompt: string; title?: string | null; status: string; conversation_id: string | null;
@@ -216,7 +218,7 @@ export function filterRunsByWorkspace(runs: RunRow[], machineId: string, root: s
   return runs.filter((r) => r.machine_id === machineId && r.workspace_root === root);
 }
 
-const LIVE = new Set(["created", "queued", "dispatched", "binding", "running"]);
+const LIVE = new Set<string>(LIVE_STATUSES);
 
 /** 工作区展示名：路径最后一段。Windows `\` 与 POSIX `/` 都认。 */
 export function workspaceFolderName(root: string): string {
@@ -325,9 +327,7 @@ export function canArchiveRun(run: Pick<RunRow, "status">): boolean {
   return !LIVE.has(run.status);
 }
 
-const RETRY_STATUSES = ["error", "unknown", "aborted"] as const;
-
 /** 失败 / 未知 / 中止：同一张卡再派发或续上原对话。已取消、已完成不重试。 */
 export function canRetryRun(run: Pick<RunRow, "status">): boolean {
-  return (RETRY_STATUSES as readonly string[]).includes(run.status);
+  return isStatus(run.status, RETRY_STATUSES);
 }

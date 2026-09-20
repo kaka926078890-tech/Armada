@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "fs";
 import { join } from "path";
+import { PROGRESSING_STATUSES, sqlStatusIn } from "./runStatus";
 
 const SCHEMA = `
 PRAGMA journal_mode=WAL;
@@ -87,7 +88,7 @@ export function openDb(home: string): Database {
   )`);
   ensureColumn(db, "blobs", "unref_at", "unref_at INTEGER");
   ensureColumn(db, "blobs", "name", "name TEXT NOT NULL DEFAULT ''");
-  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_runs_cid_active ON runs(conversation_id) WHERE conversation_id IS NOT NULL AND status IN ('dispatched','binding','running')`);
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_runs_cid_active ON runs(conversation_id) WHERE conversation_id IS NOT NULL AND status IN (${sqlStatusIn(PROGRESSING_STATUSES)})`);
   return db;
 }
 

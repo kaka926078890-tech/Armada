@@ -1,11 +1,19 @@
 import { normalizePrompt } from "../../extension/src/promptNormalize";
+import { RETRY_STATUSES } from "./runStatus";
 export { normalizePrompt };
 
-export const OCCUPYING_STATUSES = ["queued", "dispatched", "binding", "running"] as const;
-export const INJECTING_STATUSES = ["dispatched", "binding"] as const;
-export const RETRY_STATUSES = ["error", "unknown", "aborted"] as const;
-export const TERMINAL_STATUSES = ["completed", "error", "aborted", "cancelled"] as const;
-export const ACTIVE_STATUSES = ["created", "dispatched", "binding", "running"] as const;
+export {
+  OCCUPYING_STATUSES,
+  INJECTING_STATUSES,
+  PROGRESSING_STATUSES,
+  RETRY_STATUSES,
+  TERMINAL_STATUSES,
+  ACTIVE_STATUSES,
+  LIVE_STATUSES,
+  ENDED_STATUSES,
+  sqlStatusIn,
+  isStatus,
+} from "./runStatus";
 
 /** Same gate as `runs.retry()`: error / unknown / aborted. */
 export function canRetryStatus(status: string): boolean {

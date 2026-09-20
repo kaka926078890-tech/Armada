@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { normalizePrompt } from "../../extension/src/promptNormalize";
-import { limitsFromEnv, extensionSupportsMultiRunPerWindow, httpStatusForRunError, followupOutcome, ACTIVE_STATUSES, TERMINAL_STATUSES, OCCUPYING_STATUSES } from "../src/concurrency";
+import { limitsFromEnv, extensionSupportsMultiRunPerWindow, httpStatusForRunError, followupOutcome, ACTIVE_STATUSES, TERMINAL_STATUSES, OCCUPYING_STATUSES, LIVE_STATUSES, ENDED_STATUSES, INJECTING_STATUSES, PROGRESSING_STATUSES, sqlStatusIn, RETRY_STATUSES } from "../src/concurrency";
 
 describe("normalizePrompt", () => {
   test("trims, strips CR, collapses whitespace", () => {
@@ -34,25 +34,45 @@ describe("extensionSupportsMultiRunPerWindow", () => {
 });
 
 describe("status tables", () => {
-  test("ACTIVE / TERMINAL / OCCUPYING membership is owned here", () => {
+  test("ACTIVE / TERMINAL / OCCUPYING / LIVE membership is owned here", () => {
     expect([...ACTIVE_STATUSES]).toEqual(["created", "dispatched", "binding", "running"]);
     expect([...TERMINAL_STATUSES]).toEqual(["completed", "error", "aborted", "cancelled"]);
     expect([...OCCUPYING_STATUSES]).toEqual(["queued", "dispatched", "binding", "running"]);
+    expect([...LIVE_STATUSES]).toEqual(["created", "queued", "dispatched", "binding", "running"]);
+    expect([...ENDED_STATUSES]).toEqual(["completed", "error", "aborted", "cancelled", "unknown"]);
+    expect([...INJECTING_STATUSES]).toEqual(["dispatched", "binding"]);
+    expect([...PROGRESSING_STATUSES]).toEqual(["dispatched", "binding", "running"]);
+    expect([...RETRY_STATUSES]).toEqual(["error", "unknown", "aborted"]);
     expect(ACTIVE_STATUSES).not.toContain("queued");
     expect(OCCUPYING_STATUSES).not.toContain("created");
+    expect(LIVE_STATUSES).toContain("queued");
+    expect(sqlStatusIn(OCCUPYING_STATUSES)).toBe("'queued','dispatched','binding','running'");
   });
 
   test("runs.ts and ingest.ts import ACTIVE from concurrency, not a local copy", async () => {
     const runs = await Bun.file(new URL("../src/runs.ts", import.meta.url)).text();
     const ingest = await Bun.file(new URL("../src/ingest.ts", import.meta.url)).text();
     expect(runs).toMatch(/ACTIVE_STATUSES/);
-    expect(runs).toMatch(/TERMINAL_STATUSES/);
+    expect(runs).toMatch(/ENDED_STATUSES/);
     expect(runs).toMatch(/OCCUPYING_STATUSES/);
+    expect(runs).toMatch(/sqlStatusIn\(OCCUPYING_STATUSES\)/);
+    expect(runs).not.toMatch(/status IN \('queued','dispatched','binding','running'\)/);
     expect(runs).not.toMatch(/const ACTIVE = \[/);
     expect(ingest).toMatch(/ACTIVE_STATUSES/);
     expect(ingest).toMatch(/TERMINAL_STATUSES/);
     expect(ingest).toMatch(/OCCUPYING_STATUSES/);
     expect(ingest).not.toMatch(/const ACTIVE = \[/);
+  });
+
+  test("Rel-M7: board and App isLive copies match LIVE_STATUSES", async () => {
+    const liveLit = [...LIVE_STATUSES].map((s) => `"${s}"`).join(", ");
+    const board = await Bun.file(new URL("../web/src/boardState.ts", import.meta.url)).text();
+    const ios = await Bun.file(new URL("../../mobile/ios/ArmadaRemote/RelayAPI.swift", import.meta.url)).text();
+    const android = await Bun.file(new URL("../../mobile/android/core/src/main/kotlin/app/armada/remote/Models.kt", import.meta.url)).text();
+    expect(board).toMatch(/LIVE_STATUSES/);
+    expect(board).not.toMatch(/new Set\(\["created", "queued"/);
+    expect(ios).toContain(`[${liveLit}].contains(status)`);
+    expect(android).toContain(`setOf(${liveLit})`);
   });
 });
 

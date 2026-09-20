@@ -9,7 +9,12 @@ import {
   extensionSupportsMultiRunPerWindow,
   OCCUPYING_STATUSES,
   ACTIVE_STATUSES,
-  TERMINAL_STATUSES,
+  ENDED_STATUSES,
+  INJECTING_STATUSES,
+  PROGRESSING_STATUSES,
+  sqlStatusIn,
+  isStatus,
+  canRetryStatus,
 } from "./concurrency";
 import { workspacePathIn } from "../../extension/src/workspacePath";
 import { BIND_TIMEOUT_MS, WINDOWS_BIND_TIMEOUT_MS } from "../../extension/src/transcriptBind";
@@ -51,7 +56,7 @@ export class RunService {
   private askTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   private terminal(status: string): boolean {
-    return ["completed", "aborted", "error", "cancelled", "unknown"].includes(status);
+    return isStatus(status, ENDED_STATUSES);
   }
 
   private wsAttachments(ids: string[]): BlobMeta[] | undefined {
@@ -68,7 +73,7 @@ export class RunService {
   private setStatus(id: string, status: string, extra: Record<string, unknown> = {}, actor = "hub") {
     const sets = ["status=?2"]; const vals: unknown[] = [id, status];
     for (const [k, v] of Object.entries(extra)) { sets.push(`${k}=?${vals.length + 1}`); vals.push(v); }
-    if (["completed", "aborted", "error", "cancelled", "unknown"].includes(status) && !("ended_at" in extra)) {
+    if (isStatus(status, ENDED_STATUSES) && !("ended_at" in extra)) {
       sets.push(`ended_at=?${vals.length + 1}`); vals.push(Date.now());
     }
     this.db.query(`UPDATE runs SET ${sets.join(", ")} WHERE id=?1`).run(...vals as any);
@@ -84,17 +89,17 @@ export class RunService {
   private countOccupying(machineId: string, workspaceRoot?: string): number {
     if (workspaceRoot) {
       return (this.db.query(
-        `SELECT COUNT(*) AS n FROM runs WHERE machine_id=?1 AND workspace_root=?2 AND status IN ('queued','dispatched','binding','running')`,
+        `SELECT COUNT(*) AS n FROM runs WHERE machine_id=?1 AND workspace_root=?2 AND status IN (${sqlStatusIn(OCCUPYING_STATUSES)})`,
       ).get(machineId, workspaceRoot) as { n: number }).n;
     }
     return (this.db.query(
-      `SELECT COUNT(*) AS n FROM runs WHERE machine_id=?1 AND status IN ('queued','dispatched','binding','running')`,
+      `SELECT COUNT(*) AS n FROM runs WHERE machine_id=?1 AND status IN (${sqlStatusIn(OCCUPYING_STATUSES)})`,
     ).get(machineId) as { n: number }).n;
   }
 
   private injectSlotCount(machineId: string): number {
     const injectingRuns = (this.db.query(
-      `SELECT COUNT(*) AS n FROM runs WHERE machine_id=?1 AND status IN ('dispatched','binding')`,
+      `SELECT COUNT(*) AS n FROM runs WHERE machine_id=?1 AND status IN (${sqlStatusIn(INJECTING_STATUSES)})`,
     ).get(machineId) as { n: number }).n;
     const injectingOutbound = (this.db.query(
       `SELECT COUNT(*) AS n FROM run_outbound o JOIN runs r ON r.id=o.run_id
@@ -246,14 +251,14 @@ export class RunService {
   private hasPromptCollision(machineId: string, workspaceRoot: string, prompt: string, attachmentIds: string[], exceptId?: string): boolean {
     const key = collisionKey(prompt, attachmentIds);
     const rows = this.db.query(
-      `SELECT id, prompt, attachments FROM runs WHERE machine_id=?1 AND workspace_root=?2 AND status IN ('queued','dispatched','binding','running')`,
+      `SELECT id, prompt, attachments FROM runs WHERE machine_id=?1 AND workspace_root=?2 AND status IN (${sqlStatusIn(OCCUPYING_STATUSES)})`,
     ).all(machineId, workspaceRoot) as { id: string; prompt: string; attachments: string }[];
     return rows.some((r) => r.id !== exceptId && collisionKey(r.prompt, parseAttachmentIds(r.attachments)) === key);
   }
 
   private windowHasPendingAsk(machineId: string, windowId: string): boolean {
     const rows = this.db.query(
-      `SELECT pending_ask FROM runs WHERE machine_id=?1 AND window_id=?2 AND status IN ('dispatched','binding','running') AND pending_ask IS NOT NULL`,
+      `SELECT pending_ask FROM runs WHERE machine_id=?1 AND window_id=?2 AND status IN (${sqlStatusIn(PROGRESSING_STATUSES)}) AND pending_ask IS NOT NULL`,
     ).all(machineId, windowId) as { pending_ask: string }[];
     return rows.some((r) => parsePendingAsk(r.pending_ask) != null);
   }
@@ -263,7 +268,7 @@ export class RunService {
     const ver = this.registry.windowExtensionVersion(machineId, windowId);
     if (extensionSupportsMultiRunPerWindow(ver)) return true;
     const row = this.db.query(
-      `SELECT id FROM runs WHERE machine_id=?1 AND window_id=?2 AND status IN ('dispatched','binding','running') LIMIT 1`,
+      `SELECT id FROM runs WHERE machine_id=?1 AND window_id=?2 AND status IN (${sqlStatusIn(PROGRESSING_STATUSES)}) LIMIT 1`,
     ).get(machineId, windowId);
     return !row;
   }
@@ -364,7 +369,7 @@ export class RunService {
 
     if (!this.limits.multiRunPerWindow) {
       const sameWindowActive = this.db.query(
-        `SELECT id FROM runs WHERE machine_id=?1 AND window_id=?2 AND status IN ('queued','dispatched','binding','running') LIMIT 1`,
+        `SELECT id FROM runs WHERE machine_id=?1 AND window_id=?2 AND status IN (${sqlStatusIn(OCCUPYING_STATUSES)}) LIMIT 1`,
       ).get(machineId, win.windowId);
       if (sameWindowActive) return { error: "WINDOW_BUSY" };
     }
@@ -434,7 +439,7 @@ export class RunService {
     ).all(machineId) as any[];
     const hits = rows.filter((r) => {
       if (!workspacePathIn(r.workspace_root, workspaceRoots)) return false;
-      if (!["dispatched", "binding"].includes(r.status) && !this.isFalseBindTimeout(r) && !this.isFalseDispatchTimeout(r)) return false;
+      if (!isStatus(r.status, INJECTING_STATUSES) && !this.isFalseBindTimeout(r) && !this.isFalseDispatchTimeout(r)) return false;
       return this.promptCompatible(r, prompt);
     });
     return hits.length === 1 ? hits[0] : null;
@@ -504,7 +509,7 @@ export class RunService {
     const run = this.get(msg.runId);
     if (!run) return;
     const recoverable = this.isFalseDispatchTimeout(run) || this.isFalseBindTimeout(run);
-    if (!["binding", "dispatched"].includes(run.status) && !recoverable) return;
+    if (!isStatus(run.status, INJECTING_STATUSES) && !recoverable) return;
     if (recoverable && this.denyReviveIfSlotBusy(machineId, run.id)) return;
     const cid = typeof msg.conversationId === "string" && msg.conversationId.trim()
       ? msg.conversationId.trim()
@@ -528,7 +533,7 @@ export class RunService {
   onBindAmbiguous(runId: string): void {
     const run = this.get(runId);
     if (!run) return;
-    if (!["dispatched", "binding"].includes(run.status)) return;
+    if (!isStatus(run.status, INJECTING_STATUSES)) return;
     this.setStatus(run.id, "unknown", { end_reason: "BIND_AMBIGUOUS" }, "extension");
     this.promoteNextQueued(run.machine_id);
   }
@@ -779,7 +784,7 @@ export class RunService {
   /** Latest Cursor sessionEnd on a live run. `generating` stays busy; teardown maps to stop. */
   private replayCursorSessionEndStops(): void {
     const live = this.db.query(
-      "SELECT id FROM runs WHERE status IN ('dispatched','binding','running')",
+      `SELECT id FROM runs WHERE status IN (${sqlStatusIn(PROGRESSING_STATUSES)})`,
     ).all() as { id: string }[];
     for (const r of live) {
       const row = this.db.query(
@@ -800,7 +805,7 @@ export class RunService {
 
   onMachineOffline(machineId: string) {
     const rows = this.db.query(
-      `SELECT id, status FROM runs WHERE machine_id=?1 AND status IN ('queued','dispatched','binding','running')`
+      `SELECT id, status FROM runs WHERE machine_id=?1 AND status IN (${sqlStatusIn(OCCUPYING_STATUSES)})`
     ).all(machineId) as any[];
     for (const r of rows) {
       this.failUnconsumedOutbound(r.id);
@@ -844,7 +849,7 @@ export class RunService {
 
   getActiveByConversation(cid: string): any {
     return this.hydrateRun(this.db.query(
-      `SELECT * FROM runs WHERE conversation_id=?1 AND status IN (${ACTIVE_STATUSES.map((s) => `'${s}'`).join(",")})
+      `SELECT * FROM runs WHERE conversation_id=?1 AND status IN (${sqlStatusIn(ACTIVE_STATUSES)})
        ORDER BY created_at DESC LIMIT 1`,
     ).get(cid) ?? null);
   }
@@ -1097,7 +1102,7 @@ export class RunService {
   retry(runId: string): { error?: string; run?: any } {
     const run = this.get(runId);
     if (!run) return { error: "NOT_FOUND" };
-    if (!["error", "unknown", "aborted"].includes(run.status)) return { error: "INVALID_STATE" };
+    if (!canRetryStatus(run.status)) return { error: "INVALID_STATE" };
     const ids = parseAttachmentIds(run.attachments);
     this.audit("operator", "run.retry", runId, { via: run.conversation_id ? "followup" : "start" });
     if (run.conversation_id) return this.followup(runId, run.prompt ?? "", ids);
@@ -1119,7 +1124,7 @@ export class RunService {
     }
     if (!this.limits.multiRunPerWindow) {
       const sameWindowActive = this.db.query(
-        `SELECT id FROM runs WHERE machine_id=?1 AND window_id=?2 AND status IN ('queued','dispatched','binding','running') LIMIT 1`,
+        `SELECT id FROM runs WHERE machine_id=?1 AND window_id=?2 AND status IN (${sqlStatusIn(OCCUPYING_STATUSES)}) LIMIT 1`,
       ).get(run.machine_id, win.windowId);
       if (sameWindowActive) return { error: "WINDOW_BUSY" };
     }
