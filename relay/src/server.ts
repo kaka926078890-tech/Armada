@@ -9,6 +9,7 @@ import { createFcmSender, isFcmToken, type FcmConfig } from "./fcm";
 import { notifyEdges, type NotifyEdge } from "./notifyEdge";
 import { canRetryStatus, followupOutcome, httpStatusForRunError } from "../../hub/src/concurrency";
 import { MAX_BLOB_BYTES } from "../../hub/src/blobs";
+import { resolveAdminToken } from "./adminToken";
 
 export const PROTOCOL_VERSION = 1;
 const MAX_BODY = 20 * 1024 * 1024;
@@ -111,7 +112,9 @@ export function createRelayServer(opts: {
   const home = opts.home ?? join(process.env.HOME!, ".armada-relay");
   mkdirSync(home, { recursive: true });
   const db = openRelayDb(home);
-  const adminToken = opts.adminToken ?? hex64();
+  const adminToken = opts.adminToken?.trim()
+    ? opts.adminToken.trim()
+    : resolveAdminToken(home).token;
   const publicBase = opts.publicBase.replace(/\/+$/, "");
   const pending = new Map<string, Pending>();
   const hubSockets = new Map<string, { send: (s: string) => void; ws: unknown }>();
