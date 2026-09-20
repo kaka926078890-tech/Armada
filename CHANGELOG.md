@@ -10,6 +10,10 @@ Armada 按 **面** 发版：扩展、桌面、iOS、Android 可以不同号。RE
 
 ## Unreleased
 
+### 修复
+
+- 扩展包还不在中台旁时，看板和 App 写明「需要先打包」，不再给出点了没反应的 Reload。`POST /api/cursor-reload` 返回 409 `PACK_MISSING`。
+
 ---
 
 ## 2026-09-20 — 扩展 0.4.34 · iOS TF 24 · Android 0.1.11 · 桌面 0.1.0

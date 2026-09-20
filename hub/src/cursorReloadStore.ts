@@ -7,6 +7,8 @@ import {
   pendingFromAction,
   reloadStillNeededForFleet,
   neededReloadMachineIds,
+  vsixFileName,
+  vsixPackMissingNotice,
   type CursorReloadAction,
   type PendingReload,
   type ReloadMachine,
@@ -54,15 +56,47 @@ export function writePendingReload(
   return next;
 }
 
-export function cursorReloadView(home: string, machines: ReloadMachine[]): {
+export function vsixPackSearchDirs(cwd: string): string[] {
+  return [join(cwd, ".."), join(cwd, "..", "extension"), join(cwd, "extension")];
+}
+
+export function findVsixPack(version: string, searchDirs: string[]): string | null {
+  const name = vsixFileName(version);
+  if (!name) return null;
+  for (const dir of searchDirs) {
+    const p = join(dir, name);
+    if (existsSync(p)) return p;
+  }
+  return null;
+}
+
+export function cursorReloadView(home: string, machines: ReloadMachine[], packPresent = true): {
   pending: PendingReload | null;
   needed: boolean;
   neededMachineIds: string[];
+  required: string;
+  packPresent: boolean;
+  notice: string | null;
 } {
   const pending = readPendingReload(home);
+  const required = REQUIRED_EXTENSION_VERSION;
+  if (!packPresent) {
+    return {
+      pending,
+      needed: false,
+      neededMachineIds: [],
+      required,
+      packPresent: false,
+      notice: vsixPackMissingNotice(required),
+    };
+  }
+  const neededMachineIds = neededReloadMachineIds(pending, machines, required);
   return {
     pending,
-    needed: reloadStillNeededForFleet(pending, machines),
-    neededMachineIds: neededReloadMachineIds(pending, machines, REQUIRED_EXTENSION_VERSION),
+    needed: neededMachineIds.length > 0 || reloadStillNeededForFleet(pending, machines),
+    neededMachineIds,
+    required,
+    packPresent: true,
+    notice: null,
   };
 }

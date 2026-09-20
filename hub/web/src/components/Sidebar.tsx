@@ -46,6 +46,7 @@ function LiveSpinner() {
 export default function Sidebar({
   slots, machines, allRuns, selectedKey, onSelectWorkspace, readMap, onDispatch, onRename,
   showDesktopActions, onOpenWorkspace, onRepairCdp, onGetShareLink, onReloadMachine, reloadMachineIds,
+  requiredVsix, packNotice,
 }: {
   slots: WorkspaceSlot[];
   machines: Machine[];
@@ -61,6 +62,8 @@ export default function Sidebar({
   onGetShareLink?: () => void;
   onReloadMachine?: (machineId: string, action: "now" | "when-idle" | "skip") => void;
   reloadMachineIds?: string[];
+  requiredVsix?: string;
+  packNotice?: string | null;
 }) {
   const groups = groupSlotsByMachine(slots);
   const selected = slots.find((s) => encodeWorkspaceKey(s.machineId, s.root) === selectedKey);
@@ -69,7 +72,9 @@ export default function Sidebar({
   const [draft, setDraft] = useState("");
 
   const hostOf = (id: string) => machines.find((m) => m.id === id)?.name ?? "";
-  const lagOf = (id: string) => extensionLagNotice(machines.find((m) => m.id === id)?.extension_version);
+  const lagOf = (id: string) => packNotice
+    ? null
+    : extensionLagNotice(machines.find((m) => m.id === id)?.extension_version, requiredVsix);
 
   const commit = (machineId: string) => {
     onRename(machineId, draft.trim());
@@ -100,6 +105,9 @@ export default function Sidebar({
         + 派发任务
       </Button>
       <div className={`px-3 pt-1.5 pb-1 ${UI_META} uppercase tracking-wide text-muted-foreground`}>机器</div>
+      {packNotice ? (
+        <div className={`px-3 pb-2 ${UI_META} text-amber-400 leading-snug`}>{packNotice}</div>
+      ) : null}
       <ScrollArea className="flex-1">
         {groups.length === 0 && (
           <div className={`px-3 py-4 ${UI_META} text-muted-foreground`}>暂无在线工作区</div>
@@ -141,7 +149,7 @@ export default function Sidebar({
             {lag ? (
               <div className={`pl-7 pr-3 pb-1 ${UI_META} text-amber-400 leading-snug`}>{lag}</div>
             ) : null}
-            {g.online && (lag || reloadMachineIds?.includes(g.machineId)) && onReloadMachine ? (
+            {g.online && !packNotice && reloadMachineIds?.includes(g.machineId) && onReloadMachine ? (
               <div className="pl-7 pr-3 pb-1 flex flex-wrap gap-1">
                 <Button type="button" size="sm" className="whitespace-nowrap" onClick={() => onReloadMachine(g.machineId, "now")}>现在 Reload</Button>
                 <Button type="button" size="sm" variant="outline" className="whitespace-nowrap" onClick={() => onReloadMachine(g.machineId, "when-idle")}>空闲后自动</Button>

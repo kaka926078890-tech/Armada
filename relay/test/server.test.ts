@@ -454,12 +454,12 @@ describe("relay serve", () => {
         id: "m-mac", name: "Mac", os: "darwin", status: "online",
         open_workspaces: JSON.stringify(["/ws/a"]), cdp_ready: true,
       }],
-      cursorReload: { pending: { action: "when-idle", vsix: "0.4.33", setAt: 1, notBefore: 1 }, needed: true, neededMachineIds: ["m-win"] },
+      cursorReload: { pending: { action: "when-idle", vsix: "0.4.33", setAt: 1, notBefore: 1 }, needed: true, neededMachineIds: ["m-win"], notice: "扩展包 armada-agent-0.4.34.vsix 还没有，需要先打包。只点 Reload 不会装上新扩展。" },
     }));
     await Bun.sleep(50);
     const headers = { authorization: `Bearer ${fleet.operatorToken}` };
     const list = await (await fetch(url(s, "/mobile/workspaces"), { headers })).json() as any;
-    expect(list.cursorReload).toMatchObject({ needed: true, neededMachineIds: ["m-win"] });
+    expect(list.cursorReload).toMatchObject({ needed: true, neededMachineIds: ["m-win"], notice: "扩展包 armada-agent-0.4.34.vsix 还没有，需要先打包。只点 Reload 不会装上新扩展。" });
     const ac = new AbortController();
     const res = await fetch(url(s, "/mobile/stream"), { headers, signal: ac.signal });
     const sse = openSse(res);
@@ -467,7 +467,7 @@ describe("relay serve", () => {
     const frame = sse.events.find((e) => (e as { type?: string }).type === "workspaces") as {
       cursorReload?: { needed?: boolean; neededMachineIds?: string[] };
     };
-    expect(frame.cursorReload).toMatchObject({ needed: true, neededMachineIds: ["m-win"] });
+    expect(frame.cursorReload).toMatchObject({ needed: true, neededMachineIds: ["m-win"], notice: "扩展包 armada-agent-0.4.34.vsix 还没有，需要先打包。只点 Reload 不会装上新扩展。" });
     ac.abort();
     await sse.cancel();
     ws.close();

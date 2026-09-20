@@ -67,7 +67,12 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [snippets, setSnippets] = useState<PromptSnippet[]>([]);
   const [snippetError, setSnippetError] = useState("");
-  const [cursorReload, setCursorReload] = useState<{ needed: boolean; neededMachineIds: string[] }>({ needed: false, neededMachineIds: [] });
+  const [cursorReload, setCursorReload] = useState<{
+    needed: boolean;
+    neededMachineIds: string[];
+    required?: string;
+    notice?: string | null;
+  }>({ needed: false, neededMachineIds: [] });
   const desktop = isDesktopShell(window.location.search);
   const askedHost = useRef(false);
   const readMapRef = useRef(readMap);
@@ -165,6 +170,8 @@ export default function App() {
         setCursorReload({
           needed: !!reload?.needed,
           neededMachineIds: Array.isArray(reload?.neededMachineIds) ? reload.neededMachineIds.filter((id): id is string => typeof id === "string") : [],
+          required: typeof reload?.required === "string" ? reload.required : undefined,
+          notice: typeof reload?.notice === "string" && reload.notice.trim() ? reload.notice : null,
         });
         setLoadError("");
       })
@@ -452,8 +459,10 @@ export default function App() {
           onOpenWorkspace={() => requestDesktop("open-workspace")}
           onRepairCdp={() => requestDesktop("repair-cdp")}
           onGetShareLink={() => requestDesktop("get-share-link")}
-          onReloadMachine={(id, action) => { void api.postCursorReload(action, id).then(() => refresh()); }}
+          onReloadMachine={(id, action) => { void api.postCursorReload(action, id).then(() => refresh(), () => refresh()); }}
           reloadMachineIds={cursorReload.neededMachineIds}
+          requiredVsix={cursorReload.required}
+          packNotice={cursorReload.notice}
         />
         <div className="flex-1 min-w-0 min-h-0 flex flex-col">
           {showArchived && (

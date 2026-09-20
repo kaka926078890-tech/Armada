@@ -91,15 +91,35 @@ export function reloadStillNeededForFleet(
  * Per-machine Reload chrome. A machine that already runs pending.vsix (or the
  * required vsix when nothing is pending) must not keep showing the buttons.
  */
+export function vsixFileName(version: string): string {
+  const v = version.trim();
+  return v ? `armada-agent-${v}.vsix` : "";
+}
+
+export function vsixPackMissingNotice(version: string): string {
+  const name = vsixFileName(version) || "armada-agent.vsix";
+  return `扩展包 ${name} 还没有，需要先打包。只点 Reload 不会装上新扩展。`;
+}
+
+/** Reload target is the newer of leftover pending and the hub pin. */
+export function reloadTargetVsix(pending: PendingReload | null, requiredVsix: string): string {
+  const req = requiredVsix.trim();
+  const p = pending?.vsix?.trim() ?? "";
+  if (!p) return req;
+  if (!req) return p;
+  return cmpSemver(p, req) >= 0 ? p : req;
+}
+
 export function neededReloadMachineIds(
   pending: PendingReload | null,
   machines: ReloadMachine[],
   requiredVsix: string,
 ): string[] {
-  const target = (pending?.vsix || requiredVsix).trim();
+  const target = reloadTargetVsix(pending, requiredVsix);
   if (!target) return [];
   const online = machines.filter((m) => m.status === "online");
-  const scoped = pending?.machineId ? online.filter((m) => m.id === pending.machineId) : online;
+  const pendingStale = !!(pending?.vsix && requiredVsix.trim() && cmpSemver(pending.vsix, requiredVsix.trim()) < 0);
+  const scoped = pending?.machineId && !pendingStale ? online.filter((m) => m.id === pending.machineId) : online;
   const probe: PendingReload = {
     action: pending?.action ?? "when-idle",
     vsix: target,

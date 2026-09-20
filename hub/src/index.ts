@@ -13,7 +13,7 @@ import { BlobStore, MAX_BLOB_BYTES, isInlineRenderMime, responseContentType } fr
 import { assertPromptSnippets, fillSnippetIds, readUiPrefs, writeUiPrefs, mergeUiPrefs } from "./uiPrefs";
 import { JoinTickets } from "./joinTickets";
 import { startRelayClient } from "./relayClient";
-import { cursorReloadView, readPendingReload, writePendingReload } from "./cursorReloadStore";
+import { cursorReloadView, findVsixPack, readPendingReload, vsixPackSearchDirs, writePendingReload } from "./cursorReloadStore";
 import { REQUIRED_EXTENSION_VERSION } from "../web/src/boardState";
 
 export interface HubServer {
@@ -26,7 +26,7 @@ export interface HubServer {
   stop: () => void;
 }
 
-export function createServer(opts: { port?: number; hostname?: string; home?: string; concurrency?: ConcurrencyLimits } = {}): HubServer {
+export function createServer(opts: { port?: number; hostname?: string; home?: string; concurrency?: ConcurrencyLimits; vsixSearchDirs?: string[] } = {}): HubServer {
   const home = ARMADA_HOME(opts.home);
   const token = loadToken(home);
   const db = openDb(home);
@@ -36,7 +36,9 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
   const blobs = new BlobStore(db, home);
   const tickets = new JoinTickets(db);
   const runs = new RunService(db, registry, sse, { limits, blobs });
-  const reloadView = () => cursorReloadView(home, registry.listMachines());
+  const vsixDirs = opts.vsixSearchDirs ?? vsixPackSearchDirs(process.cwd());
+  const packPresent = () => findVsixPack(REQUIRED_EXTENSION_VERSION, vsixDirs) != null;
+  const reloadView = () => cursorReloadView(home, registry.listMachines(), packPresent());
   const pushCursorReload = (pending: ReturnType<typeof readPendingReload>, machineId?: string) => {
     registry.sendToConnected({ type: "ext.cursorReload", pending }, machineId);
   };
@@ -100,6 +102,10 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
     }
     const machineId = typeof body.machineId === "string" && body.machineId.trim() ? body.machineId.trim() : undefined;
     if (machineId && !registry.getMachine(machineId)) return c.json({ error: "NOT_FOUND" }, 404);
+    if (action !== "skip" && !packPresent()) {
+      const view = reloadView();
+      return c.json({ error: "PACK_MISSING", required: view.required, notice: view.notice }, 409);
+    }
     const vsix = typeof body.vsix === "string" && body.vsix.trim() ? body.vsix.trim() : REQUIRED_EXTENSION_VERSION;
     const notBefore = typeof body.notBefore === "number" && Number.isFinite(body.notBefore) ? body.notBefore : undefined;
     const pending = writePendingReload(home, action, vsix, Date.now(), notBefore, machineId);

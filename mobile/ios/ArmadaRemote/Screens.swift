@@ -314,6 +314,9 @@ struct WorkspaceListView: View {
     var body: some View {
         NavigationStack(path: $path) {
             List {
+                if let notice = session.cursorReload?.notice, !notice.isEmpty {
+                    Text(notice).foregroundStyle(.orange)
+                }
                 if session.hubOffline {
                     Text("中台离线或没有打开的仓").foregroundStyle(.secondary)
                 }

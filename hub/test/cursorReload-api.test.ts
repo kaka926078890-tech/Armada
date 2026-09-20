@@ -1,16 +1,26 @@
 import { describe, expect, test, afterEach } from "bun:test";
-import { mkdtempSync, readFileSync } from "fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { createServer, type HubServer } from "../src/index";
 import { REQUIRED_EXTENSION_VERSION } from "../web/src/boardState";
+import { vsixFileName, vsixPackMissingNotice } from "../../desktop-core/src/cursorReload";
 
 let s: HubServer | null = null;
 afterEach(() => { s?.stop(); s = null; });
 
-function start() {
+function packDir(home: string, present: boolean): string {
+  const dir = join(home, "vsix-pack");
+  mkdirSync(dir, { recursive: true });
+  const file = join(dir, vsixFileName(REQUIRED_EXTENSION_VERSION));
+  if (present) writeFileSync(file, "pk");
+  return dir;
+}
+
+function start(opts: { packPresent?: boolean } = {}) {
   const home = mkdtempSync(join(tmpdir(), "armada-cursor-reload-api-"));
-  s = createServer({ port: 0, home });
+  const present = opts.packPresent !== false;
+  s = createServer({ port: 0, home, vsixSearchDirs: [packDir(home, present)] });
   return { home, base: `http://127.0.0.1:${s.port}`, tok: s.token };
 }
 
@@ -19,7 +29,33 @@ describe("GET/POST /api/cursor-reload", () => {
     const { base, tok } = start();
     const r = await fetch(`${base}/api/cursor-reload`, { headers: { Authorization: `Bearer ${tok}` } });
     expect(r.status).toBe(200);
-    expect(await r.json()).toEqual({ pending: null, needed: false, neededMachineIds: [] });
+    expect(await r.json()).toEqual({
+      pending: null, needed: false, neededMachineIds: [],
+      required: REQUIRED_EXTENSION_VERSION, packPresent: true, notice: null,
+    });
+  });
+
+  test("GET without the vsix pack tells the operator to pack; POST now is 409", async () => {
+    const { home, base, tok } = start({ packPresent: false });
+    const get = await fetch(`${base}/api/cursor-reload`, { headers: { Authorization: `Bearer ${tok}` } });
+    expect(get.status).toBe(200);
+    expect(await get.json()).toEqual({
+      pending: null, needed: false, neededMachineIds: [],
+      required: REQUIRED_EXTENSION_VERSION, packPresent: false,
+      notice: vsixPackMissingNotice(REQUIRED_EXTENSION_VERSION),
+    });
+    const put = await fetch(`${base}/api/cursor-reload`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${tok}`, "content-type": "application/json" },
+      body: JSON.stringify({ action: "now" }),
+    });
+    expect(put.status).toBe(409);
+    expect(await put.json()).toEqual({
+      error: "PACK_MISSING",
+      required: REQUIRED_EXTENSION_VERSION,
+      notice: vsixPackMissingNotice(REQUIRED_EXTENSION_VERSION),
+    });
+    expect(() => readFileSync(join(home, "pending-reload.json"), "utf8")).toThrow();
   });
 
   test("POST when-idle writes the file; skip clears it", async () => {
@@ -42,7 +78,7 @@ describe("GET/POST /api/cursor-reload", () => {
       body: JSON.stringify({ action: "skip" }),
     });
     expect(skip.status).toBe(200);
-    expect(await skip.json()).toEqual({ pending: null, needed: false, neededMachineIds: [] });
+    expect(await skip.json()).toMatchObject({ pending: null, needed: false, neededMachineIds: [] });
   });
 
   test("needed ignores offline stale extension versions", async () => {

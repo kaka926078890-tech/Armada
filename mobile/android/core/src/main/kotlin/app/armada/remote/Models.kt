@@ -18,6 +18,7 @@ data class CursorReloadDto(
     val vsix: String? = null,
     val action: String? = null,
     val neededMachineIds: List<String>? = null,
+    val notice: String? = null,
 )
 
 data class PromptSnippet(

@@ -74,6 +74,9 @@ export const api = {
     pending: { action: "now" | "when-idle"; vsix: string; setAt: number; notBefore: number } | null;
     needed: boolean;
     neededMachineIds?: string[];
+    required?: string;
+    packPresent?: boolean;
+    notice?: string | null;
   }>,
   postCursorReload: (action: "now" | "when-idle" | "skip", machineId?: string) =>
     req("/api/cursor-reload", { method: "POST", body: JSON.stringify({ action, ...(machineId ? { machineId } : {}) }) }).then(async (r) => {

@@ -100,3 +100,52 @@ describe("Sidebar inject gate", () => {
     expect(html).toContain("打开工作区");
   });
 });
+
+describe("Sidebar vsix pack notice", () => {
+  test("missing pack copy replaces Reload buttons", () => {
+    const html = renderToStaticMarkup(
+      <Sidebar
+        slots={[slot]}
+        machines={[{
+          id: "m-win", name: "PF39WTSM", os: "win32", cursor_version: "1.128.0",
+          extension_version: "0.4.18", open_workspaces: "[]", status: "online", last_seen_at: 1,
+          display_name: "Win Destop",
+        }]}
+        allRuns={[]}
+        selectedKey={null}
+        onSelectWorkspace={() => {}}
+        readMap={{}}
+        onDispatch={() => {}}
+        onRename={() => {}}
+        onReloadMachine={() => {}}
+        reloadMachineIds={["m-win"]}
+        packNotice="扩展包 armada-agent-0.4.34.vsix 还没有，需要先打包。只点 Reload 不会装上新扩展。"
+      />,
+    );
+    expect(html).toContain("需要先打包");
+    expect(html).not.toContain("现在 Reload");
+  });
+
+  test("Reload buttons only follow hub neededMachineIds, not compile-time lag", () => {
+    const html = renderToStaticMarkup(
+      <Sidebar
+        slots={[slot]}
+        machines={[{
+          id: "m-win", name: "PF39WTSM", os: "win32", cursor_version: "1.128.0",
+          extension_version: "0.4.18", open_workspaces: "[]", status: "online", last_seen_at: 1,
+          display_name: "Win Destop",
+        }]}
+        allRuns={[]}
+        selectedKey={null}
+        onSelectWorkspace={() => {}}
+        readMap={{}}
+        onDispatch={() => {}}
+        onRename={() => {}}
+        onReloadMachine={() => {}}
+        reloadMachineIds={[]}
+      />,
+    );
+    expect(html).toContain(extensionLagNotice("0.4.18")!);
+    expect(html).not.toContain("现在 Reload");
+  });
+});

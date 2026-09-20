@@ -55,6 +55,7 @@ struct CursorReloadDTO: Decodable, Equatable {
     var needed: Bool
     var pending: CursorReloadPending?
     var neededMachineIds: [String]?
+    var notice: String?
 }
 
 struct PendingAskOption: Decodable, Identifiable, Hashable {

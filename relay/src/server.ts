@@ -32,10 +32,13 @@ type CursorReloadSnap = {
   pending: unknown;
   needed: boolean;
   neededMachineIds: string[];
+  required?: string;
+  packPresent?: boolean;
+  notice: string | null;
 };
 
 function emptyCursorReload(): CursorReloadSnap {
-  return { pending: null, needed: false, neededMachineIds: [] };
+  return { pending: null, needed: false, neededMachineIds: [], notice: null };
 }
 
 function parseCursorReloadSnap(raw: unknown): CursorReloadSnap | null {
@@ -44,10 +47,14 @@ function parseCursorReloadSnap(raw: unknown): CursorReloadSnap | null {
   const ids = Array.isArray(o.neededMachineIds)
     ? o.neededMachineIds.filter((x): x is string => typeof x === "string" && x.trim().length > 0)
     : [];
+  const notice = typeof o.notice === "string" && o.notice.trim() ? o.notice.trim() : null;
   return {
     pending: o.pending ?? null,
     needed: o.needed === true,
     neededMachineIds: ids,
+    required: typeof o.required === "string" && o.required.trim() ? o.required.trim() : undefined,
+    packPresent: o.packPresent === true,
+    notice,
   };
 }
 
@@ -482,6 +489,7 @@ export function createRelayServer(opts: {
     if (err === "HUB_OFFLINE" || err === "READ_FAIL") return 503;
     if (err === "HUB_TIMEOUT") return 502;
     if (err === "WRITE_FAIL") return 500;
+    if (err === "PACK_MISSING") return 409;
     return httpStatusForRunError(err);
   }
 

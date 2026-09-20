@@ -63,6 +63,9 @@ describe("appearance layout stays coordinated when text scales", () => {
     const sidebar = readFileSync(join(web, "src/components/Sidebar.tsx"), "utf8");
     expect(sidebar).toContain("onReloadMachine");
     expect(sidebar).toContain("现在 Reload");
+    expect(sidebar).toContain("packNotice");
+    expect(ios).toContain("cursorReload?.notice");
+    expect(android).toContain("cursorReload?.notice");
     const board = readFileSync(join(web, "src/components/Board.tsx"), "utf8");
     expect(board).not.toContain("extensionLagNotice");
     expect(ios).not.toContain("本机 Cursor 扩展已更新");

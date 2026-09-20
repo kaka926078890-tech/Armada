@@ -246,6 +246,7 @@ fun parseCursorReload(o: JSONObject): CursorReloadDto {
                 }
             }
         },
+        notice = o.optString("notice").ifBlank { null },
     )
 }
 

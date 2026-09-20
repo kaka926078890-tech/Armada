@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, writeFileSync } from "fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { createServer, type HubServer } from "../src/index";
 import { attachWithConfig } from "../src/relayAttach";
 import { createRelayServer, type RelayServer } from "../../relay/src/server";
 import { encodeWorkspaceId } from "../../relay/src/uri";
+import { REQUIRED_EXTENSION_VERSION } from "../web/src/boardState";
+import { vsixFileName } from "../../desktop-core/src/cursorReload";
 
 let hub: HubServer | null = null;
 let relay: RelayServer | null = null;
@@ -195,7 +197,10 @@ describe("relay attach (HTTP hub)", () => {
       publicBase: "http://127.0.0.1", adminToken: "adm",
     });
     const fleet = relay.createFleet();
-    hub = createServer({ port: 0, home: hubHome });
+    const pack = join(hubHome, "vsix-pack");
+    mkdirSync(pack, { recursive: true });
+    writeFileSync(join(pack, vsixFileName(REQUIRED_EXTENSION_VERSION)), "pk");
+    hub = createServer({ port: 0, home: hubHome, vsixSearchDirs: [pack] });
     attach = attachWithConfig(
       { relay: `http://127.0.0.1:${relay.port}`, fleet: fleet.fleet, secret: fleet.hubSecret },
       { hubPort: hub.port, token: hub.token, pollMs: 50 },

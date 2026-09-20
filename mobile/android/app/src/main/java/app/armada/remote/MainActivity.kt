@@ -289,6 +289,15 @@ fun FleetScreen(vm: SessionVm, state: UiState, onOpen: (WorkspaceDto) -> Unit, o
                     )
                 }
             }
+            state.cursorReload?.notice?.takeIf { it.isNotBlank() }?.let { notice ->
+                item {
+                    Text(
+                        notice,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                        color = MaterialTheme.colorScheme.tertiary,
+                    )
+                }
+            }
             groups.forEach { (mid, slots) ->
                 item {
                     val name = slots.firstOrNull { it.machineName.isNotEmpty() }?.machineName ?: mid
