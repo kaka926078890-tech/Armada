@@ -36,7 +36,7 @@ subprocess.Popen(
 PY
 ```
 
-That script `trap '' HUP`, POSTs `/api/cursor-reload` `{action:"when-idle"}` (or writes `~/.armada/pending-reload.json` using `extension/package.json` version), then notifies. After **0.4.34**, the extension reloads **per window** when that window has **no Armada live run and no fresh open composer jsonl turn** (`when-idle`). `now` still ignores Armada pending/bind, but also waits for those open jsonl turns so Cursor does not show 「N agents are still working」. 15 minutes still busy → notify, do not force.
+That script `trap '' HUP`, POSTs `/api/cursor-reload` `{action:"when-idle"}` (or writes `~/.armada/pending-reload.json` using `extension/package.json` version), then notifies. After **0.4.35**, the extension reloads **per window** when that window has **no Armada live run, no fresh open composer jsonl turn, and no stop/`turn_ended` within 2 minutes** (`when-idle`). `now` still ignores Armada pending/bind and the settle grace, but waits for those open jsonl turns so Cursor does not show 「N agents are still working」. 15 minutes still busy → notify, do not force. The on-disk attempt latch is kept after `reloadWindow` settles so the same pending cannot restack every 10s.
 
 Spawn 起来 ≠ 功能验收过。对照 `docs/superpowers/specs/2026-09-20-armada-debt-real-device-verify.md`：已过的 vsix 回归不要重派安装提示词；还欠的是 overlay **之后**在 bundled bun 上的短回归（该文 §3）。
 

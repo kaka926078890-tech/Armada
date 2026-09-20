@@ -1,6 +1,8 @@
 /** Local Cursor vsix reload is operator-gated; the extension executes Reload Window. */
 
 export const IDLE_RELOAD_MAX_WAIT_MS = 15 * 60 * 1000;
+/** when-idle: do not Reload the window that just synthesized stop / wrote turn_ended. */
+export const IDLE_RELOAD_SETTLE_GRACE_MS = 2 * 60 * 1000;
 export const PENDING_RELOAD_NAME = "pending-reload.json";
 export const PENDING_RELOAD_ATTEMPT_NAME = "pending-reload-attempt.json";
 
@@ -181,13 +183,37 @@ export function windowHasOpenComposerTurn(opts: {
 }
 
 /**
+ * A just-written `turn_ended` or a just-synthesized Armada stop is not idle
+ * for `when-idle`. 18:18:12 stop → 18:18:18 Reload yanked the operator chat.
+ */
+export function windowHasRecentSettle(opts: {
+  files: Array<{ lastLine: string; mtimeMs: number }>;
+  lastStopAt?: number | null;
+  now: number;
+  graceMs?: number;
+}): boolean {
+  const grace = opts.graceMs ?? IDLE_RELOAD_SETTLE_GRACE_MS;
+  if (typeof opts.lastStopAt === "number" && Number.isFinite(opts.lastStopAt) && opts.lastStopAt > 0) {
+    if (opts.now - opts.lastStopAt >= 0 && opts.now - opts.lastStopAt < grace) return true;
+  }
+  for (const f of opts.files) {
+    if (typeof f.mtimeMs !== "number" || !Number.isFinite(f.mtimeMs)) continue;
+    const line = typeof f.lastLine === "string" ? f.lastLine : "";
+    if (!lastLineIsSettledTurn(line)) continue;
+    if (opts.now - f.mtimeMs >= 0 && opts.now - f.mtimeMs < grace) return true;
+  }
+  return false;
+}
+
+/**
  * Per Cursor window: `when-idle` never Reloads while this window has an
  * in-flight Armada run (pending start or bound run without synthesized stop).
  * Completed binds may stay in `boundRuns` for followup and are not live.
  * Both `when-idle` and `now` wait for a fresh open composer jsonl turn so
  * Reload Window does not stack the agents-still-working dialog.
+ * `when-idle` also waits `IDLE_RELOAD_SETTLE_GRACE_MS` after stop / turn_ended.
  * `now` still Reloads through an Armada live run that has no open jsonl turn
- * (pending start / inject).
+ * (pending start / inject), including a just-settled window.
  * `expired` = waited maxWaitMs still busy → notify, do not force.
  * `done` = this window already runs pending.vsix or newer.
  */
@@ -197,6 +223,7 @@ export function decideWindowReload(opts: {
   pending: PendingReload | null;
   thisWindowHasLiveRun: boolean;
   thisWindowHasOpenComposerTurn?: boolean;
+  thisWindowRecentlySettled?: boolean;
   now: number;
   runningVsix?: string;
   maxWaitMs?: number;
@@ -208,8 +235,9 @@ export function decideWindowReload(opts: {
   if (opts.runningVsix && cmpSemver(opts.runningVsix, p.vsix) >= 0) return "done";
   if (opts.now < p.notBefore) return "wait";
   const composerBusy = opts.thisWindowHasOpenComposerTurn === true;
+  const recentlySettled = opts.thisWindowRecentlySettled === true;
   const armadaBusy = opts.thisWindowHasLiveRun;
-  const busy = composerBusy || (p.action !== "now" && armadaBusy);
+  const busy = composerBusy || (p.action !== "now" && (armadaBusy || recentlySettled));
   if (busy) {
     const max = opts.maxWaitMs ?? IDLE_RELOAD_MAX_WAIT_MS;
     if (opts.now - p.setAt >= max) return "expired";

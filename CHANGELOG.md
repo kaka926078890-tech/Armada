@@ -10,9 +10,19 @@ Armada 按 **面** 发版：扩展、桌面、iOS、Android 可以不同号。RE
 
 ## Unreleased
 
+---
+
+## 2026-09-20 — 扩展 0.4.35 · iOS TF 24 · Android 0.1.11 · 桌面 0.1.0
+
 ### 修复
 
+- 空闲 Reload 在本窗刚合成 stop / 刚写完 `turn_ended` 后等 2 分钟，不再一收口就 Reload Window 把当前对话清掉。
+- Reload 成功后不再清掉 `pending-reload-attempt.json`，同一条 pending 不会每 10 秒再打一次（今早 0.4.30 那种环）。
 - 扩展包还不在中台旁时，看板和 App 写明「需要先打包」，不再给出点了没反应的 Reload。`POST /api/cursor-reload` 返回 409 `PACK_MISSING`。
+
+### 操作员注意
+
+Windows 被控须 **先装** `armada-agent-0.4.35.vsix` 再空闲 Reload。只 Reload 不会从 0.4.34 升上去。中台须 overlay 到含 `REQUIRED_EXTENSION_VERSION=0.4.35` 的包装 hub。桌面仍是 **0.1.0**；iOS TestFlight **24**；Android **0.1.11**。
 
 ---
 

@@ -3,6 +3,7 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import {
   IDLE_RELOAD_MAX_WAIT_MS,
+  IDLE_RELOAD_SETTLE_GRACE_MS,
   decideReloadFire,
   decideWindowReload,
   noteReloadCommandSettled,
@@ -16,6 +17,7 @@ import {
   vsixPackMissingNotice,
   windowHasInFlightArmadaRun,
   windowHasOpenComposerTurn,
+  windowHasRecentSettle,
   type ReloadFireState,
 } from "../src/cursorReload";
 
@@ -108,6 +110,25 @@ describe("decideWindowReload", () => {
     })).toBe("expired");
   });
 
+  test("when-idle waits after a just-synthesized stop so the operator can read", () => {
+    // 18:18:12 stop synthesized → 18:18:18 Reload Window on this chat.
+    expect(decideWindowReload({
+      pending,
+      thisWindowHasLiveRun: false,
+      thisWindowRecentlySettled: true,
+      now: 2000,
+    })).toBe("wait");
+  });
+
+  test("now still reloads after a just-synthesized stop (operator clicked)", () => {
+    expect(decideWindowReload({
+      pending: { ...pending, action: "now" },
+      thisWindowHasLiveRun: false,
+      thisWindowRecentlySettled: true,
+      now: 2000,
+    })).toBe("reload");
+  });
+
   test("reloads when idle after notBefore", () => {
     expect(decideWindowReload({ pending, thisWindowHasLiveRun: false, now: 2000 })).toBe("reload");
   });
@@ -170,6 +191,19 @@ describe("decideReloadFire", () => {
     expect(busy.fire).toBe(false);
     const idleAgain = decideReloadFire(busy.next, { decision: "reload", pendingSetAt: setAt });
     expect(idleAgain.fire).toBe(true);
+  });
+
+  test("disk latch blocks busy→idle re-fire of the same pending (01:27 10s loop)", () => {
+    const first = decideReloadFire(idle, { decision: "reload", pendingSetAt: setAt });
+    const survived = noteReloadCommandSettled(first.next);
+    const busy = decideReloadFire(survived, {
+      decision: "wait", pendingSetAt: setAt, attemptedSetAt: setAt,
+    });
+    expect(busy.fire).toBe(false);
+    const idleAgain = decideReloadFire(busy.next, {
+      decision: "reload", pendingSetAt: setAt, attemptedSetAt: setAt,
+    });
+    expect(idleAgain.fire).toBe(false);
   });
 
   test("new pending setAt can fire even if the previous attempt survived", () => {
@@ -276,6 +310,43 @@ describe("neededReloadMachineIds", () => {
   });
 });
 
+describe("windowHasRecentSettle", () => {
+  const ended = `{"type":"turn_ended","status":"success"}`;
+  const user = `{"role":"user","message":{"content":[{"type":"text","text":"followup"}]}}`;
+  const stopAt = 1_789_899_492_000; // 18:18:12
+  const sixSecondsLater = stopAt + 6_000; // 18:18:18 Reload Window
+
+  test("tonight: turn_ended then 6s is still recent for when-idle", () => {
+    expect(windowHasRecentSettle({
+      files: [{ lastLine: ended, mtimeMs: stopAt }],
+      now: sixSecondsLater,
+    })).toBe(true);
+  });
+
+  test("tonight: synthesized stop 6s ago is still recent", () => {
+    expect(windowHasRecentSettle({
+      files: [],
+      lastStopAt: stopAt,
+      now: sixSecondsLater,
+    })).toBe(true);
+  });
+
+  test("settle older than grace is idle", () => {
+    expect(windowHasRecentSettle({
+      files: [{ lastLine: ended, mtimeMs: stopAt }],
+      lastStopAt: stopAt,
+      now: stopAt + IDLE_RELOAD_SETTLE_GRACE_MS,
+    })).toBe(false);
+  });
+
+  test("an open user line is not a settle", () => {
+    expect(windowHasRecentSettle({
+      files: [{ lastLine: user, mtimeMs: sixSecondsLater }],
+      now: sixSecondsLater,
+    })).toBe(false);
+  });
+});
+
 describe("windowHasOpenComposerTurn", () => {
   const now = 10_000;
   const user = `{"role":"user","message":{"content":[{"type":"text","text":"followup"}]}}`;
@@ -372,6 +443,10 @@ describe("extension delivers hub reload over ws", () => {
     expect(src).toContain("noteReloadCommandSettled");
     expect(src).toContain("attemptedSetAt");
     expect(src).toContain("PENDING_RELOAD_ATTEMPT_NAME");
+    expect(src).toContain("windowHasRecentSettle");
+    expect(src).toContain("thisWindowRecentlySettled");
+    expect(src).toContain("lastStopAt");
+    expect(src.match(/persistReloadAttempt\(null\)/g)?.length).toBe(1);
     expect(src).not.toContain("boundRuns.size > 0 || pendingRuns.length > 0");
   });
 });

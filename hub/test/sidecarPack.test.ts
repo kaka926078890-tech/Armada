@@ -110,7 +110,7 @@ describe("packaged sidecar hub", () => {
       "desktop/src-tauri/resources/extension/src/promptNormalize.ts",
       "desktop/src-tauri/resources/bun",
       "desktop/src-tauri/resources/bun.exe",
-      "desktop/src-tauri/resources/armada-agent-0.4.34.vsix",
+      "desktop/src-tauri/resources/armada-agent-0.4.35.vsix",
       "mobile/android/app/google-services.json",
       "mobile/android/local.properties",
       "mobile/android/app/release.keystore",

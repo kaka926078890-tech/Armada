@@ -20,9 +20,9 @@ import { hubRunsNeedingTranscriptFollow, shouldArmFollowupStopOnAdopt } from "./
 import { noteOwnerBsp, clearGeneration, synthesizedStopPayload, noteHubGeneration, onFollowupBindGeneration } from "./generationStamp";
 import { parseAskInspect, askPollActions, coalesceAskInspect } from "./askDetect";
 import { enrichPlanAsk, planDirsFor } from "./planFile";
-import { PENDING_RELOAD_ATTEMPT_NAME, PENDING_RELOAD_NAME, decideReloadFire, decideWindowReload, noteReloadCommandSettled, parsePendingReload, parseReloadAttempt, windowHasInFlightArmadaRun, windowHasOpenComposerTurn, type ReloadFireState } from "../../desktop-core/src/cursorReload";
+import { PENDING_RELOAD_ATTEMPT_NAME, PENDING_RELOAD_NAME, decideReloadFire, decideWindowReload, noteReloadCommandSettled, parsePendingReload, parseReloadAttempt, windowHasInFlightArmadaRun, windowHasOpenComposerTurn, windowHasRecentSettle, type ReloadFireState } from "../../desktop-core/src/cursorReload";
 
-const EXTENSION_VERSION = "0.4.34";
+const EXTENSION_VERSION = "0.4.35";
 
 let client: { dispose: () => void } | null = null;
 
@@ -74,6 +74,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const boundPaths = new Map<string, string>();
   const boundWorkspaces = new Map<string, string>();
   const stopSent = new Set<string>();
+  let lastStopAt: number | null = null;
   const cancelledRuns = new Set<string>();
   const childConversations = new Map<string, string>();
   const sizeWatches = new Map<string, () => void>();
@@ -136,6 +137,7 @@ export function activate(context: vscode.ExtensionContext): void {
     const stamped = synthesizedStopPayload(stop, lastGenerationId.get(runId), owner?.conversationId);
     if (!stamped.ok) return;
     stopSent.add(runId);
+    lastStopAt = Date.now();
     core.enqueue({
       type: "run.event",
       runId,
@@ -596,12 +598,15 @@ export function activate(context: vscode.ExtensionContext): void {
       if (!dir) continue;
       for (const t of collectTranscriptTails(dir)) composerFiles.push(t);
     }
-    const composerBusy = windowHasOpenComposerTurn({ files: composerFiles, now: Date.now() });
+    const now = Date.now();
+    const composerBusy = windowHasOpenComposerTurn({ files: composerFiles, now });
+    const recentlySettled = windowHasRecentSettle({ files: composerFiles, lastStopAt, now });
     const decision = decideWindowReload({
       pending,
       thisWindowHasLiveRun: live,
       thisWindowHasOpenComposerTurn: composerBusy,
-      now: Date.now(),
+      thisWindowRecentlySettled: recentlySettled,
+      now,
       runningVsix: EXTENSION_VERSION,
       machineId: machineId ?? undefined,
     });
@@ -620,11 +625,9 @@ export function activate(context: vscode.ExtensionContext): void {
     log(`vsix pending-reload: reloading window for ${pending?.vsix}`);
     void Promise.resolve(vscode.commands.executeCommand("workbench.action.reloadWindow")).then(
       () => {
-        persistReloadAttempt(null);
         reloadFire = noteReloadCommandSettled(reloadFire);
       },
       () => {
-        persistReloadAttempt(null);
         reloadFire = noteReloadCommandSettled(reloadFire);
       },
     );
