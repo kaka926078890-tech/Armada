@@ -12,6 +12,19 @@ Armada 按 **面** 发版：扩展、桌面、iOS、Android 可以不同号。RE
 
 ---
 
+## 2026-09-20 — iOS TF 22 · Android 0.1.9 · 桌面 overlay
+
+### 新增
+
+- 手机派发、终态续聊可发最多 4 张 PNG/JPEG（HEIC 在设备上转 JPEG，原像素、质量 0.92）；只附图也能发，空 prompt 列表标题是 `[N 张图片]`。
+- 中转 `POST /mobile/blobs`；中台 `cmd.blobPut` 把图交给现网 CDP 贴芯片。运行中续聊仍只能发文字。
+
+### 操作员注意
+
+要用上发图，三端一起升：包装中台 overlay（号仍 **0.1.0**）、公网中转、TestFlight **22** / Android **0.1.9**（versionCode 10）。旧中转没有 `/mobile/blobs` 时，App 会藏掉相册，不会把图当纯文本发出去。
+
+---
+
 ## 2026-09-20 — 扩展 0.4.32 · iOS TF 21 · Android 0.1.8 · 桌面 0.1.0
 
 ### 修复

@@ -12,8 +12,8 @@
 | --- | --- | --- |
 | 桌面 Armada.app | **0.1.0** | `desktop/src-tauri/tauri.conf.json` |
 | 扩展 armada-agent | **0.4.32** | `extension/package.json` |
-| iOS ArmadaRemote | **0.1.0** · TestFlight **21** | `mobile/ios` `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` |
-| Android | **0.1.8**（versionCode 9） | `mobile/android/app/build.gradle.kts` |
+| iOS ArmadaRemote | **0.1.0** · TestFlight **22** | `mobile/ios` `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` |
+| Android | **0.1.9**（versionCode 10） | `mobile/android/app/build.gradle.kts` |
 
 每面发版都记进 [CHANGELOG.md](CHANGELOG.md)。能力下限（例如「续聊须 ≥ 0.4.19」）和当前发版号不是一回事：装包请用上表。
 
@@ -40,7 +40,7 @@
 
 ## 它能做什么
 
-已具备：桌面创建/加入舰队、局域网发现、代装扩展、CDP 打开工作区、五列看板、图文派发、并行任务、中台续聊与答选择题、完成通知；可选自建中转 + iOS / Android App 远程选仓、派发、续聊、答选择题、隐藏任务；锁屏 Ask / 终态走中转代发 APNs / FCM（需密钥）。
+已具备：桌面创建/加入舰队、局域网发现、代装扩展、CDP 打开工作区、五列看板、图文派发、并行任务、中台续聊与答选择题、完成通知；可选自建中转 + iOS / Android App 远程选仓、派发（可附图 PNG/JPEG）、续聊、答选择题、隐藏任务；锁屏 Ask / 终态走中转代发 APNs / FCM（需密钥）。
 
 ### 舰队看板
 
@@ -233,7 +233,7 @@ bun run dev:relay-attach
 1. **iOS：** Xcode 打开 `mobile/ios/ArmadaRemote.xcodeproj`，模拟器或真机跑 **ArmadaRemote**（Bundle ID `app.armada.remote`）。
 2. **Android：** `mobile/android` 打 debug APK（见 [`mobile/android/README.md`](mobile/android/README.md)）；模拟器中转填 `http://10.0.2.2:8780`。
 3. 粘贴 **op** 邀请（不要贴 pair）。
-4. 舰队页按 **机器 → 工作区**；点仓看五列任务；仓顶栏 **派发** 新开对话，详情 **续聊** 同一对话。绑定后会申请通知权限；锁屏 Ask / 完成 / 失败由中转代发 APNs（iOS）或 FCM（Android）（点通知进详情强制 GET）。
+4. 舰队页按 **机器 → 工作区**；点仓看五列任务；仓顶栏 **派发** 新开对话（可从相册选最多 4 张 PNG/JPEG），详情 **续聊** 同一对话（运行中只能发文字）。绑定后会申请通知权限；锁屏 Ask / 完成 / 失败由中转代发 APNs（iOS）或 FCM（Android）（点通知进详情强制 GET）。
 5. Agent 选择题在详情里 Continue / Skip。终态正文是这一轮助手回复，不是整段 Cursor 会话。
 
 一部手机目前只绑一条 op（一台在线中台）。多台受控机只要登记在这台中台上，选不同仓即可分别派。多部手机可贴同一条 op，共用操作者令牌。
