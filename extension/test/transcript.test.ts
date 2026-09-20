@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { shouldUnfollowOnHookStop, TranscriptTailer } from "../src/transcript";
+import { TranscriptTailer } from "../src/transcript";
+import * as transcript from "../src/transcript";
 
 function fakeFs(initial = "") {
   let content = initial;
@@ -91,15 +92,18 @@ describe("TranscriptTailer", () => {
   });
 });
 
-describe("shouldUnfollowOnHookStop", () => {
+describe("transcript tail lifetime", () => {
   test("owner-cid stop does not unfollow: background Task follow-up still grows the same jsonl", () => {
     // Real hook (r-0f0eadc6 seq 2282): parent stop.conversation_id === run.conversation_id
     // after launching run_in_background Tasks. Old code unfollowed here and dropped
-    // the later assistant body ("web 审查 已完成").
-    expect(shouldUnfollowOnHookStop({
-      hook: "stop",
-      ownerConversationId: "a746cf16-81d3-4fe7-8d57-67903fb845a8",
-      eventConversationId: "a746cf16-81d3-4fe7-8d57-67903fb845a8",
-    })).toBe(false);
+    // the later assistant body ("web 审查 已完成"). Ext-m2: the constant-false
+    // shouldUnfollowOnHookStop and its detach branch are gone. 绝不 unfollow.
+    expect("shouldUnfollowOnHookStop" in transcript).toBe(false);
+    const t = new TranscriptTailer({
+      readFile: () => ({ content: "", size: 0 }),
+      onLine: () => {},
+    });
+    t.attach("r1", "/tmp/a.jsonl");
+    expect(t.activeCount()).toBe(1);
   });
 });

@@ -8,7 +8,7 @@ import { loadConfig } from "./config";
 import { WS_HEARTBEAT_MS, WsClientCore } from "./wsClient";
 import { SpoolForwarder } from "./spool";
 import { matchHookToPending, claimConversation, eventBelongsToWindow, transcriptPathBelongsToCid, runIdForHook, rememberSubagent, isAmbiguousMatch, dropPendingRuns, type PendingRun, type BindingMatch } from "./binding";
-import { TranscriptTailer, shouldUnfollowOnHookStop } from "./transcript";
+import { TranscriptTailer } from "./transcript";
 import { Executor, CancelWatcher } from "./executor";
 import { createCdpSubmitter, createImagePaster, createFileMentionPaster, createComposerFinisher, createAskQuestionDriver, probeCdpReady, type AskCdpInspect } from "./cdpInject";
 import { createOsClipboardWriter } from "./osClipboard";
@@ -17,7 +17,7 @@ import { collectTranscriptViews, matchTranscriptToPending, stopPayloadFromTransc
 import { TranscriptDirWatcher, debounceLeading, watchTranscriptDir, watchFileSize, TRANSCRIPT_WATCHDOG_MS, TRANSCRIPT_WATCH_DEBOUNCE_MS } from "./transcriptWatch";
 import { createExtSeq } from "./extSeq";
 import { hubRunsNeedingTranscriptFollow, shouldArmFollowupStopOnAdopt } from "./adoptRuns";
-import { noteOwnerBsp, clearGeneration, synthesizedStopPayload, noteHubGeneration, onFollowupBindGeneration, shouldSynthesizeTranscriptStop } from "./generationStamp";
+import { noteOwnerBsp, clearGeneration, synthesizedStopPayload, noteHubGeneration, onFollowupBindGeneration } from "./generationStamp";
 import { parseAskInspect, askPollActions, coalesceAskInspect } from "./askDetect";
 import { enrichPlanAsk, planDirsFor } from "./planFile";
 import { PENDING_RELOAD_ATTEMPT_NAME, PENDING_RELOAD_NAME, decideReloadFire, decideWindowReload, noteReloadCommandSettled, parsePendingReload, parseReloadAttempt, windowHasInFlightArmadaRun, type ReloadFireState } from "../../desktop-core/src/cursorReload";
@@ -122,7 +122,6 @@ export function activate(context: vscode.ExtensionContext): void {
       // jsonl turn_ended is the durable idle signal. Cursor stop/AAR hooks can miss
       // it (5s timeout, sidecar gen). Synth the hub stop contract on every OS.
       // 不 detach：续聊同一 path 才能保住 offset，避免重放旧 turn_ended 把 followup 立刻收口。
-      if (!shouldSynthesizeTranscriptStop()) return;
       const stop = stopPayloadFromTranscriptLine(line);
       if (!stop) return;
       emitSynthesizedStop(runId, stop);
@@ -150,7 +149,6 @@ export function activate(context: vscode.ExtensionContext): void {
   };
 
   const maybeCompleteFromDisk = (runId: string): void => {
-    if (!shouldSynthesizeTranscriptStop()) return;
     if (!followupStopGuard.shouldEmitStop(runId)) return;
     const path = boundPaths.get(runId);
     if (!path) return;
@@ -388,20 +386,8 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       if (ev.hook === "stop" && runId) {
         askLastByRun.delete(runId);
-        const owner = boundRuns.get(runId);
-        if (shouldUnfollowOnHookStop({
-          hook: ev.hook,
-          ownerConversationId: owner?.conversationId,
-          eventConversationId: cid,
-        })) {
-          tailer.detach(runId);
-          for (const [k, stop] of [...sizeWatches]) {
-            if (k === runId || k.startsWith(`${runId}\0`)) {
-              stop();
-              sizeWatches.delete(k);
-            }
-          }
-        }
+        // 绝不 unfollow：owner-cid stop 之后 background Task 仍往同一 jsonl 写。
+        // Tail lifetime is the cid bind, not the first owner stop.
       }
       core.enqueue({
         type: "run.event", runId, conversationId: cid,

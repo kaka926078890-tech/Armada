@@ -7,14 +7,8 @@ export interface TranscriptTailerOpts {
  * Transcript tail lifetime is the cid bind, not the first owner `stop`.
  * Background Task completion appends a follow-up turn after `turn_ended`;
  * unfollowing on owner-cid stop drops that assistant body from Armada.
+ * 绝不 unfollow：hook `stop` 不得 detach。
  */
-export function shouldUnfollowOnHookStop(_args: {
-  hook: string;
-  ownerConversationId: string | undefined;
-  eventConversationId: string | undefined;
-}): boolean {
-  return false;
-}
 
 export class TranscriptTailer {
   private tails = new Map<string, { runId: string; path: string; offset: number; buf: string }>();

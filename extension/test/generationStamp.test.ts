@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { noteOwnerBsp, clearGeneration, synthesizedStopPayload, noteHubGeneration, onFollowupBindGeneration, shouldSynthesizeTranscriptStop } from "../src/generationStamp";
+import { noteOwnerBsp, clearGeneration, synthesizedStopPayload, noteHubGeneration, onFollowupBindGeneration } from "../src/generationStamp";
+import * as stamp from "../src/generationStamp";
 
 describe("generationStamp", () => {
   test("only owner beforeSubmitPrompt stores gen", () => {
@@ -48,11 +49,9 @@ describe("generationStamp", () => {
     const r = synthesizedStopPayload({ status: "completed" }, "g1", "c1");
     expect(r).toEqual({ ok: true, payload: { status: "completed", generation_id: "g1", conversation_id: "c1" } });
   });
-  test("jsonl turn_ended is synthesized on darwin and win32 (hooks can miss after a finished composer turn)", () => {
-    expect(shouldSynthesizeTranscriptStop("darwin")).toBe(true);
-    expect(shouldSynthesizeTranscriptStop("darwin-arm64")).toBe(true);
-    expect(shouldSynthesizeTranscriptStop("win32")).toBe(true);
-    expect(shouldSynthesizeTranscriptStop("linux")).toBe(true);
+  test("jsonl turn_ended is synthesized on every OS (hooks can miss after a finished composer turn)", () => {
+    // Ext-m3: shouldSynthesizeTranscriptStop was constantly true; the guard is gone.
+    expect("shouldSynthesizeTranscriptStop" in stamp).toBe(false);
   });
 
   // r-5fb47426 14:40–14:43 (cid fc0d2224): parent BSP b855863b drained on

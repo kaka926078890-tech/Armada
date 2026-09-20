@@ -1,5 +1,4 @@
 import { workspacePathIn } from "./workspacePath";
-import { normalizePrompt } from "./promptNormalize";
 import { hasImageMarkers, stripImageMarkers } from "./imageMarkers";
 
 export interface PendingRun {

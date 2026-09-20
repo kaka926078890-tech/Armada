@@ -34,6 +34,13 @@ describe("matchHookToPending", () => {
     expect(m!.promptMatch).toBe(true);
   });
 
+  test("Ext-m4: whitespace folding comes from stripImageMarkers, not a binding normalizePrompt import", () => {
+    const m = matchHookToPending([P], ev("beforeSubmitPrompt", 1_002_000, {
+      conversation_id: "c1", workspace_roots: ["/ws/a"], prompt: "  hello  ",
+    }));
+    expect(m && "run" in m ? m.run.runId : null).toBe("r-1");
+  });
+
   test("beforeSubmitPrompt with a different prompt does not bind", () => {
     expect(matchHookToPending([P], ev("beforeSubmitPrompt", 1_002_000, {
       conversation_id: "c-other", workspace_roots: ["/ws/a"], prompt: "样式优化一下",
