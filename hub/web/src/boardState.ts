@@ -23,6 +23,15 @@ export function runDisplayName(run: Pick<RunRow, "title" | "prompt">): string {
   return (run.title ?? "").trim() || run.prompt.trim();
 }
 
+/** 五列卡片标题截取：约两行 CJK（列宽 ≥240px）。完整文案留给 hover / 详情。 */
+export const CARD_TITLE_MAX_CHARS = 40;
+
+export function clipCardTitle(text: string, max = CARD_TITLE_MAX_CHARS): string {
+  const t = text.replace(/\s+/g, " ").trim();
+  if (t.length <= max) return t;
+  return `${t.slice(0, max)}…`;
+}
+
 /** Board EventSource: skip jsonl `run.event` floods; merge status edges. */
 export const BOARD_SSE_DEBOUNCE_MS = 250;
 

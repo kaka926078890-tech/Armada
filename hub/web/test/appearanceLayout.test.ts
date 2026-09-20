@@ -23,11 +23,12 @@ describe("appearance layout stays coordinated when text scales", () => {
     expect(header).toContain("shrink-0");
   });
 
-  test("kanban titles wrap by word without clamping later lines", () => {
+  test("kanban titles wrap by word and clamp later lines", () => {
     const board = readFileSync(join(web, "src/components/Board.tsx"), "utf8");
     expect(board).not.toContain("break-all");
     expect(board).toContain("break-words");
-    expect(board).not.toMatch(/line-clamp-\d+/);
+    expect(board).toMatch(/line-clamp-2/);
+    expect(board).toContain("clipCardTitle");
     expect(board).toContain("whitespace-nowrap");
   });
 

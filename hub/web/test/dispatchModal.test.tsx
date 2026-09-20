@@ -40,6 +40,22 @@ describe("DispatchModal prompt", () => {
     expect(html).toContain("disabled");
   });
 
+  test("caps dialog and textarea so a long prompt cannot leave the viewport", () => {
+    const html = renderToStaticMarkup(
+      <DispatchModal
+        machines={[machine]}
+        preset={{ machineId: "m-1", workspaceRoot: "C:/ws" }}
+        activeOnWorkspace={0}
+        onClose={() => {}}
+        onDone={() => {}}
+      />,
+    );
+    expect(html).toContain("max-h-[min(90dvh,calc(100vh-2rem))]");
+    expect(html).toContain("overflow-y-auto");
+    expect(html).toContain("max-h-[min(12rem,40vh)]");
+    expect(html).toContain("field-sizing-fixed");
+  });
+
   test("shows prompt snippet bar above the textarea without submitting", () => {
     const html = renderToStaticMarkup(
       <DispatchModal

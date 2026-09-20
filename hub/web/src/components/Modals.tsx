@@ -92,7 +92,7 @@ export function DispatchModal({
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="sm:max-w-[32rem] gap-3" showCloseButton={false} onClick={(e) => e.stopPropagation()}>
+      <DialogContent className="sm:max-w-[32rem] gap-3 max-h-[min(90dvh,calc(100vh-2rem))] overflow-y-auto" showCloseButton={false} onClick={(e) => e.stopPropagation()}>
         <DialogHeader>
           <DialogTitle className={UI_TYPE}>派发任务</DialogTitle>
         </DialogHeader>
@@ -132,7 +132,8 @@ export function DispatchModal({
         />
         <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={8}
           placeholder="提示词（Markdown 原文；Enter 派发，Shift+Enter 换行）"
-          className="w-full font-mono min-h-[8rem] resize-y"
+          className="w-full font-mono min-h-[8rem] max-h-[min(12rem,40vh)] overflow-y-auto resize-y field-sizing-fixed"
+          style={{ fieldSizing: "fixed" }}
           onKeyDown={(e) => {
             if (!isFollowupSendEnter(e)) return;
             e.preventDefault();

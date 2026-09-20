@@ -104,11 +104,10 @@ describe("Board unread chrome", () => {
     expect(html).toContain("重试");
     expect(html).not.toContain("absolute top-1.5 right-1.5");
     expect(html).not.toContain("pr-16");
-    expect(html).not.toMatch(/line-clamp-\d+/);
   });
 
-  test("long card title stays in full and actions sit after the body", () => {
-    const prompt = "手机端不要创建提示词报错，只做同步就好了，而且现在中台，app 端也要对齐一遍操作路径";
+  test("long card title is clamped and actions sit after the body", () => {
+    const prompt = `${"超长提示词".repeat(20)}结尾`;
     const html = renderToStaticMarkup(
       <Board
         runs={[{ ...run, prompt }]}
@@ -122,9 +121,11 @@ describe("Board unread chrome", () => {
         onRename={() => {}}
       />,
     );
-    expect(html).toContain(prompt);
-    expect(html).not.toContain("…");
-    const titleAt = html.indexOf(prompt);
+    expect(html).toMatch(/line-clamp-2/);
+    expect(html).toContain(`title="${prompt}"`);
+    expect(html).toContain(`>${"超长提示词".repeat(8)}…<`);
+    expect(html).not.toMatch(new RegExp(`>${prompt}<`));
+    const titleAt = html.indexOf("超长提示词");
     const actionsAt = html.indexOf("改标题");
     expect(titleAt).toBeGreaterThan(-1);
     expect(actionsAt).toBeGreaterThan(titleAt);

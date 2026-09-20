@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import {
-  groupRuns, cardView, listWorkspaceSlots, encodeWorkspaceKey, decodeWorkspaceKey,
+  groupRuns, cardView, clipCardTitle, CARD_TITLE_MAX_CHARS, listWorkspaceSlots, encodeWorkspaceKey, decodeWorkspaceKey,
   filterRunsByWorkspace, sortConversations, groupSlotsByMachine, isUnreadCompleted, isUnreadMessage,
   workspaceHasUnread, workspaceUnreadCount, formatUnreadCount, canArchiveRun, canRetryRun, isHubArchived,
   workspaceFolderName, workspaceHasLiveRun, resolveSelectedWorkspace, isUnreadNeedInput, cardChromeClass, cardChromeOf, columnHasAlert,
@@ -39,11 +39,13 @@ describe("groupRuns", () => {
 });
 
 describe("cardView", () => {
-  test("title keeps the full prompt instead of slicing it", () => {
+  test("title keeps the full prompt; clipCardTitle slices the kanban label", () => {
     const prompt = "x".repeat(100);
     const v = cardView({ ...base, prompt }, 5000);
     expect(v.title).toBe(prompt);
-    expect(v.title).not.toContain("…");
+    expect(clipCardTitle(v.title)).toBe(`${"x".repeat(CARD_TITLE_MAX_CHARS)}…`);
+    expect(clipCardTitle("短标题")).toBe("短标题");
+    expect(clipCardTitle("a\n\nb   c")).toBe("a b c");
   });
   test("elapsed from started_at for running", () => {
     const v = cardView(base, 62_000);
