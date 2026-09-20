@@ -20,9 +20,9 @@ import { hubRunsNeedingTranscriptFollow, shouldArmFollowupStopOnAdopt } from "./
 import { noteOwnerBsp, clearGeneration, synthesizedStopPayload, noteHubGeneration, onFollowupBindGeneration } from "./generationStamp";
 import { parseAskInspect, askPollActions, coalesceAskInspect } from "./askDetect";
 import { enrichPlanAsk, planDirsFor } from "./planFile";
-import { PENDING_RELOAD_ATTEMPT_NAME, PENDING_RELOAD_NAME, decideReloadFire, decideWindowReload, highestInstalledArmadaAgent, noteReloadCommandSettled, parsePendingReload, parseReloadAttempt, windowHasInFlightArmadaRun, windowHasOpenComposerTurn, windowHasRecentSettle, type ReloadFireState } from "../../desktop-core/src/cursorReload";
+import { PENDING_RELOAD_ATTEMPT_NAME, PENDING_RELOAD_NAME, decideReloadFire, decideWindowReload, highestInstalledArmadaAgent, highestInstalledVsix, noteReloadCommandSettled, parsePendingReload, parseReloadAttempt, windowHasInFlightArmadaRun, windowHasOpenComposerTurn, windowHasRecentSettle, type ReloadFireState } from "../../desktop-core/src/cursorReload";
 
-const EXTENSION_VERSION = "0.4.35";
+const EXTENSION_VERSION = "0.4.36";
 
 let client: { dispose: () => void } | null = null;
 
@@ -629,7 +629,7 @@ export function activate(context: vscode.ExtensionContext): void {
       log("vsix pending-reload expired; this window still has a live Armada run or open composer turn");
       return;
     }
-    if (decision === "missing") {
+    if (decision === "missing" || decision === "need-pack") {
       log(`vsix pending-reload skipped; ${pending?.vsix} not installed (running ${EXTENSION_VERSION}, disk ${diskVsix ?? "none"})`);
       return;
     }

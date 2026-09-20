@@ -103,6 +103,17 @@ export function vsixPackMissingNotice(version: string): string {
   return `扩展包 ${name} 还没有，需要先打包。只点 Reload 不会装上新扩展。`;
 }
 
+/** Highest `armada.armada-agent-x.y.z` folder name in a Cursor extensions dir listing. */
+export function highestInstalledVsix(names: Iterable<string>): string | null {
+  let best: string | null = null;
+  for (const raw of names) {
+    const m = /(?:^|\/)armada\.armada-agent-(\d+\.\d+\.\d+)$/.exec(raw.trim());
+    if (!m) continue;
+    if (!best || cmpSemver(m[1], best) > 0) best = m[1];
+  }
+  return best;
+}
+
 /** Reload target is the newer of leftover pending and the hub pin. */
 export function reloadTargetVsix(pending: PendingReload | null, requiredVsix: string): string {
   const req = requiredVsix.trim();
@@ -216,18 +227,13 @@ export function windowHasRecentSettle(opts: {
  * (pending start / inject), including a just-settled window.
  * `expired` = waited maxWaitMs still busy → notify, do not force.
  * `done` = this window already runs pending.vsix or newer.
- * `missing` = pending vsix is not on disk; Reload Window cannot install it.
+ * `missing` / `need-pack` = pending vsix is not on disk; Reload Window
+ * cannot install it. Idle must not upgrade on that signal.
  */
-export type WindowReloadDecision = "none" | "wait" | "reload" | "expired" | "done" | "missing";
+export type WindowReloadDecision = "none" | "wait" | "reload" | "expired" | "done" | "missing" | "need-pack";
 
 export function highestInstalledArmadaAgent(dirNames: Iterable<string>): string | null {
-  let best: string | null = null;
-  for (const name of dirNames) {
-    const m = /^armada\.armada-agent-(\d+\.\d+\.\d+)/.exec(name);
-    if (!m) continue;
-    if (!best || cmpSemver(m[1], best) > 0) best = m[1];
-  }
-  return best;
+  return highestInstalledVsix(dirNames);
 }
 
 export function decideWindowReload(opts: {
@@ -239,6 +245,8 @@ export function decideWindowReload(opts: {
   runningVsix?: string;
   /** When set (including `null`), Reload is refused if disk is still behind pending.vsix. */
   installedVsix?: string | null;
+  /** False when `pending.vsix` is not already unpacked under ~/.cursor/extensions. */
+  localVsixReady?: boolean;
   maxWaitMs?: number;
   machineId?: string;
 }): WindowReloadDecision {
@@ -246,6 +254,7 @@ export function decideWindowReload(opts: {
   if (!p) return "none";
   if (p.machineId && opts.machineId && p.machineId !== opts.machineId) return "none";
   if (opts.runningVsix && cmpSemver(opts.runningVsix, p.vsix) >= 0) return "done";
+  if (opts.localVsixReady === false) return "need-pack";
   if (opts.installedVsix !== undefined) {
     if (!opts.installedVsix || cmpSemver(opts.installedVsix, p.vsix) < 0) return "missing";
   }

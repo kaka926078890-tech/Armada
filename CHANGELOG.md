@@ -10,9 +10,18 @@ Armada 按 **面** 发版：扩展、桌面、iOS、Android 可以不同号。RE
 
 ## Unreleased
 
+---
+
+## 2026-09-20 — 扩展 0.4.36 · iOS TF 24 · Android 0.1.11 · 桌面 0.1.0
+
 ### 修复
 
-- 中台 pending 的 vsix 本机磁盘还没装上时，扩展不再执行 Reload Window。中台旁有包不够：Reload 装不上缺失扩展，只会把窗口打成死循环（Intel 机 0.4.34 全舰队 pending 已踩过）。
+- 本机 `~/.cursor/extensions` 还没有 pending 那个 vsix 时，空闲（以及「现在 Reload」）都判定 `missing` / `need-pack`，不再因为窗口空闲就 Reload Window。中台旁有包不够：没装包的 Windows / Intel 不会被 when-idle 白闪成死循环。
+- 机器已经跑着 pending 号时，hub 注册不再重推 `ext.cursorReload`。
+
+### 操作员注意
+
+Windows 被控须 **先装** `armada-agent-0.4.36.vsix` 再 Reload。只空闲、只点 Reload，本地没有这个号也不会升级。中台须 overlay 到含 `REQUIRED_EXTENSION_VERSION=0.4.36` 的包装 hub。桌面仍是 **0.1.0**；iOS TestFlight **24**；Android **0.1.11**。
 
 ---
 

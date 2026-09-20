@@ -16,6 +16,7 @@ import {
   neededReloadMachineIds,
   reloadTargetVsix,
   vsixPackMissingNotice,
+  highestInstalledVsix,
   windowHasInFlightArmadaRun,
   windowHasOpenComposerTurn,
   windowHasRecentSettle,
@@ -130,8 +131,38 @@ describe("decideWindowReload", () => {
     })).toBe("reload");
   });
 
+  test("when-idle does not reload if the pending vsix is not on disk", () => {
+    expect(decideWindowReload({
+      pending,
+      thisWindowHasLiveRun: false,
+      now: 2000,
+      runningVsix: "0.4.26",
+      localVsixReady: false,
+    })).toBe("need-pack");
+  });
+
+  test("now does not reload if the pending vsix is not on disk either", () => {
+    expect(decideWindowReload({
+      pending: { ...pending, action: "now" },
+      thisWindowHasLiveRun: false,
+      now: 2000,
+      runningVsix: "0.4.26",
+      localVsixReady: false,
+    })).toBe("need-pack");
+  });
+
   test("reloads when idle after notBefore", () => {
     expect(decideWindowReload({ pending, thisWindowHasLiveRun: false, now: 2000 })).toBe("reload");
+  });
+
+  test("reloads when idle only after the pending vsix is already installed", () => {
+    expect(decideWindowReload({
+      pending,
+      thisWindowHasLiveRun: false,
+      now: 2000,
+      runningVsix: "0.4.26",
+      localVsixReady: true,
+    })).toBe("reload");
   });
 
   test("expires instead of forcing after the idle wait cap", () => {
@@ -261,11 +292,12 @@ describe("decideReloadFire", () => {
     expect(r.fire).toBe(true);
   });
 
-  test("expired/done/none/missing never fire", () => {
+  test("expired/done/none/missing/need-pack never fire", () => {
     expect(decideReloadFire(idle, { decision: "expired", pendingSetAt: setAt }).fire).toBe(false);
     expect(decideReloadFire(idle, { decision: "done", pendingSetAt: setAt }).fire).toBe(false);
     expect(decideReloadFire(idle, { decision: "none", pendingSetAt: null }).fire).toBe(false);
     expect(decideReloadFire(idle, { decision: "missing", pendingSetAt: setAt }).fire).toBe(false);
+    expect(decideReloadFire(idle, { decision: "need-pack", pendingSetAt: setAt }).fire).toBe(false);
   });
 });
 
@@ -277,6 +309,18 @@ describe("highestInstalledArmadaAgent", () => {
       "other.ext-1.0.0",
     ])).toBe("0.4.33");
     expect(highestInstalledArmadaAgent([])).toBeNull();
+  });
+});
+
+describe("highestInstalledVsix", () => {
+  test("picks the newest armada-agent folder", () => {
+    expect(highestInstalledVsix([
+      "armada.armada-agent-0.4.34",
+      "anysphere.cursor-always-local-1.0.0",
+      "armada.armada-agent-0.4.35",
+    ])).toBe("0.4.35");
+    expect(highestInstalledVsix([])).toBeNull();
+    expect(highestInstalledVsix(["armada.armada-agent-0.4.34"])).toBe("0.4.34");
   });
 });
 
@@ -488,6 +532,7 @@ describe("extension delivers hub reload over ws", () => {
     expect(src).toContain("lastStopAt");
     expect(src).toContain("installedVsix");
     expect(src).toContain("highestInstalledArmadaAgent");
+    expect(src).toContain("highestInstalledVsix");
     expect(src.match(/persistReloadAttempt\(null\)/g)?.length).toBe(1);
     expect(src).not.toContain("boundRuns.size > 0 || pendingRuns.length > 0");
     const fire = src.slice(src.indexOf("vsix pending-reload: reloading window"));
