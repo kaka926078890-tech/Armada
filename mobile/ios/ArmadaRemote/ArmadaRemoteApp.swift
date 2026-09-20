@@ -275,7 +275,13 @@ final class Session: ObservableObject {
             } catch {
                 newHidden = hiddenRuns
             }
-            let reloadState = ws.cursorReload ?? (try? await reload)
+            let fetchedReload: CursorReloadDTO?
+            do {
+                fetchedReload = try await reload
+            } catch {
+                fetchedReload = nil
+            }
+            let reloadState = ws.cursorReload ?? fetchedReload
             guard seq == refreshSeq else { return }
             if hubOffline != ws.hubOffline { hubOffline = ws.hubOffline }
             if workspaces != ws.workspaces { workspaces = ws.workspaces }
