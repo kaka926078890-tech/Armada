@@ -375,5 +375,6 @@ v1 = P0 全部。v1.5 = P1。v2 = P2（含 CDP 真机）。P3 按拍板插入，
 | 2026-09-20 | 扩展 **0.4.29**、iOS TestFlight **20**、Android **0.1.7**。真机验收清单：[2026-09-20-armada-debt-real-device-verify.md](./2026-09-20-armada-debt-real-device-verify.md)。P2-a CDP 写入仍等 Mac+Windows 点通。 |
 | 2026-09-20 | 扩展 **0.4.30**、iOS **21**、Android **0.1.8**。Ask Skip 点 Skip 按钮；Other 为 D；hub 进程启动不把 leftover `online` 当掉线杀跑；`unknown` 快照带 `finalText`。 |
 | 2026-09-20 | 扩展 **0.4.31**。Reload 跨进程闩；同号 0.4.30 会被 skipped-same-version 跳过。 |
+| 2026-09-20 | 扩展 **0.4.32**。取消 leftover Plan 不再挂 pending / 不挂到下一条。App 无新按钮。 |
 | 2026-09-20 | P3：Rel-M2 快照写入按 fleet 隔离；Rel-M4 `canRetryStatus`；Rel-M5 APNs 去掉写死 badge；Hub-m4 register 形状；Hub-m7 畸形 JSON 400。未改 CDP 选择器。 |
 | 2026-09-20 | P16/P17/Rel-I9：hub blob 预检已在；中转 followup/snippets/dispatch 共用体积闸；桌面 CSP 从 `http://*:*` 收到 `http://*:7380`（加入局域网舰队仍要 7380）。未改 CDP。 |

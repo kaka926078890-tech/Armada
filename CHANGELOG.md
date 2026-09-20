@@ -10,16 +10,25 @@ Armada 按 **面** 发版：扩展、桌面、iOS、Android 可以不同号。RE
 
 ## Unreleased
 
+---
+
+## 2026-09-20 — 扩展 0.4.32 · iOS TF 21 · Android 0.1.8 · 桌面 0.1.0
+
+### 修复
+
+- 取消 Plan 后 leftover Build 不再当 pending，也不挂到同窗下一条（Cursor 的 Created Plan transcript 卡没有关闭按钮，屏上仍可能留着 View Plan / Build）。
+- 窗上有未答 Ask 时新任务排队；取消普通 Ask 会先 Skip 再停跑。
+- 中转限制手机请求体体积；桌面看板 CSP 收到 `http://*:7380`，不再放行任意端口。
+- 看板派发框留在视口内；五列卡片标题过长截断。
+- 中转 run 快照按 `fleet` 隔离；畸形 `register` / JSON 直接 400。
+
 ### 文档
 
 - README 换成现网桌面看板 / 任务详情 / iOS 舰队·仓列表·详情截图；顶部增加四行当前版本表。
 
-### 修复
+### 操作员注意
 
-- 取消 Plan 后 leftover Build 不再当 pending，也不挂到同窗下一条（Cursor 的 Created Plan transcript 卡本身没有关闭按钮，屏上仍可能留着 View Plan / Build）。
-- 中转限制手机请求体体积；桌面看板 CSP 收到 `http://*:7380`，不再放行任意端口。
-- 看板派发框留在视口内；五列卡片标题过长截断。
-- 中转 run 快照按 `fleet` 隔离；畸形 `register` / JSON 直接 400。
+Windows 被控须 **先装** `armada-agent-0.4.32.vsix` 再空闲 Reload。只 Reload 不会从 0.4.31 升上去（同号会被 `skipped-same-version` 跳过）。看板落后会提示「需 0.4.32」。App 这一轮没有新按钮。iOS 仍是 TestFlight **21**；Android **0.1.8**（versionCode 9）；桌面仍是 **0.1.0**。
 
 ---
 

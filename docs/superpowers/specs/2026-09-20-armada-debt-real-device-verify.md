@@ -1,9 +1,9 @@
-# Armada 架构债真机验收清单（0.4.31 / App 21）
+# Armada 架构债真机验收清单（0.4.32 / App 21）
 
 - 日期：2026-09-20
 - 状态：**操作员验收清单**（不是新功能设计。CDP 写路径未点通不得改生产选择器。）
 - 父文档：[2026-09-19-armada-architecture-debt-design.md](./2026-09-19-armada-architecture-debt-design.md)
-- 打包：中台 overlay `/Applications/Armada.app`；扩展 `armada-agent` **0.4.31**；iOS TestFlight **21**（营销号仍 0.1.0）；Android **0.1.8**（versionCode 9）
+- 打包：中台 overlay `/Applications/Armada.app`；扩展 `armada-agent` **0.4.32**；iOS TestFlight **21**（营销号仍 0.1.0）；Android **0.1.8**（versionCode 9）
 - HEAD 债落地：本轮 Ask Skip/D、中台重启不杀 running、`unknown` 正文；此前 P0–P1 见旧修订。
 
 ---
@@ -13,11 +13,11 @@
 | 项 | 内容 |
 | --- | --- |
 | 问题 | 债已进 `master`，但 0.4.28 同号 vsix 不会 Reload；Windows CDP 写入、手机契约、attach toast 还没关门。 |
-| 核心方案 | 升扩展 **0.4.31** 再 overlay；Windows 必须先装 vsix，不要只 Reload；手机装 TF **21** / Android **0.1.8**。 |
+| 核心方案 | 升扩展 **0.4.32** 再 overlay；Windows 必须先装 vsix，不要只 Reload；手机装 TF **21** / Android **0.1.8**。 |
 | 关键约束 | 7380 必须是 bundled bun。CDP **写**路径 Mac+Windows 都点通才算 P2-a。禁止把源码 hub attach 当成打包绿。 |
 | 明确不做 | 不测手机发图（另文）；不在未点通时改 CDP 选择器；不把 §7.5 P3 塞进本轮验收。 |
 
-**Windows 操作员先做：在被控机装 `armada-agent-0.4.31.vsix`，再空闲 Reload。只 Reload 不会从 0.4.28 升上去。**
+**Windows 操作员先做：在被控机装 `armada-agent-0.4.32.vsix`，再空闲 Reload。只 Reload 不会从 0.4.31 升上去。**
 
 ---
 
@@ -122,7 +122,7 @@
 
 ## 7. 操作员步骤（Windows）
 
-1. 等中台 overlay 完成。Windows **先装** `armada-agent-0.4.31.vsix`，不要只点 Reload。
+1. 等中台 overlay 完成。Windows **先装** `armada-agent-0.4.32.vsix`，不要只点 Reload。
 2. **关掉该 Windows 上所有 Armada 正在跑的 Composer 任务**（或等停），Reload Window。
 3. 确认扩展 0.4.31。
 4. 按 §4 W2→W6 做；每条记下：过 / 失败现象 / 窗口里几个 composer。
@@ -150,3 +150,4 @@ Mac overlay 后也会 `when-idle` Reload；**正在跑的「真机测试」窗�
 | 2026-09-20 | 初稿。配合扩展 0.4.29、iOS 20、Android 0.1.7；Windows CDP 写路径 + 手机契约为必须项。 |
 | 2026-09-20 | 扩展 **0.4.30**、iOS **21**、Android **0.1.8**。Skip 点 `.composer-skip-button`；Ask 卡 A/B/C/D；中台重启不 `MACHINE_OFFLINE` 误杀 running；`unknown` 带正文；派发底栏不再撑满屏。 |
 | 2026-09-20 | 扩展 **0.4.31**。同一 pending Reload 后版本仍落后不再空转；同号 0.4.30 无法装上这次闩。 |
+| 2026-09-20 | 扩展 **0.4.32**。取消 leftover Plan 不再挂 pending；Windows 须先装新 vsix，不要只 Reload 0.4.31。 |
