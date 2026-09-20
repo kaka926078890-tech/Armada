@@ -57,7 +57,7 @@ fun classifyHttp(status: Int, body: String): String {
         if (status == 403 && code == "OPERATOR_REQUIRED") return "PAIR_INVITE"
         return code
     }
-    if (status == 403 || body.contains("<html", ignoreCase = true)) return "NET_INTERCEPT"
+    if (status == 403) return "NET_INTERCEPT"
     return "HTTP $status"
 }
 

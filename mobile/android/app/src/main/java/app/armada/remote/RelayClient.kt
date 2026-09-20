@@ -1,9 +1,10 @@
 package app.armada.remote
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -12,6 +13,8 @@ import okhttp3.sse.EventSourceListener
 import okhttp3.sse.EventSources
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.Base64
+import java.util.UUID
 import java.util.concurrent.TimeUnit
 
 class RelayException(val code: String) : Exception(
@@ -30,6 +33,10 @@ class RelayClient(base: String, private val token: String) {
         .writeTimeout(30, TimeUnit.SECONDS)
         .build()
     private val sseHttp = http.newBuilder().readTimeout(90, TimeUnit.SECONDS).build()
+
+    companion object {
+        private const val BLOB_CHUNK = 6 * 1024
+    }
 
     suspend fun workspaces(): Pair<Boolean, List<WorkspaceDto>> {
         val o = JSONObject(get("/mobile/workspaces"))
@@ -87,22 +94,50 @@ class RelayClient(base: String, private val token: String) {
     }
 
     suspend fun uploadBlob(bytes: ByteArray, mime: String, name: String): BlobDto {
-        val media = mime.toMediaType()
-        val reqBody = MultipartBody.Builder().setType(MultipartBody.FORM)
-            .addFormDataPart("file", name, bytes.toRequestBody(media))
-            .build()
-        return withContext(Dispatchers.IO) {
-            val req = Request.Builder()
-                .url("$base/mobile/blobs")
-                .header("Authorization", "Bearer $token")
-                .post(reqBody)
-                .build()
-            http.newCall(req).execute().use { resp ->
-                val text = resp.body?.string().orEmpty()
-                if (resp.code == 404) throw RelayException("NO_ROUTE")
-                if (resp.code !in listOf(201)) throw RelayException(classifyHttp(resp.code, text))
-                parseBlob(JSONObject(text).getJSONObject("blob"))
+        val uploadId = UUID.randomUUID().toString()
+        val count = maxOf(1, (bytes.size + BLOB_CHUNK - 1) / BLOB_CHUNK)
+        var done: BlobDto? = null
+        var i = 0
+        while (i < count) {
+            coroutineScope {
+                val end = minOf(count, i + 4)
+                val jobs = (i until end).map { index ->
+                    async(Dispatchers.IO) {
+                        putBlobChunk(uploadId, name, mime, bytes.size, index, count, bytes)
+                    }
+                }
+                jobs.forEach { job -> job.await()?.let { done = it } }
             }
+            i += 4
+        }
+        return done ?: throw RelayException("HUB_ERROR")
+    }
+
+    private fun putBlobChunk(
+        uploadId: String, name: String, mime: String, totalSize: Int,
+        index: Int, count: Int, bytes: ByteArray,
+    ): BlobDto? {
+        val start = index * BLOB_CHUNK
+        val slice = bytes.copyOfRange(start, minOf(bytes.size, start + BLOB_CHUNK))
+        val body = JSONObject()
+            .put("uploadId", uploadId)
+            .put("name", name)
+            .put("mime", mime)
+            .put("totalSize", totalSize)
+            .put("index", index)
+            .put("count", count)
+            .put("data", Base64.getEncoder().encodeToString(slice))
+        val req = Request.Builder()
+            .url("$base/mobile/blobs")
+            .header("Authorization", "Bearer $token")
+            .post(body.toString().toRequestBody(jsonType))
+            .build()
+        http.newCall(req).execute().use { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (resp.code == 202) return null
+            if (resp.code == 404) throw RelayException("NO_ROUTE")
+            if (resp.code != 201) throw RelayException(classifyHttp(resp.code, text))
+            return parseBlob(JSONObject(text).getJSONObject("blob"))
         }
     }
 

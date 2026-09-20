@@ -354,8 +354,7 @@ enum RelayAPIError: LocalizedError {
             if status == 403 && code == "OPERATOR_REQUIRED" { return .pairInvite }
             return .http(status, code)
         }
-        let text = String(data: data, encoding: .utf8) ?? ""
-        if status == 403 || text.range(of: "<html", options: .caseInsensitive) != nil {
+        if status == 403 {
             return .http(status, "NET_INTERCEPT")
         }
         return .http(status, "HTTP \(status)")
@@ -410,24 +409,61 @@ actor RelayAPI {
         return wrap.run
     }
 
+    /// Public uuWAF 500s HTML above ~10KiB; JSON chunk bodies stay under that.
+    private static let blobChunkBytes = 6 * 1024
+
     func uploadBlob(data: Data, mime: String, name: String) async throws -> BlobDTO {
-        let boundary = "armada-\(UUID().uuidString)"
-        var body = Data()
-        func append(_ s: String) { body.append(Data(s.utf8)) }
-        append("--\(boundary)\r\n")
-        append("Content-Disposition: form-data; name=\"file\"; filename=\"\(name)\"\r\n")
-        append("Content-Type: \(mime)\r\n\r\n")
-        body.append(data)
-        append("\r\n--\(boundary)--\r\n")
+        let uploadId = UUID().uuidString
+        let chunk = Self.blobChunkBytes
+        let count = max(1, (data.count + chunk - 1) / chunk)
+        var done: BlobDTO?
+        var i = 0
+        while i < count {
+            try await withThrowingTaskGroup(of: BlobDTO?.self) { group in
+                let end = min(count, i + 4)
+                for index in i..<end {
+                    group.addTask {
+                        let start = index * chunk
+                        let slice = data.subdata(in: start ..< min(data.count, start + chunk))
+                        return try await self.putBlobChunk(
+                            uploadId: uploadId, name: name, mime: mime, totalSize: data.count,
+                            index: index, count: count, slice: slice
+                        )
+                    }
+                }
+                for try await blob in group {
+                    if let blob { done = blob }
+                }
+            }
+            i += 4
+        }
+        guard let blob = done else { throw RelayAPIError.http(500, "HUB_ERROR") }
+        return blob
+    }
+
+    private func putBlobChunk(
+        uploadId: String, name: String, mime: String, totalSize: Int,
+        index: Int, count: Int, slice: Data
+    ) async throws -> BlobDTO? {
+        let obj: [String: Any] = [
+            "uploadId": uploadId,
+            "name": name,
+            "mime": mime,
+            "totalSize": totalSize,
+            "index": index,
+            "count": count,
+            "data": slice.base64EncodedString(),
+        ]
         guard let url = URL(string: base + "/mobile/blobs") else { throw RelayAPIError.transport("bad url") }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.timeoutInterval = 30
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        req.httpBody = body
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONSerialization.data(withJSONObject: obj)
         let (respData, resp) = try await URLSession.shared.data(for: req)
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        if code == 202 { return nil }
         if code == 404 { throw RelayAPIError.http(404, "NO_ROUTE") }
         if code != 201 { throw RelayAPIError.classify(status: code, data: respData) }
         struct Wrap: Decodable { var blob: BlobDTO }

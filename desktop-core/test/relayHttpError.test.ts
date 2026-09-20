@@ -22,6 +22,13 @@ describe("classifyRelayHttp", () => {
     expect(classifyRelayHttp(403, "").code).toBe("NET_INTERCEPT");
   });
 
+  test("HTML 500 from uuWAF is not the Wi-Fi intercept copy", () => {
+    const r = classifyRelayHttp(500, "<html><center>uuWAF</center></html>");
+    expect(r.code).toBe("HTTP_500");
+    expect(r.message).toBe("HTTP 500");
+    expect(r.code).not.toBe("NET_INTERCEPT");
+  });
+
   test("JSON 503 HUB_OFFLINE stays 中台离线", () => {
     const r = classifyRelayHttp(503, '{"error":"HUB_OFFLINE"}');
     expect(r.code).toBe("HUB_OFFLINE");
@@ -54,5 +61,19 @@ describe("classifyRelayHttp", () => {
       expect(kt).toContain(`"${code}"`);
       expect(operatorCopy(code)).not.toBe(code);
     }
+  });
+
+  test("iOS and Android send JSON blob chunks and only treat 403 as Wi-Fi intercept", () => {
+    const root = join(import.meta.dir, "../..");
+    const swift = readFileSync(join(root, "mobile/ios/ArmadaRemote/RelayAPI.swift"), "utf8");
+    const client = readFileSync(join(root, "mobile/android/app/src/main/java/app/armada/remote/RelayClient.kt"), "utf8");
+    const messages = readFileSync(join(root, "mobile/android/core/src/main/kotlin/app/armada/remote/OperatorMessages.kt"), "utf8");
+    expect(swift).toContain("blobChunkBytes = 6 * 1024");
+    expect(swift).toContain("application/json");
+    expect(swift).not.toContain("multipart/form-data");
+    expect(client).toContain("BLOB_CHUNK = 6 * 1024");
+    expect(messages).toContain("if (status == 403) return \"NET_INTERCEPT\"");
+    expect(swift).toContain("if status == 403");
+    expect(swift).not.toContain("<html>");
   });
 });

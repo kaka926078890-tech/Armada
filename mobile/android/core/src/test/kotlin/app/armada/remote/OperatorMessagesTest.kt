@@ -54,6 +54,7 @@ class OperatorMessagesTest {
         assertEquals("NET_INTERCEPT", classifyHttp(403, "<html>blocked</html>"))
         assertEquals("PAIR_INVITE", classifyHttp(403, """{"error":"OPERATOR_REQUIRED"}"""))
         assertEquals("HUB_OFFLINE", classifyHttp(503, """{"error":"HUB_OFFLINE"}"""))
+        assertEquals("HTTP 500", classifyHttp(500, "<html>uuWAF</html>"))
     }
 
     @Test

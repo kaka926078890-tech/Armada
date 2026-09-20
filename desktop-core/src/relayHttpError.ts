@@ -33,7 +33,7 @@ export function classifyRelayHttp(status: number, bodyText: string): { code: str
   } catch {
     /* HTML / empty / captive portal */
   }
-  if (status === 403 || /<html/i.test(trimmed)) {
+  if (status === 403) {
     return { code: "NET_INTERCEPT", message: NETWORK_INTERCEPT_COPY };
   }
   return { code: `HTTP_${status}`, message: `HTTP ${status}` };

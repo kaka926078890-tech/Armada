@@ -963,6 +963,41 @@ describe("relay serve", () => {
     ws.close();
   });
 
+  test("JSON blob chunks assemble into one cmd.blobPut", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    const seen: any[] = [];
+    ws.addEventListener("message", (e) => seen.push(JSON.parse(String(e.data))));
+    autoHub(ws);
+    await Bun.sleep(30);
+    const raw = Buffer.alloc(20_000, 9);
+    raw[0] = 0x89; raw[1] = 0x50; raw[2] = 0x4e; raw[3] = 0x47;
+    const chunk = 6 * 1024;
+    const count = Math.ceil(raw.length / chunk);
+    const headers = { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" };
+    let last: Response | undefined;
+    for (let i = 0; i < count; i++) {
+      const part = raw.subarray(i * chunk, Math.min(raw.length, (i + 1) * chunk));
+      last = await fetch(url(s, "/mobile/blobs"), {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          uploadId: "up-1", name: "shot.png", mime: "image/png", totalSize: raw.length,
+          index: i, count, data: part.toString("base64"),
+        }),
+      });
+      if (i < count - 1) expect(last.status).toBe(202);
+    }
+    expect(last!.status).toBe(201);
+    const { blob } = await last!.json() as { blob: { size: number } };
+    expect(blob.size).toBe(raw.length);
+    const put = seen.find((m) => m.type === "cmd.blobPut");
+    expect(put.bytesBase64).toBe(raw.toString("base64"));
+    expect(seen.filter((m) => m.type === "cmd.blobPut")).toHaveLength(1);
+    ws.close();
+  });
+
   test("text dispatch omits attachmentIds on the hub command", async () => {
     const s = start();
     const fleet = s.createFleet();

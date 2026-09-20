@@ -10,6 +10,7 @@ import { notifyEdges, type NotifyEdge } from "./notifyEdge";
 import { canRetryStatus, followupOutcome, httpStatusForRunError } from "../../hub/src/concurrency";
 import { MAX_BLOB_BYTES } from "../../hub/src/blobs";
 import { resolveAdminToken } from "./adminToken";
+import { applyBlobChunk, type BlobUploadSession } from "./blobUpload";
 
 export const PROTOCOL_VERSION = 1;
 const MAX_BODY = 20 * 1024 * 1024;
@@ -120,6 +121,7 @@ export function createRelayServer(opts: {
   const hubSockets = new Map<string, { send: (s: string) => void; ws: unknown }>();
   const rate = new Map<string, number[]>();
   const blobRate = new Map<string, number[]>();
+  const blobUploads = new Map<string, BlobUploadSession>();
   let reqSeq = 0;
   const apnsSender = createApnsSender(opts.apns ?? null);
   if (!apnsSender.enabled) console.warn("armada-relay APNS_DISABLED");
@@ -686,37 +688,54 @@ export function createRelayServer(opts: {
     });
   });
 
+  async function putBlobToHub(fleetId: string, name: string, mime: string, bytes: Buffer) {
+    const requestId = `r${++reqSeq}`;
+    const sent = sendHub(fleetId, {
+      type: "cmd.blobPut",
+      requestId,
+      name: name || "image.jpg",
+      mime: mime || "",
+      bytesBase64: bytes.toString("base64"),
+    });
+    if (!sent) return { error: "HUB_OFFLINE" as const };
+    const result = await waitHub(requestId);
+    if (!result.ok || !result.blob) return { error: result.error ?? "HUB_TIMEOUT" };
+    audit("operator", "blob.put", result.blob.id, { size: result.blob.size });
+    return { blob: result.blob };
+  }
+
   app.post("/mobile/blobs", async (c) => {
     const raw = c.req.header("content-length");
     if (raw == null || raw === "") return c.json({ error: "INVALID" }, 400);
     const len = Number(raw);
     if (!Number.isFinite(len) || len <= 0) return c.json({ error: "INVALID" }, 400);
-    if (len > MAX_BLOB_BYTES) return c.json({ error: "ATTACHMENT_TOO_LARGE" }, 413);
     const tok = (c as any).get("opToken") as string;
     const fleet = (c as any).get("fleet") as { id: string; hub_online: number };
-    if (!checkBlobRate(tok)) return c.json({ error: "RATE_LIMIT" }, 429);
+    const ct = c.req.header("content-type") ?? "";
+    if (ct.includes("application/json")) {
+      if (len > 10 * 1024) return c.json({ error: "INVALID" }, 400);
+      if (fleet.hub_online !== 1) return c.json({ error: "HUB_OFFLINE" }, 503);
+      const json = await c.req.json().catch(() => null);
+      const stepped = applyBlobChunk(blobUploads, tok, json);
+      if ("error" in stepped) return c.json({ error: stepped.error }, stepped.status as 400);
+      if ("pending" in stepped) return c.json({ ok: true }, 202);
+      if (!checkBlobRate(tok)) return c.json({ error: "RATE_LIMIT" }, 429);
+      if (stepped.complete.length > MAX_BLOB_BYTES) return c.json({ error: "ATTACHMENT_TOO_LARGE" }, 413);
+      const put = await putBlobToHub(fleet.id, stepped.name, stepped.mime, stepped.complete);
+      if (put.error) return c.json({ error: put.error }, hubCmdStatus(put.error) as 400);
+      return c.json({ blob: put.blob }, 201);
+    }
+    if (len > MAX_BLOB_BYTES) return c.json({ error: "ATTACHMENT_TOO_LARGE" }, 413);
     if (fleet.hub_online !== 1) return c.json({ error: "HUB_OFFLINE" }, 503);
+    if (!checkBlobRate(tok)) return c.json({ error: "RATE_LIMIT" }, 429);
     const body = await c.req.parseBody();
     const file = body["file"];
     if (!(file instanceof File)) return c.json({ error: "INVALID" }, 400);
     const bytes = Buffer.from(await file.arrayBuffer());
     if (bytes.length > MAX_BLOB_BYTES) return c.json({ error: "ATTACHMENT_TOO_LARGE" }, 413);
-    const requestId = `r${++reqSeq}`;
-    const sent = sendHub(fleet.id, {
-      type: "cmd.blobPut",
-      requestId,
-      name: file.name || "image.jpg",
-      mime: file.type || "",
-      bytesBase64: bytes.toString("base64"),
-    });
-    if (!sent) return c.json({ error: "HUB_OFFLINE" }, 503);
-    const result = await waitHub(requestId);
-    if (!result.ok || !result.blob) {
-      const err = result.error ?? "HUB_TIMEOUT";
-      return c.json({ error: err }, hubCmdStatus(err) as 400);
-    }
-    audit("operator", "blob.put", result.blob.id, { size: result.blob.size });
-    return c.json({ blob: result.blob }, 201);
+    const put = await putBlobToHub(fleet.id, file.name || "image.jpg", file.type || "", bytes);
+    if (put.error) return c.json({ error: put.error }, hubCmdStatus(put.error) as 400);
+    return c.json({ blob: put.blob }, 201);
   });
 
   app.post("/mobile/runs", async (c) => {
