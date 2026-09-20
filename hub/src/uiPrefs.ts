@@ -1,5 +1,6 @@
-import { existsSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { join } from "path";
+import { writeFileAtomic } from "./writeFileAtomic";
 
 export type ThemeName = "dark" | "light";
 export type FontScale = "normal" | "large" | "xlarge";
@@ -162,7 +163,7 @@ export function readUiPrefs(home: string): ReadUiPrefsResult {
 }
 
 export function writeUiPrefs(home: string, prefs: UiPrefs): void {
-  writeFileSync(prefsPath(home), JSON.stringify(normalizeUiPrefs(prefs)), { mode: 0o600 });
+  writeFileAtomic(prefsPath(home), JSON.stringify(normalizeUiPrefs(prefs)), 0o600);
 }
 
 export function mergeUiPrefs(base: UiPrefs, patch: Record<string, unknown>): UiPrefs {

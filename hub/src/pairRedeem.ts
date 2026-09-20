@@ -1,7 +1,7 @@
-import { writeFileSync } from "fs";
 import { join } from "path";
 import { parseRelayUri } from "../../relay/src/uri";
 import type { RelayConfig } from "./relayClient";
+import { writeFileAtomic } from "./writeFileAtomic";
 
 const HEX64 = /^[a-f0-9]{64}$/;
 
@@ -25,9 +25,9 @@ export async function redeemPairInvite(pairUri: string, fetchImpl: typeof fetch 
 }
 
 export function writeRelayConfig(home: string, cfg: RelayConfig): void {
-  writeFileSync(
+  writeFileAtomic(
     join(home, "relay.json"),
     JSON.stringify({ relay: cfg.relay, fleet: cfg.fleet, secret: cfg.secret }),
-    { mode: 0o600 },
+    0o600,
   );
 }

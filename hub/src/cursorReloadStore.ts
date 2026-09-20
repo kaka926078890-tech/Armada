@@ -1,5 +1,6 @@
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from "fs";
+import { existsSync, readFileSync, unlinkSync } from "fs";
 import { join } from "path";
+import { writeFileAtomic } from "./writeFileAtomic";
 import {
   PENDING_RELOAD_NAME,
   parsePendingReload,
@@ -48,7 +49,7 @@ export function writePendingReload(
   }
   const next = pendingFromAction(action, vsix || REQUIRED_EXTENSION_VERSION, now, notBefore, machineId);
   if (!next) return null;
-  writeFileSync(p, JSON.stringify(next), { mode: 0o600 });
+  writeFileAtomic(p, JSON.stringify(next), 0o600);
   return next;
 }
 

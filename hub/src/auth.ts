@@ -1,7 +1,8 @@
-import { writeFileSync, readFileSync, existsSync, mkdirSync } from "fs";
+import { readFileSync, existsSync, mkdirSync } from "fs";
 import { randomBytes } from "crypto";
 import { join } from "path";
 import { createMiddleware } from "hono/factory";
+import { writeFileAtomic } from "./writeFileAtomic";
 
 export function ARMADA_HOME(home?: string): string {
   const h = home ?? process.env.ARMADA_HUB_HOME ?? join(process.env.HOME!, ".armada");
@@ -13,7 +14,7 @@ export function loadToken(home: string): string {
   const p = join(home, "token");
   if (!existsSync(p)) {
     const t = randomBytes(32).toString("hex");
-    writeFileSync(p, t, { mode: 0o600 });
+    writeFileAtomic(p, t, 0o600);
     return t;
   }
   return readFileSync(p, "utf8").trim();
