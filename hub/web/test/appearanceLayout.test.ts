@@ -21,7 +21,13 @@ describe("appearance layout stays coordinated when text scales", () => {
     expect(header).toContain("flex-wrap");
     expect(header).toContain("whitespace-nowrap");
     expect(header).toContain("shrink-0");
-    expect(app).toContain("absolute inset-0 z-40");
+  });
+
+  test("run detail overlay covers the machine sidebar below the header", () => {
+    const app = readFileSync(join(web, "src/App.tsx"), "utf8");
+    const body = app.slice(app.indexOf("</header>"));
+    expect(body).toMatch(/flex flex-1 min-h-0 relative[\s\S]*<Sidebar[\s\S]*absolute inset-0 z-40/);
+    expect(body).not.toMatch(/<Sidebar[\s\S]*flex-col relative[\s\S]*absolute inset-0 z-40/);
     expect(app).not.toContain("fixed inset-0 z-40");
   });
 

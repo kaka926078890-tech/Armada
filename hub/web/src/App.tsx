@@ -438,7 +438,7 @@ export default function App() {
           </Button>
         </span>
       </header>
-      <div className="flex flex-1 min-h-0">
+      <div className="flex flex-1 min-h-0 relative">
         <Sidebar
           slots={slots}
           machines={machines}
@@ -455,7 +455,7 @@ export default function App() {
           onReloadMachine={(id, action) => { void api.postCursorReload(action, id).then(() => refresh()); }}
           reloadMachineIds={cursorReload.neededMachineIds}
         />
-        <div className="flex-1 min-w-0 min-h-0 flex flex-col relative">
+        <div className="flex-1 min-w-0 min-h-0 flex flex-col">
           {showArchived && (
             <div className={`px-4 py-1.5 ${UI_META} text-amber-700 dark:text-amber-200 bg-amber-500/10 border-b border-amber-500/20`}>
               正在查看中台已隐藏的卡片（数据未删除，可取消隐藏）
@@ -473,25 +473,25 @@ export default function App() {
             onRename={(id, prompt) => { api.renameRun(id, prompt).then(refresh); }}
             onRetry={(id) => { api.retry(id).then(refresh); }}
           />
-          {selectedRun && (
-            <div className="absolute inset-0 z-40">
-              <button type="button" className="absolute inset-0 bg-black/70 backdrop-blur-[2px]" aria-label="关闭详情" onClick={() => setSelectedRun(null)} />
-              <div className="absolute inset-y-0 right-0 flex pointer-events-none max-w-full">
-                <div className="pointer-events-auto h-full min-h-0 max-w-full">
-                  <RunDetail
-                    runId={selectedRun}
-                    machines={machines}
-                    onClose={() => setSelectedRun(null)}
-                    onChanged={refresh}
-                    snippets={snippets}
-                    saveSnippets={saveSnippets}
-                    reloadSnippets={reloadSnippets}
-                  />
-                </div>
+        </div>
+        {selectedRun && (
+          <div className="absolute inset-0 z-40">
+            <button type="button" className="absolute inset-0 bg-black/70 backdrop-blur-[2px]" aria-label="关闭详情" onClick={() => setSelectedRun(null)} />
+            <div className="absolute inset-y-0 right-0 flex pointer-events-none max-w-full">
+              <div className="pointer-events-auto h-full min-h-0 max-w-full">
+                <RunDetail
+                  runId={selectedRun}
+                  machines={machines}
+                  onClose={() => setSelectedRun(null)}
+                  onChanged={refresh}
+                  snippets={snippets}
+                  saveSnippets={saveSnippets}
+                  reloadSnippets={reloadSnippets}
+                />
               </div>
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
       {dispatchOpen && preset && (
         <DispatchModal
