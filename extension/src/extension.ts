@@ -22,7 +22,7 @@ import { parseAskInspect, askPollActions, coalesceAskInspect } from "./askDetect
 import { enrichPlanAsk, planDirsFor } from "./planFile";
 import { PENDING_RELOAD_ATTEMPT_NAME, PENDING_RELOAD_NAME, decideReloadFire, decideWindowReload, noteReloadCommandSettled, parsePendingReload, parseReloadAttempt, windowHasInFlightArmadaRun, type ReloadFireState } from "../../desktop-core/src/cursorReload";
 
-const EXTENSION_VERSION = "0.4.30";
+const EXTENSION_VERSION = "0.4.31";
 
 let client: { dispose: () => void } | null = null;
 

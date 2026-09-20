@@ -374,3 +374,4 @@ v1 = P0 全部。v1.5 = P1。v2 = P2（含 CDP 真机）。P3 按拍板插入，
 | 2026-09-19 | **完成门禁方案 1 已采纳**（快照不改写 hub `status`；空 `finalText` 仍可 `completed`）。规格落点：[2026-09-12-armada-relay-mobile-design.md](./2026-09-12-armada-relay-mobile-design.md) §4.4、`protocolVersion: 2`。 |
 | 2026-09-20 | 扩展 **0.4.29**、iOS TestFlight **20**、Android **0.1.7**。真机验收清单：[2026-09-20-armada-debt-real-device-verify.md](./2026-09-20-armada-debt-real-device-verify.md)。P2-a CDP 写入仍等 Mac+Windows 点通。 |
 | 2026-09-20 | 扩展 **0.4.30**、iOS **21**、Android **0.1.8**。Ask Skip 点 Skip 按钮；Other 为 D；hub 进程启动不把 leftover `online` 当掉线杀跑；`unknown` 快照带 `finalText`。 |
+| 2026-09-20 | 扩展 **0.4.31**。Reload 跨进程闩；同号 0.4.30 会被 skipped-same-version 跳过。 |

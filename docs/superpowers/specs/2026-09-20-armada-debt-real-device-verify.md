@@ -1,9 +1,9 @@
-# Armada 架构债真机验收清单（0.4.30 / App 21）
+# Armada 架构债真机验收清单（0.4.31 / App 21）
 
 - 日期：2026-09-20
 - 状态：**操作员验收清单**（不是新功能设计。CDP 写路径未点通不得改生产选择器。）
 - 父文档：[2026-09-19-armada-architecture-debt-design.md](./2026-09-19-armada-architecture-debt-design.md)
-- 打包：中台 overlay `/Applications/Armada.app`；扩展 `armada-agent` **0.4.30**；iOS TestFlight **21**（营销号仍 0.1.0）；Android **0.1.8**（versionCode 9）
+- 打包：中台 overlay `/Applications/Armada.app`；扩展 `armada-agent` **0.4.31**；iOS TestFlight **21**（营销号仍 0.1.0）；Android **0.1.8**（versionCode 9）
 - HEAD 债落地：本轮 Ask Skip/D、中台重启不杀 running、`unknown` 正文；此前 P0–P1 见旧修订。
 
 ---
@@ -13,11 +13,11 @@
 | 项 | 内容 |
 | --- | --- |
 | 问题 | 债已进 `master`，但 0.4.28 同号 vsix 不会 Reload；Windows CDP 写入、手机契约、attach toast 还没关门。 |
-| 核心方案 | 升扩展 **0.4.30** 再 overlay；Windows Reload 后按本表点通；手机装 TF **21** / Android **0.1.8**。 |
+| 核心方案 | 升扩展 **0.4.31** 再 overlay；Windows 必须先装 vsix，不要只 Reload；手机装 TF **21** / Android **0.1.8**。 |
 | 关键约束 | 7380 必须是 bundled bun。CDP **写**路径 Mac+Windows 都点通才算 P2-a。禁止把源码 hub attach 当成打包绿。 |
 | 明确不做 | 不测手机发图（另文）；不在未点通时改 CDP 选择器；不把 §7.5 P3 塞进本轮验收。 |
 
-**Windows 操作员先做：Cursor 空闲 → Reload Window → 看板机器扩展显示 0.4.30。**
+**Windows 操作员先做：在被控机装 `armada-agent-0.4.31.vsix`，再空闲 Reload。只 Reload 不会从 0.4.28 升上去。**
 
 ---
 
@@ -36,8 +36,8 @@
 | 面 | 要看到 | 怎么确认 |
 | --- | --- | --- |
 | 中台 | `/Applications/Armada.app`，7380 进程 args 含 `Contents/Resources/bun` | `ps -ww -p "$(lsof -t -nP -iTCP:7380 -sTCP:LISTEN)" -o args=` |
-| 扩展 | 在线机器 `extension_version=0.4.30` | 看板左侧机器行；落后会提示「需 0.4.30」 |
-| Windows Cursor | Reload 后扩展号 0.4.30 | 该窗无 Armada live run 时 Reload；15 分钟仍忙则横幅「现在 Reload」 |
+| 扩展 | 在线机器 `extension_version=0.4.31` | 看板左侧机器行；落后会提示「需 0.4.31」 |
+| Windows Cursor | 装 vsix 后再 Reload，扩展号 0.4.31 | 未装 vsix 时禁止点 Reload（会空转） |
 | iOS | TestFlight build **20** | 设置 → 关于 |
 | Android | 0.1.7 | 关于页 / `adb shell dumpsys package app.armada.remote` |
 
@@ -58,11 +58,11 @@
 
 ## 4. Windows 必须测（P2-a 可行性闸）
 
-被控机：在线 `win32`（例如 PF39WTSM）。扩展 **0.4.30**。该 Cursor **两个 composer / 两个 Plan 卡同时在屏**。
+被控机：在线 `win32`（例如 PF39WTSM）。扩展 **0.4.31**。该 Cursor **两个 composer / 两个 Plan 卡同时在屏**。
 
 | # | ID | 步骤 | 通过 | 失败样子 |
 | --- | --- | --- | --- | --- |
-| W1 | 版本 | Reload 后看板该机 0.4.30 | 无落后横幅 | 仍 0.4.28 / 需 0.4.30 |
+| W1 | 版本 | 装 0.4.31 vsix 后再 Reload，看板该机 0.4.31 | 无落后横幅 | 仍 0.4.28 / 需 0.4.31 |
 | W2 | **B4** | 同一窗口两个 composer；中台对该 run **续聊回车** | 字只进 **该 cid** 的框 | 打进旁路框或第一个框 |
 | W3 | **B5** | 两个 Ask/composer 在屏；中台点其中一个 Ask 选项 | 只点对的控件；错 cid 应 `CID_MISMATCH` 而不是点错 | 点了全页第一个按钮 |
 | W4 | **P12** | 两张 Plan：卡1 已 Building、卡2 仍 Build；中台点 Build | 点的是**第二张活按钮** | inspect/点击落到卡1 |
@@ -99,7 +99,7 @@
 
 ---
 
-## 5.1 本轮回归（0.4.30 必须过）
+## 5.1 本轮回归（0.4.31 必须过）
 
 | # | 步骤 | 通过 | 失败 |
 | --- | --- | --- | --- |
@@ -122,9 +122,9 @@
 
 ## 7. 操作员步骤（Windows）
 
-1. 等中台 overlay 完成、看板不再提示扩展落后。
+1. 等中台 overlay 完成。Windows **先装** `armada-agent-0.4.31.vsix`，不要只点 Reload。
 2. **关掉该 Windows 上所有 Armada 正在跑的 Composer 任务**（或等停），Reload Window。
-3. 确认扩展 0.4.30。
+3. 确认扩展 0.4.31。
 4. 按 §4 W2→W6 做；每条记下：过 / 失败现象 / 窗口里几个 composer。
 5. 把结果回中台操作员（本清单 ID 即可）。
 
@@ -149,3 +149,4 @@ Mac overlay 后也会 `when-idle` Reload；**正在跑的「真机测试」窗�
 | --- | --- |
 | 2026-09-20 | 初稿。配合扩展 0.4.29、iOS 20、Android 0.1.7；Windows CDP 写路径 + 手机契约为必须项。 |
 | 2026-09-20 | 扩展 **0.4.30**、iOS **21**、Android **0.1.8**。Skip 点 `.composer-skip-button`；Ask 卡 A/B/C/D；中台重启不 `MACHINE_OFFLINE` 误杀 running；`unknown` 带正文；派发底栏不再撑满屏。 |
+| 2026-09-20 | 扩展 **0.4.31**。同一 pending Reload 后版本仍落后不再空转；同号 0.4.30 无法装上这次闩。 |
