@@ -10,6 +10,10 @@ Armada 按 **面** 发版：扩展、桌面、iOS、Android 可以不同号。RE
 
 ## Unreleased
 
+### 修复
+
+- 公网 uuWAF 会把大约 10KiB 以上的 JSON 打成 HTML 500。派发 / 续发长提示词改成和发图一样的 6KiB JSON 分片，中转拼好再一次 `cmd.dispatch` / `cmd.followup`。iOS 不再把长任务误报成 HTTP 500。
+
 ---
 
 ## 2026-09-20 — 扩展 0.4.36 · iOS TF 25 · Android 0.1.11 · 桌面 0.1.0

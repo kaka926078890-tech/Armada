@@ -1027,6 +1027,96 @@ describe("relay serve", () => {
     ws.close();
   });
 
+  test("JSON prompt chunks assemble into one cmd.dispatch under the uuWAF cap", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    const seen: any[] = [];
+    ws.addEventListener("message", (e) => seen.push(JSON.parse(String(e.data))));
+    autoHub(ws);
+    await Bun.sleep(30);
+    const prompt = "派".repeat(4000);
+    const raw = Buffer.from(prompt, "utf8");
+    const chunk = 6 * 1024;
+    const count = Math.ceil(raw.length / chunk);
+    const workspaceId = encodeWorkspaceId("m-1", "/Users/me/proj");
+    const headers = { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" };
+    let last: Response | undefined;
+    for (let i = 0; i < count; i++) {
+      const part = raw.subarray(i * chunk, Math.min(raw.length, (i + 1) * chunk));
+      const body = JSON.stringify({
+        uploadId: "prompt-1",
+        workspaceId,
+        totalSize: raw.length,
+        index: i,
+        count,
+        data: part.toString("base64"),
+      });
+      expect(Buffer.byteLength(body)).toBeLessThan(10 * 1024);
+      last = await fetch(url(s, "/mobile/runs"), {
+        method: "POST",
+        headers,
+        body,
+      });
+      if (i < count - 1) expect(last.status).toBe(202);
+    }
+    expect(last!.status).toBe(201);
+    const dispatched = seen.find((m) => m.type === "cmd.dispatch");
+    expect(dispatched.prompt).toBe(prompt);
+    expect(seen.filter((m) => m.type === "cmd.dispatch")).toHaveLength(1);
+    const { run } = await last!.json() as { run: { prompt: string } };
+    expect(run.prompt).toBe(prompt);
+    ws.close();
+  });
+
+  test("JSON followup chunks assemble into one cmd.followup", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    const seen: any[] = [];
+    ws.addEventListener("message", (e) => seen.push(JSON.parse(String(e.data))));
+    autoHub(ws);
+    ws.send(JSON.stringify({
+      type: "snap.run",
+      run: {
+        runId: "r-long",
+        machineId: "m-1",
+        workspaceRoot: "/Users/me/proj",
+        prompt: "first",
+        status: "completed",
+        conversationId: "cid-1",
+        updatedAt: Date.now(),
+      },
+    }));
+    await Bun.sleep(30);
+    const prompt = "续".repeat(4000);
+    const raw = Buffer.from(prompt, "utf8");
+    const chunk = 6 * 1024;
+    const count = Math.ceil(raw.length / chunk);
+    const headers = { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" };
+    let last: Response | undefined;
+    for (let i = 0; i < count; i++) {
+      const part = raw.subarray(i * chunk, Math.min(raw.length, (i + 1) * chunk));
+      last = await fetch(url(s, "/mobile/runs/r-long/followup"), {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          uploadId: "follow-1",
+          totalSize: raw.length,
+          index: i,
+          count,
+          data: part.toString("base64"),
+        }),
+      });
+      if (i < count - 1) expect(last.status).toBe(202);
+    }
+    expect(last!.status).toBe(200);
+    const follow = seen.find((m) => m.type === "cmd.followup");
+    expect(follow.prompt).toBe(prompt);
+    expect(seen.filter((m) => m.type === "cmd.followup")).toHaveLength(1);
+    ws.close();
+  });
+
   test("text dispatch omits attachmentIds on the hub command", async () => {
     const s = start();
     const fleet = s.createFleet();

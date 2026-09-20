@@ -400,21 +400,86 @@ actor RelayAPI {
     }
 
     func dispatch(workspaceId: String, prompt: String, attachmentIds: [String] = []) async throws -> RunDTO {
-        var obj: [String: Any] = ["workspaceId": workspaceId, "prompt": prompt]
-        if !attachmentIds.isEmpty { obj["attachmentIds"] = attachmentIds }
-        let wrap: DispatchResponse = try await send("/mobile/runs", method: "POST", body: JSONSerialization.data(withJSONObject: obj), ok: [201])
+        var extra: [String: Any] = ["workspaceId": workspaceId]
+        if !attachmentIds.isEmpty { extra["attachmentIds"] = attachmentIds }
+        let wrap: DispatchResponse = try await postPrompt("/mobile/runs", prompt: prompt, extra: extra, ok: [201])
         return wrap.run
     }
 
     func followup(runId: String, prompt: String, attachmentIds: [String] = []) async throws -> RunDTO {
-        var obj: [String: Any] = ["prompt": prompt]
-        if !attachmentIds.isEmpty { obj["attachmentIds"] = attachmentIds }
-        let wrap: FollowupResponse = try await send("/mobile/runs/\(runId)/followup", method: "POST", body: JSONSerialization.data(withJSONObject: obj), ok: [200, 201])
+        var extra: [String: Any] = [:]
+        if !attachmentIds.isEmpty { extra["attachmentIds"] = attachmentIds }
+        let wrap: FollowupResponse = try await postPrompt("/mobile/runs/\(runId)/followup", prompt: prompt, extra: extra, ok: [200, 201])
         return wrap.run
     }
 
     /// Public uuWAF 500s HTML above ~10KiB; JSON chunk bodies stay under that.
-    private static let blobChunkBytes = 6 * 1024
+    private static let wafJsonChunkBytes = 6 * 1024
+    private static let blobChunkBytes = wafJsonChunkBytes
+
+    private func postPrompt<T: Decodable>(_ path: String, prompt: String, extra: [String: Any], ok: [Int]) async throws -> T {
+        var obj = extra
+        obj["prompt"] = prompt
+        let body = try JSONSerialization.data(withJSONObject: obj)
+        if body.count <= Self.wafJsonChunkBytes {
+            return try await send(path, method: "POST", body: body, ok: ok)
+        }
+        return try await sendPromptChunks(path, prompt: prompt, extra: extra, ok: ok)
+    }
+
+    private func sendPromptChunks<T: Decodable>(_ path: String, prompt: String, extra: [String: Any], ok: [Int]) async throws -> T {
+        guard let raw = prompt.data(using: .utf8) else { throw RelayAPIError.transport("bad prompt") }
+        let uploadId = UUID().uuidString
+        let chunk = Self.wafJsonChunkBytes
+        let count = max(1, (raw.count + chunk - 1) / chunk)
+        var done: T?
+        var i = 0
+        while i < count {
+            try await withThrowingTaskGroup(of: T?.self) { group in
+                let end = min(count, i + 4)
+                for index in i..<end {
+                    group.addTask {
+                        let start = index * chunk
+                        let slice = raw.subdata(in: start ..< min(raw.count, start + chunk))
+                        return try await self.putPromptChunk(
+                            path: path, uploadId: uploadId, extra: extra,
+                            totalSize: raw.count, index: index, count: count, slice: slice, ok: ok
+                        )
+                    }
+                }
+                for try await item in group {
+                    if let item { done = item }
+                }
+            }
+            i += 4
+        }
+        guard let done else { throw RelayAPIError.http(500, "HUB_ERROR") }
+        return done
+    }
+
+    private func putPromptChunk<T: Decodable>(
+        path: String, uploadId: String, extra: [String: Any],
+        totalSize: Int, index: Int, count: Int, slice: Data, ok: [Int]
+    ) async throws -> T? {
+        var obj = extra
+        obj["uploadId"] = uploadId
+        obj["totalSize"] = totalSize
+        obj["index"] = index
+        obj["count"] = count
+        obj["data"] = slice.base64EncodedString()
+        guard let url = URL(string: base + path) else { throw RelayAPIError.transport("bad url") }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 30
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONSerialization.data(withJSONObject: obj)
+        let (respData, resp) = try await URLSession.shared.data(for: req)
+        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        if code == 202 { return nil }
+        if !ok.contains(code) { throw RelayAPIError.classify(status: code, data: respData) }
+        return try JSONDecoder().decode(T.self, from: respData)
+    }
 
     func uploadBlob(data: Data, mime: String, name: String) async throws -> BlobDTO {
         let uploadId = UUID().uuidString

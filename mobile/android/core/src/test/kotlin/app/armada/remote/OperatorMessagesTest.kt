@@ -58,6 +58,16 @@ class OperatorMessagesTest {
     }
 
     @Test
+    fun longPromptJsonCrossesWafChunkGate() {
+        assertEquals(6 * 1024, WAF_JSON_CHUNK_BYTES)
+        assertFalse(shouldChunkJsonBody(100))
+        assertFalse(shouldChunkJsonBody(WAF_JSON_CHUNK_BYTES))
+        assertTrue(shouldChunkJsonBody(WAF_JSON_CHUNK_BYTES + 1))
+        val longJson = """{"workspaceId":"m-1|/ws","prompt":"${"派".repeat(4000)}"}"""
+        assertTrue(shouldChunkJsonBody(longJson.toByteArray(Charsets.UTF_8).size))
+    }
+
+    @Test
     fun hiddenListUsesViewHiddenNotArchived() {
         val path = runsListPath(50, hidden = true)
         assertTrue(path.contains("view=hidden"))

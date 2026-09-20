@@ -11,9 +11,11 @@ import { canRetryStatus, followupOutcome, httpStatusForRunError } from "../../hu
 import { MAX_BLOB_BYTES } from "../../hub/src/blobs";
 import { resolveAdminToken } from "./adminToken";
 import { applyBlobChunk, type BlobUploadSession } from "./blobUpload";
+import { MAX_OPERATOR_BODY, WAF_JSON_BODY_MAX } from "./chunkUpload";
+import { applyPromptChunk, isPromptChunkBody, type PromptUploadSession } from "./promptUpload";
 
 export const PROTOCOL_VERSION = 1;
-const MAX_BODY = 20 * 1024 * 1024;
+const MAX_BODY = MAX_OPERATOR_BODY;
 const DISPATCH_TIMEOUT_MS = 15_000;
 const RATE_WINDOW_MS = 5 * 60 * 1000;
 const RATE_MAX = 20;
@@ -153,6 +155,7 @@ export function createRelayServer(opts: {
   const rate = new Map<string, number[]>();
   const blobRate = new Map<string, number[]>();
   const blobUploads = new Map<string, BlobUploadSession>();
+  const promptUploads = new Map<string, PromptUploadSession>();
   let reqSeq = 0;
   const apnsSender = createApnsSender(opts.apns ?? null);
   if (!apnsSender.enabled) console.warn("armada-relay APNS_DISABLED");
@@ -549,6 +552,29 @@ export function createRelayServer(opts: {
     return { ids };
   }
 
+  type PromptBody =
+    | { error: string; status: number }
+    | { pending: true }
+    | { prompt: string; workspaceId?: string; attachmentIds?: unknown };
+
+  function readPromptBody(tok: string, body: unknown, contentLength: number): PromptBody {
+    if (isPromptChunkBody(body)) {
+      if (contentLength > WAF_JSON_BODY_MAX) return { error: "INVALID", status: 400 };
+      const stepped = applyPromptChunk(promptUploads, tok, body);
+      if ("error" in stepped) return { error: stepped.error, status: stepped.status };
+      if ("pending" in stepped) return { pending: true };
+      return { prompt: stepped.complete, workspaceId: stepped.extra.workspaceId, attachmentIds: stepped.extra.attachmentIds };
+    }
+    if (!body || typeof body !== "object" || Array.isArray(body)) return { error: "INVALID", status: 400 };
+    const o = body as Record<string, unknown>;
+    if (typeof o.prompt !== "string") return { error: "INVALID", status: 400 };
+    return {
+      prompt: o.prompt,
+      workspaceId: typeof o.workspaceId === "string" ? o.workspaceId : undefined,
+      attachmentIds: o.attachmentIds,
+    };
+  }
+
   const app = new Hono();
   function rejectPayload(c: { req: { header: (n: string) => string | undefined }; json: (v: unknown, s: 400 | 413) => Response }): Response | undefined {
     const raw = c.req.header("content-length");
@@ -778,7 +804,7 @@ export function createRelayServer(opts: {
     const fleet = (c as any).get("fleet") as { id: string; hub_online: number };
     const ct = c.req.header("content-type") ?? "";
     if (ct.includes("application/json")) {
-      if (len > 10 * 1024) return c.json({ error: "INVALID" }, 400);
+      if (len > WAF_JSON_BODY_MAX) return c.json({ error: "INVALID" }, 400);
       if (fleet.hub_online !== 1) return c.json({ error: "HUB_OFFLINE" }, 503);
       const json = await c.req.json().catch(() => null);
       const stepped = applyBlobChunk(blobUploads, tok, json);
@@ -808,25 +834,27 @@ export function createRelayServer(opts: {
     if (blocked) return blocked;
     const tok = (c as any).get("opToken") as string;
     const fleet = (c as any).get("fleet") as { id: string; hub_online: number };
+    if (fleet.hub_online !== 1) return c.json({ error: "HUB_OFFLINE" }, 503);
+    const len = Number(c.req.header("content-length"));
+    const body = await c.req.json().catch(() => null);
+    const read = readPromptBody(tok, body, len);
+    if ("error" in read) return c.json({ error: read.error }, read.status as 400);
+    if ("pending" in read) return c.json({ ok: true }, 202);
     if (!checkRate(tok)) {
       audit("operator", "run.rate_limit", fleet.id);
       return c.json({ error: "RATE_LIMIT" }, 429);
     }
-    if (fleet.hub_online !== 1) return c.json({ error: "HUB_OFFLINE" }, 503);
-    const body = await c.req.json().catch(() => null);
-    if (!body || typeof body.workspaceId !== "string" || typeof body.prompt !== "string") {
-      return c.json({ error: "INVALID" }, 400);
-    }
-    const decoded = decodeWorkspaceId(body.workspaceId);
+    if (typeof read.workspaceId !== "string") return c.json({ error: "INVALID" }, 400);
+    const decoded = decodeWorkspaceId(read.workspaceId);
     if (!decoded) return c.json({ error: "INVALID" }, 400);
-    const ids = parseMobileAttachmentIds(body.attachmentIds);
+    const ids = parseMobileAttachmentIds(read.attachmentIds);
     if (ids.error) return c.json({ error: ids.error }, 400);
     const requestId = `r${++reqSeq}`;
     const cmd: Record<string, unknown> = {
       type: "cmd.dispatch",
       requestId,
-      workspaceId: body.workspaceId,
-      prompt: body.prompt,
+      workspaceId: read.workspaceId,
+      prompt: read.prompt,
     };
     if (ids.ids && ids.ids.length) cmd.attachmentIds = ids.ids;
     const sent = sendHub(fleet.id, cmd);
@@ -864,25 +892,28 @@ export function createRelayServer(opts: {
     if (blocked) return blocked;
     const tok = (c as any).get("opToken") as string;
     const fleet = (c as any).get("fleet") as { id: string; hub_online: number };
+    if (fleet.hub_online !== 1) return c.json({ error: "HUB_OFFLINE" }, 503);
+    const len = Number(c.req.header("content-length"));
+    const body = await c.req.json().catch(() => null);
+    const read = readPromptBody(tok, body, len);
+    if ("error" in read) return c.json({ error: read.error }, read.status as 400);
+    if ("pending" in read) return c.json({ ok: true }, 202);
     if (!checkRate(tok)) {
       audit("operator", "run.rate_limit", fleet.id);
       return c.json({ error: "RATE_LIMIT" }, 429);
     }
-    if (fleet.hub_online !== 1) return c.json({ error: "HUB_OFFLINE" }, 503);
-    const body = await c.req.json().catch(() => null);
-    if (!body || typeof body.prompt !== "string") return c.json({ error: "INVALID" }, 400);
     const runId = c.req.param("id");
     const row = db.query("SELECT id, status FROM runs WHERE id=?1 AND fleet_id=?2").get(runId, fleet.id) as
       | { id: string; status?: string }
       | undefined;
     if (!row) return c.json({ error: "NOT_FOUND" }, 404);
-    const ids = parseMobileAttachmentIds(body.attachmentIds);
+    const ids = parseMobileAttachmentIds(read.attachmentIds);
     if (ids.error) return c.json({ error: ids.error }, 400);
     if (ids.ids && ids.ids.length && row.status === "running") {
       return c.json({ error: "OUTBOUND_TEXT_ONLY" }, 409);
     }
     const requestId = `r${++reqSeq}`;
-    const cmd: Record<string, unknown> = { type: "cmd.followup", requestId, runId, prompt: body.prompt };
+    const cmd: Record<string, unknown> = { type: "cmd.followup", requestId, runId, prompt: read.prompt };
     if (ids.ids && ids.ids.length) cmd.attachmentIds = ids.ids;
     const sent = sendHub(fleet.id, cmd);
     if (!sent) return c.json({ error: "HUB_OFFLINE" }, 503);

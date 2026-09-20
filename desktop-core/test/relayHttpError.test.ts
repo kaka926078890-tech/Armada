@@ -68,10 +68,14 @@ describe("classifyRelayHttp", () => {
     const swift = readFileSync(join(root, "mobile/ios/ArmadaRemote/RelayAPI.swift"), "utf8");
     const client = readFileSync(join(root, "mobile/android/app/src/main/java/app/armada/remote/RelayClient.kt"), "utf8");
     const messages = readFileSync(join(root, "mobile/android/core/src/main/kotlin/app/armada/remote/OperatorMessages.kt"), "utf8");
-    expect(swift).toContain("blobChunkBytes = 6 * 1024");
+    const waf = readFileSync(join(root, "mobile/android/core/src/main/kotlin/app/armada/remote/WafJson.kt"), "utf8");
+    expect(swift).toContain("wafJsonChunkBytes = 6 * 1024");
+    expect(swift).toContain("sendPromptChunks");
     expect(swift).toContain("application/json");
     expect(swift).not.toContain("multipart/form-data");
-    expect(client).toContain("BLOB_CHUNK = 6 * 1024");
+    expect(waf).toContain("WAF_JSON_CHUNK_BYTES = 6 * 1024");
+    expect(client).toContain("BLOB_CHUNK = WAF_JSON_CHUNK_BYTES");
+    expect(client).toContain("sendPromptChunks");
     expect(messages).toContain("if (status == 403) return \"NET_INTERCEPT\"");
     expect(swift).toContain("if status == 403");
     expect(swift).not.toContain("<html>");

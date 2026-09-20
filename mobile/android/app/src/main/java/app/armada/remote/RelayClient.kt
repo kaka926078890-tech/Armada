@@ -35,7 +35,7 @@ class RelayClient(base: String, private val token: String) {
     private val sseHttp = http.newBuilder().readTimeout(90, TimeUnit.SECONDS).build()
 
     companion object {
-        private const val BLOB_CHUNK = 6 * 1024
+        private const val BLOB_CHUNK = WAF_JSON_CHUNK_BYTES
     }
 
     suspend fun workspaces(): Triple<Boolean, List<WorkspaceDto>, CursorReloadDto?> {
@@ -71,14 +71,70 @@ class RelayClient(base: String, private val token: String) {
     suspend fun dispatch(workspaceId: String, prompt: String, attachmentIds: List<String> = emptyList()): RunDto {
         val body = JSONObject().put("workspaceId", workspaceId).put("prompt", prompt)
         if (attachmentIds.isNotEmpty()) body.put("attachmentIds", JSONArray(attachmentIds))
-        return parseRun(JSONObject(send("/mobile/runs", "POST", body.toString(), listOf(201))).getJSONObject("run"))
+        return parseRun(JSONObject(postPrompt("/mobile/runs", body, listOf(201))).getJSONObject("run"))
     }
 
     suspend fun followup(runId: String, prompt: String, attachmentIds: List<String> = emptyList()): RunDto {
         val body = JSONObject().put("prompt", prompt)
         if (attachmentIds.isNotEmpty()) body.put("attachmentIds", JSONArray(attachmentIds))
-        val o = JSONObject(send("/mobile/runs/$runId/followup", "POST", body.toString(), listOf(200, 201)))
+        val o = JSONObject(postPrompt("/mobile/runs/$runId/followup", body, listOf(200, 201)))
         return parseFollowupAck(parseRun(o.getJSONObject("run")), o.optNullableString("outcome")).run
+    }
+
+    private suspend fun postPrompt(path: String, body: JSONObject, ok: List<Int>): String {
+        val json = body.toString()
+        if (!shouldChunkJsonBody(json.toByteArray(Charsets.UTF_8).size)) {
+            return send(path, "POST", json, ok)
+        }
+        val prompt = body.getString("prompt")
+        body.remove("prompt")
+        return sendPromptChunks(path, prompt, body, ok)
+    }
+
+    private suspend fun sendPromptChunks(path: String, prompt: String, extra: JSONObject, ok: List<Int>): String {
+        val raw = prompt.toByteArray(Charsets.UTF_8)
+        val uploadId = UUID.randomUUID().toString()
+        val count = maxOf(1, (raw.size + BLOB_CHUNK - 1) / BLOB_CHUNK)
+        var done: String? = null
+        var i = 0
+        while (i < count) {
+            coroutineScope {
+                val end = minOf(count, i + 4)
+                val jobs = (i until end).map { index ->
+                    async(Dispatchers.IO) {
+                        putPromptChunk(path, uploadId, extra, raw.size, index, count, raw, ok)
+                    }
+                }
+                jobs.forEach { job -> job.await()?.let { done = it } }
+            }
+            i += 4
+        }
+        return done ?: throw RelayException("HUB_ERROR")
+    }
+
+    private fun putPromptChunk(
+        path: String, uploadId: String, extra: JSONObject,
+        totalSize: Int, index: Int, count: Int, bytes: ByteArray, ok: List<Int>,
+    ): String? {
+        val start = index * BLOB_CHUNK
+        val slice = bytes.copyOfRange(start, minOf(bytes.size, start + BLOB_CHUNK))
+        val body = JSONObject(extra.toString())
+            .put("uploadId", uploadId)
+            .put("totalSize", totalSize)
+            .put("index", index)
+            .put("count", count)
+            .put("data", Base64.getEncoder().encodeToString(slice))
+        val req = Request.Builder()
+            .url("$base$path")
+            .header("Authorization", "Bearer $token")
+            .post(body.toString().toRequestBody(jsonType))
+            .build()
+        http.newCall(req).execute().use { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (resp.code == 202) return null
+            if (resp.code !in ok) throw RelayException(classifyHttp(resp.code, text))
+            return text
+        }
     }
 
     suspend fun uploadBlob(bytes: ByteArray, mime: String, name: String): BlobDto {
