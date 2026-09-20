@@ -713,6 +713,57 @@ describe("relay serve", () => {
     wsOther.close();
   });
 
+  test("snap.run from another fleet does not steal the row", async () => {
+    const s = start();
+    const owner = s.createFleet();
+    const other = s.createFleet();
+    const wsOwner = await connectHub(s, owner.fleet, owner.hubSecret);
+    const wsOther = await connectHub(s, other.fleet, other.hubSecret);
+    autoHub(wsOwner);
+    autoHub(wsOther);
+    wsOwner.send(JSON.stringify({
+      type: "snap.run",
+      run: {
+        runId: "r-steal",
+        machineId: "m-owner",
+        workspaceRoot: "/Users/me/owner",
+        prompt: "owner-prompt",
+        status: "running",
+        updatedAt: Date.now(),
+      },
+    }));
+    await Bun.sleep(40);
+    wsOther.send(JSON.stringify({
+      type: "snap.run",
+      run: {
+        runId: "r-steal",
+        machineId: "m-thief",
+        workspaceRoot: "/Users/me/thief",
+        prompt: "thief-prompt",
+        status: "completed",
+        finalText: "stolen",
+        updatedAt: Date.now(),
+      },
+    }));
+    await Bun.sleep(40);
+    const owned = await fetch(url(s, "/mobile/runs/r-steal"), {
+      headers: { authorization: `Bearer ${owner.operatorToken}` },
+    });
+    expect(owned.status).toBe(200);
+    expect(await owned.json()).toMatchObject({
+      runId: "r-steal",
+      prompt: "owner-prompt",
+      status: "running",
+      machineId: "m-owner",
+    });
+    const stolen = await fetch(url(s, "/mobile/runs/r-steal"), {
+      headers: { authorization: `Bearer ${other.operatorToken}` },
+    });
+    expect(stolen.status).toBe(404);
+    wsOwner.close();
+    wsOther.close();
+  });
+
   test("answer and cancel share followup checkRate", async () => {
     const s = start();
     const fleet = s.createFleet();

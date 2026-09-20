@@ -69,6 +69,29 @@ describe("Registry", () => {
     expect(workspaceListChanged(["/a"], ["/a", "/b"])).toBe(true);
   });
 
+  test("register without machineId/windowId/os closes 4001 and does not upsert", () => {
+    const { reg } = setup();
+    const closed: { code?: number; reason?: string }[] = [];
+    const ws: ArmadaSocket = {
+      data: { registered: false },
+      send() {},
+      close(code?: number, reason?: string) { closed.push({ code, reason }); },
+    };
+    for (const msg of [
+      { windowId: "w-1", name: "Mac-A", os: "darwin-arm64" },
+      { machineId: "m-1", name: "Mac-A", os: "darwin-arm64" },
+      { machineId: "m-1", windowId: "w-1", name: "Mac-A" },
+      { machineId: 1, windowId: "w-1", name: "Mac-A", os: "darwin-arm64" },
+    ]) {
+      closed.length = 0;
+      ws.data.registered = false;
+      reg.onRegister(ws, msg);
+      expect(closed).toEqual([{ code: 4001, reason: "unauthorized" }]);
+      expect(ws.data.registered).toBe(false);
+    }
+    expect(reg.listMachines()).toHaveLength(0);
+  });
+
   test("register notifies machines changed even when union matches upsert", () => {
     const { reg } = setup();
     let n = 0;

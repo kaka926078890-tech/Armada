@@ -290,10 +290,10 @@ v1 = P0 全部。v1.5 = P1。v2 = P2（含 CDP 真机）。P3 按拍板插入，
 | ID | 问题 | 长期方案 | 并入 |
 | --- | --- | --- | --- |
 | Rel-M1 | `/answer` `/cancel` 跳过 fleet 归属与 `checkRate` | 与 followup/retry/archive 同一前置 | K6 |
-| Rel-M2 | `UPDATE runs` 无 `AND fleet_id=?`，跨舰队可搬行（id 不可猜） | WHERE 加上 fleet | — |
+| Rel-M2 | `UPDATE runs` 无 `AND fleet_id=?`，跨舰队可搬行（id 不可猜） | WHERE 加上 fleet；外舰队同 id 拒绝写入 | **done 2026-09-20** |
 | Rel-M3 | hub secret 走 WS query | 改 header/subprotocol | K7 |
-| Rel-M4 | relay 丢掉 hub 的 `canRetry` 再抄状态清单重算 | 持久化转发 hub 值 | K1/H5 |
-| Rel-M5 | APNs `badge: 1` 写死 | 不带角标或带真实未读数 | — |
+| Rel-M4 | relay 丢掉 hub 的 `canRetry` 再抄状态清单重算 | `canRetryStatus()` 同源；snap 带 boolean 则指纹用该值 | **done 2026-09-20**（未加 DB 列） |
+| Rel-M5 | APNs `badge: 1` 写死 | 不带角标（未读数未进 snap） | **done 2026-09-20** |
 | Rel-M6 | iOS 永远报 `environment: production`，sandbox token 登记成功永不投递 | Debug/TestFlight 报 sandbox | — |
 | Rel-M7 | `queued` 状态词三份副本 | 与 H6 同一导出 | H6 |
 | Rel-M8 | admin token 打 stdout | 只写一次文件，日志打指纹 | — |
@@ -306,10 +306,10 @@ v1 = P0 全部。v1.5 = P1。v2 = P2（含 CDP 真机）。P3 按拍板插入，
 | --- | --- | --- | --- |
 | Hub-m2 | HTTP 层再实现一遍 followup 准入 | 删前置，全部交给 `runs.followup` + `httpStatusForRunError` | K6 |
 | Hub-m3 | `extensionSupportsMultiRunPerWindow` 末句恒真 | 显式 `MIN_MULTI_RUN_EXT_VERSION` 或规格登记 | — |
-| Hub-m4 | `register` 不校验 machineId/windowId/os | 形状校验失败 `close(4001)` | — |
+| Hub-m4 | `register` 不校验 machineId/windowId/os | 形状校验失败 `close(4001)` | **done 2026-09-20** |
 | Hub-m5 | 四处配置就地 `writeFileSync` | 共用 `writeFileAtomic` | — |
 | Hub-m6 | stop 未知 status 静默 return，无审计 | `decideStop` 归一化/拒绝并给 audit 码 | P9 同批规格 |
-| Hub-m7 | `POST /api/runs` 畸形 json → 500 | 统一 `readJson` → 400 INVALID | — |
+| Hub-m7 | `POST /api/runs` 畸形 json → 500 | 解析失败 → 400 INVALID | **done 2026-09-20** |
 | Hub-m9 | `claimOutbound` 按 prompt 全等认领（规格已选，有 120s 兜底） | **本轮不改**；真机出现卡跑再换成 gen/turn 键 | 明确推迟 |
 
 #### Web / 桌面 Minor + 规格不一致 + 未编号 parity
@@ -375,3 +375,4 @@ v1 = P0 全部。v1.5 = P1。v2 = P2（含 CDP 真机）。P3 按拍板插入，
 | 2026-09-20 | 扩展 **0.4.29**、iOS TestFlight **20**、Android **0.1.7**。真机验收清单：[2026-09-20-armada-debt-real-device-verify.md](./2026-09-20-armada-debt-real-device-verify.md)。P2-a CDP 写入仍等 Mac+Windows 点通。 |
 | 2026-09-20 | 扩展 **0.4.30**、iOS **21**、Android **0.1.8**。Ask Skip 点 Skip 按钮；Other 为 D；hub 进程启动不把 leftover `online` 当掉线杀跑；`unknown` 快照带 `finalText`。 |
 | 2026-09-20 | 扩展 **0.4.31**。Reload 跨进程闩；同号 0.4.30 会被 skipped-same-version 跳过。 |
+| 2026-09-20 | P3：Rel-M2 快照写入按 fleet 隔离；Rel-M4 `canRetryStatus`；Rel-M5 APNs 去掉写死 badge；Hub-m4 register 形状；Hub-m7 畸形 JSON 400。未改 CDP 选择器。 |

@@ -41,6 +41,7 @@ test("buildApnsRequest has collapse-id, no finalText", () => {
   expect(parsed.runId).toBe("r-1");
   expect(parsed.kind).toBe("completed");
   expect(parsed.aps.alert.title).toBe("Armada 任务完成");
+  expect(parsed.aps.badge).toBeUndefined();
   expect(payloadTooLarge(req.body)).toBe(false);
 });
 

@@ -7,7 +7,7 @@ import { decodeWorkspaceId, encodeWorkspaceId, formatOpUri, formatPairUri } from
 import { createApnsSender, type ApnsConfig } from "./apns";
 import { createFcmSender, isFcmToken, type FcmConfig } from "./fcm";
 import { notifyEdges, type NotifyEdge } from "./notifyEdge";
-import { followupOutcome, httpStatusForRunError } from "../../hub/src/concurrency";
+import { canRetryStatus, followupOutcome, httpStatusForRunError } from "../../hub/src/concurrency";
 
 export const PROTOCOL_VERSION = 1;
 const MAX_BODY = 20 * 1024 * 1024;
@@ -269,9 +269,10 @@ export function createRelayServer(opts: {
     const conversationId = typeof snap.conversationId === "string" && snap.conversationId.trim()
       ? snap.conversationId.trim()
       : null;
-    const existing = db.query("SELECT * FROM runs WHERE id=?1").get(snap.runId) as
+    const existing = db.query("SELECT * FROM runs WHERE id=?1 AND fleet_id=?2").get(snap.runId, fleetId) as
       | {
         id: string;
+        fleet_id?: string;
         status?: string;
         prompt?: string;
         title?: string | null;
@@ -285,13 +286,17 @@ export function createRelayServer(opts: {
         notified_ask_id?: string | null;
       }
       | undefined;
+    if (!existing) {
+      const foreign = db.query("SELECT fleet_id FROM runs WHERE id=?1").get(snap.runId) as { fleet_id?: string } | undefined;
+      if (foreign) return;
+    }
     const existingArchived = existing?.archived_at && Number(existing.archived_at) > 0 ? Number(existing.archived_at) : null;
     const archivedAt = snap.archived === true
       ? (existingArchived ?? Date.now())
       : snap.archived === false
         ? null
         : existingArchived;
-    const canRetry = snap.canRetry ?? ["error", "unknown", "aborted"].includes(String(status ?? ""));
+    const canRetry = typeof snap.canRetry === "boolean" ? snap.canRetry : canRetryStatus(String(status ?? ""));
     const nextFp = runContentFp({
       status,
       prompt: snap.prompt,
@@ -313,7 +318,7 @@ export function createRelayServer(opts: {
         pendingAsk: existing.pending_ask ? JSON.parse(existing.pending_ask) : null,
         outbound: existing.outbound ? JSON.parse(existing.outbound) : [],
         archived: existingArchived != null,
-        canRetry: ["error", "unknown", "aborted"].includes(String(existing.status ?? "")),
+        canRetry: canRetryStatus(String(existing.status ?? "")),
         title: existing.title ?? "",
         conversationId: existing.conversation_id ?? "",
       });
@@ -324,8 +329,8 @@ export function createRelayServer(opts: {
       notifiedAskId: existing?.notified_ask_id ?? null,
     };
     if (existing) {
-      db.query(`UPDATE runs SET fleet_id=?2, machine_id=?3, workspace_root=?4, prompt=?5, status=?6,
-        final_text=?7, error=?8, pending_ask=?9, outbound=?11, queue_message_default_behavior=?12, archived_at=?13, updated_at=?10, title=?14, conversation_id=?15 WHERE id=?1`)
+      db.query(`UPDATE runs SET machine_id=?3, workspace_root=?4, prompt=?5, status=?6,
+        final_text=?7, error=?8, pending_ask=?9, outbound=?11, queue_message_default_behavior=?12, archived_at=?13, updated_at=?10, title=?14, conversation_id=?15 WHERE id=?1 AND fleet_id=?2`)
         .run(snap.runId, fleetId, snap.machineId, snap.workspaceRoot, snap.prompt, status, finalText, error, pendingAsk, now, outbound, queueMode, archivedAt, title, conversationId);
     } else {
       db.query(`INSERT INTO runs (id, fleet_id, machine_id, workspace_root, prompt, status, final_text, error, pending_ask, outbound, queue_message_default_behavior, archived_at, updated_at, created_at, title, conversation_id)
@@ -338,10 +343,10 @@ export function createRelayServer(opts: {
       pendingAsk: snap.pendingAsk,
       archived: archivedAt != null,
     });
-    db.query("UPDATE runs SET notified_status=?2, notified_ask_id=?3 WHERE id=?1")
-      .run(snap.runId, decided.notifiedStatus, decided.notifiedAskId);
+    db.query("UPDATE runs SET notified_status=?2, notified_ask_id=?3 WHERE id=?1 AND fleet_id=?4")
+      .run(snap.runId, decided.notifiedStatus, decided.notifiedAskId, fleetId);
     dispatchEdges(fleetId, snap.runId, decided.edges);
-    const row = db.query("SELECT * FROM runs WHERE id=?1").get(snap.runId);
+    const row = db.query("SELECT * FROM runs WHERE id=?1 AND fleet_id=?2").get(snap.runId, fleetId);
     sseBroadcast(fleetId, sseEvent({ type: "run", run: runToJson(row, true) }));
     return row;
   }
@@ -360,7 +365,7 @@ export function createRelayServer(opts: {
       pendingAsk: row.pending_ask ? JSON.parse(row.pending_ask) : null,
       outbound: row.outbound ? JSON.parse(row.outbound) : [],
       queueMessageDefaultBehavior: row.queue_message_default_behavior ?? null,
-      canRetry: ["error", "unknown", "aborted"].includes(String(row.status ?? "")),
+      canRetry: canRetryStatus(String(row.status ?? "")),
       archived: Number(row.archived_at) > 0,
       updatedAt: row.updated_at,
     };

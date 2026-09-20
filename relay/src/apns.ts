@@ -73,7 +73,6 @@ export function buildApnsRequest(opts: {
     aps: {
       alert: { title: opts.edge.title, body: opts.edge.body },
       sound: "default",
-      badge: 1,
     },
     runId: opts.runId,
     kind: opts.edge.kind,

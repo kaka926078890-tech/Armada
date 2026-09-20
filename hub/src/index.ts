@@ -148,7 +148,8 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
   });
 
   app.post("/api/runs", async (c) => {
-    const body = await c.req.json();
+    const body = await c.req.json().catch(() => null);
+    if (!body || typeof body !== "object" || Array.isArray(body)) return c.json({ error: "INVALID" }, 400);
     const attachmentIds = Array.isArray(body.attachmentIds) ? body.attachmentIds.filter((x: unknown) => typeof x === "string") : [];
     const { run, error, queuePosition } = runs.create(body.machineId, body.workspaceRoot, body.prompt ?? "", { attachmentIds });
     if (error) return c.json({ error }, httpStatusForRunError(error));

@@ -90,6 +90,14 @@ describe("Run dispatch", () => {
     ws.close();
   });
 
+  test("POST /api/runs malformed json is 400 INVALID", async () => {
+    const { api, ws } = await startWithExt();
+    const r = await api("/api/runs", { method: "POST", body: "{not-json" });
+    expect(r.status).toBe(400);
+    expect(await r.json()).toEqual({ error: "INVALID" });
+    ws.close();
+  });
+
   test("rejects offline machine (400 MACHINE_OFFLINE)", async () => {
     const { api } = await startWithExt();
     const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "ghost", workspaceRoot: "/ws/a", prompt: "x" }) });

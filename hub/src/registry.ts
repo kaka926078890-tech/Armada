@@ -103,28 +103,35 @@ export class Registry {
 
   onRegister(ws: ArmadaSocket, msg: any): void {
     if (ws.data.regTimer) { clearTimeout(ws.data.regTimer); ws.data.regTimer = undefined; }
-    const connKey = `${msg.machineId}:${msg.windowId}`;
+    const machineId = typeof msg.machineId === "string" ? msg.machineId.trim() : "";
+    const windowId = typeof msg.windowId === "string" ? msg.windowId.trim() : "";
+    const os = typeof msg.os === "string" ? msg.os.trim() : "";
+    if (!machineId || !windowId || !os) {
+      ws.close(4001, "unauthorized");
+      return;
+    }
+    const connKey = `${machineId}:${windowId}`;
     const old = this.conns.get(connKey);
     if (old && old.ws !== ws) old.ws.close(4000, "replaced");
     ws.data.registered = true;
     ws.data.connKey = connKey;
-    ws.data.machineId = msg.machineId;
-    ws.data.windowId = msg.windowId;
+    ws.data.machineId = machineId;
+    ws.data.windowId = windowId;
     this.conns.set(connKey, {
-      ws, machineId: msg.machineId, windowId: msg.windowId,
+      ws, machineId, windowId,
       openWorkspaces: msg.openWorkspaces ?? [],
       extensionVersion: typeof msg.extensionVersion === "string" ? msg.extensionVersion : null,
       cdpReady: parseCdpReady(msg.cdpReady),
     });
     this.upsertMachine({
-      id: msg.machineId, name: msg.name, os: msg.os,
+      id: machineId, name: msg.name, os,
       cursorVersion: msg.cursorVersion, extensionVersion: msg.extensionVersion,
       openWorkspaces: msg.openWorkspaces ?? [],
     });
-    this.refreshMachineWorkspaces(msg.machineId);
+    this.refreshMachineWorkspaces(machineId);
     this.onMachinesChanged();
-    ws.send(JSON.stringify({ type: "registered", machineId: msg.machineId }));
-    this.onRegistered(msg.machineId, msg.windowId);
+    ws.send(JSON.stringify({ type: "registered", machineId }));
+    this.onRegistered(machineId, windowId);
   }
 
   onHeartbeat(ws: ArmadaSocket, msg: any): void {
