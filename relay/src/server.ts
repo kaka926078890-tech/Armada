@@ -4,7 +4,7 @@ import { mkdirSync } from "fs";
 import { Hono } from "hono";
 import { openRelayDb } from "./db";
 import { decodeWorkspaceId, encodeWorkspaceId, formatOpUri, formatPairUri } from "./uri";
-import { createApnsSender, type ApnsConfig } from "./apns";
+import { createApnsSender, type ApnsConfig, type ApnsEnvironment } from "./apns";
 import { createFcmSender, isFcmToken, type FcmConfig } from "./fcm";
 import { notifyEdges, type NotifyEdge } from "./notifyEdge";
 import { canRetryStatus, followupOutcome, httpStatusForRunError } from "../../hub/src/concurrency";
@@ -202,6 +202,27 @@ export function createRelayServer(opts: {
     runSend.set(runId, next.catch(() => {}));
   }
 
+  /** TestFlight receipts are sandboxReceipt but APNs is production. Try production first for sandbox-labeled tokens; keep Debug on sandbox when production rejects. */
+  async function sendApnsEdge(
+    token: string,
+    runId: string,
+    edge: NotifyEdge,
+    labeled: ApnsEnvironment,
+  ): Promise<{ result: "ok" | "unregistered" | "fail" | "too_large" | "disabled"; stored: ApnsEnvironment }> {
+    const send = (environment: ApnsEnvironment) => apnsSender.send(token, runId, edge, environment);
+    if (labeled === "production") {
+      return { result: await send("production"), stored: "production" };
+    }
+    const prod = await send("production");
+    if (prod === "ok") return { result: "ok", stored: "production" };
+    const sand = await send("sandbox");
+    if (sand === "ok") return { result: "ok", stored: "sandbox" };
+    if (prod === "too_large" || sand === "too_large") return { result: "too_large", stored: labeled };
+    if (prod === "unregistered" && sand === "unregistered") return { result: "unregistered", stored: labeled };
+    if (sand === "unregistered") return { result: "unregistered", stored: labeled };
+    return { result: "fail", stored: labeled };
+  }
+
   function dispatchEdges(fleetId: string, runId: string, edges: NotifyEdge[]) {
     if (edges.length === 0) return;
     if (!apnsSender.enabled && !fcmSender.enabled) return;
@@ -216,13 +237,20 @@ export function createRelayServer(opts: {
           while (fleetInflight >= 20) await new Promise((r) => setTimeout(r, 20));
           fleetInflight++;
           try {
-            const result = platform === "fcm"
-              ? await fcmSender.send(row.token, runId, edge)
-              : await apnsSender.send(row.token, runId, edge, row.environment === "sandbox" ? "sandbox" : "production");
+            const labeled: ApnsEnvironment = row.environment === "sandbox" ? "sandbox" : "production";
+            const sent = platform === "fcm"
+              ? { result: await fcmSender.send(row.token, runId, edge), stored: labeled }
+              : await sendApnsEdge(row.token, runId, edge, labeled);
+            const result = sent.result;
             const tail = row.token.slice(-8);
             const kind = platform === "fcm" ? "fcm" : "apns";
-            if (result === "ok") audit("relay", `${kind}.ok`, runId, { token: tail, kind: edge.kind });
-            else if (result === "unregistered") {
+            if (result === "ok") {
+              if (platform === "apns" && sent.stored !== labeled) {
+                db.query("UPDATE push_tokens SET environment=?3 WHERE fleet_id=?1 AND token=?2").run(fleetId, row.token, sent.stored);
+                row.environment = sent.stored;
+              }
+              audit("relay", `${kind}.ok`, runId, { token: tail, kind: edge.kind, environment: sent.stored });
+            } else if (result === "unregistered") {
               db.query("DELETE FROM push_tokens WHERE fleet_id=?1 AND token=?2").run(fleetId, row.token);
               audit("relay", `${kind}.unregistered`, runId, { token: tail });
             } else if (result === "too_large") audit("relay", `${kind}.payload_too_large`, runId, { token: tail, kind: edge.kind });

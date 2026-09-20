@@ -294,7 +294,7 @@ v1 = P0 全部。v1.5 = P1。v2 = P2（含 CDP 真机）。P3 按拍板插入，
 | Rel-M3 | hub secret 走 WS query | 改 header/subprotocol | K7 |
 | Rel-M4 | relay 丢掉 hub 的 `canRetry` 再抄状态清单重算 | `canRetryStatus()` 同源；snap 带 boolean 则指纹用该值 | **done 2026-09-20**（未加 DB 列） |
 | Rel-M5 | APNs `badge: 1` 写死 | 不带角标（未读数未进 snap） | **done 2026-09-20** |
-| Rel-M6 | iOS 永远报 `environment: production`，sandbox token 登记成功永不投递 | Debug/TestFlight 报 sandbox | — |
+| Rel-M6 | iOS 永远报 `environment: production`，sandbox token 登记成功永不投递 | Debug 报 sandbox；TestFlight / App Store 报 production（`sandboxReceipt` ≠ APNs sandbox） | **done 2026-09-20**（TF 误报 sandbox 已回退） |
 | Rel-M7 | `queued` 状态词三份副本 | 与 H6 同一导出 | H6 |
 | Rel-M8 | admin token 打 stdout | 只写一次文件，日志打指纹 | — |
 | Rel-M9 | `sseClients` 无每舰队上限 | 每舰队连接上限 + 超限踢最旧 | P6 |

@@ -1314,7 +1314,8 @@ describe("relay APNs", () => {
     const s = start({
       apns: dummyApns(async (url) => {
         urls.push(url);
-        return { status: 200 };
+        if (url.includes("api.sandbox.push.apple.com")) return { status: 200 };
+        return { status: 400, reason: "BadDeviceToken" };
       }),
     });
     const fleet = s.createFleet();
@@ -1329,8 +1330,40 @@ describe("relay APNs", () => {
     ws.send(JSON.stringify({ type: "snap.run", run: completedRun() }));
     await Bun.sleep(40);
     await s.flushApns();
+    expect(urls.some((u) => u.includes("https://api.sandbox.push.apple.com/3/device/"))).toBe(true);
+    expect(urls.some((u) => u.includes("https://api.push.apple.com/3/device/"))).toBe(true);
+    ws.close();
+  });
+
+  test("sandbox-labeled TestFlight token is delivered on production APNs and stored as production", async () => {
+    const urls: string[] = [];
+    const home = mkdtempSync(join(tmpdir(), "armada-relay-"));
+    const s = start({
+      home,
+      apns: dummyApns(async (url) => {
+        urls.push(url);
+        if (url.includes("api.sandbox.push.apple.com")) return { status: 400, reason: "BadDeviceToken" };
+        return { status: 200 };
+      }),
+    });
+    const fleet = s.createFleet();
+    const headers = { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" };
+    expect((await fetch(url(s, "/mobile/push-token"), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ token: TOKEN_A, environment: "sandbox" }),
+    })).status).toBe(204);
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    ws.send(JSON.stringify({ type: "snap.run", run: completedRun() }));
+    await Bun.sleep(40);
+    await s.flushApns();
     expect(urls).toHaveLength(1);
-    expect(urls[0]).toContain("https://api.sandbox.push.apple.com/3/device/");
+    expect(urls[0]).toContain("https://api.push.apple.com/3/device/");
+    const { Database } = await import("bun:sqlite");
+    const row = new Database(join(home, "relay.db")).query(
+      "SELECT environment FROM push_tokens WHERE token=?1",
+    ).get(TOKEN_A) as { environment: string };
+    expect(row.environment).toBe("production");
     ws.close();
   });
 
