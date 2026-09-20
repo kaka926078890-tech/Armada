@@ -34,6 +34,60 @@ describe("Cursor protocol user prefixes", () => {
   });
 });
 
+describe("Cursor internal context dump", () => {
+  const dump = `<available_subagent_types>
+Available subagent_types and a quick description of what they do:
+- generalPurpose: General-purpose agent for researching complex questions
+</available_subagent_types>
+<available_subagent_models>
+If the user explicitly asks for the model of a subagent/task, you may ONLY use model slugs from this list:
+- inherit (default)
+</available_subagent_models>`;
+
+  test("available_subagent_types jsonl user line is thought, not an operator bubble", () => {
+    const blocks = eventsToChat([
+      ev({ seq: 1, source: "transcript", payload: JSON.stringify({
+        role: "user", message: { content: [{ type: "text", text: "<user_query>\n启动工作区会进入无限的死循环，帮忙修复这个问题并commit push\n</user_query>" }] },
+      }) }),
+      ev({ seq: 2, source: "transcript", payload: JSON.stringify({
+        role: "assistant", message: { content: [
+          { type: "tool_use", name: "Read", input: { path: "/ws/scripts/armada-cursor.sh" } },
+        ] },
+      }) }),
+      ev({ seq: 3, source: "transcript", payload: JSON.stringify({
+        role: "user", message: { content: [{ type: "text", text: dump }] },
+      }) }),
+    ]);
+    expect(blocks.filter((b) => b.kind === "user")).toEqual([
+      { kind: "user", text: "启动工作区会进入无限的死循环，帮忙修复这个问题并commit push", seq: 1 },
+    ]);
+    expect(blocks.some((b) => b.kind === "thought" && b.text.includes("<available_subagent_types>"))).toBe(true);
+    const segs = segmentChat(blocks);
+    expect(segs.filter((s) => s.kind === "user")).toHaveLength(1);
+    const fold = segs.find((s) => s.kind === "process");
+    expect(fold?.kind === "process" && fold.steps.some((s) => s.kind === "thought" && s.text.includes("<available_subagent_models>"))).toBe(true);
+  });
+
+  test("the same dump wrapped in user_query still folds into process", () => {
+    const blocks = eventsToChat([
+      ev({ seq: 1, source: "transcript", payload: JSON.stringify({
+        role: "user", message: { content: [{ type: "text", text: `<user_query>\n${dump}\n</user_query>` }] },
+      }) }),
+    ]);
+    expect(blocks.filter((b) => b.kind === "user")).toEqual([]);
+    expect(blocks).toEqual([{ kind: "thought", text: dump, seq: 1 }]);
+  });
+
+  test("talking about subagents without the xml tags stays a user bubble", () => {
+    const blocks = eventsToChat([
+      ev({ seq: 1, source: "transcript", payload: JSON.stringify({
+        role: "user", message: { content: [{ type: "text", text: "<user_query>\n帮我看看 available_subagent_types 是什么\n</user_query>" }] },
+      }) }),
+    ]);
+    expect(blocks).toEqual([{ kind: "user", text: "帮我看看 available_subagent_types 是什么", seq: 1 }]);
+  });
+});
+
 describe("eventsToChat user markdown source", () => {
   const md = "### 标题\n第一行\n第二行\n\n- a";
 

@@ -155,14 +155,26 @@ export const CURSOR_PROTOCOL_USER_PREFIXES = [
   "Briefly inform the user about the task result",
 ] as const;
 
+/** Cursor 塞进 jsonl user 行的内部目录；不是操作员输入。必须带尖括号，避免「帮我看看 available_subagent_types」被误收。 */
+export const CURSOR_INTERNAL_CONTEXT_MARKERS = [
+  "<available_subagent_types>",
+  "<available_subagent_models>",
+] as const;
+
 /** Cursor 协议注入的用户句，不是操作员输入；详情不画成气泡。不参与忙/闲。 */
 function isCursorProtocolUser(text: string): boolean {
   const t = text.trim();
   return CURSOR_PROTOCOL_USER_PREFIXES.some((prefix) => t.startsWith(prefix));
 }
 
+function isCursorInternalContext(text: string): boolean {
+  return CURSOR_INTERNAL_CONTEXT_MARKERS.some((marker) => text.includes(marker));
+}
+
 function emitUser(text: string, seq: number): ChatBlock[] {
-  if (!text || isCursorProtocolUser(text)) return [];
+  if (!text) return [];
+  if (isCursorProtocolUser(text)) return [];
+  if (isCursorInternalContext(text)) return [{ kind: "thought", text, seq }];
   return [{ kind: "user", text, seq }];
 }
 
