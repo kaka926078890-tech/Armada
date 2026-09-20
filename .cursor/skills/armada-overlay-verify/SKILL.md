@@ -49,6 +49,7 @@ Chicken-egg: **0.4.26 and older do not poll** `pending-reload.json`. The first j
 - `workbench.action.reloadWindow` or `cursor` CLI from a child of Cursor
 - Reloading when vsix did not change
 - Claiming desktop acceptance before 7380 is the bundled bun
+- 只打 vsix / 只 `Install from VSIX` 就当发完（包装 `REQUIRED_EXTENSION_VERSION` 仍旧号，看板「现在 / 空闲 Reload」会空转）
 
 ## Operator controls (hub + App)
 

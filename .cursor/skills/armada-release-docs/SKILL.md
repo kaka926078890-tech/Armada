@@ -7,6 +7,8 @@ description: Use when bumping Armada versions, shipping vsix / overlay / TestFli
 
 升号、打 vsix、overlay、出 TestFlight / APK **同一轮**必须改 README 当前版本表和 `CHANGELOG.md`。只改 `package.json` 不算发完。
 
+**升扩展必须同一轮 overlay 中台。** 禁止只打 `armada-agent-*.vsix` 就交给操作员。看板 Reload 按钮不传 vsix，包装 hub 用 `REQUIRED_EXTENSION_VERSION`；只装新 vsix、7380 仍是旧 `/Applications/Armada.app` 时，按钮会写成旧号，扩展 `done` 闸空转（0.4.32 只打 vsix 已踩过）。
+
 权威在 **armada 仓**：`README.md`、`CHANGELOG.md`、本 skill。Desk 工作区只镜像。
 
 ## Version sources
@@ -35,6 +37,7 @@ description: Use when bumping Armada versions, shipping vsix / overlay / TestFli
    - 手机舰队 / 仓列表 / 详情 → `mobile-fleet.png` / `mobile-workspace.png` / `mobile-run-detail.png`
 6. 中台/App 操作员新能力：同一轮问 App 是否看得到（hub `runToSnap`）。见 `armada-hub-app-parity`。
 7. 声称桌面验收通过前走 `armada-overlay-verify`。
+8. 扩展号变了：同一轮 `tauri build` + overlay `/Applications/Armada.app`，确认 7380 是包内 bun 且 `REQUIRED_EXTENSION_VERSION` 与 vsix 同号。未 overlay 不得宣称发完。
 
 ## CHANGELOG shape
 
@@ -66,6 +69,7 @@ description: Use when bumping Armada versions, shipping vsix / overlay / TestFli
 | 「截图还适用」 | 看板列、侧栏、App 五列/详情变了就必须换图。没变才可跳过第 5 步。 |
 | 「桌面还是 0.1.0 所以不用写」 | 扩展/App 升了也要改表 + CHANGELOG。桌面号照抄。 |
 | 「这是内部 chore」 | `skipped-same-version`、Reload 闩、TF 号都是操作员步骤。要写。 |
+| 「只打 vsix，中台号没变不用 overlay」 | 包装 hub 的 REQUIRED / Reload 横幅跟着 vsix。不同步 = 看板按钮写旧号。 |
 
 ## Red flags
 
@@ -73,5 +77,6 @@ description: Use when bumping Armada versions, shipping vsix / overlay / TestFli
 - README 仍写 `armada-agent-0.4.19.vsix` 而 `extension/package.json` 已经是新号
 - CHANGELOG 最新节缺修复/新增，或日期仍是上一轮
 - 发版 PR/提交自称完成，但当前版本表有一行对不上文件
+- 扩了 vsix 号却没 overlay，7380 仍是旧 `REQUIRED_EXTENSION_VERSION`
 
 **以上任一：停。先补文档再 commit。**
