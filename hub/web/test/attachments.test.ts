@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mergeAttachmentFiles } from "../src/attachments";
+import { ATTACHMENT_NAME_DISPLAY_MAX, displayAttachmentName, mergeAttachmentFiles } from "../src/attachments";
 
 function png(name: string): File {
   return new File([new Uint8Array([1])], name, { type: "image/png" });
@@ -19,5 +19,21 @@ describe("mergeAttachmentFiles", () => {
     const { files, rejected } = mergeAttachmentFiles([], [gif, pdf, txt, png("a")]);
     expect(files.map((f) => f.name)).toEqual(["spec.pdf", "notes.txt", "a"]);
     expect(rejected).toBe(0);
+  });
+});
+
+describe("displayAttachmentName", () => {
+  test("keeps short names", () => {
+    expect(displayAttachmentName("shot.png")).toBe("shot.png");
+    expect(displayAttachmentName("")).toBe("粘贴的图片");
+  });
+
+  test("ellipsizes a Feishu-length jpeg and stays within the cap", () => {
+    const long = "img_v3_0215n_5cf580dd-ad94-4f31-95b8-477e2325cddg.jpg";
+    const shown = displayAttachmentName(long);
+    expect(shown.length).toBe(ATTACHMENT_NAME_DISPLAY_MAX);
+    expect(shown.endsWith("….jpg")).toBe(true);
+    expect(shown).not.toBe(long);
+    expect(shown.startsWith("img_v3_0215n_")).toBe(true);
   });
 });

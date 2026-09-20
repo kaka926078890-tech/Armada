@@ -5,7 +5,8 @@ import { workspaceFolderName, runDisplayName, canRetryRun, CDP_NOT_READY_COPY, t
 import ChatThread from "./ChatThread";
 import { eventsToChat, mergePendingAsk, mergeOutboundChat, queuedOutbound, INITIAL_VISIBLE_TURNS, initialHiddenPrefixTurns, recentTurnsWindow } from "../chatView";
 import { collectEventPages, mergeEvents, EVENT_PAGE_SIZE, hasOlderEvents, olderEventsQuery, shouldLoadOlder, prependPreserveScroll } from "../loadEvents";
-import { mergeAttachmentFiles, isConsoleAttachment, CONSOLE_ACCEPT } from "../attachments";
+import { mergeAttachmentFiles, isConsoleAttachment } from "../attachments";
+import { ConsoleFilePicker } from "./ConsoleFilePicker";
 import { endFollowupSend, isFollowupSendEnter, tryBeginFollowupSend } from "../followupSend";
 import { WIDTH_KEY, type PromptSnippet } from "../uiPrefs";
 import { appendSnippetBody } from "../promptSnippets";
@@ -548,23 +549,11 @@ export default function RunDetail({
             />
             <Button type="submit" disabled={!injectReady || sending || (!followup.trim() && followupFiles.length === 0)} className="shrink-0">发送</Button>
           </div>
-          <input type="file" accept={CONSOLE_ACCEPT} multiple onChange={(e) => {
-            const picked = [...(e.target.files ?? [])];
-            const { files: next, rejected } = mergeAttachmentFiles(followupFiles, picked);
-            setFollowupFiles(next);
-            if (rejected) setFollowupError("最多 4 个附件，已忽略多余文件");
-            e.target.value = "";
-          }} />
-          {followupFiles.length > 0 && (
-            <div className="text-[12px] text-muted-foreground flex flex-col gap-1">
-              {followupFiles.map((f, i) => (
-                <div key={i} className="flex justify-between gap-2">
-                  <span className="truncate">{f.name || "粘贴的图片"}</span>
-                  <Button type="button" variant="ghost" size="sm" onClick={() => setFollowupFiles(followupFiles.filter((_, j) => j !== i))}>移除</Button>
-                </div>
-              ))}
-            </div>
-          )}
+          <ConsoleFilePicker
+            files={followupFiles}
+            onFiles={setFollowupFiles}
+            onRejected={() => setFollowupError("最多 4 个附件，已忽略多余文件")}
+          />
         </form>
         </div>
       )}

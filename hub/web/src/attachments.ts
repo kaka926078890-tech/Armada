@@ -25,3 +25,16 @@ export function mergeAttachmentFiles(prev: File[], incoming: File[]): { files: F
 }
 
 export const mergeImageFiles = mergeAttachmentFiles;
+
+/** 列表展示上限；完整名走 title。CSS truncate 仍要 min-w-0，这条防止原生控件把对话框撑出横条。 */
+export const ATTACHMENT_NAME_DISPLAY_MAX = 36;
+
+export function displayAttachmentName(name: string, max = ATTACHMENT_NAME_DISPLAY_MAX): string {
+  const raw = name.trim() || "粘贴的图片";
+  if (raw.length <= max) return raw;
+  const dot = raw.lastIndexOf(".");
+  const ext = dot > 0 && raw.length - dot <= 8 && raw.length - dot > 1 ? raw.slice(dot) : "";
+  const budget = max - ext.length - 1;
+  if (budget < 4) return `${raw.slice(0, Math.max(1, max - 1))}…`;
+  return `${raw.slice(0, budget)}…${ext}`;
+}

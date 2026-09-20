@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { DispatchModal } from "../src/components/Modals";
+import { ConsoleFilePicker } from "../src/components/ConsoleFilePicker";
 import { CDP_NOT_READY_COPY } from "../src/boardState";
 import type { Machine } from "../src/types";
 
@@ -51,9 +52,40 @@ describe("DispatchModal prompt", () => {
       />,
     );
     expect(html).toContain("max-h-[min(90dvh,calc(100vh-2rem))]");
+    expect(html).toContain("overflow-x-hidden");
     expect(html).toContain("overflow-y-auto");
     expect(html).toContain("max-h-[min(12rem,40vh)]");
     expect(html).toContain("field-sizing-fixed");
+  });
+
+  test("hides the native file control so a long filename cannot open a horizontal scrollbar", () => {
+    const html = renderToStaticMarkup(
+      <DispatchModal
+        machines={[machine]}
+        preset={{ machineId: "m-1", workspaceRoot: "C:/ws" }}
+        activeOnWorkspace={0}
+        onClose={() => {}}
+        onDone={() => {}}
+      />,
+    );
+    expect(html).toContain("选择文件");
+    expect(html).toContain("sr-only");
+    expect(html).not.toContain("Choose Files");
+    expect(html).toContain("min-w-0");
+  });
+
+  test("picked Feishu jpeg shows an ellipsized name instead of the native filename string", () => {
+    const f = new File(
+      [new Uint8Array([1])],
+      "img_v3_0215n_5cf580dd-ad94-4f31-95b8-477e2325cddg.jpg",
+      { type: "image/jpeg" },
+    );
+    const html = renderToStaticMarkup(<ConsoleFilePicker files={[f]} onFiles={() => {}} />);
+    expect(html).toContain("sr-only");
+    expect(html).toContain("min-w-0");
+    expect(html).toContain("truncate");
+    expect(html).toContain(">img_v3_0215n_5cf580dd-ad94-4f31….jpg<");
+    expect(html).toContain(`title="img_v3_0215n_5cf580dd-ad94-4f31-95b8-477e2325cddg.jpg"`);
   });
 
   test("shows prompt snippet bar above the textarea without submitting", () => {

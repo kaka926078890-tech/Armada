@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
-import { mergeAttachmentFiles, isConsoleAttachment, CONSOLE_ACCEPT } from "../attachments";
+import { mergeAttachmentFiles, isConsoleAttachment } from "../attachments";
+import { ConsoleFilePicker } from "./ConsoleFilePicker";
 import { endFollowupSend, isFollowupSendEnter, tryBeginFollowupSend } from "../followupSend";
 import { CDP_NOT_READY_COPY } from "../boardState";
 import { appendSnippetBody } from "../promptSnippets";
@@ -10,7 +11,7 @@ import { PromptSnippetBar } from "./PromptSnippetBar";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Textarea } from "./ui/textarea";
-import { UI_META, UI_TYPE } from "../ui";
+import { UI_TYPE } from "../ui";
 
 const ERR: Record<string, string> = {
   RUN_LIMIT: "已达该机或该工作区并行上限",
@@ -92,7 +93,7 @@ export function DispatchModal({
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="sm:max-w-[32rem] gap-3 max-h-[min(90dvh,calc(100vh-2rem))] overflow-y-auto" showCloseButton={false} onClick={(e) => e.stopPropagation()}>
+      <DialogContent className="sm:max-w-[32rem] min-w-0 gap-3 max-h-[min(90dvh,calc(100vh-2rem))] overflow-x-hidden overflow-y-auto" showCloseButton={false} onClick={(e) => e.stopPropagation()}>
         <DialogHeader>
           <DialogTitle className={UI_TYPE}>派发任务</DialogTitle>
         </DialogHeader>
@@ -149,23 +150,11 @@ export function DispatchModal({
             setFiles(next);
             if (rejected) setError("最多 4 个附件，已忽略多余文件");
           }} />
-        <input type="file" accept={CONSOLE_ACCEPT} multiple onChange={(e) => {
-          const picked = [...(e.target.files ?? [])];
-          const { files: next, rejected } = mergeAttachmentFiles(files, picked);
-          setFiles(next);
-          if (rejected) setError("最多 4 个附件，已忽略多余文件");
-          e.target.value = "";
-        }} />
-        {files.length > 0 && (
-          <div className={`${UI_META} text-muted-foreground flex flex-col gap-1`}>
-            {files.map((f, i) => (
-              <div key={i} className="flex justify-between gap-2">
-                <span className="truncate">{f.name || "粘贴的图片"}</span>
-                <Button type="button" variant="ghost" size="sm" onClick={() => setFiles(files.filter((_, j) => j !== i))}>移除</Button>
-              </div>
-            ))}
-          </div>
-        )}
+        <ConsoleFilePicker
+          files={files}
+          onFiles={setFiles}
+          onRejected={() => setError("最多 4 个附件，已忽略多余文件")}
+        />
         {error && <div className={`${UI_TYPE} text-destructive`}>{error}</div>}
         <DialogFooter className="mx-0 mb-0">
           <Button type="button" variant="outline" onClick={onClose}>取消</Button>
