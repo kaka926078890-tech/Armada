@@ -251,7 +251,15 @@ export class RunService {
     return rows.some((r) => r.id !== exceptId && collisionKey(r.prompt, parseAttachmentIds(r.attachments)) === key);
   }
 
+  private windowHasPendingAsk(machineId: string, windowId: string): boolean {
+    const rows = this.db.query(
+      `SELECT pending_ask FROM runs WHERE machine_id=?1 AND window_id=?2 AND status IN ('dispatched','binding','running') AND pending_ask IS NOT NULL`,
+    ).all(machineId, windowId) as { pending_ask: string }[];
+    return rows.some((r) => parsePendingAsk(r.pending_ask) != null);
+  }
+
   private windowCanAcceptStart(machineId: string, windowId: string): boolean {
+    if (this.windowHasPendingAsk(machineId, windowId)) return false;
     const ver = this.registry.windowExtensionVersion(machineId, windowId);
     if (extensionSupportsMultiRunPerWindow(ver)) return true;
     const row = this.db.query(
@@ -559,6 +567,10 @@ export class RunService {
     if (run.conversation_id && windowId) {
       if (windowId !== run.window_id) {
         this.db.query("UPDATE runs SET window_id=?1 WHERE id=?2").run(windowId, runId);
+      }
+      const ask = parsePendingAsk(run.pending_ask);
+      if (ask && !isPlanAsk(ask)) {
+        this.answerAsk(runId, { request_id: ask.request_id, action: "skip" });
       }
       sent = this.registry.sendTo(run.machine_id, windowId, { type: "run.cancel", runId, conversationId: run.conversation_id });
     }
@@ -876,6 +888,7 @@ export class RunService {
     this.clearAskInFlight(runId);
     this.db.query("UPDATE runs SET pending_ask=NULL WHERE id=?1").run(runId);
     this.sse.broadcast(runId, { type: "run.status", runId, status: run.status });
+    this.promoteNextQueued(run.machine_id);
   }
 
   answerAsk(runId: string, body: any): { error?: string; run?: any; already?: boolean } {

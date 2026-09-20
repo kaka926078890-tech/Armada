@@ -481,6 +481,125 @@ describe("Run dispatch", () => {
     await new Promise((r2) => setTimeout(r2, 100));
     expect(((await (await api(`/api/runs/${run.id}`)).json()) as any).status).toBe("cancelled");
     expect(inbound.find((m) => m.type === "run.cancel")).toMatchObject({ runId: run.id, conversationId: "cid-1" });
+    expect(inbound.find((m) => m.type === "run.answerAsk")).toBeUndefined();
+    ws.close();
+  });
+
+  test("pending ask on the window queues a new start; skip-resolved then promotes", async () => {
+    const { ws, inbound, api } = await startWithExt({ extensionVersion: "0.4.31" });
+    const r1 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "ask-hold" }) });
+    const { run: a } = await r1.json() as any;
+    ws.send(JSON.stringify({ type: "run.ack", runId: a.id, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId: a.id, conversationId: "cid-ask", transcriptPath: null, promptMatch: true }));
+    await new Promise((r) => setTimeout(r, 80));
+    ws.send(JSON.stringify({
+      type: "run.event", runId: a.id, conversationId: "cid-ask", source: "cdp", hookEventName: "askQuestion", seq: 1, ts: Date.now(),
+      payload: {
+        request_id: "ask-1",
+        conversation_id: "cid-ask",
+        questions: [{ id: "q0", prompt: "选一个", options: [{ id: "a", label: "A", text: "甲" }] }],
+        detected_at: 1, detect_via: "cdp",
+      },
+    }));
+    await new Promise((r) => setTimeout(r, 120));
+    inbound.length = 0;
+    const r2 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "next" }) });
+    const body2 = await r2.json() as any;
+    expect(body2.run.status).toBe("queued");
+    expect(inbound.filter((m) => m.type === "run.start")).toEqual([]);
+    expect(((await (await api(`/api/runs/${a.id}`)).json()) as any).pending_ask.request_id).toBe("ask-1");
+
+    const skip = await api(`/api/runs/${a.id}/answer-ask`, {
+      method: "POST",
+      body: JSON.stringify({ request_id: "ask-1", action: "skip" }),
+    });
+    expect(skip.status).toBe(202);
+    expect(((await (await api(`/api/runs/${body2.run.id}`)).json()) as any).status).toBe("queued");
+    ws.send(JSON.stringify({
+      type: "run.event", runId: a.id, conversationId: "cid-ask", source: "cdp", hookEventName: "askQuestionResolved", seq: 2, ts: Date.now(),
+      payload: { request_id: "ask-1", via: "cdp", conversation_id: "cid-ask" },
+    }));
+    await new Promise((r) => setTimeout(r, 150));
+    expect(((await (await api(`/api/runs/${a.id}`)).json()) as any).pending_ask).toBeNull();
+    expect(((await (await api(`/api/runs/${body2.run.id}`)).json()) as any).status).toBe("dispatched");
+    expect(inbound.filter((m) => m.type === "run.start" && m.prompt === "next")).toHaveLength(1);
+    ws.close();
+  });
+
+  test("running sibling without pending ask still accepts a new start", async () => {
+    const { ws, inbound, api } = await startWithExt({ extensionVersion: "0.4.31" });
+    const r1 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "live" }) });
+    const { run: a } = await r1.json() as any;
+    ws.send(JSON.stringify({ type: "run.ack", runId: a.id, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId: a.id, conversationId: "cid-live", transcriptPath: null, promptMatch: true }));
+    await new Promise((r) => setTimeout(r, 80));
+    inbound.length = 0;
+    const r2 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "peer" }) });
+    const body2 = await r2.json() as any;
+    expect(body2.run.status).toBe("dispatched");
+    await new Promise((r) => setTimeout(r, 80));
+    expect(inbound.find((m) => m.type === "run.start" && m.prompt === "peer")).toBeTruthy();
+    ws.close();
+  });
+
+  test("cancel with pending ask sends skip then run.cancel", async () => {
+    const { ws, inbound, api } = await startWithExt({ extensionVersion: "0.4.31" });
+    const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "hello" }) });
+    const { run } = await r.json() as any;
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId: run.id, conversationId: "cid-1", transcriptPath: null, promptMatch: true }));
+    await new Promise((r2) => setTimeout(r2, 80));
+    ws.send(JSON.stringify({
+      type: "run.event", runId: run.id, conversationId: "cid-1", source: "cdp", hookEventName: "askQuestion", seq: 1, ts: Date.now(),
+      payload: {
+        request_id: "ask-1",
+        conversation_id: "cid-1",
+        questions: [{ id: "q0", prompt: "选一个", options: [{ id: "a", label: "A", text: "甲" }] }],
+        detected_at: 1, detect_via: "cdp",
+      },
+    }));
+    await new Promise((r2) => setTimeout(r2, 120));
+    inbound.length = 0;
+    const cr = await api(`/api/runs/${run.id}/cancel`, { method: "POST" });
+    expect(cr.status).toBe(200);
+    await new Promise((r2) => setTimeout(r2, 80));
+    expect(((await (await api(`/api/runs/${run.id}`)).json()) as any).status).toBe("cancelled");
+    expect(((await (await api(`/api/runs/${run.id}`)).json()) as any).pending_ask).toBeNull();
+    const types = inbound.map((m) => m.type);
+    expect(types.indexOf("run.answerAsk")).toBeGreaterThanOrEqual(0);
+    expect(types.indexOf("run.cancel")).toBeGreaterThan(types.indexOf("run.answerAsk"));
+    expect(inbound.find((m) => m.type === "run.answerAsk")).toMatchObject({
+      runId: run.id, request_id: "ask-1", action: "skip", conversationId: "cid-1",
+    });
+    ws.close();
+  });
+
+  test("cancel with plan pending ask sends run.cancel without skip", async () => {
+    const { ws, inbound, api } = await startWithExt({ extensionVersion: "0.4.31" });
+    const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "hello" }) });
+    const { run } = await r.json() as any;
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId: run.id, conversationId: "cid-1", transcriptPath: null, promptMatch: true }));
+    await new Promise((r2) => setTimeout(r2, 80));
+    ws.send(JSON.stringify({
+      type: "run.event", runId: run.id, conversationId: "cid-1", source: "cdp", hookEventName: "askQuestion", seq: 1, ts: Date.now(),
+      payload: {
+        request_id: "ask-plan-1",
+        kind: "plan",
+        filename: "Markdown date line",
+        conversation_id: "cid-1",
+        questions: [{ id: "q0", prompt: "Created Plan: Markdown date line", options: [{ id: "build", label: "Build", text: "Build" }] }],
+        detected_at: 1, detect_via: "cdp",
+      },
+    }));
+    await new Promise((r2) => setTimeout(r2, 120));
+    inbound.length = 0;
+    const cr = await api(`/api/runs/${run.id}/cancel`, { method: "POST" });
+    expect(cr.status).toBe(200);
+    await new Promise((r2) => setTimeout(r2, 80));
+    expect(((await (await api(`/api/runs/${run.id}`)).json()) as any).status).toBe("cancelled");
+    expect(inbound.find((m) => m.type === "run.cancel")).toMatchObject({ runId: run.id, conversationId: "cid-1" });
+    expect(inbound.find((m) => m.type === "run.answerAsk")).toBeUndefined();
     ws.close();
   });
 
