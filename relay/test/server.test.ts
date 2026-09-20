@@ -1182,7 +1182,7 @@ function completedRun(runId = "r-push", extra: Record<string, unknown> = {}) {
 }
 
 describe("relay APNs", () => {
-  test("push-token: no bearer 401, pair 403, non-production 400", async () => {
+  test("push-token: no bearer 401, pair 403, unknown environment 400", async () => {
     const s = start();
     const fleet = s.createFleet();
     expect((await fetch(url(s, "/mobile/push-token"), { method: "POST", body: "{}" })).status).toBe(401);
@@ -1197,10 +1197,16 @@ describe("relay APNs", () => {
     const badEnv = await fetch(url(s, "/mobile/push-token"), {
       method: "POST",
       headers,
-      body: JSON.stringify({ token: TOKEN_A, environment: "sandbox" }),
+      body: JSON.stringify({ token: TOKEN_A, environment: "prod" }),
     });
     expect(badEnv.status).toBe(400);
     expect(await badEnv.json()).toEqual({ error: "INVALID" });
+    const sandbox = await fetch(url(s, "/mobile/push-token"), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ token: TOKEN_A, environment: "sandbox" }),
+    });
+    expect(sandbox.status).toBe(204);
     const badTok = await fetch(url(s, "/mobile/push-token"), {
       method: "POST",
       headers,
@@ -1236,6 +1242,31 @@ describe("relay APNs", () => {
     expect(JSON.stringify(parsed)).not.toContain("SECRET_BODY_MUST_NOT_LEAVE");
     expect(parsed.kind).toBe("completed");
     expect(parsed.runId).toBe("r-push");
+    ws.close();
+  });
+
+  test("sandbox token is delivered to api.sandbox.push.apple.com", async () => {
+    const urls: string[] = [];
+    const s = start({
+      apns: dummyApns(async (url) => {
+        urls.push(url);
+        return { status: 200 };
+      }),
+    });
+    const fleet = s.createFleet();
+    const headers = { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" };
+    const reg = await fetch(url(s, "/mobile/push-token"), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ token: TOKEN_A, environment: "sandbox" }),
+    });
+    expect(reg.status).toBe(204);
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    ws.send(JSON.stringify({ type: "snap.run", run: completedRun() }));
+    await Bun.sleep(40);
+    await s.flushApns();
+    expect(urls).toHaveLength(1);
+    expect(urls[0]).toContain("https://api.sandbox.push.apple.com/3/device/");
     ws.close();
   });
 

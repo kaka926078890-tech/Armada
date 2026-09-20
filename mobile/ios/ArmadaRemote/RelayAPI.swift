@@ -458,8 +458,23 @@ actor RelayAPI {
         let _: EmptyJSON = try await send("/mobile/runs/\(runId)/cancel", method: "POST", body: Data("{}".utf8), ok: [200], allowEmpty: true)
     }
 
+    /// Rel-M6: Debug and TestFlight tokens belong on APNs sandbox; App Store stays production.
+    static func apnsPushEnvironment() -> String {
+        #if DEBUG
+        return "sandbox"
+        #else
+        if Bundle.main.appStoreReceiptURL?.lastPathComponent == "sandboxReceipt" {
+            return "sandbox"
+        }
+        return "production"
+        #endif
+    }
+
     func registerPushToken(_ token: String) async throws {
-        let body = try JSONSerialization.data(withJSONObject: ["token": token, "environment": "production"])
+        let body = try JSONSerialization.data(withJSONObject: [
+            "token": token,
+            "environment": Self.apnsPushEnvironment(),
+        ])
         let _: EmptyJSON = try await send("/mobile/push-token", method: "POST", body: body, ok: [204], allowEmpty: true)
     }
 

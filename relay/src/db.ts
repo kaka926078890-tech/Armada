@@ -40,6 +40,25 @@ function ensureColumn(db: Database, table: string, column: string, ddl: string):
   if (!cols.some((c) => c.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
 }
 
+function migratePushTokenEnvironments(db: Database): void {
+  const row = db.query("SELECT sql FROM sqlite_master WHERE type='table' AND name='push_tokens'").get() as { sql: string } | null;
+  if (!row?.sql || row.sql.includes("'sandbox'")) return;
+  db.exec(`
+    CREATE TABLE push_tokens_new (
+      token TEXT NOT NULL,
+      fleet_id TEXT NOT NULL REFERENCES fleets(id),
+      environment TEXT NOT NULL CHECK (environment IN ('production', 'sandbox')),
+      updated_at INTEGER NOT NULL,
+      platform TEXT NOT NULL DEFAULT 'apns',
+      PRIMARY KEY (fleet_id, token)
+    );
+    INSERT INTO push_tokens_new (token, fleet_id, environment, updated_at, platform)
+      SELECT token, fleet_id, environment, updated_at, COALESCE(platform, 'apns') FROM push_tokens;
+    DROP TABLE push_tokens;
+    ALTER TABLE push_tokens_new RENAME TO push_tokens;
+  `);
+}
+
 export function openRelayDb(home: string): Database {
   mkdirSync(home, { recursive: true });
   const db = new Database(join(home, "relay.db"), { create: true });
@@ -55,11 +74,12 @@ export function openRelayDb(home: string): Database {
   db.exec(`CREATE TABLE IF NOT EXISTS push_tokens (
     token TEXT NOT NULL,
     fleet_id TEXT NOT NULL REFERENCES fleets(id),
-    environment TEXT NOT NULL CHECK (environment = 'production'),
+    environment TEXT NOT NULL CHECK (environment IN ('production', 'sandbox')),
     updated_at INTEGER NOT NULL,
     PRIMARY KEY (fleet_id, token)
   )`);
   ensureColumn(db, "push_tokens", "platform", "platform TEXT NOT NULL DEFAULT 'apns'");
+  migratePushTokenEnvironments(db);
   db.exec(`CREATE TABLE IF NOT EXISTS pair_codes (
     code TEXT PRIMARY KEY,
     fleet_id TEXT NOT NULL REFERENCES fleets(id),

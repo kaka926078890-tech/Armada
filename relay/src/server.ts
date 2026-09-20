@@ -169,7 +169,7 @@ export function createRelayServer(opts: {
   function dispatchEdges(fleetId: string, runId: string, edges: NotifyEdge[]) {
     if (edges.length === 0) return;
     if (!apnsSender.enabled && !fcmSender.enabled) return;
-    const tokens = db.query("SELECT token, platform FROM push_tokens WHERE fleet_id=?1").all(fleetId) as { token: string; platform?: string }[];
+    const tokens = db.query("SELECT token, platform, environment FROM push_tokens WHERE fleet_id=?1").all(fleetId) as { token: string; platform?: string; environment?: string }[];
     if (tokens.length === 0) return;
     enqueueRun(runId, async () => {
       for (const edge of edges) {
@@ -182,7 +182,7 @@ export function createRelayServer(opts: {
           try {
             const result = platform === "fcm"
               ? await fcmSender.send(row.token, runId, edge)
-              : await apnsSender.send(row.token, runId, edge);
+              : await apnsSender.send(row.token, runId, edge, row.environment === "sandbox" ? "sandbox" : "production");
             const tail = row.token.slice(-8);
             const kind = platform === "fcm" ? "fcm" : "apns";
             if (result === "ok") audit("relay", `${kind}.ok`, runId, { token: tail, kind: edge.kind });
@@ -613,21 +613,21 @@ export function createRelayServer(opts: {
     const fleet = (c as any).get("fleet") as { id: string };
     const body = await c.req.json().catch(() => null);
     if (!body || typeof body.token !== "string") return c.json({ error: "INVALID" }, 400);
-    if (body.environment !== "production") return c.json({ error: "INVALID" }, 400);
+    if (body.environment !== "production" && body.environment !== "sandbox") return c.json({ error: "INVALID" }, 400);
     const platform = body.platform == null || body.platform === "" ? "apns" : body.platform;
     if (platform !== "apns" && platform !== "fcm") return c.json({ error: "INVALID" }, 400);
     if (platform === "apns" && !TOKEN_HEX.test(body.token)) return c.json({ error: "INVALID" }, 400);
     if (platform === "fcm" && !isFcmToken(body.token)) return c.json({ error: "INVALID" }, 400);
-    db.query(`INSERT INTO push_tokens (token, fleet_id, environment, platform, updated_at) VALUES (?1,?2,'production',?3,?4)
-      ON CONFLICT(fleet_id, token) DO UPDATE SET updated_at=excluded.updated_at, platform=excluded.platform`)
-      .run(body.token, fleet.id, platform, Date.now());
+    db.query(`INSERT INTO push_tokens (token, fleet_id, environment, platform, updated_at) VALUES (?1,?2,?3,?4,?5)
+      ON CONFLICT(fleet_id, token) DO UPDATE SET updated_at=excluded.updated_at, platform=excluded.platform, environment=excluded.environment`)
+      .run(body.token, fleet.id, body.environment, platform, Date.now());
     const extra = db.query("SELECT token FROM push_tokens WHERE fleet_id=?1 ORDER BY updated_at ASC").all(fleet.id) as { token: string }[];
     if (extra.length > 20) {
       for (const row of extra.slice(0, extra.length - 20)) {
         db.query("DELETE FROM push_tokens WHERE fleet_id=?1 AND token=?2").run(fleet.id, row.token);
       }
     }
-    audit("operator", "push.register", fleet.id, { token: body.token.slice(-8), platform });
+    audit("operator", "push.register", fleet.id, { token: body.token.slice(-8), platform, environment: body.environment });
     return c.body(null, 204);
   });
 

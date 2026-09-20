@@ -3,7 +3,9 @@ import { generateKeyPairSync } from "crypto";
 import { mkdtempSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { buildApnsRequest, createApnsSender, isUnregistered, loadApnsFromEnv, applyHomeEnv, payloadTooLarge, signApnsJwt } from "../src/apns";
+import { Database } from "bun:sqlite";
+import { buildApnsRequest, createApnsSender, isUnregistered, loadApnsFromEnv, applyHomeEnv, payloadTooLarge, signApnsJwt, apnsHost, normalizeApnsEnvironment } from "../src/apns";
+import { openRelayDb } from "../src/db";
 
 test("applyHomeEnv fills blank keys from RELAY_HOME/env", () => {
   const dir = mkdtempSync(join(tmpdir(), "armada-apns-"));
@@ -36,6 +38,7 @@ test("buildApnsRequest has collapse-id, no finalText", () => {
   expect(req.headers["apns-topic"]).toBe("app.armada.remote");
   expect(req.headers["apns-collapse-id"]).toBe("run-r-1");
   expect(req.headers["apns-push-type"]).toBe("alert");
+  expect(req.url).toContain("https://api.push.apple.com/3/device/");
   const parsed = JSON.parse(req.body);
   expect(parsed.finalText).toBeUndefined();
   expect(parsed.runId).toBe("r-1");
@@ -87,4 +90,68 @@ test("sender posts mock 200 and treats 410 as unregistered", async () => {
   });
   expect(await gone.send("b".repeat(64), "r-1", { kind: "completed", title: "t", body: "b" })).toBe("unregistered");
   expect(isUnregistered(400, "BadDeviceToken")).toBe(true);
+});
+
+test("Rel-M6 sandbox tokens hit api.sandbox.push.apple.com", async () => {
+  expect(normalizeApnsEnvironment("sandbox")).toBe("sandbox");
+  expect(normalizeApnsEnvironment("production")).toBe("production");
+  expect(normalizeApnsEnvironment("prod")).toBeNull();
+  expect(apnsHost("sandbox")).toBe("https://api.sandbox.push.apple.com");
+  expect(apnsHost("production")).toBe("https://api.push.apple.com");
+  const req = buildApnsRequest({
+    token: "a".repeat(64),
+    runId: "r-1",
+    edge: { kind: "completed", title: "t", body: "b" },
+    bundleId: "app.armada.remote",
+    jwt: "jwt",
+    environment: "sandbox",
+  });
+  expect(req.url).toBe(`https://api.sandbox.push.apple.com/3/device/${"a".repeat(64)}`);
+
+  const dir = mkdtempSync(join(tmpdir(), "armada-apns-"));
+  const { privateKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+  const pem = privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+  const keyPath = join(dir, "key.p8");
+  writeFileSync(keyPath, pem);
+  const urls: string[] = [];
+  const s = createApnsSender({
+    keyPath, keyId: "KEYID", teamId: "LW2A4J4KKG",
+    retryDelays: [],
+    post: async (url) => {
+      urls.push(url);
+      return { status: 200 };
+    },
+  });
+  expect(await s.send("c".repeat(64), "r-1", { kind: "ask", title: "t", body: "b" }, "sandbox")).toBe("ok");
+  expect(urls[0]).toContain("https://api.sandbox.push.apple.com/3/device/");
+});
+
+test("openRelayDb migrates production-only CHECK so sandbox tokens can persist", () => {
+  const home = mkdtempSync(join(tmpdir(), "armada-relay-db-"));
+  const raw = new Database(join(home, "relay.db"));
+  raw.exec(`
+    CREATE TABLE fleets (
+      id TEXT PRIMARY KEY,
+      hub_secret TEXT NOT NULL UNIQUE,
+      operator_token TEXT NOT NULL UNIQUE,
+      hub_online INTEGER NOT NULL DEFAULT 0,
+      workspaces TEXT NOT NULL DEFAULT '[]',
+      created_at INTEGER NOT NULL
+    );
+    INSERT INTO fleets VALUES ('fleet-1','sec','op',0,'[]',1);
+    CREATE TABLE push_tokens (
+      token TEXT NOT NULL,
+      fleet_id TEXT NOT NULL REFERENCES fleets(id),
+      environment TEXT NOT NULL CHECK (environment = 'production'),
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (fleet_id, token)
+    );
+    INSERT INTO push_tokens VALUES ('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','fleet-1','production',1);
+  `);
+  raw.close();
+  const db = openRelayDb(home);
+  db.query(`INSERT INTO push_tokens (token, fleet_id, environment, updated_at, platform) VALUES (?1,?2,'sandbox',2,'apns')`)
+    .run("b".repeat(64), "fleet-1");
+  const rows = db.query("SELECT environment FROM push_tokens ORDER BY token").all() as { environment: string }[];
+  expect(rows.map((r) => r.environment)).toEqual(["production", "sandbox"]);
 });

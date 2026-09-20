@@ -16,7 +16,18 @@ export type ApnsConfig = {
 };
 
 const JWT_TTL_MS = 50 * 60 * 1000;
-const HOST = "https://api.push.apple.com";
+const HOST_PRODUCTION = "https://api.push.apple.com";
+const HOST_SANDBOX = "https://api.sandbox.push.apple.com";
+
+export type ApnsEnvironment = "production" | "sandbox";
+
+export function normalizeApnsEnvironment(value: unknown): ApnsEnvironment | null {
+  return value === "production" || value === "sandbox" ? value : null;
+}
+
+export function apnsHost(environment: ApnsEnvironment = "production"): string {
+  return environment === "sandbox" ? HOST_SANDBOX : HOST_PRODUCTION;
+}
 
 export function applyHomeEnv(home: string, env: NodeJS.ProcessEnv = process.env): void {
   const p = join(home, "env");
@@ -68,6 +79,7 @@ export function buildApnsRequest(opts: {
   edge: NotifyEdge;
   bundleId: string;
   jwt: string;
+  environment?: ApnsEnvironment;
 }): { url: string; headers: Record<string, string>; body: string } {
   const body = JSON.stringify({
     aps: {
@@ -78,7 +90,7 @@ export function buildApnsRequest(opts: {
     kind: opts.edge.kind,
   });
   return {
-    url: `${HOST}/3/device/${opts.token}`,
+    url: `${apnsHost(opts.environment ?? "production")}/3/device/${opts.token}`,
     headers: {
       authorization: `bearer ${opts.jwt}`,
       "apns-topic": opts.bundleId,
@@ -138,7 +150,7 @@ export type ApnsSendResult = "ok" | "unregistered" | "disabled" | "fail" | "too_
 
 export function createApnsSender(cfg: ApnsConfig | null): {
   enabled: boolean;
-  send: (token: string, runId: string, edge: NotifyEdge) => Promise<ApnsSendResult>;
+  send: (token: string, runId: string, edge: NotifyEdge, environment?: ApnsEnvironment) => Promise<ApnsSendResult>;
 } {
   if (!cfg?.keyPath || !cfg.keyId || !cfg.teamId || !existsSync(cfg.keyPath)) {
     return { enabled: false, send: async () => "disabled" };
@@ -159,12 +171,12 @@ export function createApnsSender(cfg: ApnsConfig | null): {
     return jwt;
   };
 
-  const sendOnce = async (token: string, runId: string, edge: NotifyEdge, forceRefreshJwt = false): Promise<{ status: number; reason?: string; body: string }> => {
+  const sendOnce = async (token: string, runId: string, edge: NotifyEdge, environment: ApnsEnvironment = "production", forceRefreshJwt = false): Promise<{ status: number; reason?: string; body: string }> => {
     if (forceRefreshJwt) {
       jwt = "";
       jwtAt = 0;
     }
-    const req = buildApnsRequest({ token, runId, edge, bundleId, jwt: tokenJwt() });
+    const req = buildApnsRequest({ token, runId, edge, bundleId, jwt: tokenJwt(), environment });
     if (payloadTooLarge(req.body)) return { status: 413, reason: "PayloadTooLarge", body: req.body };
     const res = await post(req.url, req.headers, req.body);
     return { ...res, body: req.body };
@@ -172,17 +184,18 @@ export function createApnsSender(cfg: ApnsConfig | null): {
 
   return {
     enabled: true,
-    async send(token, runId, edge) {
+    async send(token, runId, edge, environment = "production") {
+      const env: ApnsEnvironment = environment === "sandbox" ? "sandbox" : "production";
       let last: ApnsSendResult = "fail";
       const tries = Math.max(1, delays.length || 1);
       for (let i = 0; i < tries; i++) {
         try {
-          const res = await sendOnce(token, runId, edge, false);
+          const res = await sendOnce(token, runId, edge, env, false);
           if (res.status === 200) return "ok";
           if (res.status === 413) return "too_large";
           if (isUnregistered(res.status, res.reason)) return "unregistered";
           if (res.status === 403 && res.reason === "ExpiredProviderToken") {
-            const again = await sendOnce(token, runId, edge, true);
+            const again = await sendOnce(token, runId, edge, env, true);
             if (again.status === 200) return "ok";
             if (isUnregistered(again.status, again.reason)) return "unregistered";
           }
