@@ -7,6 +7,7 @@ import {
   decideWindowReload,
   noteReloadCommandSettled,
   parsePendingReload,
+  parseReloadAttempt,
   pendingFromAction,
   reloadStillNeeded,
   reloadStillNeededForFleet,
@@ -25,6 +26,14 @@ describe("parsePendingReload", () => {
     expect(parsePendingReload({ action: "skip", vsix: "0.4.27", setAt: 10 })).toBeNull();
     expect(parsePendingReload(null)).toBeNull();
     expect(parsePendingReload({ action: "now", vsix: "", setAt: 10 })).toBeNull();
+  });
+});
+
+describe("parseReloadAttempt", () => {
+  test("keeps a positive setAt", () => {
+    expect(parseReloadAttempt({ setAt: 1000 })).toEqual({ setAt: 1000 });
+    expect(parseReloadAttempt({ setAt: 0 })).toBeNull();
+    expect(parseReloadAttempt(null)).toBeNull();
   });
 });
 
@@ -139,6 +148,26 @@ describe("decideReloadFire", () => {
     expect(nextPending.fire).toBe(true);
   });
 
+  test("does not re-fire after a successful Reload Window (fresh process, same pending)", () => {
+    const fresh: ReloadFireState = { lastFiredSetAt: null, lastDecision: null, inFlight: false };
+    const r = decideReloadFire(fresh, {
+      decision: "reload",
+      pendingSetAt: setAt,
+      attemptedSetAt: setAt,
+    });
+    expect(r.fire).toBe(false);
+  });
+
+  test("a new pending still fires after a previous window reload attempt", () => {
+    const fresh: ReloadFireState = { lastFiredSetAt: null, lastDecision: null, inFlight: false };
+    const r = decideReloadFire(fresh, {
+      decision: "reload",
+      pendingSetAt: setAt + 1,
+      attemptedSetAt: setAt,
+    });
+    expect(r.fire).toBe(true);
+  });
+
   test("expired/done/none never fire", () => {
     expect(decideReloadFire(idle, { decision: "expired", pendingSetAt: setAt }).fire).toBe(false);
     expect(decideReloadFire(idle, { decision: "done", pendingSetAt: setAt }).fire).toBe(false);
@@ -242,6 +271,8 @@ describe("extension delivers hub reload over ws", () => {
     expect(src).toContain("windowHasInFlightArmadaRun");
     expect(src).toContain("decideReloadFire");
     expect(src).toContain("noteReloadCommandSettled");
+    expect(src).toContain("attemptedSetAt");
+    expect(src).toContain("PENDING_RELOAD_ATTEMPT_NAME");
     expect(src).not.toContain("boundRuns.size > 0 || pendingRuns.length > 0");
   });
 });

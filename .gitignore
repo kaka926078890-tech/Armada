@@ -41,6 +41,7 @@ service-account.json
 relay.json
 hub.db
 pending-reload.json
+pending-reload-attempt.json
 
 mobile/ios/build/
 xcuserdata/

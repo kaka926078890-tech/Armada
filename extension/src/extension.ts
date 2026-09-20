@@ -20,7 +20,7 @@ import { hubRunsNeedingTranscriptFollow, shouldArmFollowupStopOnAdopt } from "./
 import { noteOwnerBsp, clearGeneration, synthesizedStopPayload, noteHubGeneration, onFollowupBindGeneration, shouldSynthesizeTranscriptStop } from "./generationStamp";
 import { parseAskInspect, askPollActions, coalesceAskInspect } from "./askDetect";
 import { enrichPlanAsk, planDirsFor } from "./planFile";
-import { PENDING_RELOAD_NAME, decideReloadFire, decideWindowReload, noteReloadCommandSettled, parsePendingReload, windowHasInFlightArmadaRun, type ReloadFireState } from "../../desktop-core/src/cursorReload";
+import { PENDING_RELOAD_ATTEMPT_NAME, PENDING_RELOAD_NAME, decideReloadFire, decideWindowReload, noteReloadCommandSettled, parsePendingReload, parseReloadAttempt, windowHasInFlightArmadaRun, type ReloadFireState } from "../../desktop-core/src/cursorReload";
 
 const EXTENSION_VERSION = "0.4.30";
 
@@ -569,10 +569,27 @@ export function activate(context: vscode.ExtensionContext): void {
   };
 
   const pendingReloadPath = join(homedir(), ".armada", PENDING_RELOAD_NAME);
+  const reloadAttemptPath = join(homedir(), ".armada", PENDING_RELOAD_ATTEMPT_NAME);
+  const persistReloadAttempt = (setAt: number | null) => {
+    mkdirSync(join(homedir(), ".armada"), { recursive: true });
+    if (setAt == null) {
+      try { unlinkSync(reloadAttemptPath); } catch { /* missing */ }
+      return;
+    }
+    writeFileSync(reloadAttemptPath, JSON.stringify({ setAt }), { mode: 0o600 });
+  };
+  const readReloadAttemptSetAt = (): number | null => {
+    try {
+      return parseReloadAttempt(JSON.parse(readFileSync(reloadAttemptPath, "utf8")))?.setAt ?? null;
+    } catch {
+      return null;
+    }
+  };
   const persistLocalPending = (pending: ReturnType<typeof parsePendingReload>) => {
     mkdirSync(join(homedir(), ".armada"), { recursive: true });
     if (!pending) {
       try { unlinkSync(pendingReloadPath); } catch { /* missing */ }
+      persistReloadAttempt(null);
       return;
     }
     writeFileSync(pendingReloadPath, JSON.stringify(pending), { mode: 0o600 });
@@ -592,17 +609,28 @@ export function activate(context: vscode.ExtensionContext): void {
       runningVsix: EXTENSION_VERSION,
       machineId: machineId ?? undefined,
     });
-    const attempt = decideReloadFire(reloadFire, { decision, pendingSetAt: pending?.setAt ?? null });
+    const attempt = decideReloadFire(reloadFire, {
+      decision,
+      pendingSetAt: pending?.setAt ?? null,
+      attemptedSetAt: readReloadAttemptSetAt(),
+    });
     reloadFire = attempt.next;
     if (decision === "expired") {
       log("vsix pending-reload expired; this window still has a live Armada run");
       return;
     }
     if (!attempt.fire) return;
+    persistReloadAttempt(pending?.setAt ?? null);
     log(`vsix pending-reload: reloading window for ${pending?.vsix}`);
     void Promise.resolve(vscode.commands.executeCommand("workbench.action.reloadWindow")).then(
-      () => { reloadFire = noteReloadCommandSettled(reloadFire); },
-      () => { reloadFire = noteReloadCommandSettled(reloadFire); },
+      () => {
+        persistReloadAttempt(null);
+        reloadFire = noteReloadCommandSettled(reloadFire);
+      },
+      () => {
+        persistReloadAttempt(null);
+        reloadFire = noteReloadCommandSettled(reloadFire);
+      },
     );
   };
   const applyHubCursorReload = (raw: unknown) => {

@@ -2,6 +2,7 @@
 
 export const IDLE_RELOAD_MAX_WAIT_MS = 15 * 60 * 1000;
 export const PENDING_RELOAD_NAME = "pending-reload.json";
+export const PENDING_RELOAD_ATTEMPT_NAME = "pending-reload-attempt.json";
 
 export type CursorReloadAction = "now" | "when-idle" | "skip";
 
@@ -40,6 +41,13 @@ export function pendingFromAction(
   const start = notBefore != null && Number.isFinite(notBefore) ? notBefore : now;
   const mid = typeof machineId === "string" && machineId.trim() ? machineId.trim() : undefined;
   return { action, vsix: v, setAt: now, notBefore: start, ...(mid ? { machineId: mid } : {}) };
+}
+
+export function parseReloadAttempt(raw: unknown): { setAt: number } | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const setAt = (raw as { setAt?: unknown }).setAt;
+  if (typeof setAt !== "number" || !Number.isFinite(setAt) || setAt <= 0) return null;
+  return { setAt };
 }
 
 export function cmpSemver(a: string, b: string): number {
@@ -135,6 +143,9 @@ export function decideWindowReload(opts: {
  * the 10s poll would keep calling reloadWindow and restack that dialog.
  * Fire at most once per pending until the command settles; retry only after a
  * busy→idle edge (Armada run started then finished) or a new pending setAt.
+ * `attemptedSetAt` is the on-disk latch for a pending that already survived a
+ * real window reload (in-memory state is gone; repeating Reload cannot install
+ * a missing vsix).
  */
 export type ReloadFireState = {
   lastFiredSetAt: number | null;
@@ -144,11 +155,16 @@ export type ReloadFireState = {
 
 export function decideReloadFire(
   state: ReloadFireState,
-  opts: { decision: WindowReloadDecision; pendingSetAt: number | null },
+  opts: { decision: WindowReloadDecision; pendingSetAt: number | null; attemptedSetAt?: number | null },
 ): { fire: boolean; next: ReloadFireState } {
   const lastDecision = opts.decision;
   if (opts.decision !== "reload" || opts.pendingSetAt == null) {
     return { fire: false, next: { ...state, lastDecision } };
+  }
+  // Survived a real Reload Window: in-memory latch is gone, but retrying the
+  // same pending cannot install a missing vsix — it only restacks reloads.
+  if (opts.attemptedSetAt === opts.pendingSetAt) {
+    return { fire: false, next: { ...state, lastFiredSetAt: opts.pendingSetAt, lastDecision } };
   }
   if (state.inFlight) {
     return { fire: false, next: { ...state, lastDecision } };
