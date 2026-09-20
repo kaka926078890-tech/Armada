@@ -1,7 +1,7 @@
 # Armada 手机图片发送（App → 中转 → hub blob → 现网 CDP 贴芯片）
 
 - 日期：2026-09-19
-- 状态：**待评审**（v1 方案冻结；**未标实施基准**。不写新 CDP 选择器；贴芯片沿用现网 `createImagePaster`。中转 blob 管道未落地前 App 不得画发送入口。）
+- 状态：**已进 master**（v1 落地：`710f3a3`；iOS TestFlight **22** / Android **0.1.9**，`1c9e712`。不写新 CDP 选择器；贴芯片沿用现网 `createImagePaster`。）
 - 父文档：
   - [2026-09-02-armada-composer-image-chip-design.md](./2026-09-02-armada-composer-image-chip-design.md)（中台图文派发 / blob / 芯片）
   - [2026-09-14-armada-workspace-file-attach-design.md](./2026-09-14-armada-workspace-file-attach-design.md)（非图文件 inbox；本规格 **不做** 手机 pdf/txt）

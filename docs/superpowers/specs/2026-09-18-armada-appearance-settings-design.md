@@ -1,7 +1,7 @@
 # Armada 外观设置（主题 + 字号）
 
 - 日期：2026-09-18
-- 状态：**待评审**（方案 A 已口头确认：各端本地、不同步）
+- 状态：**已落地**（方案 A：各端本地、不同步。中台设置弹窗 + iOS/Android 设置页主题/字号已进 master。）
 - 父文档：
   - [armada-hub-app-parity](../../../.cursor/rules/armada-hub-app-parity.mdc)（中台给操作员的外观入口，App 同一轮要能看见、改完）
   - [2026-09-17-armada-android-app-design.md](./2026-09-17-armada-android-app-design.md)（Android 对等 iOS）
