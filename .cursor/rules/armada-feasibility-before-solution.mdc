@@ -23,3 +23,5 @@ IDE 控件、CDP 点击、hook/jsonl 形状、未知弹窗：**真机验证完�
 ```
 
 对端 OS（本功能=Windows 被控机）未用同一选择器点通 Continue/Esc 前，不得宣称完成。Mac 夹具不能代替 Windows 真机。
+
+已记入 [真机台账](../../docs/superpowers/specs/2026-09-20-armada-debt-real-device-verify.md) 的项 **不要再派「先装 vsix / 再跑 W1–W6」**。0.4.32 扩展回归（B1–B3、cid 不串台、Other）已过；同页双框 **blocked**。还开着的是 **overlay 之后**在 bundled bun 上的短回归（台账 §3），不是从没测过 Windows。

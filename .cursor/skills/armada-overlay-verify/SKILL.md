@@ -38,6 +38,8 @@ PY
 
 That script `trap '' HUP`, POSTs `/api/cursor-reload` `{action:"when-idle"}` (or writes `~/.armada/pending-reload.json` using `extension/package.json` version), then notifies. After **0.4.27**, the extension reloads **per window** when that window has **no Armada live run** (`when-idle`) or immediately (`now`). 15 minutes still busy → notify, do not force.
 
+Spawn 起来 ≠ 功能验收过。对照 `docs/superpowers/specs/2026-09-20-armada-debt-real-device-verify.md`：已过的 vsix 回归不要重派安装提示词；还欠的是 overlay **之后**在 bundled bun 上的短回归（该文 §3）。
+
 Chicken-egg: **0.4.26 and older do not poll** `pending-reload.json`. The first jump to 0.4.27 still needs one operator **Reload Window** (or a window already on 0.4.27). After that, idle Reload is automatic.
 
 8. Tell the operator in chat: overlay spawned, notification sent. Failures get a failure notification too.
@@ -50,6 +52,7 @@ Chicken-egg: **0.4.26 and older do not poll** `pending-reload.json`. The first j
 - Reloading when vsix did not change
 - Claiming desktop acceptance before 7380 is the bundled bun
 - 只打 vsix / 只 `Install from VSIX` 就当发完（包装 `REQUIRED_EXTENSION_VERSION` 仍旧号，看板「现在 / 空闲 Reload」会空转）
+- overlay 前的 vsix B1–B3 当成 overlay **后**打包功能验收
 
 ## Operator controls (hub + App)
 

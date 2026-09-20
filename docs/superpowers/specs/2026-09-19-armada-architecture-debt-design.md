@@ -161,7 +161,7 @@ flowchart TD
 
 ## 6. 实施路线图（优先级）
 
-上线 gate：非 CDP 项 = 单测绿；CDP 写路径 = Mac + Windows 真机点通后才准生产。
+上线 gate：非 CDP 项 = 单测绿。CDP 新选择器仍要写路径点通。P2-a 同页双框 2026-09-20 **blocked**（Cursor 同窗替换）；cid 跨窗续聊已过。不准为「先绿」改生产选择器。
 
 | 阶段 | 优先级 | 范围 | 验收 | 依赖 |
 | --- | --- | --- | --- | --- |
@@ -173,7 +173,7 @@ flowchart TD
 | **P1-c** | 6 | K2 blob 引用派生重算 | 终态后续聊同一 sha 24h 后文件仍在 | 无 |
 | **P1-d** | 7 | K6 错误码一份表 + App 文案穷举 | `ASK_INVALID_OPTION` 409 不是 502；`NO_ASSISTANT_BODY` 有中文 | P0-c 可并行 |
 | **P1-e** | 8 | H10+P14 overlay attach 可观测 + hubUrl 校正 | attach 时 UI 明示非本应用 spawn；Cursor hubUrl 与看板一致 | 打包验收 |
-| **P2-a** | 9 | B4+B5+P12 CDP 写入按 cid；Plan 卡内配对 | 真机：续聊回车进对的 composer；两张 Plan 点第二张 Build | **可行性闸** |
+| **P2-a** | 9 | B4+B5+P12 CDP 写入按 cid；Plan 卡内配对 | 跨窗 cid 续聊已过；同页双框/双 Plan **blocked**。inspect 卡内配对有夹具。**未冻新 click 选择器** | 真机台账 |
 | **P2-b** | 10 | P4+P5+H11 中转指纹 + markOpened 有条件 + Android 同源 | identical 内容不广播；详情打开不每帧写 UserDefaults | P0-b 的活动时间可一并做 |
 | **P3** | 11 | 其余 Important/Minor + §7.5 漏网项 | 见 §7.4–7.5 | 部分需拍板 |
 
@@ -347,11 +347,11 @@ v1 = P0 全部。v1.5 = P1。v2 = P2（含 CDP 真机）。P3 按拍板插入，
 | --- | --- | --- | --- | --- |
 | R1 | 改 K1 要改已绿测试与 09-12 规格「完成门禁」 | 文档与代码必须同批 | P0-b 含规格修订 | 未做 |
 | R2 | B1 删 prompt 回退可能露出无 request_id 的真事件 | Ask 卡消失 | 先搜夹具/日志；有则入口合成 id | 阻塞确认 |
-| R3 | P2-a CDP 未真机点通就写选择器 | 假绿 | 可行性闸 | 阻塞实施 |
+| R3 | P2-a 同页双控件没摆出来就改选择器 | 假绿 | 台账：[2026-09-20](./2026-09-20-armada-debt-real-device-verify.md) §2.3 blocked；不准改 `cdpInject` | **选择器仍禁写**；不是「Windows 没测」 |
 | R4 | H12 误删后 Windows 若再装 hook | bind 行为变 | 拍板后再删 | 未决 |
 | R5 | B10 扩展/hub 不同步 | ack 更乱 | 同批发布或不动 | 未决 |
 
-阻塞实施（非阻塞本文）：R2、R3、R4、R5、P19 产品范围。P0-a/P0-c 无阻塞。
+阻塞实施（非阻塞本文）：R2、R4、R5、P19 产品范围。R3 = 同页双框 blocked，不是未测。P0-a/P0-c 无阻塞。0.4.32 overlay **后**打包功能验收仍开着（台账 §3）。
 
 ---
 
@@ -372,9 +372,10 @@ v1 = P0 全部。v1.5 = P1。v2 = P2（含 CDP 真机）。P3 按拍板插入，
 | 2026-09-19 | 初稿。汇总 HEAD `b49123f` 四层审查；长期方案按共享边界收口；优先级 P0 安全与快照 → P1 契约 → P2 CDP/性能 → P3 拍板项。 |
 | 2026-09-19 | 补 §7.5：四层原文 Minor / 规格 X2 / 未编号 parity。合并审查 51 条主 ID 已齐；原先 `m*` 一行改为可追踪子 ID。 |
 | 2026-09-19 | **完成门禁方案 1 已采纳**（快照不改写 hub `status`；空 `finalText` 仍可 `completed`）。规格落点：[2026-09-12-armada-relay-mobile-design.md](./2026-09-12-armada-relay-mobile-design.md) §4.4、`protocolVersion: 2`。 |
-| 2026-09-20 | 扩展 **0.4.29**、iOS TestFlight **20**、Android **0.1.7**。真机验收清单：[2026-09-20-armada-debt-real-device-verify.md](./2026-09-20-armada-debt-real-device-verify.md)。P2-a CDP 写入仍等 Mac+Windows 点通。 |
+| 2026-09-20 | 扩展 **0.4.29**、iOS TestFlight **20**、Android **0.1.7**。真机验收清单：[2026-09-20-armada-debt-real-device-verify.md](./2026-09-20-armada-debt-real-device-verify.md)。 |
 | 2026-09-20 | 扩展 **0.4.30**、iOS **21**、Android **0.1.8**。Ask Skip 点 Skip 按钮；Other 为 D；hub 进程启动不把 leftover `online` 当掉线杀跑；`unknown` 快照带 `finalText`。 |
 | 2026-09-20 | 扩展 **0.4.31**。Reload 跨进程闩；同号 0.4.30 会被 skipped-same-version 跳过。 |
 | 2026-09-20 | 扩展 **0.4.32**。取消 leftover Plan 不再挂 pending / 不挂到下一条。App 无新按钮。 |
 | 2026-09-20 | P3：Rel-M2 快照写入按 fleet 隔离；Rel-M4 `canRetryStatus`；Rel-M5 APNs 去掉写死 badge；Hub-m4 register 形状；Hub-m7 畸形 JSON 400。未改 CDP 选择器。 |
 | 2026-09-20 | P16/P17/Rel-I9：hub blob 预检已在；中转 followup/snippets/dispatch 共用体积闸；桌面 CSP 从 `http://*:*` 收到 `http://*:7380`（加入局域网舰队仍要 7380）。未改 CDP。 |
+| 2026-09-20 | 真机台账：Win/Intel/Arm **0.4.32 vsix** B1–B3 已过；同页双框/双 Plan **blocked**；cid 续聊不串台已过。**15:35 overlay 后打包功能验收未做。** 禁止再派「先装 vsix 再跑 W1–W6」。 |

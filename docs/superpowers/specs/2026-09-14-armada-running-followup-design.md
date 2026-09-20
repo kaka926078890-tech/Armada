@@ -1,7 +1,7 @@
 # Armada：运行中续发（Cursor 直发 / 队列）
 
 - 日期：2026-09-14
-- 状态：设计草案 v1.1（方案 1 已拍板；Mac 真机写路径已点通；Windows **一起实现、尚未真机验证**；2026-09-14 Grok 4.6 独立评审后闭合 QUEUE_DRAIN / Win gen 推送 / running 注入不得 bindKnown）
+- 状态：v1.1 已落地。Mac 写路径 2026-09-14 点通。Windows **2026-09-20** 续聊注入已过（`r-922b4664` followup 进 cid `4f64e60e`，旁路 cid 0 条探针）；同页双框仍 blocked，不挡本规格。
 - 父文档：
   - [2026-08-31-armada-parallel-runs-design.md](../../../../docs/superpowers/specs/2026-08-31-armada-parallel-runs-design.md)（下称《并行》：v1 同 cid `409 CONVERSATION_BUSY`；v1.5 followup FIFO **被本文替代**）
   - [armada-durable-boundaries](../../../.cursor/rules/armada-durable-boundaries.mdc)（三把钥匙；Mac `followup()` 不得立刻退役 live gen）
@@ -17,14 +17,14 @@
 | 问题 | 同 cid 占用中 `POST /api/runs/:id/followup` → `409 CONVERSATION_BUSY`。详情只能等停。Cursor 已能在生成中 Enter：配置 `queue` 进托盘，`steer` 进当前轮用户句。 |
 | 核心方案 | **方案 1：全程打进 Cursor。** `running` 续发不改 `status`；占注入槽后 `openComposer(cid)` + 现网 `COMPOSER_ENTER_JS`（普通 Enter）。心跳上报 `cursor.composer.queueMessageDefaultBehavior`；详情按该值立刻画托盘或当前轮用户句。存在 `state=queued` 时 matching completed → `QUEUE_DRAIN`（记下 `deferred_stop`，清零后重放）。 |
 | 关键约束 | ① 详情无 Send/Queue 开关，不改被控机配置。② 同 cid 仍一条 live 生成。③ `running` 续发 **Mac/Win 都不得** `retireLiveGeneration` / 在注入当下 `attachHubGeneration`。④ 注入槽 = `dispatched`/`binding` **加上** `outbound.state=injecting`。⑤ `openComposer(cid)` 硬前置；v1 沿用 `COMPOSER_FOCUS_JS` 空框优先（**只保证焦点卡**）。⑥ `hasOutstandingOutbound` **只计 `queued`**。⑦ running 注入禁止 `addPending` / `bindKnown` / `FollowupStopGuard.arm`。 |
-| 明确不做 | 中台 FIFO 代替 Cursor 队列；解析 `settings.json`；Cmd/Alt+Enter 按配置切换；复刻 Keep Queuing 提示；`pending_ask` / `dispatched` / `binding` 续发；宣称 Windows 真机已过；v1 运行中带图；v1 CDP 读队列 DOM 纠偏；v1 改 FOCUS 拒绝第一空框。 |
+| 明确不做 | 中台 FIFO 代替 Cursor 队列；解析 `settings.json`；Cmd/Alt+Enter 按配置切换；复刻 Keep Queuing 提示；`pending_ask` / `dispatched` / `binding` 续发；v1 运行中带图；v1 CDP 读队列 DOM 纠偏；v1 改 FOCUS 拒绝第一空框。 |
 
 **可行性（写生产前）：**
 
 | OS | 读（DOM） | 写（Enter） | 本规格 |
 | --- | --- | --- | --- |
 | macOS 3.20.10 | 空框「Add a follow-up」；`.send-with-mode` 空=停、有字=上箭头 | `steer` → `.composer-human-message`；`queue` → `.composer-toolbar-queue-item-list[aria-label="Queued messages"]` → `.composer-toolbar-queue-item` | **已点通**（2026-09-14 本机，焦点卡） |
-| Windows | 未测 | 未测 | **代码与 Mac 共用**；验收不把 Mac 夹具当 Win 完成 |
+| Windows | 2026-09-20 跨窗/跨 tab 续聊进对的 cid | 同左（`outcome=injected`，探针只进目标 jsonl） | **cid 路由已过**；同页双输入框 blocked（Cursor Agents 同窗替换） |
 
 ---
 
@@ -36,7 +36,7 @@
 | R2 | 对标 Cursor 直发 / 队列 | 行为交给被控机 `queueMessageDefaultBehavior`；中台只读、不选、不改 |
 | R3 | 详情形态要像 Cursor | `queue` 画托盘；`steer` 画当前轮用户句；一点续发就画，不等 jsonl |
 | R4 | 配置在各机 Cursor 上 | 扩展 `getConfiguration("cursor.composer")`，心跳上报；禁止详情切换 |
-| R5 | Mac / Windows 一起实现 | 同一注入路径；Win 无 hook：jsonl 认领后签发 **新** hub gen **并 WS 推到扩展**。Win **未真机验证**，不单开 Darwin 分支 |
+| R5 | Mac / Windows 一起实现 | 同一注入路径；Win 无 hook：jsonl 认领后签发 **新** hub gen **并 WS 推到扩展**。Win 续聊注入 2026-09-20 已过，不单开 Darwin 分支 |
 
 对照被本方案废止的旧条款：
 
@@ -368,7 +368,7 @@ turn_ended(G1) + queued → ignore QUEUE_DRAIN
 | E2 | `run.generation` → `noteHubGeneration`；无 lastGenerationId 不合成 | `generationStamp` |
 | E3 | Win 真形状：`turn_ended(G1)` ignore → user → G2 `turn_ended` completed | 集成，禁止 Darwin hook 代替 |
 | M1 | Mac overlay 焦点卡：steer 用户句；queue 托盘 | 真机 |
-| W1 | Win 同一套 Enter + E3 | **未做**；不挡 Mac 合入 |
+| W1 | Win 同一套 Enter + E3 | **2026-09-20 过**（followup 进目标 cid）；同页双框不挡本规格 |
 
 ---
 
@@ -379,3 +379,4 @@ turn_ended(G1) + queued → ignore QUEUE_DRAIN
 | 2026-09-14 | 初稿。方案 1。Mac steer/queue Enter 已点通。Windows 一起实现、未验证。 |
 | 2026-09-14 | v1.1：Grok 4.6 独立评审。闭合 QUEUE_DRAIN（`deferred_stop` + 重放；120s 从 drain 起算）；outstanding 只计 `queued`；unknown 不当 queued；`onRunAck` running 分支；running 禁止 bindKnown/FollowupStopGuard；Win 认领必须 `run.generation`；认领限增量 jsonl；展示不写 hub BSP；v1 只保证焦点卡；`OUTBOUND_LIMIT`；running 纯文本；回滚清 outbound 表。 |
 | 2026-09-18 | BG_DRAIN 与 QUEUE_DRAIN 共用 120s 重放。子代理 jsonl 收口且 live 未换才 apply；不在 child `turn_ended` 当下重放（`r-43b92cc0` 协议续轮）。 |
+| 2026-09-20 | Windows 续聊注入记过（`r-922b4664` / cid `4f64e60e`）。同页双框仍 blocked。 |

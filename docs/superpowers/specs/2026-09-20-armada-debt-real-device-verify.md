@@ -1,153 +1,146 @@
-# Armada 架构债真机验收清单（0.4.32 / App 21）
+# Armada 架构债真机验收台账（0.4.32 / App 21）
 
 - 日期：2026-09-20
-- 状态：**操作员验收清单**（不是新功能设计。CDP 写路径未点通不得改生产选择器。）
+- 状态：**台账**（不是待派发的新提示词。Windows vsix 回归已过；**0.4.32 overlay 后的打包功能验收未做。**）
 - 父文档：[2026-09-19-armada-architecture-debt-design.md](./2026-09-19-armada-architecture-debt-design.md)
-- 打包：中台 overlay `/Applications/Armada.app`；扩展 `armada-agent` **0.4.32**；iOS TestFlight **21**（营销号仍 0.1.0）；Android **0.1.8**（versionCode 9）
-- HEAD 债落地：本轮 Ask Skip/D、中台重启不杀 running、`unknown` 正文；此前 P0–P1 见旧修订。
+- 打包：中台 overlay `/Applications/Armada.app`（bun mtime **15:35**）；扩展 **0.4.32**；iOS TestFlight **21**；Android **0.1.8**
+- 机器：Win Destop `m-44ff077a` / PF39WTSM；Mac Intel `m-f9b648b5`；Mac Arm New `m-a713c1d0`
+
+禁止再把 §2 已过项写成「Windows 必须再装 vsix / 再跑 W1–W6」。助手不得为此再发安装提示词。
 
 ---
 
 ## 0. TL;DR
 
-| 项 | 内容 |
+| 层 | 内容 | 状态 |
+| --- | --- | --- |
+| 扩展 0.4.32 | 三台 Install from VSIX + Reload，看板 `extension_version=0.4.32` | **过** |
+| Windows / Intel / Arm **vsix 回归** B1–B3 | 未答 Ask 占位、取消先 Skip、leftover Plan 不挂 next | **过**（Arm 的 B3 首轮没出卡，Intel+Win 出到 Plan 卡） |
+| cid 续聊不串台 | Windows 跨窗/跨 tab：探针进对的 cid | **过**（规格 W2 的「同页双框」是另一回事） |
+| Other `freeform` | Windows 10:43 `P2A-W5-OTHER-FREEFORM-round2-indigo`；Mac §3 Other | **过** |
+| 同页双 composer / 双 Plan | Cursor Agents 同窗只有 1 个输入框；New Agent 会替换 | **blocked**（产品/IDE，不是没测） |
+| **0.4.32 overlay 后打包验收** | 15:35 spawn bundled bun、`REQUIRED=0.4.32`；**没有**在这套 hub 上再走占用/Ask/Plan | **未做** |
+
+发图 / `cmd.blobPut`：另文，不进本台账。
+
+---
+
+## 1. 两层不要混
+
+| 层 | 测的是什么 | 2026-09-20 事实 |
+| --- | --- | --- |
+| **A. 被控扩展** | `armada-agent-0.4.32.vsix` 在 win32 / darwin 上的占用、Skip、leftover Plan | Windows 15:16–15:22、Intel 15:08–15:10、Arm B1/B2 同日。当时 7380 仍是 **上一份** 包装 hub（`REQUIRED` 还是 0.4.31） |
+| **B. 打包中台** | `/Applications/Armada.app` 里的 bun：`restoreOwnedHub` spawn、看板 Reload 写对号、占用契约、Ask 卡 | **安装过**：15:35 spawn、`REQUIRED_EXTENSION_VERSION=0.4.32`、三台已是 0.4.32 故 `skipped-same-version`。**功能没在这套 hub 上重跑** |
+
+验收合同（`armada-desktop-packaged-verify`）：overlay **之后**还要在 bundled bun 上把改动走一遍。只确认 7380 是包内 bun ≠ 功能验收过。
+
+---
+
+## 2. 已过（不要再派 Windows 重装 / 重测）
+
+证据在 `~/.armada/hub.db` 与当日会话 [Windows B1–B3](44aa4601-e6e0-4005-a135-e7413df43578)、[0.4.31 占用](bc15794d-118c-40b9-8c07-310e071517a5)、[W1–W6 两轮](33ed49fe-8973-4715-b24f-e45e270d8338)。
+
+### 2.1 版本
+
+| 何时 | 机 | 结果 |
+| --- | --- | --- |
+| 10:26 | Win Destop | W1 过：`0.4.31`，`needed=false` |
+| 15:16 | Win Destop | A 过：`0.4.32`，本机无 7380，pending 已清 |
+| 15:08 | Mac Intel | `darwin-x64` **0.4.32**，9222 仍在 |
+| 15:00 左右 | Mac Arm New | 看板 **0.4.32**，CDP 就绪 |
+
+### 2.2 占用 / leftover（0.4.32 vsix）
+
+| 闸 | Win Destop | Mac Intel | Mac Arm New |
+| --- | --- | --- | --- |
+| B1 未答 Ask → decoy `queued` | **过** `r-e42c5eb9` / decoy `r-5fb5b0fe` | **过** `r-137035bf` / decoy `r-b711df1a` | **过**（`r-7bc1312b` 等） |
+| B2 取消普通 Ask 先 Skip | **过** 同毫秒 `answerAsk skip` → `cancel` | **过** | **过** |
+| B3 leftover Plan 不挂 next | **过** `r-47f4f33a` → next `r-55d32f6d` 无 `kind=plan` | **过** `r-9d705fc5` → next `r-cad28e8d` | 首轮 SwitchMode 被拒没出卡；不挡 Win/Intel |
+
+11:54 还有一轮 **0.4.31 + 11:44 overlay hub** 的 R1/R2/R3（`r-8b422037` 等），占用合同当时已绿。
+
+### 2.3 写路径里已经有结论的
+
+| ID | 结论 | 不要再做什么 |
+| --- | --- | --- |
+| W2 同页双框 | **blocked**。New Agent 替换当前对话。跨窗续聊探针 `P2A-W2-MARKER` 进了对的 cid（`4f64e60e`，没进旁路） | 禁止再派「造第二个 composer」；禁止把跨窗 jsonl 写成同页双框过 |
+| W3 同页双 Ask | **blocked**。连派第二条会 `User aborted` 上一条（已用占用合同修，B1 覆盖） | 禁止连派两个 Ask 当双框夹具 |
+| W4 双 Plan | **blocked**。同页摆不出卡1 Building + 卡2 Build | 禁止 New Agent 硬造 |
+| W5 Other | **过**（10:43 freeform；0.4.32 回归合同写明不重测） | 不要再当未测 |
+| W6 掐 9222 | **不做**。9222 是该 Cursor 调试口，掐了掉窗 | 不要写进 overlay 后清单 |
+| O3 409 | 已报过，可选 | 不挡 |
+
+P2-a「给 click JS 加 `expectedCid`」：**同页双控件没摆出来，选择器不能冻。** 不是「Windows 没来测」。未点通双控件前仍不准改生产 CDP 选择器。
+
+### 2.4 Mac 包装 hub（11:44 那次 overlay，不是 15:35）
+
+| ID | 结果 |
 | --- | --- |
-| 问题 | 债已进 `master`，但 0.4.28 同号 vsix 不会 Reload；Windows CDP 写入、手机契约、attach toast 还没关门。 |
-| 核心方案 | 升扩展 **0.4.32** 再 overlay；Windows 必须先装 vsix，不要只 Reload；手机装 TF **21** / Android **0.1.8**。 |
-| 关键约束 | 7380 必须是 bundled bun。CDP **写**路径 Mac+Windows 都点通才算 P2-a。禁止把源码 hub attach 当成打包绿。 |
-| 明确不做 | 不测手机发图（另文）；不在未点通时改 CDP 选择器；不把 §7.5 P3 塞进本轮验收。 |
+| K7 blob | 过 |
+| H1 overlay 时 running | 过（当时卡未变 unknown） |
+| H2 unknown 带正文 | 过 `r-277352f7` |
+| H3 Skip / H4 Skip 后续聊 | 过 |
 
-**Windows 操作员先做：在被控机装 `armada-agent-0.4.32.vsix`，再空闲 Reload。只 Reload 不会从 0.4.31 升上去。**
-
----
-
-## 1. 背景与需求
-
-| # | 原始诉求 | 映射 |
-| --- | --- | --- |
-| R1 | Windows 配合测试 | 本文 §4 Windows 闸 |
-| R2 | 要测的内容写进文档 | 本文件；债文档只加修订指针 |
-| R3 | 手机要不要升版并出包 | 要。TF 19 / Android 0.1.6 之后还有 IME 修复 + Plan kind / title / cid / followup `outcome` / Other / 完成门禁 |
+H10 attach 占用 7380：**未测**（可选）。
 
 ---
 
-## 2. 版本闸（测功能前必须绿）
+## 3. 未做：0.4.32 overlay 后的打包功能验收
 
-| 面 | 要看到 | 怎么确认 |
-| --- | --- | --- |
-| 中台 | `/Applications/Armada.app`，7380 进程 args 含 `Contents/Resources/bun` | `ps -ww -p "$(lsof -t -nP -iTCP:7380 -sTCP:LISTEN)" -o args=` |
-| 扩展 | 在线机器 `extension_version=0.4.31` | 看板左侧机器行；落后会提示「需 0.4.31」 |
-| Windows Cursor | 装 vsix 后再 Reload，扩展号 0.4.31 | 未装 vsix 时禁止点 Reload（会空转） |
-| iOS | TestFlight build **20** | 设置 → 关于 |
-| Android | 0.1.7 | 关于页 / `adb shell dumpsys package app.armada.remote` |
+15:35：`ditto` 覆盖 `/Applications/Armada.app`，7380 为
 
-0.4.28 即使「已安装」也不算过：20:12 那包没有后续 Ask 三态 / Plan kind 点击 / 卡内配对 / generation 重取消。
+`/Applications/Armada.app/Contents/Resources/bun src/index.ts --lan`
 
----
+包内 `REQUIRED_EXTENSION_VERSION = "0.4.32"`。三台扩展已是 0.4.32 → Reload `skipped-same-version`。
 
-## 3. 已在 Mac 打包 hub 过的（Windows 不必重复，除非回归）
+Windows B1–B3（15:16）**早于**这次 overlay（15:35），测的是上一份包装 hub。扩展侧 leftover 仍算数；**中台占用 / Ask 卡 / Reload 写号**要在 **15:35 这份 bun** 上再走一遍才算打包验收。
 
-| ID | 项 | Mac 结果 2026-09-20 |
-| --- | --- | --- |
-| K7 | `POST /api/blobs?token=` 401；html GET `octet-stream` + `attachment` + `nosniff` | 过 |
-| K7 | 导出审计走 Bearer，不把 token 放 URL | 过 |
-| H10 | 本次 restore 为 **spawn**，无「非本应用启动」 | 场景正确；**attach 占用 7380 未测** |
-| K3/K4 | Other 闸：卡片「待处理」、Ask A/B/C + Other 框、答完仍 `completed` | 过（并行闸） |
+### 3.1 overlay 后要做（短回归，不要重装 vsix）
 
----
+三台已经是 0.4.32。不要 Install from VSIX，不要为版本 Reload，不要掐 9222，不要 New Agent。
 
-## 4. Windows 必须测（P2-a 可行性闸）
-
-被控机：在线 `win32`（例如 PF39WTSM）。扩展 **0.4.31**。该 Cursor **两个 composer / 两个 Plan 卡同时在屏**。
-
-| # | ID | 步骤 | 通过 | 失败样子 |
-| --- | --- | --- | --- | --- |
-| W1 | 版本 | 装 0.4.31 vsix 后再 Reload，看板该机 0.4.31 | 无落后横幅 | 仍 0.4.28 / 需 0.4.31 |
-| W2 | **B4** | 同一窗口两个 composer；中台对该 run **续聊回车** | 字只进 **该 cid** 的框 | 打进旁路框或第一个框 |
-| W3 | **B5** | 两个 Ask/composer 在屏；中台点其中一个 Ask 选项 | 只点对的控件；错 cid 应 `CID_MISMATCH` 而不是点错 | 点了全页第一个按钮 |
-| W4 | **P12** | 两张 Plan：卡1 已 Building、卡2 仍 Build；中台点 Build | 点的是**第二张活按钮** | inspect/点击落到卡1 |
-| W5 | Ask Other | 一问三选项 + Other；中台只填 Other 提交 | 409 不再；被控收到自由文本 | `ASK_INVALID_OPTION` / 空 `option_ids` |
-| W6 | K3 | 人为掐 CDP 或关调试口，Ask 仍在屏 | 中台卡保持 pending，不误 resolve | 探测失败立刻「已处理」 |
-
-**Mac 用同一张表再走一遍 W2–W6**（本机已 overlay）。两台都过才许改生产 CDP 选择器。
-
-不要在本轮改 `cdpInject` 选择器来「先绿」。点不通就记失败步骤 + 当时 DOM/jsonl。
-
----
-
-## 5. 手机必须测（新包）
-
-装 **iOS 21** 和 **Android 0.1.8**。中转仍是现网 relay；不要映射 7380。
-
-| # | ID | 步骤 | 通过 |
+| # | 在谁身上 | 步骤 | 过 |
 | --- | --- | --- | --- |
-| M1 | P2 | 列表标题 = hub `title`（无则 prompt） | 与看板同一条 |
-| M2 | P2 | 无 `conversationId` 的终态 **不出现续聊** | 有 cid 才有输入框 |
-| M3 | P7 | 运行中续聊 | 响应带 `outcome: queued` 或 `injected`，App **不要**用 HTTP 200/201 猜 |
-| M4 | K4 | `kind=plan` 且 option id 不是 `build` | 仍是 Plan/Build 黄卡 |
-| M5 | K4 | 普通 Ask 单选项 id=`build` | **不是** Plan 卡 |
-| M6 | K5 | 多问 Ask | 没有「继续」 |
-| M7 | Other | 点 **D Other**（不是单独大输入框），填文本 Continue | App 与中台都走 `action: freeform` |
-| M8 | K1 | hub `completed` 且 `finalText` 空 | App 显示已完成 + 占位，**没有**假重试 |
-| M9 | P5/H11 | 打开详情后内容未变 | 输入框不因 SSE 重建（尤其 iOS IME） |
-| M10 | Skip | Ask 卡点 Skip | 控件消失、`pendingAsk` 清空、**续聊可点**；Skip 失败可再点（不会永久灰） |
-| M11 | ABC | Ask 选项文案 | 字母只出现一次，没有「A A：…」 |
-| M12 | 派发 | 打开「派发任务」 | 能看见工作区路径 / Prompt 芯片；输入框不超过底栏；填词后「派发」可点（机器在线且 CDP 就绪） |
-| M13 | 续聊 | 无 Ask 闸、有 cid 的运行中/已完成 | 「续聊」可点；Ask 未 Skip 前续聊应仍灰 |
+| P1 | 中台本机 | 确认 7380 args 仍含 `Contents/Resources/bun`；看板 Reload 目标号 0.4.32 | 不是源码 hub、不是 `attach` |
+| P2 | Win Destop **或** Intel（一台即可） | 未答 Ask → 立刻 decoy → decoy `queued`；中台取消 Ask（不手点 Skip）→ 审计 skip→cancel，decoy start | 与 §2.2 同形，但 **hub 必须是 15:35 这份** |
+| P3 | 同上，能出 Created Plan 时 | 取消 Plan（不 Skip、不 Build）→ next 不挂 leftover `kind=plan` | 屏上 View Plan 仍在不算失败 |
+| P4 | 中台 | 当时若有 running：overlay 后卡仍 running，不变 `MACHINE_OFFLINE` | H1 在这包上 |
 
-发图 / `cmd.blobPut`：**不测**（`2026-09-19-armada-mobile-image-send-design.md`）。
+同页双框 / 双 Plan：**不测**（§2.3 blocked）。手机 M1–M13：包已出，整表未打勾，另排，不和 Windows 提示词绑在一起。
 
 ---
 
-## 5.1 本轮回归（0.4.31 必须过）
+## 4. 历史清单（已冻结，只作对照）
 
-| # | 步骤 | 通过 | 失败 |
-| --- | --- | --- | --- |
-| H1 | 中台 overlay 重启，当时有 running 任务 | 卡仍 running，**不变异常** | `MACHINE_OFFLINE` / 异常且没正文 |
-| H2 | 旧 `unknown` 卡（重启误杀遗留） | App/中台能看到当时助手正文 | 空白「没有正文」 |
-| H3 | 中台 Ask 卡：A/B/C + D Other + Skip | 与 Cursor 同形；点 D 才出 Other 输入 | 单独 Other 大框、Skip 点了没关、按钮一直 Skipping |
-| H4 | Skip 后立刻续聊 | 无 `pendingAsk`，续聊可发 | 续聊灰、Ask 仍挂着 |
+初稿把 W1–W6 写成「Windows 必须测」。实测后口径见 §2。下面留作对照，**不是待办。**
 
----
+| # | 初稿要求 | 台账 |
+| --- | --- | --- |
+| W1 | 装 vsix 看板 0.4.31/0.4.32 | 过 |
+| W2 | 同窗两个 composer 续聊 | blocked；cid 不串台已过 |
+| W3 | 两个 Ask 点对 cid | blocked；占用合同已过 |
+| W4 | 两张 Plan 点第二张 Build | blocked |
+| W5 | Other 自由文本 | 过 |
+| W6 | 掐 CDP | 明确不做 |
 
-## 6. 可选（不挡 P2-a）
-
-| # | ID | 步骤 | 说明 |
-| --- | --- | --- | --- |
-| O1 | H10 | 先占 7380 再 overlay | toast 须含「非本应用启动」 |
-| O2 | B8 | 运行中连点两次取消 | 归因到期望的 generation，不误伤下一折 |
-| O3 | K6 | App 答错 option | 中文 409，不是 502 |
+手机表、可选 O1–O3：仍在初稿 §5–§6 语义里；O1/O2 未测。
 
 ---
 
-## 7. 操作员步骤（Windows）
-
-1. 等中台 overlay 完成。Windows **先装** `armada-agent-0.4.32.vsix`，不要只点 Reload。
-2. **关掉该 Windows 上所有 Armada 正在跑的 Composer 任务**（或等停），Reload Window。
-3. 确认扩展 0.4.31。
-4. 按 §4 W2→W6 做；每条记下：过 / 失败现象 / 窗口里几个 composer。
-5. 把结果回中台操作员（本清单 ID 即可）。
-
-Mac overlay 后也会 `when-idle` Reload；**正在跑的「真机测试」窗口会等到闲。**
-
----
-
-## 8. 风险与未决
+## 5. 风险
 
 | ID | 风险 | 应对 |
 | --- | --- | --- |
-| R3 | 未点通就改 CDP 选择器 | 本清单失败则停，只收 DOM/jsonl |
-| Win-reload | 窗口仍 busy，15 分钟不 Reload | 操作员点「现在 Reload」或停跑后再 Reload |
-| TF | 账号/证书导致 build 21 传不上去 | IPA 仍在 `mobile/ios/build/export/`；改用本机安装并说明 |
-| P3 | §7.5 其余项 | 不进本轮；另开 |
+| 混层 | 把 vsix 回归当成 overlay 后验收 | 以 §1 为准；15:35 之后没有 P2/P3 run 就不算 B |
+| 假绿选择器 | 同页双框 blocked 仍去改 `cdpInject` | 禁止 |
+| 重派 | 助手忘记台账又发「先装 0.4.32」 | 先读本文 §2 |
 
 ---
 
-## 9. 修订记录
+## 6. 修订记录
 
 | 日期 | 变更 |
 | --- | --- |
-| 2026-09-20 | 初稿。配合扩展 0.4.29、iOS 20、Android 0.1.7；Windows CDP 写路径 + 手机契约为必须项。 |
-| 2026-09-20 | 扩展 **0.4.30**、iOS **21**、Android **0.1.8**。Skip 点 `.composer-skip-button`；Ask 卡 A/B/C/D；中台重启不 `MACHINE_OFFLINE` 误杀 running；`unknown` 带正文；派发底栏不再撑满屏。 |
-| 2026-09-20 | 扩展 **0.4.31**。同一 pending Reload 后版本仍落后不再空转；同号 0.4.30 无法装上这次闩。 |
-| 2026-09-20 | 扩展 **0.4.32**。取消 leftover Plan 不再挂 pending；Windows 须先装新 vsix，不要只 Reload 0.4.31。 |
+| 2026-09-20 | 初稿。配合扩展 0.4.29、iOS 20、Android 0.1.7。 |
+| 2026-09-20 | 扩展 **0.4.30** / **0.4.31** / **0.4.32**。 |
+| 2026-09-20 | 改成台账：vsix 三台 B1–B3 已过；同页双框 blocked；**15:35 overlay 后打包功能验收未做**。 |
