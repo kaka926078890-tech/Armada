@@ -12,6 +12,18 @@ Armada 按 **面** 发版：扩展、桌面、iOS、Android 可以不同号。RE
 
 ---
 
+## 2026-09-20 — 扩展 0.4.34 · iOS TF 23 · Android 0.1.10 · 桌面 0.1.0
+
+### 修复
+
+- 空闲 Reload 把本窗工作区里尚未 `turn_ended`、且 15 分钟内还在写的 composer jsonl 也算忙。本地 Agent 还在跑时不再调用 Reload Window，避免 Cursor 弹出「N agents are still working」。`now` 仍不回避只有 Armada pending/bind、还没有 jsonl 的注入，但同样会等这些未收口 jsonl。
+
+### 操作员注意
+
+Windows 被控须 **先装** `armada-agent-0.4.34.vsix` 再空闲 Reload。只 Reload 不会从 0.4.33 升上去（同号会被 `skipped-same-version` 跳过）。看板落后会提示「需 0.4.34」。中台须 overlay 到含 `REQUIRED_EXTENSION_VERSION=0.4.34` 的包装 hub。桌面仍是 **0.1.0**；iOS TestFlight **23**；Android **0.1.10**。
+
+---
+
 ## 2026-09-20 — 扩展 0.4.33 · iOS TF 23 · Android 0.1.10 · 桌面 0.1.0
 
 ### 修复

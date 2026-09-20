@@ -127,11 +127,47 @@ export function windowHasInFlightArmadaRun(opts: {
   return false;
 }
 
+function lastLineIsSettledTurn(line: string): boolean {
+  const t = line.trim();
+  if (!t) return false;
+  try {
+    const j = JSON.parse(t) as { type?: unknown };
+    return j.type === "turn_ended";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Local Cursor composers that are not Armada-bound still trip Reload Window's
+ * "N agents are still working" dialog. Idle signal is the same jsonl
+ * `turn_ended` used for synth stop. Stale mid-turn files (no write within
+ * maxStaleMs) are abandoned, not busy.
+ */
+export function windowHasOpenComposerTurn(opts: {
+  files: Array<{ lastLine: string; mtimeMs: number }>;
+  now: number;
+  maxStaleMs?: number;
+}): boolean {
+  const max = opts.maxStaleMs ?? IDLE_RELOAD_MAX_WAIT_MS;
+  for (const f of opts.files) {
+    if (typeof f.mtimeMs !== "number" || !Number.isFinite(f.mtimeMs)) continue;
+    if (opts.now - f.mtimeMs > max) continue;
+    const line = typeof f.lastLine === "string" ? f.lastLine.trim() : "";
+    if (!line) continue;
+    if (!lastLineIsSettledTurn(line)) return true;
+  }
+  return false;
+}
+
 /**
  * Per Cursor window: `when-idle` never Reloads while this window has an
  * in-flight Armada run (pending start or bound run without synthesized stop).
  * Completed binds may stay in `boundRuns` for followup and are not live.
- * `now` is operator-forced and Reloads even with a live run.
+ * Both `when-idle` and `now` wait for a fresh open composer jsonl turn so
+ * Reload Window does not stack the agents-still-working dialog.
+ * `now` still Reloads through an Armada live run that has no open jsonl turn
+ * (pending start / inject).
  * `expired` = waited maxWaitMs still busy → notify, do not force.
  * `done` = this window already runs pending.vsix or newer.
  */
@@ -140,6 +176,7 @@ export type WindowReloadDecision = "none" | "wait" | "reload" | "expired" | "don
 export function decideWindowReload(opts: {
   pending: PendingReload | null;
   thisWindowHasLiveRun: boolean;
+  thisWindowHasOpenComposerTurn?: boolean;
   now: number;
   runningVsix?: string;
   maxWaitMs?: number;
@@ -150,8 +187,10 @@ export function decideWindowReload(opts: {
   if (p.machineId && opts.machineId && p.machineId !== opts.machineId) return "none";
   if (opts.runningVsix && cmpSemver(opts.runningVsix, p.vsix) >= 0) return "done";
   if (opts.now < p.notBefore) return "wait";
-  if (p.action === "now") return "reload";
-  if (opts.thisWindowHasLiveRun) {
+  const composerBusy = opts.thisWindowHasOpenComposerTurn === true;
+  const armadaBusy = opts.thisWindowHasLiveRun;
+  const busy = composerBusy || (p.action !== "now" && armadaBusy);
+  if (busy) {
     const max = opts.maxWaitMs ?? IDLE_RELOAD_MAX_WAIT_MS;
     if (opts.now - p.setAt >= max) return "expired";
     return "wait";
@@ -161,8 +200,9 @@ export function decideWindowReload(opts: {
 
 /**
  * Cursor's Reload Window confirmation stays up if a local composer (AskQuestion
- * etc.) is still working. `decideWindowReload` only sees Armada live runs, so
- * the 10s poll would keep calling reloadWindow and restack that dialog.
+ * etc.) is still working. `decideWindowReload` waits for Armada live runs and
+ * fresh open jsonl turns; the 10s poll would still restack that dialog if we
+ * re-fired after a confirmation that left the window alive.
  * Fire at most once per pending until the command settles; retry only after a
  * busy→idle edge (Armada run started then finished) or a new pending setAt.
  * `attemptedSetAt` is the on-disk latch for a pending that already survived a

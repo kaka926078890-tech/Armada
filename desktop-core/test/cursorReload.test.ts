@@ -13,6 +13,7 @@ import {
   reloadStillNeededForFleet,
   neededReloadMachineIds,
   windowHasInFlightArmadaRun,
+  windowHasOpenComposerTurn,
   type ReloadFireState,
 } from "../src/cursorReload";
 
@@ -76,6 +77,33 @@ describe("decideWindowReload", () => {
       thisWindowHasLiveRun: true,
       now: 2000,
     })).toBe("reload");
+  });
+
+  test("when-idle waits for a local composer turn even with no Armada run", () => {
+    expect(decideWindowReload({
+      pending,
+      thisWindowHasLiveRun: false,
+      thisWindowHasOpenComposerTurn: true,
+      now: 2000,
+    })).toBe("wait");
+  });
+
+  test("now waits for a local composer turn so Reload Window does not stack the dialog", () => {
+    expect(decideWindowReload({
+      pending: { ...pending, action: "now" },
+      thisWindowHasLiveRun: true,
+      thisWindowHasOpenComposerTurn: true,
+      now: 2000,
+    })).toBe("wait");
+  });
+
+  test("now with an open composer turn expires instead of forcing", () => {
+    expect(decideWindowReload({
+      pending: { ...pending, action: "now" },
+      thisWindowHasLiveRun: false,
+      thisWindowHasOpenComposerTurn: true,
+      now: 1000 + IDLE_RELOAD_MAX_WAIT_MS,
+    })).toBe("expired");
   });
 
   test("reloads when idle after notBefore", () => {
@@ -235,6 +263,39 @@ describe("neededReloadMachineIds", () => {
   });
 });
 
+describe("windowHasOpenComposerTurn", () => {
+  const now = 10_000;
+  const user = `{"role":"user","message":{"content":[{"type":"text","text":"followup"}]}}`;
+  const ended = `{"type":"turn_ended","status":"success"}`;
+
+  test("empty or settled last line is idle", () => {
+    expect(windowHasOpenComposerTurn({ files: [], now })).toBe(false);
+    expect(windowHasOpenComposerTurn({ files: [{ lastLine: "", mtimeMs: now }], now })).toBe(false);
+    expect(windowHasOpenComposerTurn({ files: [{ lastLine: ended, mtimeMs: now }], now })).toBe(false);
+  });
+
+  test("a user line after turn_ended is an open turn (PF39WTSM 0.4.33 dialog)", () => {
+    expect(windowHasOpenComposerTurn({ files: [{ lastLine: user, mtimeMs: now }], now })).toBe(true);
+  });
+
+  test("stale mid-turn jsonl is abandoned, not busy", () => {
+    expect(windowHasOpenComposerTurn({
+      files: [{ lastLine: user, mtimeMs: now - IDLE_RELOAD_MAX_WAIT_MS - 1 }],
+      now,
+    })).toBe(false);
+  });
+
+  test("one open file among settled leaves is busy", () => {
+    expect(windowHasOpenComposerTurn({
+      files: [
+        { lastLine: ended, mtimeMs: now },
+        { lastLine: user, mtimeMs: now },
+      ],
+      now,
+    })).toBe(true);
+  });
+});
+
 describe("windowHasInFlightArmadaRun", () => {
   test("pending start is in-flight even with no binds", () => {
     expect(windowHasInFlightArmadaRun({
@@ -292,6 +353,8 @@ describe("extension delivers hub reload over ws", () => {
     expect(src).toContain("case \"ext.cursorReload\"");
     expect(src).toContain("machineId: machineId");
     expect(src).toContain("windowHasInFlightArmadaRun");
+    expect(src).toContain("windowHasOpenComposerTurn");
+    expect(src).toContain("thisWindowHasOpenComposerTurn");
     expect(src).toContain("decideReloadFire");
     expect(src).toContain("noteReloadCommandSettled");
     expect(src).toContain("attemptedSetAt");

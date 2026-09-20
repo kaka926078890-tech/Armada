@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, statSync } from "fs";
+import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, statSync } from "fs";
 import { dirname, join } from "path";
 import { hasImageMarkers, stripImageMarkers } from "./imageMarkers";
 import { normalizePrompt } from "./promptNormalize";
@@ -108,6 +108,44 @@ export function listLeafTranscripts(transcriptsRoot: string): string[] {
     if (existsSync(leaf)) out.push(leaf);
   }
   return out;
+}
+
+/** Last complete jsonl line; 8KiB tail so Reload idle poll does not read the whole file. */
+export function readLastNonEmptyLine(path: string): string {
+  try {
+    const st = statSync(path);
+    if (st.size <= 0) return "";
+    const n = Math.min(st.size, 8192);
+    const fd = openSync(path, "r");
+    try {
+      const buf = Buffer.alloc(n);
+      readSync(fd, buf, 0, n, st.size - n);
+      const lines = buf.toString("utf8").split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+      return lines[lines.length - 1] ?? "";
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return "";
+  }
+}
+
+export type TranscriptTail = { path: string; lastLine: string; mtimeMs: number };
+
+/** Parent leaves plus sibling subagent jsonl, for Reload idle (open composer turns). */
+export function collectTranscriptTails(transcriptsRoot: string): TranscriptTail[] {
+  const out: TranscriptTail[] = [];
+  for (const path of listLeafTranscripts(transcriptsRoot)) {
+    pushTail(out, path);
+    for (const sub of listSubagentTranscripts(path)) pushTail(out, sub);
+  }
+  return out;
+}
+
+function pushTail(out: TranscriptTail[], path: string): void {
+  let mtimeMs = 0;
+  try { mtimeMs = statSync(path).mtimeMs; } catch { return; }
+  out.push({ path, lastLine: readLastNonEmptyLine(path), mtimeMs });
 }
 
 export function collectTranscriptViews(transcriptsRoot: string): TranscriptFileView[] {

@@ -4,6 +4,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { isAmbiguousMatch, type PendingRun } from "../src/binding";
 import {
+  collectTranscriptTails,
   conversationIdFromTranscriptPath,
   cursorProjectSlug,
   extractFirstUserPrompt,
@@ -143,6 +144,22 @@ describe("listLeafTranscripts", () => {
     writeFileSync(leaf, WRAP);
     writeFileSync(join(root, CID, "subagents", "child.jsonl"), "{}");
     expect(listLeafTranscripts(root).sort()).toEqual([leaf]);
+  });
+});
+
+describe("collectTranscriptTails", () => {
+  test("tails parent and uuid subagent last lines", () => {
+    const root = mkdtempSync(join(tmpdir(), "armada-tails-"));
+    const child = "a7bcf55d-baaa-41fb-95ec-e4b600bc9773";
+    mkdirSync(join(root, CID, "subagents"), { recursive: true });
+    const leaf = join(root, CID, `${CID}.jsonl`);
+    const sub = join(root, CID, "subagents", `${child}.jsonl`);
+    writeFileSync(leaf, `{"type":"turn_ended","status":"success"}\n`);
+    writeFileSync(sub, `{"role":"assistant","message":{"content":[{"type":"text","text":"child"}]}}\n`);
+    const tails = collectTranscriptTails(root);
+    expect(tails.map((t) => t.path).sort()).toEqual([leaf, sub].sort());
+    expect(tails.find((t) => t.path === leaf)?.lastLine).toBe(`{"type":"turn_ended","status":"success"}`);
+    expect(tails.find((t) => t.path === sub)?.lastLine).toContain("child");
   });
 });
 

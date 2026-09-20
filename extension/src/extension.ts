@@ -13,16 +13,16 @@ import { Executor, CancelWatcher } from "./executor";
 import { createCdpSubmitter, createImagePaster, createFileMentionPaster, createComposerFinisher, createAskQuestionDriver, probeCdpReady, type AskCdpInspect } from "./cdpInject";
 import { createOsClipboardWriter } from "./osClipboard";
 import { mergeHooks, hooksDriftHash, spoolScriptName, shouldInstallArmadaHooks } from "./hooksInstall";
-import { collectTranscriptViews, matchTranscriptToPending, stopPayloadFromTranscriptLine, stopFromTranscriptFileContent, transcriptsDirForWorkspace, isWithinTranscriptBindWindow, FollowupStopGuard, listSubagentTranscripts, childCidFromSubagentPath, decideLateTranscriptAttach, transcriptJsonlPath } from "./transcriptBind";
+import { collectTranscriptViews, collectTranscriptTails, matchTranscriptToPending, stopPayloadFromTranscriptLine, stopFromTranscriptFileContent, transcriptsDirForWorkspace, isWithinTranscriptBindWindow, FollowupStopGuard, listSubagentTranscripts, childCidFromSubagentPath, decideLateTranscriptAttach, transcriptJsonlPath } from "./transcriptBind";
 import { TranscriptDirWatcher, debounceLeading, watchTranscriptDir, watchFileSize, TRANSCRIPT_WATCHDOG_MS, TRANSCRIPT_WATCH_DEBOUNCE_MS } from "./transcriptWatch";
 import { createExtSeq } from "./extSeq";
 import { hubRunsNeedingTranscriptFollow, shouldArmFollowupStopOnAdopt } from "./adoptRuns";
 import { noteOwnerBsp, clearGeneration, synthesizedStopPayload, noteHubGeneration, onFollowupBindGeneration } from "./generationStamp";
 import { parseAskInspect, askPollActions, coalesceAskInspect } from "./askDetect";
 import { enrichPlanAsk, planDirsFor } from "./planFile";
-import { PENDING_RELOAD_ATTEMPT_NAME, PENDING_RELOAD_NAME, decideReloadFire, decideWindowReload, noteReloadCommandSettled, parsePendingReload, parseReloadAttempt, windowHasInFlightArmadaRun, type ReloadFireState } from "../../desktop-core/src/cursorReload";
+import { PENDING_RELOAD_ATTEMPT_NAME, PENDING_RELOAD_NAME, decideReloadFire, decideWindowReload, noteReloadCommandSettled, parsePendingReload, parseReloadAttempt, windowHasInFlightArmadaRun, windowHasOpenComposerTurn, type ReloadFireState } from "../../desktop-core/src/cursorReload";
 
-const EXTENSION_VERSION = "0.4.33";
+const EXTENSION_VERSION = "0.4.34";
 
 let client: { dispose: () => void } | null = null;
 
@@ -590,9 +590,17 @@ export function activate(context: vscode.ExtensionContext): void {
       boundRunIds: boundRuns.keys(),
       stopSentRunIds: stopSent,
     });
+    const composerFiles: Array<{ lastLine: string; mtimeMs: number }> = [];
+    for (const root of workspaces()) {
+      const dir = transcriptsDirForWorkspace(homedir(), root);
+      if (!dir) continue;
+      for (const t of collectTranscriptTails(dir)) composerFiles.push(t);
+    }
+    const composerBusy = windowHasOpenComposerTurn({ files: composerFiles, now: Date.now() });
     const decision = decideWindowReload({
       pending,
       thisWindowHasLiveRun: live,
+      thisWindowHasOpenComposerTurn: composerBusy,
       now: Date.now(),
       runningVsix: EXTENSION_VERSION,
       machineId: machineId ?? undefined,
@@ -604,7 +612,7 @@ export function activate(context: vscode.ExtensionContext): void {
     });
     reloadFire = attempt.next;
     if (decision === "expired") {
-      log("vsix pending-reload expired; this window still has a live Armada run");
+      log("vsix pending-reload expired; this window still has a live Armada run or open composer turn");
       return;
     }
     if (!attempt.fire) return;
