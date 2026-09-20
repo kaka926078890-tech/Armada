@@ -1,0 +1,11 @@
+---
+description: Bumping Armada versions must update README current-version table and CHANGELOG
+globs: extension/package.json,desktop/package.json,desktop/src-tauri/tauri.conf.json,desktop/src-tauri/Cargo.toml,mobile/android/app/build.gradle.kts,mobile/ios/**/project.pbxproj,README.md,CHANGELOG.md,docs/assets/**
+alwaysApply: false
+---
+
+# Armada release docs
+
+Canonical skill: **`armada-release-docs`**.
+
+升 `armada-agent` / Armada.app / iOS TestFlight / Android `versionName`，或换 README 截图时：同一轮改 `README.md` 当前版本表和 `CHANGELOG.md`。只改版本文件不算发完。

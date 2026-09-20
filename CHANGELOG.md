@@ -1,0 +1,74 @@
+# Changelog
+
+Armada 按 **面** 发版：扩展、桌面、iOS、Android 可以不同号。README 顶部「当前版本」表只反映此刻要装的号；本文件按日期记下每个号修了什么、新了什么。
+
+格式：[Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。版本号来源见 skill `armada-release-docs`。
+
+未打新号就合进 `master` 的改动先写在 **Unreleased**；下次升号时整段搬进对应版本。
+
+---
+
+## Unreleased
+
+### 文档
+
+- README 换成现网桌面看板 / 任务详情 / iOS 舰队·仓列表·详情截图；顶部增加四行当前版本表。
+
+### 修复
+
+- 中转限制手机请求体体积；桌面看板 CSP 收到 `http://*:7380`，不再放行任意端口。
+- 看板派发框留在视口内；五列卡片标题过长截断。
+- 中转 run 快照按 `fleet` 隔离；畸形 `register` / JSON 直接 400。
+
+---
+
+## 2026-09-20 — 扩展 0.4.31 · iOS TF 21 · Android 0.1.8 · 桌面 0.1.0
+
+### 新增
+
+- Ask 卡把 Cursor **Other** 显示为选项 D，自由文本可过中台/App。
+- 手机快照带 `title`、`conversationId`；`unknown` 快照带 `finalText`。
+- 空闲 Reload：扩展 ≥ 0.4.27 按窗口在无 live run 时 Reload；**0.4.31** 把这次闩打进新 vsix 号（同号 0.4.30 会被 `skipped-same-version` 跳过）。
+
+### 修复
+
+- Ask **Skip** 点 Cursor 的 Skip 按钮，不再误点 Continue。
+- Hub 进程启动不把 leftover `online` 当成掉线，避免误杀 running。
+- Plan 点击按 `kind` 配对到卡，不按乱码 prompt；Build 选项 id 由 hub 下发。
+- 续聊 `outcome`、按 fleet 答 Ask；列表 SSE 不再带整段正文。
+- Reload 失败尝试落盘，避免同一窗口反复叠 `Reload Window`。
+- 中台重启后 leftover 在线机不当 `MACHINE_OFFLINE`。
+
+### 操作员注意
+
+Windows 被控须 **先装** `armada-agent-0.4.31.vsix` 再空闲 Reload。只 Reload 不会从 0.4.28 升上去。iOS 装 TestFlight **21**；Android **0.1.8**（versionCode 9）。
+
+---
+
+## 2026-09-20 — 扩展 0.4.29 · iOS TF 20 · Android 0.1.7
+
+### 新增
+
+- 架构债真机验收清单（Windows CDP 写入仍等双端点通，不改生产选择器）。
+
+### 修复
+
+- Ask Other 自由文本过 hub / App。
+- 按 `generation_id` 重取消；Plan inspect 配对到卡。
+- 手机 IME：SSE 快照不再重建输入框。
+
+---
+
+## 2026-09 — 更早里程碑（摘要）
+
+| 面 / 号 | 记什么 |
+| --- | --- |
+| 扩展 0.4.22 | 工作区文件附件；Windows `@` 等 typeahead |
+| 扩展 0.4.19 | 绑定扫描窗、续聊收口 |
+| 扩展 0.4.18 | 全平台合成 jsonl stop；`status: success` → completed |
+| 扩展 0.4.0 | 同窗并行第二条 |
+| 桌面 0.1.0 | 创建/加入舰队、代装 vsix、CDP 打开工作区；包装版仍不自己拨中转 |
+| iOS TF 1–19 | 中转遥控、Keychain token、前台 SSE、APNs、语音派发 |
+| Android 0.1.0–0.1.6 | 与 iOS 操作员面 parity、FCM、分组列表与系统蓝 |
+
+更早逐条提交见 `git log`。新发版不要往这张摘要表堆细节，写进上面带日期的版本节。
