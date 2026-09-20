@@ -8,6 +8,7 @@ import { createApnsSender, type ApnsConfig } from "./apns";
 import { createFcmSender, isFcmToken, type FcmConfig } from "./fcm";
 import { notifyEdges, type NotifyEdge } from "./notifyEdge";
 import { canRetryStatus, followupOutcome, httpStatusForRunError } from "../../hub/src/concurrency";
+import { MAX_BLOB_BYTES } from "../../hub/src/blobs";
 
 export const PROTOCOL_VERSION = 1;
 const MAX_BODY = 20 * 1024 * 1024;
@@ -55,13 +56,15 @@ export type RunSnap = {
   queueMessageDefaultBehavior?: string | null;
   archived?: boolean;
   canRetry?: boolean;
+  attachments?: { id: string; mime: string; name: string; size: number }[];
   updatedAt?: number;
 };
 
 type PromptSnippet = { id: string; title: string; body: string };
+type BlobSnap = { id: string; sha256: string; mime: string; name: string; size: number };
 
 type Pending = {
-  resolve: (v: { ok: boolean; error?: string; run?: RunSnap; snippets?: PromptSnippet[]; cursorReload?: unknown }) => void;
+  resolve: (v: { ok: boolean; error?: string; run?: RunSnap; snippets?: PromptSnippet[]; cursorReload?: unknown; blob?: BlobSnap }) => void;
 };
 
 function hex64(): string {
@@ -113,6 +116,7 @@ export function createRelayServer(opts: {
   const pending = new Map<string, Pending>();
   const hubSockets = new Map<string, { send: (s: string) => void; ws: unknown }>();
   const rate = new Map<string, number[]>();
+  const blobRate = new Map<string, number[]>();
   let reqSeq = 0;
   const apnsSender = createApnsSender(opts.apns ?? null);
   if (!apnsSender.enabled) console.warn("armada-relay APNS_DISABLED");
@@ -242,6 +246,7 @@ export function createRelayServer(opts: {
     canRetry: boolean;
     title: string;
     conversationId: string;
+    attachments: unknown;
   }): string {
     return JSON.stringify({
       status: input.status,
@@ -254,6 +259,7 @@ export function createRelayServer(opts: {
       canRetry: input.canRetry,
       title: input.title,
       conversationId: input.conversationId,
+      attachments: input.attachments ?? [],
     });
   }
 
@@ -284,6 +290,7 @@ export function createRelayServer(opts: {
         archived_at?: number | null;
         notified_status?: string | null;
         notified_ask_id?: string | null;
+        attachments?: string | null;
       }
       | undefined;
     if (!existing) {
@@ -297,6 +304,10 @@ export function createRelayServer(opts: {
         ? null
         : existingArchived;
     const canRetry = typeof snap.canRetry === "boolean" ? snap.canRetry : canRetryStatus(String(status ?? ""));
+    const attachmentsJson = Array.isArray(snap.attachments)
+      ? JSON.stringify(snap.attachments)
+      : (existing?.attachments ?? null);
+    const attachmentsFp = attachmentsJson ? JSON.parse(attachmentsJson) : [];
     const nextFp = runContentFp({
       status,
       prompt: snap.prompt,
@@ -308,6 +319,7 @@ export function createRelayServer(opts: {
       canRetry,
       title: title ?? "",
       conversationId: conversationId ?? "",
+      attachments: attachmentsFp,
     });
     if (existing) {
       const prevFp = runContentFp({
@@ -321,6 +333,7 @@ export function createRelayServer(opts: {
         canRetry: canRetryStatus(String(existing.status ?? "")),
         title: existing.title ?? "",
         conversationId: existing.conversation_id ?? "",
+        attachments: existing.attachments ? JSON.parse(existing.attachments) : [],
       });
       if (prevFp === nextFp) return existing;
     }
@@ -330,12 +343,12 @@ export function createRelayServer(opts: {
     };
     if (existing) {
       db.query(`UPDATE runs SET machine_id=?3, workspace_root=?4, prompt=?5, status=?6,
-        final_text=?7, error=?8, pending_ask=?9, outbound=?11, queue_message_default_behavior=?12, archived_at=?13, updated_at=?10, title=?14, conversation_id=?15 WHERE id=?1 AND fleet_id=?2`)
-        .run(snap.runId, fleetId, snap.machineId, snap.workspaceRoot, snap.prompt, status, finalText, error, pendingAsk, now, outbound, queueMode, archivedAt, title, conversationId);
+        final_text=?7, error=?8, pending_ask=?9, outbound=?11, queue_message_default_behavior=?12, archived_at=?13, updated_at=?10, title=?14, conversation_id=?15, attachments=?16 WHERE id=?1 AND fleet_id=?2`)
+        .run(snap.runId, fleetId, snap.machineId, snap.workspaceRoot, snap.prompt, status, finalText, error, pendingAsk, now, outbound, queueMode, archivedAt, title, conversationId, attachmentsJson);
     } else {
-      db.query(`INSERT INTO runs (id, fleet_id, machine_id, workspace_root, prompt, status, final_text, error, pending_ask, outbound, queue_message_default_behavior, archived_at, updated_at, created_at, title, conversation_id)
-        VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?11,?12,?13,?10,?10,?14,?15)`)
-        .run(snap.runId, fleetId, snap.machineId, snap.workspaceRoot, snap.prompt, status, finalText, error, pendingAsk, now, outbound, queueMode, archivedAt, title, conversationId);
+      db.query(`INSERT INTO runs (id, fleet_id, machine_id, workspace_root, prompt, status, final_text, error, pending_ask, outbound, queue_message_default_behavior, archived_at, updated_at, created_at, title, conversation_id, attachments)
+        VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?11,?12,?13,?10,?10,?14,?15,?16)`)
+        .run(snap.runId, fleetId, snap.machineId, snap.workspaceRoot, snap.prompt, status, finalText, error, pendingAsk, now, outbound, queueMode, archivedAt, title, conversationId, attachmentsJson);
     }
     const decided = notifyEdges(prev, {
       prompt: snap.prompt,
@@ -367,6 +380,7 @@ export function createRelayServer(opts: {
       queueMessageDefaultBehavior: row.queue_message_default_behavior ?? null,
       canRetry: canRetryStatus(String(row.status ?? "")),
       archived: Number(row.archived_at) > 0,
+      attachments: row.attachments ? JSON.parse(row.attachments) : [],
       updatedAt: row.updated_at,
     };
   }
@@ -418,7 +432,7 @@ export function createRelayServer(opts: {
     return true;
   }
 
-  function waitHub(requestId: string): Promise<{ ok: boolean; error?: string; run?: RunSnap; snippets?: PromptSnippet[]; cursorReload?: unknown }> {
+  function waitHub(requestId: string): Promise<{ ok: boolean; error?: string; run?: RunSnap; snippets?: PromptSnippet[]; cursorReload?: unknown; blob?: BlobSnap }> {
     return new Promise((resolve) => {
       const t = setTimeout(() => {
         pending.delete(requestId);
@@ -438,12 +452,31 @@ export function createRelayServer(opts: {
   }
 
   function checkRate(token: string): boolean {
+    return takeRate(rate, token);
+  }
+
+  function checkBlobRate(token: string): boolean {
+    return takeRate(blobRate, token);
+  }
+
+  function takeRate(map: Map<string, number[]>, token: string): boolean {
     const now = Date.now();
-    const arr = (rate.get(token) ?? []).filter((t) => now - t < RATE_WINDOW_MS);
-    if (arr.length >= RATE_MAX) { rate.set(token, arr); return false; }
+    const arr = (map.get(token) ?? []).filter((t) => now - t < RATE_WINDOW_MS);
+    if (arr.length >= RATE_MAX) { map.set(token, arr); return false; }
     arr.push(now);
-    rate.set(token, arr);
+    map.set(token, arr);
     return true;
+  }
+
+  function parseMobileAttachmentIds(raw: unknown): { ids?: string[]; error?: string } {
+    if (raw == null) return { ids: [] };
+    if (!Array.isArray(raw)) return { error: "INVALID" };
+    const ids: string[] = [];
+    for (const x of raw) {
+      if (typeof x !== "string" || !HEX64.test(x)) return { error: "INVALID" };
+      ids.push(x);
+    }
+    return { ids };
   }
 
   const app = new Hono();
@@ -650,6 +683,39 @@ export function createRelayServer(opts: {
     });
   });
 
+  app.post("/mobile/blobs", async (c) => {
+    const raw = c.req.header("content-length");
+    if (raw == null || raw === "") return c.json({ error: "INVALID" }, 400);
+    const len = Number(raw);
+    if (!Number.isFinite(len) || len <= 0) return c.json({ error: "INVALID" }, 400);
+    if (len > MAX_BLOB_BYTES) return c.json({ error: "ATTACHMENT_TOO_LARGE" }, 413);
+    const tok = (c as any).get("opToken") as string;
+    const fleet = (c as any).get("fleet") as { id: string; hub_online: number };
+    if (!checkBlobRate(tok)) return c.json({ error: "RATE_LIMIT" }, 429);
+    if (fleet.hub_online !== 1) return c.json({ error: "HUB_OFFLINE" }, 503);
+    const body = await c.req.parseBody();
+    const file = body["file"];
+    if (!(file instanceof File)) return c.json({ error: "INVALID" }, 400);
+    const bytes = Buffer.from(await file.arrayBuffer());
+    if (bytes.length > MAX_BLOB_BYTES) return c.json({ error: "ATTACHMENT_TOO_LARGE" }, 413);
+    const requestId = `r${++reqSeq}`;
+    const sent = sendHub(fleet.id, {
+      type: "cmd.blobPut",
+      requestId,
+      name: file.name || "image.jpg",
+      mime: file.type || "",
+      bytesBase64: bytes.toString("base64"),
+    });
+    if (!sent) return c.json({ error: "HUB_OFFLINE" }, 503);
+    const result = await waitHub(requestId);
+    if (!result.ok || !result.blob) {
+      const err = result.error ?? "HUB_TIMEOUT";
+      return c.json({ error: err }, hubCmdStatus(err) as 400);
+    }
+    audit("operator", "blob.put", result.blob.id, { size: result.blob.size });
+    return c.json({ blob: result.blob }, 201);
+  });
+
   app.post("/mobile/runs", async (c) => {
     const blocked = rejectPayload(c);
     if (blocked) return blocked;
@@ -666,13 +732,17 @@ export function createRelayServer(opts: {
     }
     const decoded = decodeWorkspaceId(body.workspaceId);
     if (!decoded) return c.json({ error: "INVALID" }, 400);
+    const ids = parseMobileAttachmentIds(body.attachmentIds);
+    if (ids.error) return c.json({ error: ids.error }, 400);
     const requestId = `r${++reqSeq}`;
-    const sent = sendHub(fleet.id, {
+    const cmd: Record<string, unknown> = {
       type: "cmd.dispatch",
       requestId,
       workspaceId: body.workspaceId,
       prompt: body.prompt,
-    });
+    };
+    if (ids.ids && ids.ids.length) cmd.attachmentIds = ids.ids;
+    const sent = sendHub(fleet.id, cmd);
     if (!sent) return c.json({ error: "HUB_OFFLINE" }, 503);
     const result = await waitHub(requestId);
     if (!result.ok) {
@@ -715,10 +785,19 @@ export function createRelayServer(opts: {
     const body = await c.req.json().catch(() => null);
     if (!body || typeof body.prompt !== "string") return c.json({ error: "INVALID" }, 400);
     const runId = c.req.param("id");
-    const row = db.query("SELECT id FROM runs WHERE id=?1 AND fleet_id=?2").get(runId, fleet.id);
+    const row = db.query("SELECT id, status FROM runs WHERE id=?1 AND fleet_id=?2").get(runId, fleet.id) as
+      | { id: string; status?: string }
+      | undefined;
     if (!row) return c.json({ error: "NOT_FOUND" }, 404);
+    const ids = parseMobileAttachmentIds(body.attachmentIds);
+    if (ids.error) return c.json({ error: ids.error }, 400);
+    if (ids.ids && ids.ids.length && row.status === "running") {
+      return c.json({ error: "OUTBOUND_TEXT_ONLY" }, 409);
+    }
     const requestId = `r${++reqSeq}`;
-    const sent = sendHub(fleet.id, { type: "cmd.followup", requestId, runId, prompt: body.prompt });
+    const cmd: Record<string, unknown> = { type: "cmd.followup", requestId, runId, prompt: body.prompt };
+    if (ids.ids && ids.ids.length) cmd.attachmentIds = ids.ids;
+    const sent = sendHub(fleet.id, cmd);
     if (!sent) return c.json({ error: "HUB_OFFLINE" }, 503);
     const result = await waitHub(requestId);
     if (!result.ok) {
@@ -883,7 +962,7 @@ export function createRelayServer(opts: {
           const p = pending.get(msg.requestId);
           if (p) {
             pending.delete(msg.requestId);
-            p.resolve({ ok: !!msg.ok, error: msg.error, run: msg.run, snippets: msg.snippets, cursorReload: msg.cursorReload });
+            p.resolve({ ok: !!msg.ok, error: msg.error, run: msg.run, snippets: msg.snippets, cursorReload: msg.cursorReload, blob: msg.blob });
           }
         }
       },

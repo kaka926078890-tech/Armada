@@ -229,5 +229,57 @@ describe("relay attach (HTTP hub)", () => {
     expect(attachSrc).toContain("startRelayHeartbeat");
     expect(clientSrc).toContain("startRelayHeartbeat");
     expect(handlerSrc).toMatch(/\.ping\s*\(/);
+    expect(handlerSrc).toContain("cmd.blobPut");
+  });
+
+  test("attach blobPut writes hub blobs and dispatch keeps ids", async () => {
+    const PNG = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    const relayHome = mkdtempSync(join(tmpdir(), "armada-relay-"));
+    const hubHome = mkdtempSync(join(tmpdir(), "armada-hub-"));
+    relay = createRelayServer({
+      port: 0, hostname: "127.0.0.1", home: relayHome,
+      publicBase: "http://127.0.0.1", adminToken: "adm",
+    });
+    const fleet = relay.createFleet();
+    hub = createServer({ port: 0, home: hubHome });
+    attach = attachWithConfig(
+      { relay: `http://127.0.0.1:${relay.port}`, fleet: fleet.fleet, secret: fleet.hubSecret },
+      { hubPort: hub.port, token: hub.token, pollMs: 50 },
+    );
+    const ext: WebSocket = await new Promise((res, rej) => {
+      const w = new WebSocket(`ws://127.0.0.1:${hub!.port}/ws?token=${hub!.token}`);
+      w.onopen = () => res(w);
+      w.onerror = rej;
+    });
+    ext.send(JSON.stringify({
+      type: "register", machineId: "m-1", windowId: "w-1", name: "A", os: "darwin", openWorkspaces: ["/ws/a"], cdpReady: true,
+    }));
+    const headers = { authorization: `Bearer ${fleet.operatorToken}` };
+    await waitUntil(async () => {
+      const j = await (await fetch(`http://127.0.0.1:${relay!.port}/mobile/workspaces`, { headers })).json() as any;
+      return j.hubOffline === false && j.workspaces?.[0]?.workspaceRoot === "/ws/a";
+    });
+    const fd = new FormData();
+    fd.append("file", new File([PNG], "shot.png", { type: "image/png" }));
+    const up = await fetch(`http://127.0.0.1:${relay.port}/mobile/blobs`, { method: "POST", headers, body: fd });
+    expect(up.status).toBe(201);
+    const { blob } = await up.json() as any;
+    const d = await fetch(`http://127.0.0.1:${relay.port}/mobile/runs`, {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({
+        workspaceId: encodeWorkspaceId("m-1", "/ws/a"),
+        prompt: "see",
+        attachmentIds: [blob.id],
+      }),
+    });
+    expect(d.status).toBe(201);
+    const body = await d.json() as any;
+    expect(JSON.parse(hub.runs.get(body.run.runId).attachments)).toEqual([blob.id]);
+    expect(body.run.attachments?.[0]?.id).toBe(blob.id);
+    ext.close();
   });
 });

@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import Foundation
+import PhotosUI
 
 enum AppRoute: Hashable {
     case workspace(WorkspaceDTO)
@@ -628,14 +629,50 @@ struct PromptSnippetChips: View {
     }
 }
 
+struct DraftImage: Identifiable {
+    let id = UUID()
+    var data: Data
+    var mime: String
+    var name: String
+}
+
+func imageMagicMime(_ data: Data) -> String? {
+    if data.count >= 4, data[0] == 0x89, data[1] == 0x50, data[2] == 0x4E, data[3] == 0x47 { return "image/png" }
+    if data.count >= 3, data[0] == 0xFF, data[1] == 0xD8, data[2] == 0xFF { return "image/jpeg" }
+    return nil
+}
+
+func prepareUploadImage(_ data: Data, name: String) -> DraftImage? {
+    if let mime = imageMagicMime(data) {
+        if data.count > 8 * 1024 * 1024 { return nil }
+        return DraftImage(data: data, mime: mime, name: nameFor(name, mime: mime))
+    }
+    guard let img = UIImage(data: data), let jpeg = img.jpegData(compressionQuality: 0.92) else { return nil }
+    if jpeg.count > 8 * 1024 * 1024 { return nil }
+    return DraftImage(data: jpeg, mime: "image/jpeg", name: nameFor(name, mime: "image/jpeg"))
+}
+
+private func nameFor(_ raw: String, mime: String) -> String {
+    let base = (raw as NSString).lastPathComponent
+    let stem = (base as NSString).deletingPathExtension
+    let safe = stem.isEmpty ? "image" : stem
+    return mime == "image/png" ? "\(safe).png" : "\(safe).jpg"
+}
+
 /// 豆包 / GPT 底栏：胶囊输入 + 32pt 圆发送。语音是现网能力，收成图标，不抽独立通栏大钮。
 struct ComposerBar: View {
     @Binding var text: String
+    @Binding var pickerItems: [PhotosPickerItem]
     var sending: Bool
     var listening: Bool
     var canSend: Bool
+    var photoVisible: Bool = false
+    var photoEnabled: Bool = true
+    var maxPick: Int = 4
     var onMic: () -> Void
+    var onPhotoDisabled: () -> Void
     var onSend: () -> Void
+    var onPasteImage: ((Data) -> Void)? = nil
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 8) {
@@ -646,7 +683,26 @@ struct ComposerBar: View {
             }
             .buttonStyle(.plain)
             .disabled(sending)
-            ComposerField(text: $text, placeholder: "输入提示词", enabled: !listening && !sending)
+            if photoVisible {
+                if photoEnabled {
+                    PhotosPicker(selection: $pickerItems, maxSelectionCount: max(0, maxPick), matching: .images) {
+                        Image(systemName: "photo")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(width: 32, height: 32)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(sending)
+                } else {
+                    Button(action: onPhotoDisabled) {
+                        Image(systemName: "photo")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(width: 32, height: 32)
+                            .opacity(0.4)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            ComposerField(text: $text, placeholder: "输入提示词", enabled: !listening && !sending, onPasteImage: onPasteImage)
                 .padding(.horizontal, 8)
                 .frame(minHeight: 36, maxHeight: 132)
                 .fixedSize(horizontal: false, vertical: true)
@@ -672,11 +728,15 @@ struct DispatchSheet: View {
     @EnvironmentObject var session: Session
     let workspace: WorkspaceDTO
     var followupRunId: String? = nil
+    var followupIsLive: Bool = false
     var onDone: (BoardColumn) -> Void
     @StateObject private var speech = PromptSpeech()
     @State private var prompt = ""
     @State private var sending = false
     @State private var err: String?
+    @State private var drafts: [DraftImage] = []
+    @State private var blobsAvailable = true
+    @State private var pickerItems: [PhotosPickerItem] = []
     @Environment(\.dismiss) private var dismiss
 
     private var live: WorkspaceDTO {
@@ -687,7 +747,10 @@ struct DispatchSheet: View {
         prompt.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private var canSend: Bool { live.canInject && !sending && !speech.listening && !trimmed.isEmpty }
+    private var photoEnabled: Bool { !followupIsLive }
+    private var canSend: Bool {
+        live.canInject && !sending && !speech.listening && (!trimmed.isEmpty || (photoEnabled && !drafts.isEmpty))
+    }
 
     var body: some View {
         NavigationStack {
@@ -732,15 +795,51 @@ struct DispatchSheet: View {
                 }
             }
             .safeAreaInset(edge: .bottom) {
-                ComposerBar(
-                    text: $prompt,
-                    sending: sending,
-                    listening: speech.listening,
-                    canSend: canSend,
-                    onMic: { toggleMic() },
-                    onSend: { Task { await send() } }
-                )
-                .background(.bar)
+                VStack(spacing: 8) {
+                    if !drafts.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(drafts) { draft in
+                                    ZStack(alignment: .topTrailing) {
+                                        if let ui = UIImage(data: draft.data) {
+                                            Image(uiImage: ui)
+                                                .resizable()
+                                                .scaledToFill()
+                                                .frame(width: 56, height: 56)
+                                                .clipped()
+                                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                        }
+                                        Button {
+                                            drafts.removeAll { $0.id == draft.id }
+                                        } label: {
+                                            Image(systemName: "xmark.circle.fill")
+                                                .foregroundStyle(.white, .black.opacity(0.45))
+                                        }
+                                        .offset(x: 4, y: -4)
+                                    }
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                        }
+                    }
+                    ComposerBar(
+                        text: $prompt,
+                        pickerItems: $pickerItems,
+                        sending: sending,
+                        listening: speech.listening,
+                        canSend: canSend,
+                        photoVisible: blobsAvailable,
+                        photoEnabled: photoEnabled && !sending && drafts.count < 4,
+                        maxPick: max(1, 4 - drafts.count),
+                        onMic: { toggleMic() },
+                        onPhotoDisabled: {
+                            err = RelayAPIError.operatorMessage(followupIsLive ? "OUTBOUND_TEXT_ONLY" : "ATTACHMENT_COUNT")
+                        },
+                        onSend: { Task { await send() } },
+                        onPasteImage: { data in addDraft(data, name: "paste") }
+                    )
+                    .background(.bar)
+                }
             }
             .navigationTitle(followupRunId == nil ? "派发任务" : "续聊")
             .toolbar {
@@ -764,7 +863,37 @@ struct DispatchSheet: View {
             .onChange(of: speech.listening) { _, listening in
                 if !listening { prompt = speech.prompt }
             }
+            .onChange(of: pickerItems) { _, items in
+                Task { await ingestPicker(items) }
+            }
             .task { await session.loadSnippets() }
+        }
+    }
+
+    private func addDraft(_ data: Data, name: String) {
+        if drafts.count >= 4 {
+            err = RelayAPIError.operatorMessage("ATTACHMENT_COUNT")
+            return
+        }
+        guard let draft = prepareUploadImage(data, name: name) else {
+            err = imageMagicMime(data) == nil ? "无法转换这张图" : RelayAPIError.operatorMessage("ATTACHMENT_TOO_LARGE")
+            return
+        }
+        drafts.append(draft)
+    }
+
+    private func ingestPicker(_ items: [PhotosPickerItem]) async {
+        pickerItems = []
+        for item in items {
+            if drafts.count >= 4 {
+                err = RelayAPIError.operatorMessage("ATTACHMENT_COUNT")
+                break
+            }
+            guard let data = try? await item.loadTransferable(type: Data.self) else {
+                err = "无法转换这张图"
+                continue
+            }
+            addDraft(data, name: "image")
         }
     }
 
@@ -789,17 +918,27 @@ struct DispatchSheet: View {
         sending = true
         defer { sending = false }
         do {
+            var ids: [String] = []
+            if photoEnabled {
+                for draft in drafts {
+                    ids.append(try await session.api().uploadBlob(data: draft.data, mime: draft.mime, name: draft.name).id)
+                }
+            }
             let run: RunDTO
             if let followupRunId {
-                run = try await session.api().followup(runId: followupRunId, prompt: text)
+                run = try await session.api().followup(runId: followupRunId, prompt: text, attachmentIds: ids)
             } else {
-                run = try await session.api().dispatch(workspaceId: live.workspaceId, prompt: text)
+                run = try await session.api().dispatch(workspaceId: live.workspaceId, prompt: text, attachmentIds: ids)
             }
             err = nil
             await session.refresh()
             onDone(run.column)
             dismiss()
         } catch {
+            if let e = error as? RelayAPIError, case .http(404, _) = e {
+                blobsAvailable = false
+                drafts = []
+            }
             err = error.localizedDescription
         }
     }
@@ -980,7 +1119,7 @@ struct RunDetailView: View {
         }
         .sheet(isPresented: $showDispatch) {
             if let slot {
-                DispatchSheet(workspace: slot, followupRunId: runId) { _ in
+                DispatchSheet(workspace: slot, followupRunId: runId, followupIsLive: run?.isLive == true) { _ in
                     showDispatch = false
                     Task {
                         await reload()

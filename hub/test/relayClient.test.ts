@@ -209,6 +209,19 @@ describe("runToSnap", () => {
       prompt: "hi", conversation_id: "  ", status: "running", created_at: 1,
     }, []).conversationId).toBeNull();
   });
+
+  test("runToSnap includes attachment metas and omits empty", () => {
+    const id = "a".repeat(64);
+    const withAtt = runToSnap({
+      id: "r-1", machine_id: "m-1", workspace_root: "/ws/a",
+      prompt: "", status: "dispatched", created_at: 1,
+      attachment_items: [{ id, sha256: id, mime: "image/jpeg", name: "x.jpg", size: 12 }],
+    }, []);
+    expect(withAtt.attachments).toEqual([{ id, mime: "image/jpeg", name: "x.jpg", size: 12 }]);
+    expect(runToSnap({
+      id: "r-1", machine_id: "m-1", workspace_root: "/ws/a", prompt: "hi", status: "running", created_at: 1,
+    }, []).attachments).toBeUndefined();
+  });
 });
 
 describe("hub outbound to relay", () => {
@@ -536,6 +549,62 @@ describe("hub outbound to relay", () => {
     ext.close();
   });
 
+  test("mobile blobPut lands in hub BlobStore and dispatch carries ids", async () => {
+    const PNG = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    const relayHome = mkdtempSync(join(tmpdir(), "armada-relay-"));
+    const hubHome = mkdtempSync(join(tmpdir(), "armada-hub-"));
+    relay = createRelayServer({
+      port: 0, hostname: "127.0.0.1", home: relayHome,
+      publicBase: "http://127.0.0.1", adminToken: "adm",
+    });
+    const fleet = relay.createFleet();
+    writeFileSync(join(hubHome, "relay.json"), JSON.stringify({
+      relay: `http://127.0.0.1:${relay.port}`, fleet: fleet.fleet, secret: fleet.hubSecret,
+    }), { mode: 0o600 });
+    hub = createServer({ port: 0, home: hubHome });
+    const ext: WebSocket = await new Promise((res, rej) => {
+      const w = new WebSocket(`ws://127.0.0.1:${hub!.port}/ws?token=${hub!.token}`);
+      w.onopen = () => res(w);
+      w.onerror = rej;
+    });
+    ext.send(JSON.stringify({
+      type: "register", machineId: "m-1", windowId: "w-1", name: "A", os: "darwin", openWorkspaces: ["/ws/a"], cdpReady: true,
+    }));
+    const headers = { authorization: `Bearer ${fleet.operatorToken}` };
+    await waitUntil(async () => {
+      const j = await (await fetch(`http://127.0.0.1:${relay!.port}/mobile/workspaces`, { headers })).json() as any;
+      return j.hubOffline === false && j.workspaces?.[0]?.workspaceRoot === "/ws/a";
+    });
+    const fd = new FormData();
+    fd.append("file", new File([PNG], "shot.png", { type: "image/png" }));
+    const up = await fetch(`http://127.0.0.1:${relay.port}/mobile/blobs`, { method: "POST", headers, body: fd });
+    expect(up.status).toBe(201);
+    const { blob } = await up.json() as any;
+    expect(blob.id).toHaveLength(64);
+    const got = await fetch(`http://127.0.0.1:${hub.port}/api/blobs/${blob.id}`, {
+      headers: { authorization: `Bearer ${hub.token}` },
+    });
+    expect(got.status).toBe(200);
+    expect(Buffer.from(await got.arrayBuffer()).equals(PNG)).toBe(true);
+    const d = await fetch(`http://127.0.0.1:${relay.port}/mobile/runs`, {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({
+        workspaceId: encodeWorkspaceId("m-1", "/ws/a"),
+        prompt: "",
+        attachmentIds: [blob.id],
+      }),
+    });
+    expect(d.status).toBe(201);
+    const body = await d.json() as any;
+    expect(JSON.parse(hub.runs.get(body.run.runId).attachments)).toEqual([blob.id]);
+    expect(body.run.attachments?.[0]).toMatchObject({ id: blob.id, mime: "image/png", size: PNG.length });
+    ext.close();
+  });
+
   test("onCommand uses shared createRelayCommandHandler including Reload", () => {
     const src = readFileSync(join(import.meta.dir, "../src/relayClient.ts"), "utf8");
     expect(src).toContain("createRelayCommandHandler");
@@ -543,7 +612,7 @@ describe("hub outbound to relay", () => {
     for (const cmd of [
       "cmd.dispatch", "cmd.followup", "cmd.retry", "cmd.answer", "cmd.cancel",
       "cmd.archive", "cmd.unarchive", "cmd.promptSnippetsGet", "cmd.promptSnippetsPut",
-      "cmd.cursorReloadGet", "cmd.cursorReloadPost", "UNKNOWN_CMD",
+      "cmd.cursorReloadGet", "cmd.cursorReloadPost", "cmd.blobPut", "UNKNOWN_CMD",
     ]) {
       expect(handler).toContain(cmd);
     }
@@ -559,5 +628,64 @@ describe("hub outbound to relay", () => {
     });
     await handle({ type: "cmd.notARealCommand", requestId: "req-1" });
     expect(sent).toEqual([{ type: "cmd.result", requestId: "req-1", ok: false, error: "UNKNOWN_CMD" }]);
+  });
+
+  test("cmd.blobPut posts decoded bytes to /api/blobs", async () => {
+    const { createRelayCommandHandler } = await import("../src/relayCommandHandler");
+    const PNG = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    const blob = { id: "b".repeat(64), sha256: "b".repeat(64), mime: "image/png", name: "a.png", size: PNG.length };
+    const calls: { path: string; init?: RequestInit }[] = [];
+    const sent: object[] = [];
+    const handle = createRelayCommandHandler({
+      hubFetch: async (path, init) => {
+        calls.push({ path, init });
+        return new Response(JSON.stringify({ blob }), { status: 201 });
+      },
+      snapOf: async () => null,
+      send: (msg) => sent.push(msg),
+    });
+    await handle({
+      type: "cmd.blobPut", requestId: "req-b", name: "a.png", mime: "image/png",
+      bytesBase64: PNG.toString("base64"),
+    });
+    expect(calls[0]?.path).toBe("/api/blobs");
+    expect(calls[0]?.init?.method).toBe("POST");
+    const headers = calls[0]?.init?.headers as Record<string, string>;
+    expect(headers["content-type"]).toMatch(/^multipart\/form-data; boundary=/);
+    expect(Number(headers["content-length"])).toBeGreaterThan(PNG.length);
+    const body = Buffer.from(calls[0]?.init?.body as Buffer);
+    expect(body.includes(PNG)).toBe(true);
+    expect(sent).toEqual([{ type: "cmd.result", requestId: "req-b", ok: true, blob }]);
+  });
+
+  test("cmd.dispatch forwards attachmentIds and omits them for text", async () => {
+    const { createRelayCommandHandler } = await import("../src/relayCommandHandler");
+    const { encodeWorkspaceId } = await import("../../relay/src/uri");
+    const posts: string[] = [];
+    const snap = {
+      runId: "r-1", machineId: "m-1", workspaceRoot: "/ws/a", prompt: "hi", title: "hi",
+      conversationId: null, status: "dispatched", updatedAt: 1,
+    };
+    const handle = createRelayCommandHandler({
+      hubFetch: async (_path, init) => {
+        posts.push(String(init?.body ?? ""));
+        return new Response(JSON.stringify({ run: { id: "r-1" } }), { status: 201 });
+      },
+      snapOf: async () => snap,
+      send: () => {},
+    });
+    const wsId = encodeWorkspaceId("m-1", "/ws/a");
+    await handle({ type: "cmd.dispatch", requestId: "d1", workspaceId: wsId, prompt: "hi" });
+    expect(JSON.parse(posts[0])).toEqual({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "hi" });
+    const ids = ["c".repeat(64)];
+    await handle({
+      type: "cmd.dispatch", requestId: "d2", workspaceId: wsId, prompt: "", attachmentIds: ids,
+    });
+    expect(JSON.parse(posts[1])).toEqual({
+      machineId: "m-1", workspaceRoot: "/ws/a", prompt: "", attachmentIds: ids,
+    });
   });
 });

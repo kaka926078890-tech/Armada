@@ -821,6 +821,7 @@ export class RunService {
       outbound: this.listVisibleOutbound(row.id),
       queue_message_default_behavior: mode,
       window_connected: !!(row.window_id && this.registry.isConnected(row.machine_id, row.window_id)),
+      attachment_items: this.wsAttachments(parseAttachmentIds(row.attachments)) ?? [],
     };
   }
 

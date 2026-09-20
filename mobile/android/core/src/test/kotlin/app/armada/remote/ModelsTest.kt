@@ -42,6 +42,17 @@ class ModelsTest {
         assertFalse(asking.canFollowup)
         assertEquals("短标题", run("running", title = "短标题").displayTitle)
         assertEquals("do it", run("running").displayTitle)
+        assertEquals("[2 张图片]", run("dispatched").copy(prompt = "", attachments = listOf(
+            RunAttachmentDto("a"),
+            RunAttachmentDto("b"),
+        )).displayTitle)
+        assertTrue(canAcceptMoreAttachments(3, 1))
+        assertFalse(canAcceptMoreAttachments(4, 1))
+        val png = byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47)
+        val jpeg = byteArrayOf(0xff.toByte(), 0xd8.toByte(), 0xff.toByte())
+        assertEquals("image/png", imageMagicMime(png))
+        assertEquals("image/jpeg", imageMagicMime(jpeg))
+        assertEquals(null, imageMagicMime(byteArrayOf(0x00, 0x01)))
     }
 
     @Test
@@ -246,6 +257,7 @@ class ModelsTest {
         assertFalse(runContentEquals(a, b.copy(status = "completed")))
         assertFalse(runContentEquals(a, b.copy(prompt = "other")))
         assertFalse(runContentEquals(a, b.copy(finalText = "x")))
+        assertFalse(runContentEquals(a, b.copy(attachments = listOf(RunAttachmentDto("a")))))
     }
 
     @Test

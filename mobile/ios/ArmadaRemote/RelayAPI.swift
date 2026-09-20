@@ -83,6 +83,21 @@ struct OutboundDTO: Decodable, Hashable, Identifiable {
     var createdAt: Int
 }
 
+struct RunAttachment: Decodable, Hashable {
+    var id: String
+    var mime: String?
+    var name: String?
+    var size: Int?
+}
+
+struct BlobDTO: Decodable {
+    var id: String
+    var sha256: String?
+    var mime: String?
+    var name: String?
+    var size: Int?
+}
+
 struct RunDTO: Decodable, Identifiable, Hashable {
     var runId: String
     var machineId: String
@@ -99,6 +114,7 @@ struct RunDTO: Decodable, Identifiable, Hashable {
     var updatedAt: Int?
     var title: String?
     var conversationId: String?
+    var attachments: [RunAttachment]?
     var id: String { runId }
 
     var isLive: Bool {
@@ -121,7 +137,10 @@ struct RunDTO: Decodable, Identifiable, Hashable {
 
     var displayTitle: String {
         let named = (title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return named.isEmpty ? prompt : named
+        if !named.isEmpty { return named }
+        if !prompt.isEmpty { return prompt }
+        let n = attachments?.count ?? 0
+        return n > 0 ? "[\(n) 张图片]" : prompt
     }
 
     var showsRetry: Bool {
@@ -198,6 +217,8 @@ func runContentEquals(_ a: RunDTO, _ b: RunDTO) -> Bool {
     var y = b
     x.updatedAt = nil
     y.updatedAt = nil
+    if x.attachments == nil { x.attachments = [] }
+    if y.attachments == nil { y.attachments = [] }
     return x == y
 }
 
@@ -295,13 +316,20 @@ enum RelayAPIError: LocalizedError {
         case "HUB_OFFLINE": return "中台离线"
         case "HUB_TIMEOUT": return "中台处理超时，请再发一次"
         case "RATE_LIMIT": return "点得太快，请稍后再发"
-        case "EMPTY_PROMPT": return "提示词是空的"
+        case "EMPTY_PROMPT": return "写点字或加一张图"
         case "NET_INTERCEPT": return "当前网络拦截了中转。请关掉 Wi‑Fi 改用蜂窝，或换一个网络后再打开。"
         case "OUTBOUND_LIMIT": return "待消化续发已达上限，等 Cursor 消化后再发"
-        case "OUTBOUND_TEXT_ONLY": return "运行中续发暂只支持纯文本"
+        case "OUTBOUND_TEXT_ONLY": return "运行中只能发文字"
         case "INVALID_STATE": return "当前状态不能重试"
         case "NOT_FOUND": return "任务不存在"
         case "INVALID": return "推送登记失败"
+        case "ATTACHMENT_TOO_LARGE": return "单张不能超过 8 MB"
+        case "ATTACHMENT_INVALID_MIME": return "只支持 PNG / JPEG"
+        case "ATTACHMENT_COUNT": return "最多 4 张图"
+        case "ATTACHMENT_NOT_FOUND": return "图片还没传到中台，请重试"
+        case "IMAGE_PASTE_DISABLED": return "被控机关了贴图"
+        case "IMAGE_PASTE_FAILED": return "图片没贴进 Cursor，请重试"
+        case "NO_ROUTE": return "当前中转还不支持发图"
         case "SNIPPET_INVALID": return "标题和提示词都不能为空，且不要超长"
         case "SNIPPET_LIMIT": return "最多 30 条快捷提示词"
         case "READ_FAIL": return "读取快捷提示词失败"
@@ -368,14 +396,42 @@ actor RelayAPI {
         try await get("/mobile/runs/\(id)")
     }
 
-    func dispatch(workspaceId: String, prompt: String) async throws -> RunDTO {
-        let wrap: DispatchResponse = try await send("/mobile/runs", method: "POST", body: encode(["workspaceId": workspaceId, "prompt": prompt]), ok: [201])
+    func dispatch(workspaceId: String, prompt: String, attachmentIds: [String] = []) async throws -> RunDTO {
+        var obj: [String: Any] = ["workspaceId": workspaceId, "prompt": prompt]
+        if !attachmentIds.isEmpty { obj["attachmentIds"] = attachmentIds }
+        let wrap: DispatchResponse = try await send("/mobile/runs", method: "POST", body: JSONSerialization.data(withJSONObject: obj), ok: [201])
         return wrap.run
     }
 
-    func followup(runId: String, prompt: String) async throws -> RunDTO {
-        let wrap: FollowupResponse = try await send("/mobile/runs/\(runId)/followup", method: "POST", body: encode(["prompt": prompt]), ok: [200, 201])
+    func followup(runId: String, prompt: String, attachmentIds: [String] = []) async throws -> RunDTO {
+        var obj: [String: Any] = ["prompt": prompt]
+        if !attachmentIds.isEmpty { obj["attachmentIds"] = attachmentIds }
+        let wrap: FollowupResponse = try await send("/mobile/runs/\(runId)/followup", method: "POST", body: JSONSerialization.data(withJSONObject: obj), ok: [200, 201])
         return wrap.run
+    }
+
+    func uploadBlob(data: Data, mime: String, name: String) async throws -> BlobDTO {
+        let boundary = "armada-\(UUID().uuidString)"
+        var body = Data()
+        func append(_ s: String) { body.append(Data(s.utf8)) }
+        append("--\(boundary)\r\n")
+        append("Content-Disposition: form-data; name=\"file\"; filename=\"\(name)\"\r\n")
+        append("Content-Type: \(mime)\r\n\r\n")
+        body.append(data)
+        append("\r\n--\(boundary)--\r\n")
+        guard let url = URL(string: base + "/mobile/blobs") else { throw RelayAPIError.transport("bad url") }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 30
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        req.httpBody = body
+        let (respData, resp) = try await URLSession.shared.data(for: req)
+        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        if code == 404 { throw RelayAPIError.http(404, "NO_ROUTE") }
+        if code != 201 { throw RelayAPIError.classify(status: code, data: respData) }
+        struct Wrap: Decodable { var blob: BlobDTO }
+        return try JSONDecoder().decode(Wrap.self, from: respData).blob
     }
 
     func retry(runId: String) async throws -> RunDTO {

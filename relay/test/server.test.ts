@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { generateKeyPairSync } from "crypto";
+import { createHash, generateKeyPairSync } from "crypto";
 import { mkdtempSync, writeFileSync } from "fs";
 import { createConnection, type Socket } from "net";
 import { tmpdir } from "os";
@@ -103,6 +103,9 @@ function autoHub(ws: WebSocket, onDispatch?: (msg: any) => object | void) {
       const custom = onDispatch?.(msg);
       if (custom) { ws.send(JSON.stringify(custom)); return; }
       const decoded = String(msg.workspaceId).split("|");
+      const atts = Array.isArray(msg.attachmentIds)
+        ? msg.attachmentIds.map((id: string) => ({ id, mime: "image/png", name: "shot.png", size: 70 }))
+        : undefined;
       ws.send(JSON.stringify({
         type: "cmd.result",
         requestId: msg.requestId,
@@ -113,8 +116,19 @@ function autoHub(ws: WebSocket, onDispatch?: (msg: any) => object | void) {
           workspaceRoot: decoded.slice(1).join("|"),
           prompt: msg.prompt,
           status: "dispatched",
+          ...(atts?.length ? { attachments: atts } : {}),
           updatedAt: Date.now(),
         },
+      }));
+    }
+    if (msg.type === "cmd.blobPut") {
+      const bytes = Buffer.from(String(msg.bytesBase64 ?? ""), "base64");
+      const id = createHash("sha256").update(bytes).digest("hex");
+      ws.send(JSON.stringify({
+        type: "cmd.result",
+        requestId: msg.requestId,
+        ok: true,
+        blob: { id, sha256: id, mime: msg.mime || "image/png", name: msg.name || "image.png", size: bytes.length },
       }));
     }
     if (msg.type === "cmd.answer" || msg.type === "cmd.cancel") {
@@ -901,6 +915,135 @@ describe("relay serve", () => {
     expect(j.pairUri).toContain("armada-relay://pair");
     expect(j.opUri).toContain("armada-relay://op");
     expect(j.pairUri).not.toContain(j.hubSecret);
+  });
+
+  const PNG_1x1 = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    "base64",
+  );
+
+  test("POST /mobile/blobs stores via cmd.blobPut and dispatch keeps attachmentIds", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    const seen: any[] = [];
+    ws.addEventListener("message", (e) => seen.push(JSON.parse(String(e.data))));
+    autoHub(ws);
+    await Bun.sleep(30);
+    const headers = { authorization: `Bearer ${fleet.operatorToken}` };
+    const fd = new FormData();
+    fd.append("file", new File([PNG_1x1], "shot.png", { type: "image/png" }));
+    const up = await fetch(url(s, "/mobile/blobs"), { method: "POST", headers, body: fd });
+    expect(up.status).toBe(201);
+    const { blob } = await up.json() as { blob: { id: string; sha256: string; mime: string; name: string; size: number } };
+    expect(blob.id).toBe(createHash("sha256").update(PNG_1x1).digest("hex"));
+    expect(blob.id).toBe(blob.sha256);
+    expect(blob.mime).toBe("image/png");
+    expect(blob.size).toBe(PNG_1x1.length);
+    const put = seen.find((m) => m.type === "cmd.blobPut");
+    expect(put.bytesBase64).toBe(PNG_1x1.toString("base64"));
+    expect(JSON.stringify(put)).not.toContain(PNG_1x1.toString("base64").slice(0, 12) + "audit");
+
+    const d = await fetch(url(s, "/mobile/runs"), {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({
+        workspaceId: encodeWorkspaceId("m-1", "/Users/me/proj"),
+        prompt: "",
+        attachmentIds: [blob.id],
+      }),
+    });
+    expect(d.status).toBe(201);
+    const dispatched = seen.find((m) => m.type === "cmd.dispatch");
+    expect(dispatched.attachmentIds).toEqual([blob.id]);
+    const body = await d.json() as any;
+    expect(body.run.attachments).toEqual([
+      { id: blob.id, mime: "image/png", name: "shot.png", size: 70 },
+    ]);
+    ws.close();
+  });
+
+  test("text dispatch omits attachmentIds on the hub command", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    const seen: any[] = [];
+    ws.addEventListener("message", (e) => seen.push(JSON.parse(String(e.data))));
+    autoHub(ws);
+    await Bun.sleep(30);
+    const r = await fetch(url(s, "/mobile/runs"), {
+      method: "POST",
+      headers: { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ workspaceId: encodeWorkspaceId("m-1", "/Users/me/proj"), prompt: "plain" }),
+    });
+    expect(r.status).toBe(201);
+    const dispatched = seen.find((m) => m.type === "cmd.dispatch");
+    expect(dispatched.attachmentIds).toBeUndefined();
+    expect(Object.keys(dispatched).sort()).toEqual(["prompt", "requestId", "type", "workspaceId"].sort());
+    ws.close();
+  });
+
+  test("running followup with attachmentIds is 409 without hub cmd", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    const seen: any[] = [];
+    ws.addEventListener("message", (e) => seen.push(JSON.parse(String(e.data))));
+    autoHub(ws);
+    ws.send(JSON.stringify({
+      type: "snap.run",
+      run: {
+        runId: "r-live",
+        machineId: "m-1",
+        workspaceRoot: "/Users/me/proj",
+        prompt: "hi",
+        status: "running",
+        updatedAt: Date.now(),
+      },
+    }));
+    await Bun.sleep(40);
+    const sha = "a".repeat(64);
+    const f = await fetch(url(s, "/mobile/runs/r-live/followup"), {
+      method: "POST",
+      headers: { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ prompt: "看图", attachmentIds: [sha] }),
+    });
+    expect(f.status).toBe(409);
+    expect(await f.json()).toEqual({ error: "OUTBOUND_TEXT_ONLY" });
+    expect(seen.some((m) => m.type === "cmd.followup")).toBe(false);
+    ws.close();
+  });
+
+  test("non-hex attachmentIds are 400 INVALID", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    autoHub(ws);
+    await Bun.sleep(20);
+    const r = await fetch(url(s, "/mobile/runs"), {
+      method: "POST",
+      headers: { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        workspaceId: encodeWorkspaceId("m-1", "/ws"),
+        prompt: "x",
+        attachmentIds: ["nope"],
+      }),
+    });
+    expect(r.status).toBe(400);
+    expect(await r.json()).toEqual({ error: "INVALID" });
+    ws.close();
+  });
+
+  test("blob Content-Length over 8 MiB is 413 before 20 MiB gate", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const r = await rawMobilePost(s.port, "/mobile/blobs", fleet.operatorToken, [
+      "Content-Length: 8388609",
+      "Content-Type: multipart/form-data; boundary=x",
+    ], "", 800);
+    expect(r.status).toBe(413);
+    expect(r.raw).toMatch(/ATTACHMENT_TOO_LARGE/);
+    r.socket.destroy();
   });
 });
 

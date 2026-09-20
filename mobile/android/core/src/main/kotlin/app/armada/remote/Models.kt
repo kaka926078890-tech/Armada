@@ -48,6 +48,47 @@ data class OutboundDto(
     val createdAt: Long,
 )
 
+data class RunAttachmentDto(
+    val id: String,
+    val mime: String = "",
+    val name: String = "",
+    val size: Long = 0,
+)
+
+data class BlobDto(
+    val id: String,
+    val sha256: String,
+    val mime: String,
+    val name: String,
+    val size: Long,
+)
+
+const val MAX_RUN_ATTACHMENTS = 4
+const val MAX_BLOB_BYTES = 8 * 1024 * 1024
+
+fun imageMagicMime(bytes: ByteArray): String? {
+    if (bytes.size >= 4 &&
+        bytes[0] == 0x89.toByte() && bytes[1] == 0x50.toByte() &&
+        bytes[2] == 0x4e.toByte() && bytes[3] == 0x47.toByte()
+    ) return "image/png"
+    if (bytes.size >= 3 &&
+        bytes[0] == 0xff.toByte() && bytes[1] == 0xd8.toByte() && bytes[2] == 0xff.toByte()
+    ) return "image/jpeg"
+    return null
+}
+
+fun runDisplayTitle(title: String?, prompt: String, attachmentCount: Int): String {
+    val named = title?.trim().orEmpty()
+    if (named.isNotEmpty()) return named
+    if (prompt.isNotEmpty()) return prompt
+    if (attachmentCount > 0) return "[$attachmentCount 张图片]"
+    return prompt
+}
+
+fun canAcceptMoreAttachments(current: Int, adding: Int, max: Int = MAX_RUN_ATTACHMENTS): Boolean {
+    return adding > 0 && current + adding <= max
+}
+
 enum class BoardColumn(val title: String) {
     Waiting("待回车"),
     Running("运行中"),
@@ -82,6 +123,7 @@ data class RunDto(
     val updatedAt: Long? = null,
     val title: String? = null,
     val conversationId: String? = null,
+    val attachments: List<RunAttachmentDto> = emptyList(),
 ) {
     val isLive: Boolean
         get() = status in setOf("created", "queued", "dispatched", "binding", "running")
@@ -90,7 +132,7 @@ data class RunDto(
     val queuedOutbound: List<OutboundDto>
         get() = (outbound ?: emptyList()).filter { it.state == "queued" || (it.state == "injecting" && it.expectedMode == "queue") }
     val canFollowup: Boolean get() = pendingAsk == null && !conversationId.isNullOrBlank()
-    val displayTitle: String get() = title?.trim()?.takeIf { it.isNotEmpty() } ?: prompt
+    val displayTitle: String get() = runDisplayTitle(title, prompt, attachments.size)
     val showsRetry: Boolean
         get() = canRetry ?: (status in setOf("error", "unknown", "aborted"))
     val displayError: String?

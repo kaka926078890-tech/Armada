@@ -3,9 +3,11 @@ package app.armada.remote
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -152,7 +154,7 @@ data class NavAction(val title: String, val enabled: Boolean = true, val onClick
 
 data class SwipeAction(val label: String, val color: Color, val onClick: () -> Unit)
 
-enum class IosIcon { Mic, Stop, ArrowUp, Copy, Unread, Eye, EyeSlash, Check, Hourglass }
+enum class IosIcon { Mic, Stop, ArrowUp, Copy, Unread, Eye, EyeSlash, Check, Hourglass, Photo }
 
 @Composable
 fun IosNavBar(
@@ -349,6 +351,7 @@ fun BarButton(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ComposerBar(
     value: String,
@@ -359,6 +362,10 @@ fun ComposerBar(
     enabledMic: Boolean,
     onMic: () -> Unit,
     onSend: () -> Unit,
+    photoVisible: Boolean = false,
+    photoEnabled: Boolean = true,
+    onPhoto: () -> Unit = {},
+    onPhotoLong: (() -> Unit)? = null,
 ) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
@@ -373,6 +380,20 @@ fun ComposerBar(
             contentAlignment = Alignment.Center,
         ) {
             IosGlyph(if (listening) IosIcon.Stop else IosIcon.Mic, Modifier.size(22.dp), MaterialTheme.colorScheme.onSurface)
+        }
+        if (photoVisible) {
+            Box(
+                Modifier
+                    .size(32.dp)
+                    .alpha(if (photoEnabled) 1f else 0.4f)
+                    .combinedClickable(
+                        onClick = { if (photoEnabled) onPhoto() else onPhoto() },
+                        onLongClick = { onPhotoLong?.invoke() },
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                IosGlyph(IosIcon.Photo, Modifier.size(22.dp), MaterialTheme.colorScheme.onSurface)
+            }
         }
         Box(
             Modifier
@@ -617,6 +638,24 @@ fun IosGlyph(icon: IosIcon, modifier: Modifier = Modifier, tint: Color = AccentB
                     lineTo(w * 0.78f, h * 0.28f)
                 }
                 drawPath(path, c, style = stroke)
+            }
+            IosIcon.Photo -> {
+                drawRoundRect(
+                    c,
+                    androidx.compose.ui.geometry.Offset(w * 0.14f, h * 0.22f),
+                    androidx.compose.ui.geometry.Size(w * 0.72f, h * 0.56f),
+                    androidx.compose.ui.geometry.CornerRadius(w * 0.08f),
+                    style = stroke,
+                )
+                drawCircle(c, radius = w * 0.08f, center = androidx.compose.ui.geometry.Offset(w * 0.34f, h * 0.40f))
+                val mountain = Path().apply {
+                    moveTo(w * 0.22f, h * 0.68f)
+                    lineTo(w * 0.42f, h * 0.48f)
+                    lineTo(w * 0.56f, h * 0.60f)
+                    lineTo(w * 0.70f, h * 0.44f)
+                    lineTo(w * 0.82f, h * 0.68f)
+                }
+                drawPath(mountain, c, style = stroke)
             }
         }
     }

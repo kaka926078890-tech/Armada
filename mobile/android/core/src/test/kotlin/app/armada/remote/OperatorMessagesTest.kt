@@ -32,6 +32,14 @@ class OperatorMessagesTest {
         assertEquals("任务已完成，正文尚未生成", operatorMessage("NO_ASSISTANT_BODY"))
         assertEquals("先写回复，或不选选项去点上面的答案", operatorMessage("ASK_TEXT_EMPTY"))
         assertEquals("回复太长，请缩短后再发", operatorMessage("ASK_TEXT_TOO_LONG"))
+        assertEquals("写点字或加一张图", operatorMessage("EMPTY_PROMPT"))
+        assertEquals("运行中只能发文字", operatorMessage("OUTBOUND_TEXT_ONLY"))
+        assertEquals("单张不能超过 8 MB", operatorMessage("ATTACHMENT_TOO_LARGE"))
+        assertEquals("只支持 PNG / JPEG", operatorMessage("ATTACHMENT_INVALID_MIME"))
+        assertEquals("最多 4 张图", operatorMessage("ATTACHMENT_COUNT"))
+        assertEquals("图片还没传到中台，请重试", operatorMessage("ATTACHMENT_NOT_FOUND"))
+        assertEquals("被控机关了贴图", operatorMessage("IMAGE_PASTE_DISABLED"))
+        assertEquals("图片没贴进 Cursor，请重试", operatorMessage("IMAGE_PASTE_FAILED"))
     }
 
     @Test

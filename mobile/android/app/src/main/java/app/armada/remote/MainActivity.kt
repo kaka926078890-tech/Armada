@@ -74,7 +74,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
@@ -577,6 +580,7 @@ fun DispatchModal(
     vm: SessionVm,
     workspace: WorkspaceDto,
     followupRunId: String?,
+    followupIsLive: Boolean = false,
     onSent: (BoardColumn) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -589,6 +593,7 @@ fun DispatchModal(
             vm,
             workspace,
             followupRunId,
+            followupIsLive,
             onSent = {
                 onSent(it)
                 onDismiss()
@@ -599,12 +604,14 @@ fun DispatchModal(
 }
 
 @Composable
-fun DispatchSheet(vm: SessionVm, workspace: WorkspaceDto, followupRunId: String?, onSent: (BoardColumn) -> Unit, onDismiss: () -> Unit) {
+fun DispatchSheet(vm: SessionVm, workspace: WorkspaceDto, followupRunId: String?, followupIsLive: Boolean, onSent: (BoardColumn) -> Unit, onDismiss: () -> Unit) {
     val state by vm.state.collectAsState()
     var prompt by remember { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
     var listening by remember { mutableStateOf(false) }
     var err by remember { mutableStateOf<String?>(null) }
+    var drafts by remember { mutableStateOf(listOf<ImagePrepare.Ok>()) }
+    var blobsAvailable by remember { mutableStateOf(true) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val speech = remember {
@@ -618,8 +625,34 @@ fun DispatchSheet(vm: SessionVm, workspace: WorkspaceDto, followupRunId: String?
     val micPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) speech.start(prompt) else err = dictationMessage("MIC_DENIED")
     }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(MAX_RUN_ATTACHMENTS)) { uris ->
+        if (uris.isEmpty()) return@rememberLauncherForActivityResult
+        val accepted = uris.take(MAX_RUN_ATTACHMENTS - drafts.size)
+        if (uris.size > accepted.size) err = operatorMessage("ATTACHMENT_COUNT")
+        val next = drafts.toMutableList()
+        for ((i, uri) in accepted.withIndex()) {
+            when (val got = prepareImageForUpload(context, uri, "image-$i")) {
+                is ImagePrepare.Ok -> next += got
+                is ImagePrepare.Fail -> err = if (got.code == "CONVERT") "无法转换这张图" else operatorMessage(got.code)
+            }
+        }
+        drafts = next
+    }
+    fun addClipboard() {
+        val uri = clipboardImageUri(context)
+        if (uri == null) return
+        if (!canAcceptMoreAttachments(drafts.size, 1)) {
+            err = operatorMessage("ATTACHMENT_COUNT")
+            return
+        }
+        when (val got = prepareImageForUpload(context, uri, "paste")) {
+            is ImagePrepare.Ok -> drafts = drafts + got
+            is ImagePrepare.Fail -> err = if (got.code == "CONVERT") "无法转换这张图" else operatorMessage(got.code)
+        }
+    }
     val trimmed = prompt.trim()
-    val canSend = workspace.canInject && !sending && !listening && trimmed.isNotEmpty()
+    val photoEnabled = !followupIsLive
+    val canSend = workspace.canInject && !sending && !listening && (trimmed.isNotEmpty() || (photoEnabled && drafts.isNotEmpty()))
     fun send() {
         if (listening) {
             speech.stop()
@@ -629,7 +662,25 @@ fun DispatchSheet(vm: SessionVm, workspace: WorkspaceDto, followupRunId: String?
         sending = true
         scope.launch {
             try {
-                val run = if (followupRunId != null) vm.api().followup(followupRunId, trimmed) else vm.api().dispatch(workspace.workspaceId, trimmed)
+                val ids = mutableListOf<String>()
+                if (photoEnabled) {
+                    for (draft in drafts) {
+                        try {
+                            ids += vm.api().uploadBlob(draft.bytes, draft.mime, draft.name).id
+                        } catch (e: RelayException) {
+                            if (e.code == "NO_ROUTE") {
+                                blobsAvailable = false
+                                drafts = emptyList()
+                            }
+                            throw e
+                        }
+                    }
+                }
+                val run = if (followupRunId != null) {
+                    vm.api().followup(followupRunId, trimmed, ids)
+                } else {
+                    vm.api().dispatch(workspace.workspaceId, trimmed, ids)
+                }
                 vm.refresh()
                 onSent(run.column)
             } catch (e: Exception) {
@@ -676,7 +727,7 @@ fun DispatchSheet(vm: SessionVm, workspace: WorkspaceDto, followupRunId: String?
                     GroupedDivider()
                 }
                 Text(
-                    if (trimmed.isEmpty()) "粘贴或语音后应显示字数" else "${prompt.length} 字",
+                    if (trimmed.isEmpty() && drafts.isEmpty()) "粘贴或语音后应显示字数" else "${prompt.length} 字",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(16.dp),
@@ -684,6 +735,37 @@ fun DispatchSheet(vm: SessionVm, workspace: WorkspaceDto, followupRunId: String?
                 if (listening) {
                     GroupedDivider()
                     Text("正在听…说完点停止，改完再派发", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(16.dp))
+                }
+            }
+        }
+        if (drafts.isNotEmpty()) {
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                drafts.forEachIndexed { i, draft ->
+                    val bmp = remember(draft.bytes) { android.graphics.BitmapFactory.decodeByteArray(draft.bytes, 0, draft.bytes.size) }
+                    Box {
+                        if (bmp != null) {
+                            androidx.compose.foundation.Image(
+                                bitmap = bmp.asImageBitmap(),
+                                contentDescription = draft.name,
+                                modifier = Modifier.size(56.dp).clip(RoundedCornerShape(8.dp)),
+                                contentScale = ContentScale.Crop,
+                            )
+                        } else {
+                            Box(Modifier.size(56.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)))
+                        }
+                        Text(
+                            "×",
+                            color = Color.White,
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .clickable { drafts = drafts.filterIndexed { idx, _ -> idx != i } }
+                                .background(Color.Black.copy(alpha = 0.45f), CircleShape)
+                                .padding(horizontal = 4.dp),
+                        )
+                    }
                 }
             }
         }
@@ -700,6 +782,21 @@ fun DispatchSheet(vm: SessionVm, workspace: WorkspaceDto, followupRunId: String?
                 else micPerm.launch(Manifest.permission.RECORD_AUDIO)
             },
             onSend = { send() },
+            photoVisible = blobsAvailable,
+            photoEnabled = photoEnabled && !sending,
+            onPhoto = {
+                if (!photoEnabled) {
+                    err = operatorMessage("OUTBOUND_TEXT_ONLY")
+                } else if (!canAcceptMoreAttachments(drafts.size, 1)) {
+                    err = operatorMessage("ATTACHMENT_COUNT")
+                } else {
+                    picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                }
+            },
+            onPhotoLong = {
+                if (!photoEnabled) err = operatorMessage("OUTBOUND_TEXT_ONLY")
+                else addClipboard()
+            },
         )
     }
 }
@@ -857,6 +954,7 @@ fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String, onBack: () -> 
                 vm = vm,
                 workspace = ws,
                 followupRunId = runId,
+                followupIsLive = run?.isLive == true,
                 onSent = { scope.launch { vm.refresh(); runCatching { adopt(vm.api().run(runId)) } } },
                 onDismiss = { showFollow = false },
             )

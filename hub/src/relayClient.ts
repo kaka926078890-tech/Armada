@@ -25,6 +25,8 @@ export type OutboundSnap = {
   createdAt: number;
 };
 
+export type SnapAttachment = { id: string; mime: string; name: string; size: number };
+
 export type RunSnap = {
   runId: string;
   machineId: string;
@@ -40,8 +42,29 @@ export type RunSnap = {
   queueMessageDefaultBehavior?: string | null;
   canRetry?: boolean;
   archived?: boolean;
+  attachments?: SnapAttachment[];
   updatedAt: number;
 };
+
+export function snapAttachmentsOf(run: any): SnapAttachment[] {
+  const raw = Array.isArray(run?.attachment_items) ? run.attachment_items
+    : Array.isArray(run?.attachments) && run.attachments.some((x: any) => x && typeof x === "object" && typeof (x.id ?? x.sha256) === "string")
+      ? run.attachments
+      : [];
+  const out: SnapAttachment[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const id = typeof item.id === "string" ? item.id : typeof item.sha256 === "string" ? item.sha256 : "";
+    if (!id) continue;
+    out.push({
+      id,
+      mime: typeof item.mime === "string" ? item.mime : "",
+      name: typeof item.name === "string" ? item.name : "",
+      size: typeof item.size === "number" ? item.size : 0,
+    });
+  }
+  return out;
+}
 
 function snapOutbound(raw: unknown): OutboundSnap[] {
   if (!Array.isArray(raw)) return [];
@@ -102,6 +125,7 @@ export function runToSnap(run: any, events: RunEvent[]): RunSnap {
   const cid = typeof run.conversation_id === "string" && run.conversation_id.trim()
     ? run.conversation_id.trim()
     : null;
+  const attachments = snapAttachmentsOf(run);
   return {
     runId: run.id,
     machineId: run.machine_id,
@@ -117,6 +141,7 @@ export function runToSnap(run: any, events: RunEvent[]): RunSnap {
     queueMessageDefaultBehavior: mode,
     canRetry: canRetryStatus(status),
     archived: Number(run.archived_at) > 0,
+    ...(attachments.length ? { attachments } : {}),
     updatedAt: Number(run.ended_at ?? run.started_at ?? run.created_at ?? Date.now()),
   };
 }

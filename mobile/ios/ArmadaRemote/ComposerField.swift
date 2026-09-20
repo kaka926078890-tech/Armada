@@ -9,13 +9,15 @@ struct ComposerField: UIViewRepresentable {
     var enabled: Bool
     var minHeight: CGFloat = 36
     var maxHeight: CGFloat = 132
+    var onPasteImage: ((Data) -> Void)? = nil
 
-    func makeCoordinator() -> Coord { Coord(text: $text) }
+    func makeCoordinator() -> Coord { Coord(text: $text, onPasteImage: onPasteImage) }
 
     func makeUIView(context: Context) -> ComposerTextView {
         let view = ComposerTextView()
         view.minHeight = minHeight
         view.maxHeight = maxHeight
+        view.onPasteImage = onPasteImage
         view.delegate = context.coordinator
         view.font = .preferredFont(forTextStyle: .body)
         view.backgroundColor = .clear
@@ -44,6 +46,8 @@ struct ComposerField: UIViewRepresentable {
 
     func updateUIView(_ uiView: ComposerTextView, context: Context) {
         context.coordinator.text = $text
+        context.coordinator.onPasteImage = onPasteImage
+        uiView.onPasteImage = onPasteImage
         uiView.minHeight = minHeight
         uiView.maxHeight = maxHeight
         uiView.isEditable = enabled
@@ -59,7 +63,11 @@ struct ComposerField: UIViewRepresentable {
 
     final class Coord: NSObject, UITextViewDelegate {
         var text: Binding<String>
-        init(text: Binding<String>) { self.text = text }
+        var onPasteImage: ((Data) -> Void)?
+        init(text: Binding<String>, onPasteImage: ((Data) -> Void)?) {
+            self.text = text
+            self.onPasteImage = onPasteImage
+        }
         func textViewDidChange(_ textView: UITextView) {
             (textView as? ComposerTextView)?.refreshPlaceholder()
             textView.invalidateIntrinsicContentSize()
@@ -72,9 +80,29 @@ final class ComposerTextView: UITextView {
     var minHeight: CGFloat = 36
     var maxHeight: CGFloat = 132
     let placeholderLabel = UILabel()
+    var onPasteImage: ((Data) -> Void)?
 
     func refreshPlaceholder() {
         placeholderLabel.isHidden = !(text ?? "").isEmpty
+    }
+
+    override func paste(_ sender: Any?) {
+        if let data = pngOrJpegFromPasteboard() {
+            onPasteImage?(data)
+            return
+        }
+        if let img = UIPasteboard.general.image, let jpeg = img.jpegData(compressionQuality: 0.92) {
+            onPasteImage?(jpeg)
+            return
+        }
+        super.paste(sender)
+    }
+
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        if action == #selector(paste(_:)), pngOrJpegFromPasteboard() != nil || UIPasteboard.general.image != nil {
+            return onPasteImage != nil || super.canPerformAction(action, withSender: sender)
+        }
+        return super.canPerformAction(action, withSender: sender)
     }
 
     override var intrinsicContentSize: CGSize {
@@ -84,4 +112,13 @@ final class ComposerTextView: UITextView {
         isScrollEnabled = fitting.height > maxHeight + 0.5
         return CGSize(width: UIView.noIntrinsicMetric, height: height)
     }
+}
+
+func pngOrJpegFromPasteboard() -> Data? {
+    let pb = UIPasteboard.general
+    if let d = pb.data(forPasteboardType: "public.png"), d.count >= 4,
+       d[0] == 0x89, d[1] == 0x50, d[2] == 0x4E, d[3] == 0x47 { return d }
+    if let d = pb.data(forPasteboardType: "public.jpeg"), d.count >= 3,
+       d[0] == 0xFF, d[1] == 0xD8, d[2] == 0xFF { return d }
+    return nil
 }

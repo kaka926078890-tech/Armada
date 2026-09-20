@@ -3,6 +3,7 @@ package app.armada.remote
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -72,15 +73,37 @@ class RelayClient(base: String, private val token: String) {
 
     suspend fun run(id: String): RunDto = parseRun(JSONObject(get("/mobile/runs/$id")))
 
-    suspend fun dispatch(workspaceId: String, prompt: String): RunDto {
+    suspend fun dispatch(workspaceId: String, prompt: String, attachmentIds: List<String> = emptyList()): RunDto {
         val body = JSONObject().put("workspaceId", workspaceId).put("prompt", prompt)
+        if (attachmentIds.isNotEmpty()) body.put("attachmentIds", JSONArray(attachmentIds))
         return parseRun(JSONObject(send("/mobile/runs", "POST", body.toString(), listOf(201))).getJSONObject("run"))
     }
 
-    suspend fun followup(runId: String, prompt: String): RunDto {
+    suspend fun followup(runId: String, prompt: String, attachmentIds: List<String> = emptyList()): RunDto {
         val body = JSONObject().put("prompt", prompt)
+        if (attachmentIds.isNotEmpty()) body.put("attachmentIds", JSONArray(attachmentIds))
         val o = JSONObject(send("/mobile/runs/$runId/followup", "POST", body.toString(), listOf(200, 201)))
         return parseFollowupAck(parseRun(o.getJSONObject("run")), o.optNullableString("outcome")).run
+    }
+
+    suspend fun uploadBlob(bytes: ByteArray, mime: String, name: String): BlobDto {
+        val media = mime.toMediaType()
+        val reqBody = MultipartBody.Builder().setType(MultipartBody.FORM)
+            .addFormDataPart("file", name, bytes.toRequestBody(media))
+            .build()
+        return withContext(Dispatchers.IO) {
+            val req = Request.Builder()
+                .url("$base/mobile/blobs")
+                .header("Authorization", "Bearer $token")
+                .post(reqBody)
+                .build()
+            http.newCall(req).execute().use { resp ->
+                val text = resp.body?.string().orEmpty()
+                if (resp.code == 404) throw RelayException("NO_ROUTE")
+                if (resp.code !in listOf(201)) throw RelayException(classifyHttp(resp.code, text))
+                parseBlob(JSONObject(text).getJSONObject("blob"))
+            }
+        }
     }
 
     suspend fun retry(runId: String): RunDto =
@@ -203,6 +226,24 @@ fun parseRun(o: JSONObject) = RunDto(
     updatedAt = if (o.has("updatedAt")) o.optLong("updatedAt") else null,
     title = o.optNullableString("title"),
     conversationId = o.optNullableString("conversationId"),
+    attachments = o.optJSONArray("attachments")?.let { arr ->
+        buildList { for (i in 0 until arr.length()) add(parseAttachment(arr.getJSONObject(i))) }
+    } ?: emptyList(),
+)
+
+private fun parseAttachment(o: JSONObject) = RunAttachmentDto(
+    id = o.optString("id"),
+    mime = o.optString("mime"),
+    name = o.optString("name"),
+    size = o.optLong("size"),
+)
+
+private fun parseBlob(o: JSONObject) = BlobDto(
+    id = o.getString("id"),
+    sha256 = o.optString("sha256").ifBlank { o.getString("id") },
+    mime = o.optString("mime"),
+    name = o.optString("name"),
+    size = o.optLong("size"),
 )
 
 private fun parseAsk(o: JSONObject): PendingAskDto {
