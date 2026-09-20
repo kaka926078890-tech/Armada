@@ -1,7 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import {
-  afterOpenWorkspaceFeedback,
-  afterZombieCleared,
+  advanceZombiePoll,
+  tryClaimExclusive,
+  watchdogOutcome,
   advertiseFailedCopy,
   boardUrl,
   copiedToast,
@@ -554,6 +555,27 @@ window.addEventListener("DOMContentLoaded", () => {
 const WATCHDOG_MS = 10_000;
 let openWsWatchdog: number | null = null;
 let openWsZombiePoll: number | null = null;
+const openWsGate = { claimed: false };
+
+function releaseOpenWorkspace() {
+  openWsGate.claimed = false;
+}
+
+function armOpenWorkspaceWatchdog(absPath: string, absentRetriesLeft: number) {
+  if (openWsWatchdog !== null) {
+    window.clearTimeout(openWsWatchdog);
+    openWsWatchdog = null;
+  }
+  openWsWatchdog = window.setTimeout(() => {
+    openWsWatchdog = null;
+    void invoke<CdpStatus>("cdp_status").then((s) => {
+      const out = watchdogOutcome(s, absentRetriesLeft);
+      if (out.toast) showToast(out.toast, out.retry ? "ok" : "err");
+      if (out.retry) armOpenWorkspaceWatchdog(absPath, absentRetriesLeft - 1);
+      else releaseOpenWorkspace();
+    }).catch(() => releaseOpenWorkspace());
+  }, WATCHDOG_MS);
+}
 
 function clearOpenWorkspaceTimers() {
   if (openWsWatchdog !== null) {
@@ -567,47 +589,58 @@ function clearOpenWorkspaceTimers() {
 }
 
 async function openWorkspaceFromBoard() {
+  if (!tryClaimExclusive(openWsGate)) return;
   let absPath: string;
   try {
     absPath = await invoke<string>("pick_workspace");
   } catch (e) {
+    releaseOpenWorkspace();
     const msg = String(e);
     if (msg.toLowerCase().includes("cancelled")) return;
     showToast(fleetErrorMessage(msg), "err");
     return;
   }
   absPath = absPath.trim();
-  if (!absPath) return;
+  if (!absPath) {
+    releaseOpenWorkspace();
+    return;
+  }
   setErr("");
   clearOpenWorkspaceTimers();
   try {
     await invoke("open_workspace", { absPath });
-    openWsWatchdog = window.setTimeout(() => {
-      openWsWatchdog = null;
-      void invoke<CdpStatus>("cdp_status").then((s) => {
-        const action = afterOpenWorkspaceFeedback("watchdog", s);
-        if (action && action !== "clear" && action !== "continue") showToast(action, "err");
-      });
-    }, WATCHDOG_MS);
+    armOpenWorkspaceWatchdog(absPath, 1);
   } catch (e) {
     const raw = String(e);
     showToast(fleetErrorMessage(raw), "err");
     if (raw.toLowerCase().includes("zombie")) {
+      const pollGate = { claimed: false, absentTicks: 0 };
       openWsZombiePoll = window.setInterval(() => {
         void invoke<CdpStatus>("cdp_status").then((s) => {
-          const next = afterZombieCleared(s);
-          if (next === "wait") return;
+          const next = advanceZombiePoll(pollGate, s);
+          if (next.action === "wait") return;
           if (openWsZombiePoll !== null) {
             window.clearInterval(openWsZombiePoll);
             openWsZombiePoll = null;
           }
-          if (next === "launch") {
-            void invoke("open_workspace", { absPath }).catch((err) => {
-              showToast(fleetErrorMessage(String(err)), "err");
-            });
+          if (next.action === "ready") {
+            releaseOpenWorkspace();
+            return;
+          }
+          if (next.action === "launch") {
+            void invoke("open_workspace", { absPath })
+              .then(() => {
+                armOpenWorkspaceWatchdog(absPath, 1);
+              })
+              .catch((err) => {
+                showToast(fleetErrorMessage(String(err)), "err");
+                releaseOpenWorkspace();
+              });
           }
         });
       }, 1000);
+    } else {
+      releaseOpenWorkspace();
     }
   }
 }

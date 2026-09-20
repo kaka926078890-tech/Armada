@@ -202,6 +202,10 @@ pub fn plan_open(
     match status {
         CdpStatus::Zombie => Ok(OpenPlan::BlockZombie),
         CdpStatus::Ready => {
+            // Reuse the live instance. macOS `open -n` starts a second Cursor without
+            // debug flags and it steals the profile (restart loop on update recovery).
+            // Windows: pass only the folder so the existing single-instance process
+            // opens it; do not add a force-new switch.
             if os == "windows" {
                 let exe = cursor_exe.ok_or("cursor-missing")?;
                 Ok(OpenPlan::OpenExisting {
@@ -212,7 +216,7 @@ pub fn plan_open(
             } else {
                 Ok(OpenPlan::OpenExisting {
                     program: "open".into(),
-                    args: vec!["-na".into(), "Cursor".into(), "--args".into(), abs_path.to_string()],
+                    args: vec!["-a".into(), "Cursor".into(), abs_path.to_string()],
                     wait: true,
                 })
             }
@@ -391,7 +395,7 @@ mod tests {
     }
 
     #[test]
-    fn ready_macos_is_open_na_not_launcher() {
+    fn ready_macos_reuses_running_instance() {
         let plan = plan_open(
             CdpStatus::Ready,
             "/tmp/ws",
@@ -403,9 +407,12 @@ mod tests {
         assert!(!plan.uses_launcher());
         let blob = plan.argv_blob();
         assert!(blob.contains("open"));
-        assert!(blob.contains("-na"));
+        assert!(blob.contains("-a"));
+        assert!(!blob.contains("-na"));
+        assert!(!blob.contains("-n "));
         assert!(blob.contains("Cursor"));
         assert!(blob.contains("/tmp/ws"));
+        assert!(!blob.contains("--args"));
         assert!(!blob.contains("armada-cursor"));
         assert!(!blob.contains("remote-debugging-port"));
     }
@@ -426,6 +433,10 @@ mod tests {
         assert!(blob.contains(r"C:\ws"));
         assert!(!blob.contains("armada-cursor"));
         assert!(!blob.contains("remote-debugging-port"));
+        match plan {
+            OpenPlan::OpenExisting { args, .. } => assert_eq!(args, vec![r"C:\ws".to_string()]),
+            _ => panic!("ready windows must OpenExisting"),
+        }
     }
 
     #[test]
@@ -536,6 +547,15 @@ mod tests {
         assert!(p.is_file());
         let name = p.file_name().unwrap().to_string_lossy();
         assert!(name.starts_with("armada-cursor."));
+    }
+
+    #[test]
+    fn macos_launcher_script_does_not_force_new_instance() {
+        let p = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/armada-cursor.sh");
+        let s = std::fs::read_to_string(&p).expect("armada-cursor.sh");
+        assert!(s.contains("open -a \"Cursor\""), "launcher must reuse LaunchServices");
+        assert!(!s.contains("open -na"), "open -n starts a second Cursor that fights the profile");
+        assert!(!s.contains("open -n "));
     }
 
     #[test]

@@ -24,4 +24,5 @@ if pgrep -x Cursor >/dev/null 2>&1; then
   exit 1
 fi
 
-exec open -na "Cursor" --args --remote-debugging-port="$PORT" --remote-debugging-address=127.0.0.1 "$@"
+# 不要 open -n/-na：第二个 Cursor 会抢同一 profile，和更新器/残进程互杀成重启死循环。
+exec open -a "Cursor" --args --remote-debugging-port="$PORT" --remote-debugging-address=127.0.0.1 "$@"
