@@ -10,9 +10,17 @@ Armada 按 **面** 发版：扩展、桌面、iOS、Android 可以不同号。RE
 
 ## Unreleased
 
+---
+
+## 2026-09-20 — 扩展 0.4.36 · iOS TF 25 · Android 0.1.11 · 桌面 0.1.0
+
 ### 修复
 
 - TestFlight 锁屏通知：Rel-M6 把 `sandboxReceipt` 误当成 APNs sandbox，token 打到 `api.sandbox.push.apple.com` 全部失败。Release 仍登记 production；中转对误标 sandbox 的 token 先打生产主机。
+
+### 操作员注意
+
+装 iOS TestFlight **25**。24 仍会把 device token 报成 sandbox。扩展仍是 **0.4.36**；Android **0.1.11**；桌面 **0.1.0**。
 
 ---
 
