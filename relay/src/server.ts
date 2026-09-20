@@ -28,6 +28,29 @@ export type WorkspaceSnap = {
   cdpReady?: boolean;
 };
 
+type CursorReloadSnap = {
+  pending: unknown;
+  needed: boolean;
+  neededMachineIds: string[];
+};
+
+function emptyCursorReload(): CursorReloadSnap {
+  return { pending: null, needed: false, neededMachineIds: [] };
+}
+
+function parseCursorReloadSnap(raw: unknown): CursorReloadSnap | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const o = raw as Record<string, unknown>;
+  const ids = Array.isArray(o.neededMachineIds)
+    ? o.neededMachineIds.filter((x): x is string => typeof x === "string" && x.trim().length > 0)
+    : [];
+  return {
+    pending: o.pending ?? null,
+    needed: o.needed === true,
+    neededMachineIds: ids,
+  };
+}
+
 function machineLabel(m: any): string {
   const d = typeof m.display_name === "string" ? m.display_name.trim() : "";
   if (d) return d;
@@ -119,6 +142,7 @@ export function createRelayServer(opts: {
   const publicBase = opts.publicBase.replace(/\/+$/, "");
   const pending = new Map<string, Pending>();
   const hubSockets = new Map<string, { send: (s: string) => void; ws: unknown }>();
+  const cursorReloadByFleet = new Map<string, CursorReloadSnap>();
   const rate = new Map<string, number[]>();
   const blobRate = new Map<string, number[]>();
   const blobUploads = new Map<string, BlobUploadSession>();
@@ -403,6 +427,7 @@ export function createRelayServer(opts: {
       online: boolean;
       cdpReady: boolean;
     }[];
+    cursorReload?: CursorReloadSnap;
   } {
     const fleet = getFleet(fleetId);
     const hubOffline = !fleet || fleet.hub_online !== 1;
@@ -417,7 +442,11 @@ export function createRelayServer(opts: {
       online: w.online !== false,
       cdpReady: w.cdpReady === true,
     }));
-    return { type: "workspaces", hubOffline, workspaces };
+    if (hubOffline) return { type: "workspaces", hubOffline, workspaces, cursorReload: emptyCursorReload() };
+    const cursorReload = cursorReloadByFleet.get(fleetId);
+    return cursorReload
+      ? { type: "workspaces", hubOffline, workspaces, cursorReload }
+      : { type: "workspaces", hubOffline, workspaces };
   }
 
   function emitWorkspaces(fleetId: string) {
@@ -533,8 +562,8 @@ export function createRelayServer(opts: {
 
   app.get("/mobile/workspaces", (c) => {
     const fleet = (c as any).get("fleet") as { id: string };
-    const { hubOffline, workspaces } = workspacesPayload(fleet.id);
-    return c.json({ hubOffline, workspaces });
+    const { hubOffline, workspaces, cursorReload } = workspacesPayload(fleet.id);
+    return c.json(cursorReload ? { hubOffline, workspaces, cursorReload } : { hubOffline, workspaces });
   });
 
   app.get("/mobile/prompt-snippets", async (c) => {
@@ -977,6 +1006,8 @@ export function createRelayServer(opts: {
           }
           }
           db.query("UPDATE fleets SET workspaces=?1 WHERE id=?2").run(JSON.stringify(slots), fleetId);
+          const reload = parseCursorReloadSnap(msg.cursorReload);
+          if (reload) cursorReloadByFleet.set(fleetId, reload);
           emitWorkspaces(fleetId);
         } else if (msg.type === "snap.run" && msg.run) {
           applyRunSnap(fleetId, msg.run);
@@ -995,6 +1026,7 @@ export function createRelayServer(opts: {
         if (cur?.ws !== ws) return;
         hubSockets.delete(id);
         db.query("UPDATE fleets SET hub_online=0 WHERE id=?1").run(id);
+        cursorReloadByFleet.delete(id);
         emitWorkspaces(id);
       },
     },

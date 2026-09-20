@@ -608,6 +608,7 @@ describe("hub outbound to relay", () => {
   test("onCommand uses shared createRelayCommandHandler including Reload", () => {
     const src = readFileSync(join(import.meta.dir, "../src/relayClient.ts"), "utf8");
     expect(src).toContain("createRelayCommandHandler");
+    expect(src).toContain("cursorReloadView");
     const handler = readFileSync(join(import.meta.dir, "../src/relayCommandHandler.ts"), "utf8");
     for (const cmd of [
       "cmd.dispatch", "cmd.followup", "cmd.retry", "cmd.answer", "cmd.cancel",

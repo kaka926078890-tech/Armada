@@ -18,7 +18,6 @@ import { DispatchModal } from "./components/Modals";
 import { alertCompletions, alertNeedInput, ensureNotifyPermission, seedAskStatus, seedRunStatus, stopTitleMarquee, takeNewlyAlertable, takeNewlyNeedInput } from "./completionNotify";
 import { applyFontScale, applyTheme, loadFontScale, loadTheme, saveFontScale, saveTheme, type FontScale, type ThemeName } from "./theme";
 import SettingsModal from "./components/SettingsModal";
-import CursorReloadBar from "./components/CursorReloadBar";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
 import { UI_META, UI_TYPE } from "./ui";
@@ -68,7 +67,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [snippets, setSnippets] = useState<PromptSnippet[]>([]);
   const [snippetError, setSnippetError] = useState("");
-  const [cursorReload, setCursorReload] = useState<{ needed: boolean; vsix?: string }>({ needed: false });
+  const [cursorReload, setCursorReload] = useState<{ needed: boolean; neededMachineIds: string[] }>({ needed: false, neededMachineIds: [] });
   const desktop = isDesktopShell(window.location.search);
   const askedHost = useRef(false);
   const readMapRef = useRef(readMap);
@@ -163,7 +162,10 @@ export default function App() {
         setMachines(m);
         setRuns(Array.isArray(r) ? r : []);
         setHiddenRuns(Array.isArray(hidden) ? hidden : []);
-        setCursorReload({ needed: !!reload?.needed, vsix: reload?.pending?.vsix });
+        setCursorReload({
+          needed: !!reload?.needed,
+          neededMachineIds: Array.isArray(reload?.neededMachineIds) ? reload.neededMachineIds.filter((id): id is string => typeof id === "string") : [],
+        });
         setLoadError("");
       })
       .catch((e) => {
@@ -424,23 +426,18 @@ export default function App() {
         >
           {showArchived ? "返回看板" : `查看已隐藏${hiddenRuns.length ? ` ${hiddenRuns.length}` : ""}`}
         </Button>
-        <span className={`ml-auto flex items-center gap-2 ${UI_META} text-muted-foreground shrink-0 whitespace-nowrap`}>
-          在线 {machines.filter((m) => m.status === "online").length}/{machines.length}
-          <Button type="button" variant="outline" onClick={() => { reloadSnippets(); setSettingsOpen(true); }}>
+        <span className="ml-auto flex items-center gap-2 flex-wrap shrink-0">
+          <span className={`${UI_META} text-muted-foreground whitespace-nowrap`}>
+            在线 {machines.filter((m) => m.status === "online").length}/{machines.length}
+          </span>
+          <Button type="button" variant="outline" className="shrink-0" onClick={() => { reloadSnippets(); setSettingsOpen(true); }}>
             设置
           </Button>
-          <Button type="button" variant="outline" onClick={leaveFleet}>
+          <Button type="button" variant="outline" className="shrink-0" onClick={leaveFleet}>
             退出中台
           </Button>
         </span>
       </header>
-      <CursorReloadBar
-        needed={cursorReload.needed}
-        vsix={cursorReload.vsix}
-        onNow={() => { void api.postCursorReload("now").then(() => refresh()); }}
-        onIdle={() => { void api.postCursorReload("when-idle").then(() => refresh()); }}
-        onSkip={() => { void api.postCursorReload("skip").then(() => refresh()); }}
-      />
       <div className="flex flex-1 min-h-0">
         <Sidebar
           slots={slots}
@@ -456,8 +453,9 @@ export default function App() {
           onRepairCdp={() => requestDesktop("repair-cdp")}
           onGetShareLink={() => requestDesktop("get-share-link")}
           onReloadMachine={(id, action) => { void api.postCursorReload(action, id).then(() => refresh()); }}
+          reloadMachineIds={cursorReload.neededMachineIds}
         />
-        <div className="flex-1 min-w-0 min-h-0 flex flex-col">
+        <div className="flex-1 min-w-0 min-h-0 flex flex-col relative">
           {showArchived && (
             <div className={`px-4 py-1.5 ${UI_META} text-amber-700 dark:text-amber-200 bg-amber-500/10 border-b border-amber-500/20`}>
               正在查看中台已隐藏的卡片（数据未删除，可取消隐藏）
@@ -475,26 +473,26 @@ export default function App() {
             onRename={(id, prompt) => { api.renameRun(id, prompt).then(refresh); }}
             onRetry={(id) => { api.retry(id).then(refresh); }}
           />
+          {selectedRun && (
+            <div className="absolute inset-0 z-40">
+              <button type="button" className="absolute inset-0 bg-black/70 backdrop-blur-[2px]" aria-label="关闭详情" onClick={() => setSelectedRun(null)} />
+              <div className="absolute inset-y-0 right-0 flex pointer-events-none max-w-full">
+                <div className="pointer-events-auto h-full min-h-0 max-w-full">
+                  <RunDetail
+                    runId={selectedRun}
+                    machines={machines}
+                    onClose={() => setSelectedRun(null)}
+                    onChanged={refresh}
+                    snippets={snippets}
+                    saveSnippets={saveSnippets}
+                    reloadSnippets={reloadSnippets}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
-      {selectedRun && (
-        <div className="fixed inset-0 z-40">
-          <button type="button" className="absolute inset-0 bg-black/70 backdrop-blur-[2px]" aria-label="关闭详情" onClick={() => setSelectedRun(null)} />
-          <div className="absolute inset-y-0 right-0 flex pointer-events-none">
-            <div className="pointer-events-auto h-full min-h-0">
-              <RunDetail
-                runId={selectedRun}
-                machines={machines}
-                onClose={() => setSelectedRun(null)}
-                onChanged={refresh}
-                snippets={snippets}
-                saveSnippets={saveSnippets}
-                reloadSnippets={reloadSnippets}
-              />
-            </div>
-          </div>
-        </div>
-      )}
       {dispatchOpen && preset && (
         <DispatchModal
           machines={machines}

@@ -275,7 +275,7 @@ final class Session: ObservableObject {
             } catch {
                 newHidden = hiddenRuns
             }
-            let reloadState = try? await reload
+            let reloadState = ws.cursorReload ?? (try? await reload)
             guard seq == refreshSeq else { return }
             if hubOffline != ws.hubOffline { hubOffline = ws.hubOffline }
             if workspaces != ws.workspaces { workspaces = ws.workspaces }
@@ -412,6 +412,7 @@ final class Session: ObservableObject {
         if frame.type == "workspaces", let list = frame.workspaces, let offline = frame.hubOffline {
             if hubOffline != offline { hubOffline = offline }
             if workspaces != list { workspaces = list }
+            if let reload = frame.cursorReload, cursorReload != reload { cursorReload = reload }
             if optionalChanged(lastError, nil) { lastError = nil }
             applyBadge()
             return
@@ -505,6 +506,14 @@ final class Session: ObservableObject {
 
     func hasLive(_ workspace: WorkspaceDTO) -> Bool {
         runs(in: workspace).contains(where: \.isLive)
+    }
+
+    func machineNeedsReload(_ machineId: String) -> Bool {
+        guard let reload = cursorReload else { return false }
+        if let ids = reload.neededMachineIds {
+            return ids.contains(machineId)
+        }
+        return reload.needed
     }
 
     var machineGroups: [(id: String, name: String, slots: [WorkspaceDTO])] {

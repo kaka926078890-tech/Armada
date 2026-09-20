@@ -55,10 +55,11 @@ export function attachWithConfig(
   const fpOf = (row: any) =>
     `${row.status ?? ""}|${row.ended_at ?? ""}|${row.prompt ?? ""}|${JSON.stringify(row.pending_ask ?? null)}|${JSON.stringify(row.outbound ?? [])}|${row.archived_at ?? ""}|${row.finalText ?? row.final_text ?? ""}`;
 
-  const pushWorkspaces = async (machines?: any[]) => {
+  const pushWorkspaces = async (machines?: any[], cursorReload?: unknown) => {
     const list = machines ?? await (await hubFetch("/api/machines")).json().catch(() => null);
     if (!Array.isArray(list)) return;
-    send({ type: "snap.workspaces", machines: list });
+    const reload = cursorReload ?? await (await hubFetch("/api/cursor-reload")).json().catch(() => null);
+    send({ type: "snap.workspaces", machines: list, ...(reload && typeof reload === "object" ? { cursorReload: reload } : {}) });
   };
 
   const pushRun = async (runId: string) => {
@@ -71,11 +72,15 @@ export function attachWithConfig(
     polling = true;
     try {
       const machines = await (await hubFetch("/api/machines")).json().catch(() => null);
+      const reload = await (await hubFetch("/api/cursor-reload")).json().catch(() => null);
       if (Array.isArray(machines)) {
-        const fp = JSON.stringify(machines.map((m: any) => [m.id, m.status, m.open_workspaces ?? m.openWorkspaces, m.cdp_ready ?? null]));
+        const fp = JSON.stringify({
+          machines: machines.map((m: any) => [m.id, m.status, m.open_workspaces ?? m.openWorkspaces, m.cdp_ready ?? null, m.extension_version ?? m.extensionVersion ?? null]),
+          reload,
+        });
         if (fp !== lastMachinesFp) {
           lastMachinesFp = fp;
-          await pushWorkspaces(machines);
+          await pushWorkspaces(machines, reload);
         }
       }
       const runs = await (await hubFetch("/api/runs")).json().catch(() => null);

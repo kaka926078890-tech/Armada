@@ -228,6 +228,8 @@ describe("relay attach (HTTP hub)", () => {
     expect(clientSrc).toContain("createRelayCommandHandler");
     expect(attachSrc).toContain("startRelayHeartbeat");
     expect(clientSrc).toContain("startRelayHeartbeat");
+    expect(attachSrc).toContain("extension_version");
+    expect(attachSrc).toContain("/api/cursor-reload");
     expect(handlerSrc).toMatch(/\.ping\s*\(/);
     expect(handlerSrc).toContain("cmd.blobPut");
   });

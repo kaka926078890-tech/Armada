@@ -21,6 +21,8 @@ describe("appearance layout stays coordinated when text scales", () => {
     expect(header).toContain("flex-wrap");
     expect(header).toContain("whitespace-nowrap");
     expect(header).toContain("shrink-0");
+    expect(app).toContain("absolute inset-0 z-40");
+    expect(app).not.toContain("fixed inset-0 z-40");
   });
 
   test("kanban titles wrap by word and clamp later lines", () => {
@@ -42,15 +44,12 @@ describe("appearance layout stays coordinated when text scales", () => {
     expect(board).not.toMatch(/max-w-\[240px\]/);
   });
 
-  test("hub and App share cursor vsix reload controls", () => {
+  test("hub and App share cursor vsix reload controls on the machine region", () => {
     const app = readFileSync(join(web, "src/App.tsx"), "utf8");
-    const bar = readFileSync(join(web, "src/components/CursorReloadBar.tsx"), "utf8");
     const ios = readFileSync(join(repo, "mobile/ios/ArmadaRemote/Screens.swift"), "utf8");
     const android = readFileSync(join(repo, "mobile/android/app/src/main/java/app/armada/remote/MainActivity.kt"), "utf8");
-    expect(app).toContain("CursorReloadBar");
-    expect(bar).toContain("现在 Reload");
-    expect(bar).toContain("空闲后自动");
-    expect(bar).toContain("这次跳过");
+    expect(app).not.toContain("CursorReloadBar");
+    expect(app).toContain("reloadMachineIds");
     expect(ios).toContain("现在 Reload");
     expect(android).toContain("现在 Reload");
     expect(ios).toContain("machineId");
@@ -58,6 +57,10 @@ describe("appearance layout stays coordinated when text scales", () => {
     const sidebar = readFileSync(join(web, "src/components/Sidebar.tsx"), "utf8");
     expect(sidebar).toContain("onReloadMachine");
     expect(sidebar).toContain("现在 Reload");
+    const board = readFileSync(join(web, "src/components/Board.tsx"), "utf8");
+    expect(board).not.toContain("extensionLagNotice");
+    expect(ios).not.toContain("本机 Cursor 扩展已更新");
+    expect(android).not.toContain("本机 Cursor 扩展已更新");
   });
 
   test("desktop window is a board, not an 800x600 document", () => {

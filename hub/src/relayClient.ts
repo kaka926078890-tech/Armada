@@ -7,6 +7,7 @@ import { runDisplayName } from "../web/src/boardState";
 import type { RunEvent } from "../web/src/types";
 import { canRetryStatus, TERMINAL_STATUSES } from "./concurrency";
 import { createRelayCommandHandler, startRelayHeartbeat } from "./relayCommandHandler";
+import { cursorReloadView } from "./cursorReloadStore";
 import type { Registry } from "./registry";
 import type { RunService } from "./runs";
 import type { SseHub } from "./sse";
@@ -178,7 +179,11 @@ export function startRelayClient(opts: {
   };
 
   const pushWorkspaces = () => {
-    send({ type: "snap.workspaces", machines: opts.registry.listMachines() });
+    send({
+      type: "snap.workspaces",
+      machines: opts.registry.listMachines(),
+      cursorReload: cursorReloadView(opts.home, opts.registry.listMachines()),
+    });
   };
 
   const pushRun = (runId: string) => {

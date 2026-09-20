@@ -11,6 +11,7 @@ import {
   pendingFromAction,
   reloadStillNeeded,
   reloadStillNeededForFleet,
+  neededReloadMachineIds,
   windowHasInFlightArmadaRun,
   type ReloadFireState,
 } from "../src/cursorReload";
@@ -209,6 +210,28 @@ describe("reloadStillNeededForFleet", () => {
       { id: "mac", status: "online", extension_version: "0.4.27" },
       { id: "win", status: "online", extension_version: "0.4.26" },
     ])).toBe(false);
+  });
+});
+
+describe("neededReloadMachineIds", () => {
+  const pending = { action: "when-idle" as const, vsix: "0.4.33", setAt: 1, notBefore: 1 };
+  test("drops a machine that already reloaded to the pending vsix", () => {
+    expect(neededReloadMachineIds(pending, [
+      { id: "mac", status: "online", extension_version: "0.4.33" },
+      { id: "win", status: "online", extension_version: "0.4.32" },
+    ], "0.4.33")).toEqual(["win"]);
+  });
+  test("without pending, still names online machines behind the required vsix", () => {
+    expect(neededReloadMachineIds(null, [
+      { id: "mac", status: "online", extension_version: "0.4.33" },
+      { id: "win", status: "online", extension_version: "0.4.32" },
+    ], "0.4.33")).toEqual(["win"]);
+  });
+  test("offline installs do not keep a reloaded machine dirty", () => {
+    expect(neededReloadMachineIds(pending, [
+      { id: "mac", status: "online", extension_version: "0.4.33" },
+      { id: "old", status: "offline", extension_version: "0.4.18" },
+    ], "0.4.33")).toEqual([]);
   });
 });
 

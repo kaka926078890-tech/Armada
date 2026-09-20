@@ -168,6 +168,12 @@ class SessionVm(app: Application) : AndroidViewModel(app) {
 
     fun isUnread(run: RunDto) = app.armada.remote.isUnread(run, readAt)
 
+    fun machineNeedsReload(machineId: String): Boolean {
+        val reload = _state.value.cursorReload ?: return false
+        val ids = reload.neededMachineIds
+        return if (ids != null) ids.contains(machineId) else reload.needed
+    }
+
     fun startLive() {
         live?.cancel()
         live = viewModelScope.launch { runLive() }
@@ -231,7 +237,13 @@ class SessionVm(app: Application) : AndroidViewModel(app) {
             "workspaces" -> {
                 val arr = frame.optJSONArray("workspaces") ?: return
                 val list = buildList { for (i in 0 until arr.length()) add(parseWorkspace(arr.getJSONObject(i))) }
-                _state.value = _state.value.copy(hubOffline = frame.optBoolean("hubOffline"), workspaces = list, lastError = null)
+                val reload = frame.optJSONObject("cursorReload")?.let(::parseCursorReload)
+                _state.value = _state.value.copy(
+                    hubOffline = frame.optBoolean("hubOffline"),
+                    workspaces = list,
+                    cursorReload = reload ?: _state.value.cursorReload,
+                    lastError = null,
+                )
             }
             "run" -> {
                 val run = frame.optJSONObject("run")?.let(::parseRun) ?: return
@@ -248,8 +260,8 @@ class SessionVm(app: Application) : AndroidViewModel(app) {
         val seq = refreshSeq
         try {
             val client = api()
-            val (offline, ws) = withContext(Dispatchers.IO) { client.workspaces() }
-            val reload = withContext(Dispatchers.IO) { runCatching { client.cursorReload() }.getOrNull() }
+            val (offline, ws, fromWs) = withContext(Dispatchers.IO) { client.workspaces() }
+            val reload = fromWs ?: withContext(Dispatchers.IO) { runCatching { client.cursorReload() }.getOrNull() }
             val runs = withContext(Dispatchers.IO) { client.runs() }
             val hidden = withContext(Dispatchers.IO) {
                 runCatching { client.runs(hidden = true) }.getOrDefault(_state.value.board.hidden)

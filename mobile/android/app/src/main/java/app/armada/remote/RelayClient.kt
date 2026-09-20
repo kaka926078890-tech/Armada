@@ -38,35 +38,23 @@ class RelayClient(base: String, private val token: String) {
         private const val BLOB_CHUNK = 6 * 1024
     }
 
-    suspend fun workspaces(): Pair<Boolean, List<WorkspaceDto>> {
+    suspend fun workspaces(): Triple<Boolean, List<WorkspaceDto>, CursorReloadDto?> {
         val o = JSONObject(get("/mobile/workspaces"))
         val list = o.optJSONArray("workspaces") ?: JSONArray()
         val ws = buildList {
             for (i in 0 until list.length()) add(parseWorkspace(list.getJSONObject(i)))
         }
-        return o.optBoolean("hubOffline") to ws
+        return Triple(o.optBoolean("hubOffline"), ws, o.optJSONObject("cursorReload")?.let(::parseCursorReload))
     }
 
     suspend fun cursorReload(): CursorReloadDto {
-        val o = JSONObject(get("/mobile/cursor-reload"))
-        val pending = o.optJSONObject("pending")
-        return CursorReloadDto(
-            needed = o.optBoolean("needed"),
-            vsix = pending?.optString("vsix")?.ifBlank { null },
-            action = pending?.optString("action")?.ifBlank { null },
-        )
+        return parseCursorReload(JSONObject(get("/mobile/cursor-reload")))
     }
 
     suspend fun setCursorReload(action: String, machineId: String? = null): CursorReloadDto {
         val body = JSONObject().put("action", action)
         if (machineId != null) body.put("machineId", machineId)
-        val o = JSONObject(send("/mobile/cursor-reload", "POST", body.toString(), listOf(200)))
-        val pending = o.optJSONObject("pending")
-        return CursorReloadDto(
-            needed = o.optBoolean("needed"),
-            vsix = pending?.optString("vsix")?.ifBlank { null },
-            action = pending?.optString("action")?.ifBlank { null },
-        )
+        return parseCursorReload(JSONObject(send("/mobile/cursor-reload", "POST", body.toString(), listOf(200))))
     }
 
     suspend fun runs(hidden: Boolean = false): List<RunDto> {
@@ -242,6 +230,24 @@ fun parseWorkspace(o: JSONObject) = WorkspaceDto(
     online = if (o.has("online")) o.optBoolean("online") else true,
     cdpReady = o.optBoolean("cdpReady"),
 )
+
+fun parseCursorReload(o: JSONObject): CursorReloadDto {
+    val pending = o.optJSONObject("pending")
+    val ids = o.optJSONArray("neededMachineIds")
+    return CursorReloadDto(
+        needed = o.optBoolean("needed"),
+        vsix = pending?.optString("vsix")?.ifBlank { null },
+        action = pending?.optString("action")?.ifBlank { null },
+        neededMachineIds = ids?.let { arr ->
+            buildList {
+                for (i in 0 until arr.length()) {
+                    val id = arr.optString(i)
+                    if (id.isNotBlank()) add(id)
+                }
+            }
+        },
+    )
+}
 
 fun parseRun(o: JSONObject) = RunDto(
     runId = o.getString("runId"),

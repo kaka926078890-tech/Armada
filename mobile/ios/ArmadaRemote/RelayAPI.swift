@@ -43,6 +43,7 @@ struct WorkspaceDTO: Decodable, Identifiable, Hashable {
 struct WorkspacesResponse: Decodable {
     var hubOffline: Bool
     var workspaces: [WorkspaceDTO]
+    var cursorReload: CursorReloadDTO?
 }
 
 struct CursorReloadPending: Decodable, Equatable {
@@ -53,6 +54,7 @@ struct CursorReloadPending: Decodable, Equatable {
 struct CursorReloadDTO: Decodable, Equatable {
     var needed: Bool
     var pending: CursorReloadPending?
+    var neededMachineIds: [String]?
 }
 
 struct PendingAskOption: Decodable, Identifiable, Hashable {
@@ -273,6 +275,7 @@ struct StreamFrame: Decodable {
     var hubOffline: Bool?
     var workspaces: [WorkspaceDTO]?
     var run: RunDTO?
+    var cursorReload: CursorReloadDTO?
 }
 
 struct EmptyJSON: Decodable {}

@@ -27,8 +27,8 @@ describe("hub UI density is one scale", () => {
     const ask = readFileSync(join(srcRoot, "components/ChatThread.tsx"), "utf8");
     expect(conf.style).toBe("radix-nova");
     expect(button).toContain("text-[13px]");
-    expect(button).toContain('"h-8');
-    expect(button).toContain('sm: "h-7');
+    expect(button).toContain("min-h-8");
+    expect(button).toContain("min-h-7");
     expect(button).toContain('plan: "bg-plan');
     expect(bar).toContain('size="sm"');
     expect(bar).toContain("rounded-full");

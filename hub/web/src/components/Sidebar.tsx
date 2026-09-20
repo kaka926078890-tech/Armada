@@ -45,7 +45,7 @@ function LiveSpinner() {
 
 export default function Sidebar({
   slots, machines, allRuns, selectedKey, onSelectWorkspace, readMap, onDispatch, onRename,
-  showDesktopActions, onOpenWorkspace, onRepairCdp, onGetShareLink, onReloadMachine,
+  showDesktopActions, onOpenWorkspace, onRepairCdp, onGetShareLink, onReloadMachine, reloadMachineIds,
 }: {
   slots: WorkspaceSlot[];
   machines: Machine[];
@@ -60,6 +60,7 @@ export default function Sidebar({
   onRepairCdp?: () => void;
   onGetShareLink?: () => void;
   onReloadMachine?: (machineId: string, action: "now" | "when-idle" | "skip") => void;
+  reloadMachineIds?: string[];
 }) {
   const groups = groupSlotsByMachine(slots);
   const selected = slots.find((s) => encodeWorkspaceKey(s.machineId, s.root) === selectedKey);
@@ -76,7 +77,7 @@ export default function Sidebar({
   };
 
   return (
-    <aside className="w-[224px] shrink-0 border-r border-border flex flex-col bg-sidebar text-sidebar-foreground">
+    <aside className="w-[224px] shrink-0 border-r border-border flex flex-col bg-sidebar text-sidebar-foreground overflow-x-hidden">
       {showDesktopActions ? (
         <div className="mx-3 mt-3 mb-1.5 flex flex-col gap-1.5">
           <Button type="button" variant="outline" className="w-full" onClick={onOpenWorkspace}>
@@ -140,7 +141,7 @@ export default function Sidebar({
             {lag ? (
               <div className={`pl-7 pr-3 pb-1 ${UI_META} text-amber-400 leading-snug`}>{lag}</div>
             ) : null}
-            {g.online && lag && onReloadMachine ? (
+            {g.online && (lag || reloadMachineIds?.includes(g.machineId)) && onReloadMachine ? (
               <div className="pl-7 pr-3 pb-1 flex flex-wrap gap-1">
                 <Button type="button" size="sm" className="whitespace-nowrap" onClick={() => onReloadMachine(g.machineId, "now")}>现在 Reload</Button>
                 <Button type="button" size="sm" variant="outline" className="whitespace-nowrap" onClick={() => onReloadMachine(g.machineId, "when-idle")}>空闲后自动</Button>

@@ -444,6 +444,35 @@ describe("relay serve", () => {
     ws.close();
   });
 
+  test("snap.workspaces cursorReload is on the operator list and SSE", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    ws.send(JSON.stringify({
+      type: "snap.workspaces",
+      machines: [{
+        id: "m-mac", name: "Mac", os: "darwin", status: "online",
+        open_workspaces: JSON.stringify(["/ws/a"]), cdp_ready: true,
+      }],
+      cursorReload: { pending: { action: "when-idle", vsix: "0.4.33", setAt: 1, notBefore: 1 }, needed: true, neededMachineIds: ["m-win"] },
+    }));
+    await Bun.sleep(50);
+    const headers = { authorization: `Bearer ${fleet.operatorToken}` };
+    const list = await (await fetch(url(s, "/mobile/workspaces"), { headers })).json() as any;
+    expect(list.cursorReload).toMatchObject({ needed: true, neededMachineIds: ["m-win"] });
+    const ac = new AbortController();
+    const res = await fetch(url(s, "/mobile/stream"), { headers, signal: ac.signal });
+    const sse = openSse(res);
+    await sse.waitUntil((ev) => ev.some((e) => (e as { type?: string }).type === "workspaces"));
+    const frame = sse.events.find((e) => (e as { type?: string }).type === "workspaces") as {
+      cursorReload?: { needed?: boolean; neededMachineIds?: string[] };
+    };
+    expect(frame.cursorReload).toMatchObject({ needed: true, neededMachineIds: ["m-win"] });
+    ac.abort();
+    await sse.cancel();
+    ws.close();
+  });
+
   test("snap.run outbound is returned on GET", async () => {
     const s = start();
     const fleet = s.createFleet();

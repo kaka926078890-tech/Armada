@@ -6,6 +6,7 @@ import {
   parsePendingReload,
   pendingFromAction,
   reloadStillNeededForFleet,
+  neededReloadMachineIds,
   type CursorReloadAction,
   type PendingReload,
   type ReloadMachine,
@@ -56,7 +57,12 @@ export function writePendingReload(
 export function cursorReloadView(home: string, machines: ReloadMachine[]): {
   pending: PendingReload | null;
   needed: boolean;
+  neededMachineIds: string[];
 } {
   const pending = readPendingReload(home);
-  return { pending, needed: reloadStillNeededForFleet(pending, machines) };
+  return {
+    pending,
+    needed: reloadStillNeededForFleet(pending, machines),
+    neededMachineIds: neededReloadMachineIds(pending, machines, REQUIRED_EXTENSION_VERSION),
+  };
 }

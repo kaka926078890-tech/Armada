@@ -280,24 +280,6 @@ fun FleetScreen(vm: SessionVm, state: UiState, onOpen: (WorkspaceDto) -> Unit, o
         },
     ) { pad ->
         LazyColumn(Modifier.padding(pad)) {
-            val reload = state.cursorReload
-            if (reload?.needed == true) {
-                item {
-                    Column(Modifier.padding(16.dp)) {
-                        Text("本机 Cursor 扩展已更新，需 Reload Window")
-                        Text(
-                            "有 Armada 任务在跑的窗口会等空闲；点「现在 Reload」会立刻重载。",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
-                        )
-                        Row {
-                            TextButton(onClick = { vm.setCursorReload("now") }) { Text("现在 Reload") }
-                            TextButton(onClick = { vm.setCursorReload("when-idle") }) { Text("空闲后自动") }
-                            TextButton(onClick = { vm.setCursorReload("skip") }) { Text("这次跳过") }
-                        }
-                    }
-                }
-            }
             if (state.hubOffline) {
                 item {
                     Text(
@@ -341,9 +323,9 @@ fun FleetScreen(vm: SessionVm, state: UiState, onOpen: (WorkspaceDto) -> Unit, o
                                 Text("›", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 8.dp))
                             }
                         }
-                        if (reload?.needed == true && online) {
+                        if (vm.machineNeedsReload(mid) && online) {
                             GroupedDivider()
-                            Row(Modifier.padding(horizontal = 8.dp)) {
+                            Row(Modifier.padding(horizontal = 8.dp).fillMaxWidth().horizontalScroll(rememberScrollState())) {
                                 TextButton(onClick = { vm.setCursorReload("now", machineId = mid) }) { Text("现在 Reload") }
                                 TextButton(onClick = { vm.setCursorReload("when-idle", machineId = mid) }) { Text("空闲后自动") }
                                 TextButton(onClick = { vm.setCursorReload("skip", machineId = mid) }) { Text("这次跳过") }

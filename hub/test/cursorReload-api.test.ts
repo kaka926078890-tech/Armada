@@ -19,7 +19,7 @@ describe("GET/POST /api/cursor-reload", () => {
     const { base, tok } = start();
     const r = await fetch(`${base}/api/cursor-reload`, { headers: { Authorization: `Bearer ${tok}` } });
     expect(r.status).toBe(200);
-    expect(await r.json()).toEqual({ pending: null, needed: false });
+    expect(await r.json()).toEqual({ pending: null, needed: false, neededMachineIds: [] });
   });
 
   test("POST when-idle writes the file; skip clears it", async () => {
@@ -42,7 +42,7 @@ describe("GET/POST /api/cursor-reload", () => {
       body: JSON.stringify({ action: "skip" }),
     });
     expect(skip.status).toBe(200);
-    expect(await skip.json()).toEqual({ pending: null, needed: false });
+    expect(await skip.json()).toEqual({ pending: null, needed: false, neededMachineIds: [] });
   });
 
   test("needed ignores offline stale extension versions", async () => {
@@ -60,7 +60,24 @@ describe("GET/POST /api/cursor-reload", () => {
       body: JSON.stringify({ action: "when-idle" }),
     });
     const get = await fetch(`${base}/api/cursor-reload`, { headers: { Authorization: `Bearer ${tok}` } });
-    expect(await get.json()).toMatchObject({ needed: false });
+    expect(await get.json()).toMatchObject({ needed: false, neededMachineIds: [] });
+  });
+
+  test("neededMachineIds omits an online machine already on the required vsix", async () => {
+    const { base, tok } = start();
+    s!.registry.upsertMachine({
+      id: "m-mac", name: "Mac", os: "darwin", extensionVersion: REQUIRED_EXTENSION_VERSION, openWorkspaces: [],
+    });
+    s!.registry.upsertMachine({
+      id: "m-win", name: "Win", os: "win32", extensionVersion: "0.4.18", openWorkspaces: [],
+    });
+    await fetch(`${base}/api/cursor-reload`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${tok}`, "content-type": "application/json" },
+      body: JSON.stringify({ action: "when-idle" }),
+    });
+    const get = await fetch(`${base}/api/cursor-reload`, { headers: { Authorization: `Bearer ${tok}` } });
+    expect(await get.json()).toMatchObject({ needed: true, neededMachineIds: ["m-win"] });
   });
 
   test("POST pushes ext.cursorReload on connected sockets", async () => {

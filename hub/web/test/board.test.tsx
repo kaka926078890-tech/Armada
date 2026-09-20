@@ -131,7 +131,7 @@ describe("Board unread chrome", () => {
     expect(actionsAt).toBeGreaterThan(titleAt);
   });
 
-  test("card on a stale Windows extension names the vsix gap", () => {
+  test("card on a stale Windows extension does not repeat the vsix gap", () => {
     const html = renderToStaticMarkup(
       <Board
         runs={[run]}
@@ -145,6 +145,6 @@ describe("Board unread chrome", () => {
         onRename={() => {}}
       />,
     );
-    expect(html).toContain(extensionLagNotice("0.4.18")!);
+    expect(html).not.toContain(extensionLagNotice("0.4.18")!);
   });
 });

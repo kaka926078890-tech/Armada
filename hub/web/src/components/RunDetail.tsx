@@ -71,7 +71,7 @@ function DrawerShell({ children }: { children: ReactNode }) {
   };
 
   return (
-    <aside className="h-full min-h-0 shrink-0 border-l border-border flex flex-col bg-background shadow-2xl relative" style={{ width }}>
+    <aside className="h-full min-h-0 shrink-0 border-l border-border flex flex-col bg-background shadow-2xl relative max-w-full" style={{ width, maxWidth: "100%" }}>
       <div
         role="separator"
         aria-orientation="vertical"

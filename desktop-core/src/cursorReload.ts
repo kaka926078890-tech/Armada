@@ -88,6 +88,28 @@ export function reloadStillNeededForFleet(
 }
 
 /**
+ * Per-machine Reload chrome. A machine that already runs pending.vsix (or the
+ * required vsix when nothing is pending) must not keep showing the buttons.
+ */
+export function neededReloadMachineIds(
+  pending: PendingReload | null,
+  machines: ReloadMachine[],
+  requiredVsix: string,
+): string[] {
+  const target = (pending?.vsix || requiredVsix).trim();
+  if (!target) return [];
+  const online = machines.filter((m) => m.status === "online");
+  const scoped = pending?.machineId ? online.filter((m) => m.id === pending.machineId) : online;
+  const probe: PendingReload = {
+    action: pending?.action ?? "when-idle",
+    vsix: target,
+    setAt: pending?.setAt ?? 1,
+    notBefore: pending?.notBefore ?? 1,
+  };
+  return scoped.filter((m) => reloadStillNeeded(probe, [m.extension_version])).map((m) => m.id);
+}
+
+/**
  * Busy for `when-idle` Reload: a pending start, or a bound run that has not
  * synthesized stop yet. Completed binds stay in `boundRuns` for followup and
  * must not count as live.
