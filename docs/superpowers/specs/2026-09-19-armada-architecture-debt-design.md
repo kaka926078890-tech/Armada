@@ -250,8 +250,8 @@ v1 = P0 全部。v1.5 = P1。v2 = P2（含 CDP 真机）。P3 按拍板插入，
 | P11 | 性能 | 看板每条 jsonl 打 4 REST | `*` 通道服务端白名单 + 250ms 合并 | 否 |
 | P13 | 竞态 | Ask 轮询无重入锁 | 门闩或 timeout 链 | 否 |
 | P15 | 安全 | Android token 明文降级 | fail closed | 否 |
-| P16 | 安全 | blob 先读进内存再限流 | Content-Length 预检，inFlight 前移 | 与 K7 可同批 |
-| P17 | 安全 | postMessage 不校验 origin；CSP `http://*:*` | 校验 currentBoardOrigin；CSP 收敛 | 否 |
+| P16 | 安全 | blob 先读进内存再限流 | Content-Length 预检，inFlight 前移 | **done**（hub 已闸；中转 Rel-I9 同批） |
+| P17 | 安全 | postMessage 不校验 origin；CSP `http://*:*` | 校验 currentBoardOrigin；CSP 收敛到 `:7380` | **done 2026-09-20** |
 | P18 | 其他 | cid 唯一约束抛到 WS 无 catch | `onRunBound` 先 `getActiveByConversation` → BIND_AMBIGUOUS | 否 |
 | P19 | parity | 关卡/改名/审计导出/标未读不对称 | 规格写明 App v1 不做或补 snap+路由 | **产品** |
 
@@ -298,7 +298,7 @@ v1 = P0 全部。v1.5 = P1。v2 = P2（含 CDP 真机）。P3 按拍板插入，
 | Rel-M7 | `queued` 状态词三份副本 | 与 H6 同一导出 | H6 |
 | Rel-M8 | admin token 打 stdout | 只写一次文件，日志打指纹 | — |
 | Rel-M9 | `sseClients` 无每舰队上限 | 每舰队连接上限 + 超限踢最旧 | P6 |
-| Rel-I9 | 体积闸只看 Content-Length 且只装在 dispatch；followup/snippets 无闸 | 缺头/chunked 拒或限流读；三路由共用 | P16 |
+| Rel-I9 | 体积闸只看 Content-Length 且只装在 dispatch；followup/snippets 无闸 | 缺头/chunked 拒；dispatch/followup/snippets 共用 `rejectPayload` | **done 2026-09-20** |
 
 #### Hub Minor（原文 Hub m2–m9；m1=H6，m8⊂K7）
 
@@ -376,3 +376,4 @@ v1 = P0 全部。v1.5 = P1。v2 = P2（含 CDP 真机）。P3 按拍板插入，
 | 2026-09-20 | 扩展 **0.4.30**、iOS **21**、Android **0.1.8**。Ask Skip 点 Skip 按钮；Other 为 D；hub 进程启动不把 leftover `online` 当掉线杀跑；`unknown` 快照带 `finalText`。 |
 | 2026-09-20 | 扩展 **0.4.31**。Reload 跨进程闩；同号 0.4.30 会被 skipped-same-version 跳过。 |
 | 2026-09-20 | P3：Rel-M2 快照写入按 fleet 隔离；Rel-M4 `canRetryStatus`；Rel-M5 APNs 去掉写死 badge；Hub-m4 register 形状；Hub-m7 畸形 JSON 400。未改 CDP 选择器。 |
+| 2026-09-20 | P16/P17/Rel-I9：hub blob 预检已在；中转 followup/snippets/dispatch 共用体积闸；桌面 CSP 从 `http://*:*` 收到 `http://*:7380`（加入局域网舰队仍要 7380）。未改 CDP。 |

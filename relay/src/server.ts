@@ -447,6 +447,15 @@ export function createRelayServer(opts: {
   }
 
   const app = new Hono();
+  function rejectPayload(c: { req: { header: (n: string) => string | undefined }; json: (v: unknown, s: 400 | 413) => Response }): Response | undefined {
+    const raw = c.req.header("content-length");
+    if (raw == null || raw === "") return c.json({ error: "INVALID" }, 400);
+    const len = Number(raw);
+    if (!Number.isFinite(len) || len < 0) return c.json({ error: "INVALID" }, 400);
+    if (len > MAX_BODY) return c.json({ error: "PAYLOAD_TOO_LARGE" }, 413);
+    return undefined;
+  }
+
   app.get("/health", (c) => c.json({ ok: true, name: "armada-relay", protocolVersion: PROTOCOL_VERSION }));
 
   app.post("/pair", async (c) => {
@@ -506,6 +515,8 @@ export function createRelayServer(opts: {
   });
 
   app.put("/mobile/prompt-snippets", async (c) => {
+    const blocked = rejectPayload(c);
+    if (blocked) return blocked;
     const tok = (c as any).get("opToken") as string;
     const fleet = (c as any).get("fleet") as { id: string; hub_online: number };
     if (!checkRate(tok)) return c.json({ error: "RATE_LIMIT" }, 429);
@@ -640,8 +651,8 @@ export function createRelayServer(opts: {
   });
 
   app.post("/mobile/runs", async (c) => {
-    const len = Number(c.req.header("content-length") ?? 0);
-    if (len > MAX_BODY) return c.json({ error: "PAYLOAD_TOO_LARGE" }, 413);
+    const blocked = rejectPayload(c);
+    if (blocked) return blocked;
     const tok = (c as any).get("opToken") as string;
     const fleet = (c as any).get("fleet") as { id: string; hub_online: number };
     if (!checkRate(tok)) {
@@ -692,6 +703,8 @@ export function createRelayServer(opts: {
   });
 
   app.post("/mobile/runs/:id/followup", async (c) => {
+    const blocked = rejectPayload(c);
+    if (blocked) return blocked;
     const tok = (c as any).get("opToken") as string;
     const fleet = (c as any).get("fleet") as { id: string; hub_online: number };
     if (!checkRate(tok)) {

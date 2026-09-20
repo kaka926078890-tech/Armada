@@ -108,6 +108,18 @@ describe("parseDesktopBoardRequest", () => {
     expect(main).toMatch(/e\.origin !== currentBoardOrigin|!isTrustedBoardMessageOrigin\(e\.origin/);
     expect(main).not.toMatch(/postMessage\([^;]*,\s*"\*"\s*\)/);
   });
+
+  test("tauri CSP does not allow any host on any port", () => {
+    const conf = JSON.parse(readFileSync(join(import.meta.dir, "../../desktop/src-tauri/tauri.conf.json"), "utf8")) as {
+      app: { security: { csp: string } };
+    };
+    const csp = conf.app.security.csp;
+    expect(csp).not.toMatch(/http:\/\/\*:\*/);
+    expect(csp).not.toMatch(/ws:\/\/\*:\*/);
+    expect(csp).toMatch(/frame-src[^;]*http:\/\/\*:7380/);
+    expect(csp).toMatch(/connect-src[^;]*http:\/\/\*:7380/);
+    expect(csp).toMatch(/connect-src[^;]*ws:\/\/\*:7380/);
+  });
 });
 
 describe("board session", () => {

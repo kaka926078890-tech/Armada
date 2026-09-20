@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { generateKeyPairSync } from "crypto";
 import { mkdtempSync, writeFileSync } from "fs";
+import { createConnection, type Socket } from "net";
 import { tmpdir } from "os";
 import { join } from "path";
 import { createRelayServer, type RelayServer } from "../src/server";
@@ -44,6 +45,43 @@ function start(extra?: { home?: string; apns?: ApnsConfig | null; fcm?: FcmConfi
     ssePingMs: extra?.ssePingMs,
   });
   return srv;
+}
+
+const MAX_BODY = 20 * 1024 * 1024;
+
+function rawMobilePost(
+  port: number,
+  path: string,
+  token: string,
+  headers: string[],
+  body = "",
+  waitMs = 1500,
+): Promise<{ status: number; raw: string; ms: number; socket: Socket }> {
+  const t0 = Date.now();
+  return new Promise((resolve) => {
+    const chunks: Buffer[] = [];
+    const socket = createConnection({ host: "127.0.0.1", port }, () => {
+      socket.write(`POST ${path} HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer ${token}\r\n${headers.join("\r\n")}\r\n\r\n${body}`);
+    });
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      const raw = Buffer.concat(chunks).toString("utf8");
+      resolve({ status: Number(raw.split(" ")[1]), raw, ms: Date.now() - t0, socket });
+    };
+    socket.on("data", (d) => {
+      chunks.push(Buffer.from(d));
+      const raw = Buffer.concat(chunks).toString("utf8");
+      const headEnd = raw.indexOf("\r\n\r\n");
+      if (headEnd < 0) return;
+      const head = raw.slice(0, headEnd);
+      const cl = head.match(/content-length:\s*(\d+)/i);
+      if (!cl || raw.length - (headEnd + 4) >= Number(cl[1])) finish();
+    });
+    socket.setTimeout(waitMs, finish);
+    socket.on("error", finish);
+  });
 }
 
 function url(s: RelayServer, p: string) {
@@ -863,6 +901,93 @@ describe("relay serve", () => {
     expect(j.pairUri).toContain("armada-relay://pair");
     expect(j.opUri).toContain("armada-relay://op");
     expect(j.pairUri).not.toContain(j.hubSecret);
+  });
+});
+
+describe("relay payload gates", () => {
+  test("followup missing Content-Length is 400 without waiting for a body", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const r = await rawMobilePost(s.port, "/mobile/runs/r-1/followup", fleet.operatorToken, [
+      "Transfer-Encoding: chunked",
+      "Content-Type: application/json",
+    ], "");
+    try {
+      expect(r.status).toBe(400);
+      expect(r.ms).toBeLessThan(1200);
+      expect(r.raw).toMatch(/INVALID/);
+    } finally {
+      r.socket.destroy();
+    }
+  });
+
+  test("followup oversized Content-Length is 413 before the body is read", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const r = await rawMobilePost(s.port, "/mobile/runs/r-1/followup", fleet.operatorToken, [
+      `Content-Length: ${MAX_BODY + 1}`,
+      "Content-Type: application/json",
+    ], "");
+    try {
+      expect(r.status).toBe(413);
+      expect(r.ms).toBeLessThan(1200);
+      expect(r.raw).toMatch(/PAYLOAD_TOO_LARGE/);
+    } finally {
+      r.socket.destroy();
+    }
+  });
+
+  test("prompt-snippets PUT oversized Content-Length is 413 before the body is read", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const t0 = Date.now();
+    const r = await new Promise<{ status: number; raw: string; ms: number; socket: Socket }>((resolve) => {
+      const chunks: Buffer[] = [];
+      const socket = createConnection({ host: "127.0.0.1", port: s.port }, () => {
+        socket.write(`PUT /mobile/prompt-snippets HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer ${fleet.operatorToken}\r\nContent-Length: ${MAX_BODY + 1}\r\nContent-Type: application/json\r\n\r\n`);
+      });
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        const raw = Buffer.concat(chunks).toString("utf8");
+        resolve({ status: Number(raw.split(" ")[1]), raw, ms: Date.now() - t0, socket });
+      };
+      socket.on("data", (d) => {
+        chunks.push(Buffer.from(d));
+        const raw = Buffer.concat(chunks).toString("utf8");
+        const headEnd = raw.indexOf("\r\n\r\n");
+        if (headEnd < 0) return;
+        const head = raw.slice(0, headEnd);
+        const cl = head.match(/content-length:\s*(\d+)/i);
+        if (!cl || raw.length - (headEnd + 4) >= Number(cl[1])) finish();
+      });
+      socket.setTimeout(1500, finish);
+      socket.on("error", finish);
+    });
+    try {
+      expect(r.status).toBe(413);
+      expect(r.ms).toBeLessThan(1200);
+      expect(r.raw).toMatch(/PAYLOAD_TOO_LARGE/);
+    } finally {
+      r.socket.destroy();
+    }
+  });
+
+  test("dispatch oversized Content-Length is 413 before the body is read", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const r = await rawMobilePost(s.port, "/mobile/runs", fleet.operatorToken, [
+      `Content-Length: ${MAX_BODY + 1}`,
+      "Content-Type: application/json",
+    ], "");
+    try {
+      expect(r.status).toBe(413);
+      expect(r.ms).toBeLessThan(1200);
+      expect(r.raw).toMatch(/PAYLOAD_TOO_LARGE/);
+    } finally {
+      r.socket.destroy();
+    }
   });
 });
 
