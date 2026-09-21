@@ -195,11 +195,11 @@ export class RunService {
     }), runId);
   }
 
-  private maybeReplayDeferredStop(runId: string): void {
+  private maybeReplayDeferredStop(runId: string, opts?: { ignoreOpenChildren?: boolean }): void {
     if (this.hasOutstandingOutbound(runId)) return;
-    // Open child jsonl is the BG_DRAIN latch. Do not skip by reason=BG_DRAIN:
-    // protocol resume may still rearm; sweepTimeouts applies the same 120s as QUEUE_DRAIN.
-    if (this.hasOpenSubagentTranscript(runId)) return;
+    // Open child jsonl is the BG_DRAIN latch until QUEUE_DRAIN_MS. After that,
+    // replay even if Cursor never wrote child turn_ended (r-b770619c orphan).
+    if (!opts?.ignoreOpenChildren && this.hasOpenSubagentTranscript(runId)) return;
     const row = this.db.query("SELECT deferred_stop, live_generation_id FROM runs WHERE id=?1").get(runId) as {
       deferred_stop: string | null; live_generation_id: string | null;
     } | null;
@@ -214,7 +214,7 @@ export class RunService {
       return;
     }
     this.clearDeferredStop(runId);
-    this.onStopEvent(runId, snap.payload);
+    this.onStopEvent(runId, snap.payload, { replayDeferred: !!opts?.ignoreOpenChildren });
   }
 
   claimOutbound(runId: string, promptNorm: string, eventTs: number): void {
@@ -656,9 +656,11 @@ export class RunService {
   private hasOpenSubagentTranscript(runId: string): boolean {
     const row = this.db.query(
       `SELECT 1 AS n FROM run_events e
+       JOIN runs r ON r.id = e.run_id
        WHERE e.run_id=?1 AND e.source='subagent-transcript'
          AND json_extract(e.payload, '$.__subagent_cid') IS NOT NULL
          AND json_extract(e.payload, '$.__subagent_cid') != ''
+         AND e.ts >= COALESCE(r.started_at, r.created_at)
          AND NOT EXISTS (
            SELECT 1 FROM run_events t
            WHERE t.run_id=e.run_id AND t.source='subagent-transcript'
@@ -686,7 +688,7 @@ export class RunService {
     return this.hasOpenSubagentTranscript(runId) || this.backgroundDrainHold(runId, live);
   }
 
-  onStopEvent(runId: string, payload: any) {
+  onStopEvent(runId: string, payload: any, opts?: { replayDeferred?: boolean }) {
     const run = this.get(runId);
     if (!run) return;
     // BIND_TIMEOUT / DISPATCH_TIMEOUT 误杀后真实事件仍可能到达
@@ -703,7 +705,7 @@ export class RunService {
       retired,
       liveTurnSettled: this.liveTurnSettled(runId, live),
       hasOutstandingOutbound: this.hasOutstandingOutbound(runId),
-      hasOutstandingBackground: this.hasOutstandingBackground(runId, live),
+      hasOutstandingBackground: opts?.replayDeferred ? false : this.hasOutstandingBackground(runId, live),
       stopStatus: payload?.status,
     });
     if (d.action === "ignore") {
@@ -775,7 +777,7 @@ export class RunService {
       try { snap = JSON.parse(r.deferred_stop); } catch { continue; }
       if (typeof snap.drained_at !== "number" || now - snap.drained_at < QUEUE_DRAIN_MS) continue;
       this.failQueuedOutbound(r.id);
-      this.maybeReplayDeferredStop(r.id);
+      this.maybeReplayDeferredStop(r.id, { ignoreOpenChildren: snap.reason === "BG_DRAIN" });
     }
     this.replayCursorSessionEndStops();
     for (const machineId of machines) this.promoteNextQueued(machineId);

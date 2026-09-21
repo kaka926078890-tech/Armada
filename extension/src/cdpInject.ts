@@ -878,6 +878,10 @@ export function createImagePaster(deps: CdpSubmitterDeps) {
       return { ok: true };
     } catch (e) {
       log(`image paste fail: ${String(e)}`);
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "CLIPBOARD_TIMEOUT" || msg.endsWith("CLIPBOARD_TIMEOUT")) {
+        return { ok: false, reason: "CLIPBOARD_TIMEOUT" };
+      }
       return { ok: false, reason: `CDP_EVAL_FAIL:${String(e)}` };
     } finally {
       session.close();

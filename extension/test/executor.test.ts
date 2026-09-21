@@ -92,6 +92,30 @@ describe("Executor image path", () => {
     expect(clipboardWrites).toEqual([]);
   });
 
+  test("autoSubmitImages CHIP_COUNT is not rewritten to IMAGE_PASTE_FAILED", async () => {
+    const { ex, acks } = makeExec({
+      imagePaste: true,
+      fetchBlob: async () => ({ bytes: Buffer.from("x"), mime: "image/png" }),
+      autoSubmitImages: async () => ({ ok: false, reason: "CHIP_COUNT:1" }),
+    });
+    await ex.startRun({ runId: "r1", workspaceRoot: "/ws/a", prompt: "see", attachments: pngAtt });
+    expect(acks[acks.length - 1]).toEqual({
+      type: "run.ack", runId: "r1", status: "rejected", reason: "CHIP_COUNT:1",
+    });
+  });
+
+  test("autoSubmitImages CLIPBOARD_TIMEOUT is not rewritten to IMAGE_PASTE_FAILED", async () => {
+    const { ex, acks } = makeExec({
+      imagePaste: true,
+      fetchBlob: async () => ({ bytes: Buffer.from("x"), mime: "image/png" }),
+      autoSubmitImages: async () => { throw new Error("CLIPBOARD_TIMEOUT"); },
+    });
+    await ex.startRun({ runId: "r1", workspaceRoot: "/ws/a", prompt: "see", attachments: pngAtt });
+    expect(acks[acks.length - 1]).toEqual({
+      type: "run.ack", runId: "r1", status: "rejected", reason: "CLIPBOARD_TIMEOUT",
+    });
+  });
+
   test("autoSubmitImages WINDOW_TARGET_NOT_FOUND is not rewritten to IMAGE_PASTE_FAILED", async () => {
     const { ex, acks } = makeExec({
       imagePaste: true,

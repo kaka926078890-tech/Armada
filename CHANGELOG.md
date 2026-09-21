@@ -12,6 +12,19 @@ Armada 按 **面** 发版：扩展、桌面、iOS、Android 可以不同号。RE
 
 ---
 
+## 2026-09-21 — 扩展 0.4.37 · iOS TF 26 · Android 0.1.12 · 桌面 0.1.0
+
+### 修复
+
+- 上一轮没写完 `turn_ended` 的子代理 jsonl 不再把续发后的卡永远闩在 loading。BG_DRAIN 只计本轮 child；120s 仍开着则重放 completed（`r-b770619c`）。
+- Windows 贴图：剪贴板 15s 超时会杀掉卡住的 PowerShell 再拉起，并把 `CLIPBOARD_TIMEOUT` / `CHIP_COUNT:*` 透传到看板，不再一律改写成 `IMAGE_PASTE_FAILED`。
+
+### 操作员注意
+
+Windows 被控须 **先装** `armada-agent-0.4.37.vsix` 再 Reload。只空闲、只点 Reload，本地没有这个号也不会升级。中台须 overlay 到含 `REQUIRED_EXTENSION_VERSION=0.4.37` 的包装 hub。桌面仍是 **0.1.0**；iOS TestFlight **26**；Android **0.1.12**。
+
+---
+
 ## 2026-09-21 — 扩展 0.4.36 · iOS TF 26 · Android 0.1.12 · 桌面 0.1.0
 
 ### 修复

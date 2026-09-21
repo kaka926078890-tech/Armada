@@ -46,6 +46,39 @@ describe("createOsClipboardWriter", () => {
     expect(spawns[0]!.writes.filter((s) => s !== "QUIT\n")).toHaveLength(2);
   });
 
+  test("CLIPBOARD_TIMEOUT kills the PowerShell child so the next write respawns", async () => {
+    const spawns: { cmd: string; writes: string[]; killed: number }[] = [];
+    const writer = createOsClipboardWriter({
+      platform: "win32",
+      writeTimeoutMs: 30,
+      mkdtempSync: () => "/tmp/armada-clip-test",
+      writeFileSync: () => {},
+      rmSync: () => {},
+      execFileSync: () => Buffer.from(""),
+      spawn: (cmd, _args) => {
+        const rec = { cmd, writes: [] as string[], killed: 0 };
+        spawns.push(rec);
+        return {
+          stdin: {
+            write(s: string) {
+              rec.writes.push(s);
+              return true;
+            },
+            end() {},
+          },
+          stdout: { on() {} },
+          kill() { rec.killed += 1; },
+        };
+      },
+    });
+    await expect(writer.write(Buffer.from("a"), "image/png")).rejects.toThrow("CLIPBOARD_TIMEOUT");
+    expect(spawns).toHaveLength(1);
+    expect(spawns[0]!.killed).toBe(1);
+    await expect(writer.write(Buffer.from("b"), "image/png")).rejects.toThrow("CLIPBOARD_TIMEOUT");
+    expect(spawns).toHaveLength(2);
+    await writer.close();
+  });
+
   test("writeOsImageClipboard is not a second clipboard writer", () => {
     const src = readFileSync(join(import.meta.dir, "../src/osClipboard.ts"), "utf8");
     expect(src).not.toMatch(/export function writeOsImageClipboard/);

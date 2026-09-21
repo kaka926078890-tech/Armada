@@ -27,6 +27,7 @@ export type ClipboardChild = {
 
 export type OsClipboardDeps = {
   platform?: NodeJS.Platform;
+  writeTimeoutMs?: number;
   mkdtempSync: (prefix: string) => string;
   writeFileSync: (path: string, bytes: Buffer) => void;
   rmSync: (path: string, opts: { recursive: boolean; force: boolean }) => void;
@@ -37,6 +38,7 @@ export type OsClipboardDeps = {
 function defaultDeps(over: Partial<OsClipboardDeps> = {}): OsClipboardDeps {
   return {
     platform: (over.platform ?? process.platform) as NodeJS.Platform,
+    writeTimeoutMs: over.writeTimeoutMs,
     mkdtempSync: over.mkdtempSync ?? ((p) => mkdtempSync(p)),
     writeFileSync: over.writeFileSync ?? writeFileSync,
     rmSync: over.rmSync ?? rmSync,
@@ -82,11 +84,20 @@ export function createOsClipboardWriter(over: Partial<OsClipboardDeps> = {}): Os
 
   function waitOk(): Promise<void> {
     return new Promise((resolve, reject) => {
-      const t = setTimeout(() => reject(new Error("CLIPBOARD_TIMEOUT")), WRITE_TIMEOUT_MS);
-      waiters.push({
+      const timeoutMs = deps.writeTimeoutMs ?? WRITE_TIMEOUT_MS;
+      const waiter = {
         resolve: () => { clearTimeout(t); resolve(); },
-        reject: (e) => { clearTimeout(t); reject(e); },
-      });
+        reject: (e: Error) => { clearTimeout(t); reject(e); },
+      };
+      const t = setTimeout(() => {
+        const i = waiters.indexOf(waiter);
+        if (i >= 0) waiters.splice(i, 1);
+        try { child?.kill(); } catch { /* ignore */ }
+        child = null;
+        acc = "";
+        waiter.reject(new Error("CLIPBOARD_TIMEOUT"));
+      }, timeoutMs);
+      waiters.push(waiter);
     });
   }
 

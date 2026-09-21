@@ -284,6 +284,80 @@ describe("event ingest", () => {
     ws.close();
   });
 
+  test("r-b770619c: orphan child from previous turn does not BG_DRAIN this live gen", async () => {
+    // Real 09:03 explore jsonl never got turn_ended; 09:07 error applied;
+    // 09:13 followup armed ba7ae966; 09:19 parent turn_ended success + matching
+    // stop was ignored because hasOpenSubagentTranscript scanned all history.
+    const G1 = "857428ca-cd4f-4685-8161-9c38bfd23183";
+    const G2 = "ba7ae966-02ab-44c4-b411-90bfa9f91a0e";
+    const orphan = "e4e91cbf-1b8f-4f92-9595-d1ce30665502";
+    const { ws, api, runId } = await startBoundRun();
+    const snap = async () => (await (await api(`/api/runs/${runId}`)).json()) as any;
+
+    ws.send(JSON.stringify(ev(runId, 1, "beforeSubmitPrompt", {
+      conversation_id: "cid-1", generation_id: G1, prompt: "部署+打包",
+    })));
+    ws.send(JSON.stringify({
+      type: "run.event", runId, source: "subagent-transcript", seq: 2, ts: Date.now() - 60_000,
+      payload: { __subagent_cid: orphan, role: "assistant", message: { content: [{ type: "text", text: "Find relay" }] } },
+    }));
+    ws.send(JSON.stringify(ev(runId, 3, "stop", {
+      status: "error", conversation_id: "cid-1", generation_id: G1,
+      error: "Agent turn stopped after repeated resume attempts made no progress",
+    })));
+    await new Promise((r) => setTimeout(r, 80));
+    expect((await snap()).status).toBe("error");
+
+    const f = await api(`/api/runs/${runId}/followup`, { method: "POST", body: JSON.stringify({ prompt: "这个问题修复部署了么？也就是部署+打包" }) });
+    expect(f.ok).toBe(true);
+    ws.send(JSON.stringify({ type: "run.ack", runId, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId, conversationId: "cid-1", transcriptPath: "/tmp/t.jsonl", promptMatch: true }));
+    ws.send(JSON.stringify(ev(runId, 4, "beforeSubmitPrompt", {
+      conversation_id: "cid-1", generation_id: G2, prompt: "这个问题修复部署了么？也就是部署+打包",
+    })));
+    await new Promise((r) => setTimeout(r, 120));
+    expect((await snap()).status).toBe("running");
+    expect((await snap()).live_generation_id).toBe(G2);
+
+    ws.send(JSON.stringify({
+      type: "run.event", runId, source: "transcript", seq: 5, ts: Date.now(),
+      payload: { type: "turn_ended", status: "success" },
+    }));
+    ws.send(JSON.stringify(ev(runId, 6, "stop", {
+      status: "completed", conversation_id: "cid-1", generation_id: G2,
+    })));
+    await new Promise((r) => setTimeout(r, 120));
+    const done = await snap();
+    expect(done.status).toBe("completed");
+    expect(done.live_generation_id).toBeNull();
+    ws.close();
+  });
+
+  test("BG_DRAIN timeout replays completed even if child jsonl never turn_ended", async () => {
+    const live = "ba7ae966-02ab-44c4-b411-90bfa9f91a0e";
+    const child = "e4e91cbf-1b8f-4f92-9595-d1ce30665502";
+    const { ws, api, runId } = await startBoundRun();
+    ws.send(JSON.stringify(ev(runId, 1, "beforeSubmitPrompt", {
+      conversation_id: "cid-1", generation_id: live, prompt: "hi",
+    })));
+    ws.send(JSON.stringify({
+      type: "run.event", runId, source: "subagent-transcript", seq: 2, ts: Date.now(),
+      payload: { __subagent_cid: child, role: "assistant", message: { content: [{ type: "text", text: "review" }] } },
+    }));
+    ws.send(JSON.stringify(ev(runId, 3, "stop", {
+      status: "completed", conversation_id: "cid-1", generation_id: live,
+    })));
+    await new Promise((r) => setTimeout(r, 80));
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).status).toBe("running");
+
+    hub!.runs.sweepTimeouts(Date.now() + 121_000);
+    await new Promise((r) => setTimeout(r, 40));
+    const after = (await (await api(`/api/runs/${runId}`)).json()) as any;
+    expect(after.status).toBe("completed");
+    expect(after.live_generation_id).toBeNull();
+    ws.close();
+  });
+
   test("BG_DRAIN timeout does not complete after UUID preToolUse rearms", async () => {
     const G1 = "b855863b-cbb8-4c00-a0ba-23b6c69ddcf0";
     const G2 = "b89b8455-84de-4c1c-823d-4aeba602fdee";

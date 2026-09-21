@@ -151,12 +151,18 @@ function isCdpDown(reason?: string): boolean {
   return reason === "CDP_UNREACHABLE" || (typeof reason === "string" && reason.startsWith("CDP_CONNECT_FAIL"));
 }
 
+function isPasteDetail(reason?: string): boolean {
+  return reason === "CLIPBOARD_TIMEOUT"
+    || (typeof reason === "string" && reason.startsWith("CHIP_COUNT"));
+}
+
 /** 自动提交时这些失败不能降级成剪贴板 accepted。 */
 function isCdpHardFail(reason?: string): boolean {
   return isCdpDown(reason)
     || reason === "WINDOW_TARGET_NOT_FOUND"
     || reason === "WINDOW_TARGET_AMBIGUOUS"
-    || reason === "NO_WS_URL";
+    || reason === "NO_WS_URL"
+    || isPasteDetail(reason);
 }
 
 export class Executor {
@@ -353,7 +359,11 @@ export class Executor {
         }
       }
       return { ok: true };
-    } catch {
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "CLIPBOARD_TIMEOUT" || msg.endsWith("CLIPBOARD_TIMEOUT")) {
+        return { ok: false, reason: "CLIPBOARD_TIMEOUT" };
+      }
       return { ok: false, reason: files.length ? "FILE_MENTION_FAILED" : "IMAGE_PASTE_FAILED" };
     }
   }

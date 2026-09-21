@@ -524,6 +524,19 @@ describe("connectWorkspacePage window stamp", () => {
 });
 
 describe("createImagePaster", () => {
+  test("clipboard throw is CLIPBOARD_TIMEOUT not CDP_EVAL_FAIL", async () => {
+    const paste = createImagePaster(deps({ connect: async () => mockSession(["OK"], []) }));
+    const r = await paste(
+      "/Users/x/armada-test-ws",
+      "hi",
+      [{ bytes: Buffer.from("x"), mime: "image/png" }],
+      async () => { throw new Error("CLIPBOARD_TIMEOUT"); },
+      true,
+    );
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe("CLIPBOARD_TIMEOUT");
+  });
+
   test("chip count never reaches N → CHIP_COUNT and no Enter", async () => {
     const log: CallLog[] = [];
     const paste = createImagePaster(deps({ connect: async () => mockSession(["OK", "0"], log) }));
