@@ -445,23 +445,6 @@ fun WorkspaceScreen(vm: SessionVm, state: UiState, workspace: WorkspaceDto, onBa
                 Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                val columnUnread = if (showArchived) 0 else vm.unreadCount(
-                    MarkReadScope.Column(workspace.machineId, workspace.workspaceRoot, tab),
-                )
-                if (columnUnread > 0) {
-                    Row(
-                        Modifier.clip(RoundedCornerShape(50))
-                            .background(AccentBlue.copy(alpha = 0.18f))
-                            .clickable {
-                                vm.markAllRead(MarkReadScope.Column(workspace.machineId, workspace.workspaceRoot, tab))
-                            }
-                            .heightIn(min = 36.dp)
-                            .padding(horizontal = 12.dp, vertical = 7.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text("本列已读", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                    }
-                }
                 BoardColumn.entries.forEach { col ->
                     val n = openRuns.count { it.column == col }
                     val selected = archiveChipSelected(showArchived, tab == col)

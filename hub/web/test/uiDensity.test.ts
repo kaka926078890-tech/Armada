@@ -102,7 +102,7 @@ describe("App UI density is one scale", () => {
     expect(androidRow).not.toContain("size(8.dp).clip(CircleShape).background(statusColor");
   });
 
-  test("fleet can mark a machine or workspace read; workspace page can mark the open column", () => {
+  test("fleet can mark a machine or workspace read; workspace page has no extra 已读 column", () => {
     const ios = readFileSync(join(repoRoot, "mobile/ios/ArmadaRemote/Screens.swift"), "utf8");
     const api = readFileSync(join(repoRoot, "mobile/ios/ArmadaRemote/RelayAPI.swift"), "utf8");
     const android = androidUi();
@@ -114,26 +114,24 @@ describe("App UI density is one scale", () => {
     expect(api).toContain("func applyMarkAllRead");
     expect(api).toContain("case machine(");
     expect(api).toContain("case workspace(");
-    expect(api).toContain("case column(");
     expect(models).toContain("fun applyMarkAllRead");
     expect(models).toContain("class Machine");
     expect(models).toContain("class Workspace");
-    expect(models).toContain("class Column");
     expect(ios).not.toContain("struct UnreadBadge");
     expect(iosList).toContain("全部已读");
     expect(iosList).not.toContain("UnreadBadge");
     expect(iosList).toContain(".fill(Color.red)");
     expect(iosList).toContain("markAllRead(.machine");
     expect(iosList).toContain("markAllRead(.workspace");
-    expect(iosHome).toContain("本列已读");
-    expect(iosHome).toContain("markAllRead(.column");
+    expect(iosHome).not.toContain("本列已读");
+    expect(iosHome).not.toContain("markAllRead(.column");
     expect(fleet).toContain("全部已读");
     expect(fleet).not.toContain("UnreadBadge");
     expect(fleet).toContain("size(8.dp).clip(CircleShape).background(StatusRed)");
     expect(fleet).toContain("MarkReadScope.Machine");
     expect(fleet).toContain("MarkReadScope.Workspace");
-    expect(workspace).toContain("本列已读");
-    expect(workspace).toContain("MarkReadScope.Column");
+    expect(workspace).not.toContain("本列已读");
+    expect(workspace).not.toContain("MarkReadScope.Column");
     expect(workspace).not.toContain("TextButton");
   });
 

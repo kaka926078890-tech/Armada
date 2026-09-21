@@ -460,38 +460,10 @@ struct WorkspaceHome: View {
         return boardRuns.filter { $0.column == tab }
     }
 
-    private var columnUnread: Int {
-        guard !showArchived else { return 0 }
-        return session.unreadCount(.column(
-            machineId: live.machineId,
-            workspaceRoot: live.workspaceRoot,
-            column: tab
-        ))
-    }
-
     var body: some View {
         VStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    if columnUnread > 0 {
-                        Button {
-                            session.markAllRead(.column(
-                                machineId: live.machineId,
-                                workspaceRoot: live.workspaceRoot,
-                                column: tab
-                            ))
-                        } label: {
-                            Text("本列已读")
-                                .font(.subheadline.weight(.semibold))
-                                .lineLimit(1)
-                                .fixedSize(horizontal: true, vertical: false)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 7)
-                                .background(Color.accentColor.opacity(0.18))
-                                .clipShape(Capsule())
-                        }
-                        .buttonStyle(.plain)
-                    }
                     ForEach(BoardColumn.allCases) { col in
                         let n = openRuns.filter { $0.column == col }.count
                         let selected = !showArchived && tab == col
