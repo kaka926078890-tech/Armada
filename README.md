@@ -78,7 +78,7 @@
 
 被控侧看到的就是普通 Cursor 窗口：文件树、Agent 对话、该机自己的账号与模型选择。派发沿用该窗口当前选中的模型。
 
-同一机器可并行多条任务（默认每机 8、每工作区 4）；整机同时只有 1 条处于派发/绑定（CDP 注入串行）。超出限额 → `429 RUN_LIMIT`。同工作区相同 prompt → `409 PROMPT_COLLISION`。关着的工作区不能派（`400 WORKSPACE_NOT_OPEN`）。扩展需 ≥ 0.4.0 才能同一窗口并行第二条；收口与续聊请用 **armada-agent ≥ 0.4.19**；**文件附件请用 ≥ 0.4.22**（Windows `@` 菜单会等 typeahead）。**当前请装 0.4.37**（空闲 Reload 只在本机已经解包了目标 vsix 时才执行；没有新包不会因为窗口空闲就 Reload。有包时还要等未收口 composer jsonl，且收口后再等 2 分钟）。
+同一机器可并行多条任务（默认每机 8、每工作区 4）；整机同时只有 1 条处于派发/绑定（CDP 注入串行）。**同一 Cursor 窗口**在已有 dispatched/binding/running 时，新开对话只排队，等当前条收口再 `createNew`（Cursor Agents 同窗会换掉当前对话，不能靠并行第二条去打断）。跨窗仍可同时跑。超出限额 → `429 RUN_LIMIT`。同工作区相同 prompt → `409 PROMPT_COLLISION`。关着的工作区不能派（`400 WORKSPACE_NOT_OPEN`）。收口与续聊请用 **armada-agent ≥ 0.4.19**；**文件附件请用 ≥ 0.4.22**（Windows `@` 菜单会等 typeahead）。**当前请装 0.4.37**（空闲 Reload 只在本机已经解包了目标 vsix 时才执行；没有新包不会因为窗口空闲就 Reload。有包时还要等未收口 composer jsonl，且收口后再等 2 分钟）。
 
 完成、失败、需要处理选择题时，桌面会弹系统通知，浏览器会闪标题；点通知可回到那张卡。
 
@@ -470,7 +470,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\armada-cursor.ps1 C:
 | `INJECT_SLOT_BUSY` | **中台**：正在向该机注入另一条任务，稍后再续聊 |
 | `OUTBOUND_LIMIT` | **中台**：该卡待消化续发已达 8 条 |
 | `OUTBOUND_TEXT_ONLY` | **中台**：运行中续发暂只支持纯文本 |
-| `WINDOW_BUSY` | **中台**：扩展 < 0.4.0 或关了同窗并行时，该窗口已有占用项；等它结束或升级扩展。同区另有 running **不拦**旧卡续聊 |
+| `WINDOW_BUSY` | **中台**：关了 `ARMADA_MULTI_RUN_PER_WINDOW` 时，该窗口已有占用项则 409。默认开着时同窗新任务会 **排队** 而不是立刻 `createNew`。同卡 running 续聊仍走 followup |
 | 一直「待本机回车」但黄字是「绑定中」，超时后进异常 | **受控**：须装 **armada-agent ≥ 0.4.19**（当前 **0.4.37**）并 Reload。0.4.10 扫描窗 20s 会 BIND_TIMEOUT。Windows 无 hook，绑定等 jsonl，约 **3 分钟**；macOS 约 **1 分钟** |
 | 本机对话已结束，看板仍「运行中」 | **受控**：须 ≥ 0.4.18。日志：`stop synthesized` / `adopt r-…`。Hub 须把 `status: success` 收成 completed |
 | 一直「待本机回车」且蓝字是「已预填,待本机回车」 | **受控**：Cursor 不是启动器/桌面打开的（Windows：托盘未退干净就又点了图标） |
@@ -506,7 +506,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\armada-cursor.ps1 C:
 | `ARMADA_HUB_URL` / `ARMADA_HUB_TOKEN` | 环境变量（扩展） | 仅当对应 Cursor 设置项为空时回退；设置项非空优先 |
 | `ARMADA_MAX_RUNS_PER_MACHINE` | 环境变量 | 每机占用中任务上限，默认 8（含 queued） |
 | `ARMADA_MAX_RUNS_PER_WORKSPACE` | 环境变量 | 每工作区上限，默认 4 |
-| `ARMADA_MULTI_RUN_PER_WINDOW` | 环境变量 | `0` 关闭同窗并行（U1 探针失败时用） |
+| `ARMADA_MULTI_RUN_PER_WINDOW` | 环境变量 | `0` 时同窗已有占用项 → 409 `WINDOW_BUSY`（拒绝）。默认开着时同窗新任务排队，不立刻开第二条对话 |
 | `~/.armada/relay.json` | 中台数据目录 | 可选；`{ relay, fleet, secret }`。没有则不拨中转 |
 | `RELAY_HOME` | 环境变量 | 中转数据目录，默认 `~/.armada-relay` |
 | `RELAY_HOST` / `RELAY_PORT` | 环境变量 | 中转监听，默认 `127.0.0.1:8780` |

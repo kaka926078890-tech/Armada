@@ -139,7 +139,7 @@ describe("Run dispatch", () => {
     ws.close();
   });
 
-  test("second run queues while inject slot occupied, then starts after bind", async () => {
+  test("second run queues while inject slot occupied, stays queued until first completes", async () => {
     const { ws, inbound, api } = await startWithExt({ extensionVersion: "0.4.0" });
     const r1 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "a" }) });
     expect(r1.status).toBe(201);
@@ -154,8 +154,14 @@ describe("Run dispatch", () => {
     ws.send(JSON.stringify({ type: "run.bound", runId: a.id, conversationId: "cid-a", transcriptPath: null, promptMatch: true }));
     await new Promise((r) => setTimeout(r, 150));
     expect(((await (await api(`/api/runs/${a.id}`)).json()) as any).status).toBe("running");
+    expect(((await (await api(`/api/runs/${body2.run.id}`)).json()) as any).status).toBe("queued");
+    expect(inbound.filter((m) => m.type === "run.start").map((m) => m.prompt)).toEqual(["a"]);
+    inbound.length = 0;
+    ws.send(JSON.stringify({ type: "run.event", runId: a.id, source: "hook", hookEventName: "stop", payload: { status: "completed" }, ts: Date.now(), seq: 1 }));
+    await new Promise((r) => setTimeout(r, 150));
+    expect(((await (await api(`/api/runs/${a.id}`)).json()) as any).status).toBe("completed");
     expect(((await (await api(`/api/runs/${body2.run.id}`)).json()) as any).status).toBe("dispatched");
-    expect(inbound.filter((m) => m.type === "run.start").map((m) => m.prompt).sort()).toEqual(["a", "b"]);
+    expect(inbound.filter((m) => m.type === "run.start").map((m) => m.prompt)).toEqual(["b"]);
     ws.close();
   });
 
@@ -279,6 +285,10 @@ describe("Run dispatch", () => {
     await new Promise((r) => setTimeout(r, 150));
     expect(((await (await api(`/api/runs/${gone.id}`)).json()) as any).status).toBe("error");
     expect(((await (await api(`/api/runs/${gone.id}`)).json()) as any).end_reason).toBe("WORKSPACE_NOT_OPEN");
+    expect(((await (await api(`/api/runs/${next.id}`)).json()) as any).status).toBe("queued");
+    inbound.length = 0;
+    ws.send(JSON.stringify({ type: "run.event", runId: hold.id, source: "hook", hookEventName: "stop", payload: { status: "completed" }, ts: Date.now(), seq: 1 }));
+    await new Promise((r) => setTimeout(r, 150));
     expect(((await (await api(`/api/runs/${next.id}`)).json()) as any).status).toBe("dispatched");
     expect(inbound.filter((m) => m.type === "run.start").map((m) => m.prompt)).toEqual(["a"]);
     ws.close();
@@ -521,12 +531,16 @@ describe("Run dispatch", () => {
     }));
     await new Promise((r) => setTimeout(r, 150));
     expect(((await (await api(`/api/runs/${a.id}`)).json()) as any).pending_ask).toBeNull();
+    expect(((await (await api(`/api/runs/${body2.run.id}`)).json()) as any).status).toBe("queued");
+    inbound.length = 0;
+    ws.send(JSON.stringify({ type: "run.event", runId: a.id, source: "hook", hookEventName: "stop", payload: { status: "completed" }, ts: Date.now(), seq: 3 }));
+    await new Promise((r) => setTimeout(r, 150));
     expect(((await (await api(`/api/runs/${body2.run.id}`)).json()) as any).status).toBe("dispatched");
     expect(inbound.filter((m) => m.type === "run.start" && m.prompt === "next")).toHaveLength(1);
     ws.close();
   });
 
-  test("running sibling without pending ask still accepts a new start", async () => {
+  test("running sibling without pending ask queues a new start until the live run completes", async () => {
     const { ws, inbound, api } = await startWithExt({ extensionVersion: "0.4.31" });
     const r1 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "live" }) });
     const { run: a } = await r1.json() as any;
@@ -536,8 +550,12 @@ describe("Run dispatch", () => {
     inbound.length = 0;
     const r2 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "peer" }) });
     const body2 = await r2.json() as any;
-    expect(body2.run.status).toBe("dispatched");
-    await new Promise((r) => setTimeout(r, 80));
+    expect(body2.run.status).toBe("queued");
+    expect(inbound.find((m) => m.type === "run.start" && m.prompt === "peer")).toBeUndefined();
+    inbound.length = 0;
+    ws.send(JSON.stringify({ type: "run.event", runId: a.id, source: "hook", hookEventName: "stop", payload: { status: "completed" }, ts: Date.now(), seq: 1 }));
+    await new Promise((r) => setTimeout(r, 150));
+    expect(((await (await api(`/api/runs/${body2.run.id}`)).json()) as any).status).toBe("dispatched");
     expect(inbound.find((m) => m.type === "run.start" && m.prompt === "peer")).toBeTruthy();
     ws.close();
   });
@@ -1008,22 +1026,30 @@ describe("running followup outbound", () => {
   });
 
   test("A2 occupying dispatched still 409; A3 running followup does not insert hub BSP", async () => {
-    const { ws, api, inbound, run } = await bindRunning();
-    const dispatched = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "b" }) });
+    const { wsA, inboundA, wsB, inboundB, api } = await startTwoWindows();
+    const r1 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "a" }) });
+    const { run } = await r1.json() as any;
+    wsA.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    wsA.send(JSON.stringify({ type: "run.bound", runId: run.id, conversationId: "cid-1", transcriptPath: "/tmp/t.jsonl", promptMatch: true }));
+    await new Promise((x) => setTimeout(x, 80));
+    const dispatched = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/b", prompt: "b" }) });
     const { run: b } = await dispatched.json() as any;
     expect(b.status).toBe("dispatched");
     const busy = await api(`/api/runs/${run.id}/followup`, { method: "POST", body: JSON.stringify({ prompt: "续" }) });
     expect(busy.status).toBe(409);
     expect(((await busy.json()) as any).error).toBe("INJECT_SLOT_BUSY");
-    ws.send(JSON.stringify({ type: "run.ack", runId: b.id, status: "accepted" }));
-    ws.send(JSON.stringify({ type: "run.bound", runId: b.id, conversationId: "cid-b", transcriptPath: null, promptMatch: true }));
+    wsB.send(JSON.stringify({ type: "run.ack", runId: b.id, status: "accepted" }));
+    wsB.send(JSON.stringify({ type: "run.bound", runId: b.id, conversationId: "cid-b", transcriptPath: null, promptMatch: true }));
     await new Promise((x) => setTimeout(x, 80));
+    inboundA.length = 0;
+    inboundB.length = 0;
     const f = await api(`/api/runs/${run.id}/followup`, { method: "POST", body: JSON.stringify({ prompt: "续" }) });
     expect(f.status).toBe(201);
     const events = (await (await api(`/api/runs/${run.id}/events`)).json()) as any[];
     expect(events.some((e) => e.hook_event_name === "beforeSubmitPrompt" && JSON.parse(e.payload).prompt === "续")).toBe(false);
-    expect(inbound.find((m) => m.type === "run.followup" && m.runId === run.id)?.generation_id).toBeUndefined();
-    ws.close();
+    expect(inboundA.find((m) => m.type === "run.followup" && m.runId === run.id)?.generation_id).toBeUndefined();
+    wsA.close();
+    wsB.close();
   });
 
   test("A6 onRunAck running injecting does not set binding or error", async () => {
@@ -1593,19 +1619,18 @@ describe("resolveInjectWindow", () => {
 
 describe("onRunBound cid unique", () => {
   test("binding a second live run to an occupied cid is BIND_AMBIGUOUS, not unique-index throw", async () => {
-    const { ws, api } = await startWithExt({ extensionVersion: "0.4.0" });
+    const { wsA, wsB, api } = await startTwoWindows();
     const r1 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "a" }) });
     const { run: a } = await r1.json() as any;
-    const r2 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "b" }) });
-    const { run: b } = await r2.json() as any;
-    expect(b.status).toBe("queued");
-    ws.send(JSON.stringify({ type: "run.ack", runId: a.id, status: "accepted" }));
-    ws.send(JSON.stringify({ type: "run.bound", runId: a.id, conversationId: "cid-1", transcriptPath: "/tmp/t.jsonl", promptMatch: true }));
+    wsA.send(JSON.stringify({ type: "run.ack", runId: a.id, status: "accepted" }));
+    wsA.send(JSON.stringify({ type: "run.bound", runId: a.id, conversationId: "cid-1", transcriptPath: "/tmp/t.jsonl", promptMatch: true }));
     await new Promise((x) => setTimeout(x, 150));
     expect(((await (await api(`/api/runs/${a.id}`)).json()) as any).status).toBe("running");
-    expect(((await (await api(`/api/runs/${b.id}`)).json()) as any).status).toBe("dispatched");
-    ws.send(JSON.stringify({ type: "run.ack", runId: b.id, status: "accepted" }));
-    ws.send(JSON.stringify({ type: "run.bound", runId: b.id, conversationId: "cid-1", transcriptPath: "/tmp/t.jsonl", promptMatch: true }));
+    const r2 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/b", prompt: "b" }) });
+    const { run: b } = await r2.json() as any;
+    expect(b.status).toBe("dispatched");
+    wsB.send(JSON.stringify({ type: "run.ack", runId: b.id, status: "accepted" }));
+    wsB.send(JSON.stringify({ type: "run.bound", runId: b.id, conversationId: "cid-1", transcriptPath: "/tmp/t.jsonl", promptMatch: true }));
     await new Promise((x) => setTimeout(x, 150));
     const afterA = (await (await api(`/api/runs/${a.id}`)).json()) as any;
     const afterB = (await (await api(`/api/runs/${b.id}`)).json()) as any;
@@ -1613,7 +1638,8 @@ describe("onRunBound cid unique", () => {
     expect(afterA.conversation_id).toBe("cid-1");
     expect(afterB.status).toBe("unknown");
     expect(afterB.end_reason).toBe("BIND_AMBIGUOUS");
-    ws.close();
+    wsA.close();
+    wsB.close();
   });
 });
 

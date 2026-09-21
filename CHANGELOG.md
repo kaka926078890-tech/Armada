@@ -10,6 +10,10 @@ Armada 按 **面** 发版：扩展、桌面、iOS、Android 可以不同号。RE
 
 ## Unreleased
 
+### 修复
+
+- 同一 Cursor 窗口已有 dispatched/binding/running 时，新派发不再立刻 `composer.createNew`。任务进 `queued`，等当前条收口再注入。Cursor Agents 同窗只有一个输入框，再开会换掉/打断正在跑的对话（Windows `r-a7cce90d`）。跨窗并行和同卡 followup 不变。中台须 overlay 这份 hub，不必升 vsix。
+
 ---
 
 ## 2026-09-21 — 扩展 0.4.37 · iOS TF 26 · Android 0.1.12 · 桌面 0.1.0
