@@ -100,6 +100,14 @@ describe("packaged sidecar hub", () => {
     }
   });
 
+  test("macOS pack does not force ad-hoc signingIdentity", () => {
+    const conf = readFileSync(join(ROOT, "desktop/src-tauri/tauri.conf.json"), "utf8");
+    expect(conf).not.toMatch(/"signingIdentity"\s*:\s*"-"/);
+    const sh = readFileSync(join(ROOT, "desktop/scripts/tauri-build.sh"), "utf8");
+    expect(sh).toContain("macos-signing-identity.sh");
+    expect(sh).toContain("APPLE_SIGNING_IDENTITY");
+  });
+
   test("pack-time resources copies and installers are gitignored; .gitkeep is not", () => {
     const ignored = (rel: string) =>
       Bun.spawnSync(["git", "check-ignore", "-q", "--", rel], { cwd: ROOT }).exitCode === 0;

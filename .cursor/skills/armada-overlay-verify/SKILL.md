@@ -10,7 +10,7 @@ Acceptance is **overlay-installed `/Applications/Armada.app`**, then a **spawned
 ## Do this every overlay
 
 1. Quit Armada.app. Stop source hub: `launchctl unload ~/Library/LaunchAgents/com.armada.hub.plist` (ignore missing). Confirm **7380 is free**.
-2. `cd armada/desktop && bun run tauri build`
+2. `cd armada/desktop && bash scripts/tauri-build.sh`（稳定开发证书，禁止 `signingIdentity: "-"`。ad-hoc 每次 overlay 都会重弹 TCC「允许访问桌面」，系统框不能代点。）
 3. `ditto` the bundle onto `/Applications/Armada.app`
 4. `open /Applications/Armada.app`
 5. Wait until `ps -ww -p "$(lsof -t -nP -iTCP:7380 -sTCP:LISTEN)" -o args=` contains **`/Applications/Armada.app/Contents/Resources/bun`**. `lsof` COMMAND is just `bun` — do not match the bundle path on that column. The desktop shell persists the board in `localStorage` and calls `restoreOwnedHub()` even when that session is missing (Mac create path) — **do not wait for a click on 创建舰队**.
@@ -52,7 +52,8 @@ Chicken-egg: **0.4.26 and older do not poll** `pending-reload.json`. The first j
 - Reloading when vsix did not change
 - Claiming desktop acceptance before 7380 is the bundled bun
 - 只打 vsix / 只 `Install from VSIX` 就当发完（包装 `REQUIRED_EXTENSION_VERSION` 仍旧号，看板「现在 / 空闲 Reload」会空转）
-- overlay 前的 vsix B1–B3 当成 overlay **后**打包功能验收
+- overlay 用 `signingIdentity: "-"` ad-hoc 打包（每次覆盖安装都会重弹 TCC）
+- 用 Accessibility / osascript 去点「允许访问桌面」系统框
 
 ## Operator controls (hub + App)
 
