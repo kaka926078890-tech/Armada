@@ -1,7 +1,10 @@
+import { spawn } from "child_process";
+import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 import type { PendingRun } from "./binding";
 import { acquireCdpLock } from "./cdpLock";
+import { workspaceFolderName } from "./cdpPage";
 import { workspacePathIn } from "./workspacePath";
 import { materializeInboxFile, uniqueInboxFilename } from "./workspaceInbox";
 
@@ -123,6 +126,10 @@ export interface ExecutorDeps {
   bindKnown?: (args: { runId: string; conversationId: string; prompt: string; workspaceRoot: string }) => void;
   /** Override path of the machine-wide CDP inject lock (tests / non-default home). */
   cdpLockPath?: string;
+  /** Override ~/.armada for the sidecar .code-workspace used to force a new OS window. */
+  armadaHome?: string;
+  cursorBin?: () => string | null;
+  spawnDetached?: (command: string, args: string[]) => void;
   answerAskCdp?: (args: {
     workspaceRoot: string;
     action: "continue" | "skip" | "freeform";
@@ -136,6 +143,45 @@ export interface ExecutorDeps {
 function vs(): typeof import("vscode") {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   return require("vscode");
+}
+
+function envWithoutVscodeIpc(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const out = { ...env };
+  delete out.VSCODE_IPC_HOOK;
+  delete out.VSCODE_IPC_HOOK_CLI;
+  return out;
+}
+
+function defaultCursorBin(): string | null {
+  try {
+    const appRoot = vs().env?.appRoot;
+    const name = process.platform === "win32" ? "cursor.cmd" : "cursor";
+    if (typeof appRoot === "string" && appRoot) {
+      const p = join(appRoot, "bin", name);
+      if (existsSync(p)) return p;
+    }
+  } catch {
+    // tests / no vscode
+  }
+  return null;
+}
+
+export function writeOpenWorkspaceFile(root: string, armadaHome: string): string {
+  const folder = workspaceFolderName(root);
+  const dir = join(armadaHome, "open-windows");
+  mkdirSync(dir, { recursive: true });
+  const file = join(dir, `${folder}.code-workspace`);
+  writeFileSync(file, JSON.stringify({ folders: [{ path: root }] }, null, 2));
+  return file;
+}
+
+function spawnCursorDetached(command: string, args: string[]): void {
+  const child = spawn(command, args, {
+    detached: true,
+    stdio: "ignore",
+    env: envWithoutVscodeIpc(),
+  });
+  child.unref();
 }
 
 function autoSubmitOutcome(r: boolean | { ok: boolean; reason?: string }): { ok: boolean; reason?: string } {
@@ -207,6 +253,12 @@ export class Executor {
     // Windows (r-d4aa8dc3 stayed queued). Duplicate is the command Cursor uses for a second OS window.
     if (workspacePathIn(root, folders)) {
       await vscode.commands.executeCommand("workbench.action.duplicateWorkspaceInNewWindow");
+      return;
+    }
+    const bin = this.deps.cursorBin?.() ?? defaultCursorBin();
+    const file = writeOpenWorkspaceFile(root, this.deps.armadaHome ?? join(homedir(), ".armada"));
+    if (bin) {
+      (this.deps.spawnDetached ?? spawnCursorDetached)(bin, ["--new-window", file]);
       return;
     }
     await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(root), { forceNewWindow: true });

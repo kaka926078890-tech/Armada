@@ -6,6 +6,7 @@ import { join } from "path";
 const clipboardWrites: string[] = [];
 const commands: string[] = [];
 const commandArgs: unknown[][] = [];
+const spawned: { cmd: string; args: string[] }[] = [];
 let workspaceFolderPaths = ["/ws/a"];
 
 mock.module("vscode", () => ({
@@ -26,9 +27,11 @@ function makeExec(over: Partial<ConstructorParameters<typeof Executor>[0]> = {})
   clipboardWrites.length = 0;
   commands.length = 0;
   commandArgs.length = 0;
+  spawned.length = 0;
   workspaceFolderPaths = ["/ws/a"];
   const acks: Record<string, unknown>[] = [];
   const lockPath = join(mkdtempSync(join(tmpdir(), "armada-exec-")), "cdp.lock");
+  const armadaHome = mkdtempSync(join(tmpdir(), "armada-home-"));
   const ex = new Executor({
     globalState: {
       get: (_k, d) => (d !== undefined ? ["/ws/a"] : ["/ws/a"]) as never,
@@ -37,6 +40,9 @@ function makeExec(over: Partial<ConstructorParameters<typeof Executor>[0]> = {})
     send: (m) => { acks.push(m as Record<string, unknown>); },
     sleep: async () => {},
     cdpLockPath: lockPath,
+    armadaHome,
+    cursorBin: () => "/bin/cursor",
+    spawnDetached: (cmd, args) => { spawned.push({ cmd, args }); },
     ...over,
   });
   return { ex, acks };
@@ -351,11 +357,24 @@ describe("Executor dirty composer", () => {
   });
 
   test("openWorkspaceWindow uses vscode.openFolder forceNewWindow for a different folder", async () => {
-    const { ex } = makeExec();
+    const { ex } = makeExec({ cursorBin: () => null });
     await ex.openWorkspaceWindow("/ws/b");
     expect(commands).toEqual(["vscode.openFolder"]);
     expect(commandArgs[0]?.[0]).toEqual({ fsPath: "/ws/b", scheme: "file" });
     expect(commandArgs[0]?.[1]).toEqual({ forceNewWindow: true });
+  });
+
+  test("openWorkspaceWindow opens a folder-named .code-workspace via cursor --new-window", async () => {
+    const { ex } = makeExec();
+    await ex.openWorkspaceWindow("/Users/apple/Desktop/desk");
+    expect(commands).toEqual([]);
+    expect(spawned).toHaveLength(1);
+    expect(spawned[0]?.cmd).toBe("/bin/cursor");
+    expect(spawned[0]?.args[0]).toBe("--new-window");
+    const file = spawned[0]?.args[1] ?? "";
+    expect(file.endsWith("/open-windows/desk.code-workspace")).toBe(true);
+    const body = JSON.parse(await Bun.file(file).text()) as { folders: { path: string }[] };
+    expect(body.folders[0]?.path).toBe("/Users/apple/Desktop/desk");
   });
 
   test("CDP_UNREACHABLE rejects startRun without createNew or clipboard", async () => {

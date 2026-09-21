@@ -39,10 +39,12 @@ async function startWithExt(opts: {
   return { ws, inbound, api };
 }
 
-async function startTwoWindows(opts: { sameWorkspace?: boolean; os?: string } = {}) {
+async function startTwoWindows(opts: {
+  sameWorkspace?: boolean; os?: string; extA?: string; extB?: string;
+} = {}) {
   const home = mkdtempSync(join(tmpdir(), "armada-runs-"));
   hub = createServer({ port: 0, home });
-  const connect = async (windowId: string, openWorkspaces: string[]) => {
+  const connect = async (windowId: string, openWorkspaces: string[], extensionVersion: string) => {
     const ws: WebSocket = await new Promise((res, rej) => {
       const w = new WebSocket(`ws://127.0.0.1:${hub!.port}/ws?token=${hub!.token}`);
       w.onopen = () => res(w); w.onerror = rej;
@@ -51,14 +53,14 @@ async function startTwoWindows(opts: { sameWorkspace?: boolean; os?: string } = 
     ws.addEventListener("message", (e) => inbound.push(JSON.parse(String(e.data))));
     ws.send(JSON.stringify({
       type: "register", machineId: "m-1", windowId, name: "Mac-A",
-      os: opts.os ?? "darwin-arm64", openWorkspaces, extensionVersion: "0.4.0", cdpReady: true,
+      os: opts.os ?? "darwin-arm64", openWorkspaces, extensionVersion, cdpReady: true,
     }));
     await new Promise((r) => setTimeout(r, 100));
     inbound.length = 0;
     return { ws, inbound };
   };
-  const a = await connect("w-1", ["/ws/a"]);
-  const b = await connect("w-2", opts.sameWorkspace ? ["/ws/a"] : ["/ws/b"]);
+  const a = await connect("w-1", ["/ws/a"], opts.extA ?? "0.4.0");
+  const b = await connect("w-2", opts.sameWorkspace ? ["/ws/a"] : ["/ws/b"], opts.extB ?? "0.4.0");
   const api = (path: string, init?: RequestInit) =>
     fetch(`http://127.0.0.1:${hub!.port}${path}`, {
       ...init,
@@ -172,6 +174,27 @@ describe("Run dispatch", () => {
     expect(((await (await api(`/api/runs/${a.id}`)).json()) as any).status).toBe("running");
     ws.close();
     ws2.close();
+  });
+
+  test("openWindow goes to a 0.4.40 peer, not the busy 0.4.38 window of that workspace", async () => {
+    const { wsA, inboundA, wsB, inboundB, api } = await startTwoWindows({
+      extA: "0.4.38", extB: "0.4.40",
+    });
+    const r1 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "a" }) });
+    const { run: a } = await r1.json() as any;
+    wsA.send(JSON.stringify({ type: "run.ack", runId: a.id, status: "accepted" }));
+    wsA.send(JSON.stringify({ type: "run.bound", runId: a.id, conversationId: "cid-a", transcriptPath: null, promptMatch: true }));
+    await new Promise((r) => setTimeout(r, 150));
+    inboundA.length = 0;
+    inboundB.length = 0;
+    const r2 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "b" }) });
+    const body2 = await r2.json() as any;
+    expect(body2.run.status).toBe("queued");
+    await new Promise((r) => setTimeout(r, 80));
+    expect(inboundA.filter((m) => m.type === "run.openWindow")).toEqual([]);
+    expect(inboundB.filter((m) => m.type === "run.openWindow" && m.workspaceRoot === "/ws/a")).toHaveLength(1);
+    wsA.close();
+    wsB.close();
   });
 
   test("identical prompt on same workspace → 409 PROMPT_COLLISION even after running", async () => {
@@ -301,6 +324,59 @@ describe("Run dispatch", () => {
     expect(((await (await api(`/api/runs/${next.id}`)).json()) as any).status).toBe("dispatched");
     expect(inbound.filter((m) => m.type === "run.start").map((m) => m.prompt)).toEqual(["a"]);
     ws.close();
+  });
+
+  test("queued other-root is not WORKSPACE_NOT_OPEN when a sibling window registers first after hub restart", async () => {
+    const home = mkdtempSync(join(tmpdir(), "armada-runs-"));
+    hub = createServer({ port: 0, home });
+    const token = hub.token;
+    const port = hub.port;
+    const connect = async (windowId: string, openWorkspaces: string[]) => {
+      const ws: WebSocket = await new Promise((res, rej) => {
+        const w = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${token}`);
+        w.onopen = () => res(w); w.onerror = rej;
+      });
+      ws.send(JSON.stringify({
+        type: "register", machineId: "m-1", windowId, name: "Mac-A",
+        os: "darwin-arm64", openWorkspaces, extensionVersion: "0.4.39", cdpReady: true,
+      }));
+      await new Promise((r) => setTimeout(r, 80));
+      return ws;
+    };
+    const wsA = await connect("w-a", ["/ws/a"]);
+    const api = (path: string, init?: RequestInit) =>
+      fetch(`http://127.0.0.1:${port}${path}`, {
+        ...init,
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}`, ...(init?.headers ?? {}) },
+      });
+    const r1 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "hold" }) });
+    const { run: hold } = await r1.json() as any;
+    wsA.send(JSON.stringify({ type: "run.ack", runId: hold.id, status: "accepted" }));
+    wsA.send(JSON.stringify({ type: "run.bound", runId: hold.id, conversationId: "cid-hold", transcriptPath: null, promptMatch: true }));
+    await new Promise((r) => setTimeout(r, 120));
+    const r2 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "queued" }) });
+    const queued = (await r2.json() as any).run;
+    expect(queued.status).toBe("queued");
+    wsA.close();
+    hub.stop();
+    hub = createServer({ port: 0, home });
+    const token2 = hub.token;
+    const port2 = hub.port;
+    const wsB: WebSocket = await new Promise((res, rej) => {
+      const w = new WebSocket(`ws://127.0.0.1:${port2}/ws?token=${token2}`);
+      w.onopen = () => res(w); w.onerror = rej;
+    });
+    wsB.send(JSON.stringify({
+      type: "register", machineId: "m-1", windowId: "w-b", name: "Mac-A",
+      os: "darwin-arm64", openWorkspaces: ["/ws/b"], extensionVersion: "0.4.39", cdpReady: true,
+    }));
+    await new Promise((r) => setTimeout(r, 150));
+    const after = await (await fetch(`http://127.0.0.1:${port2}/api/runs/${queued.id}`, {
+      headers: { authorization: `Bearer ${token2}` },
+    })).json() as any;
+    expect(after.status).toBe("queued");
+    expect(after.end_reason).toBeNull();
+    wsB.close();
   });
 
   test("rejected ack → error with reason", async () => {

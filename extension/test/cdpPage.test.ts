@@ -50,6 +50,12 @@ describe("titleMatchesWorkspace", () => {
     expect(titleMatchesWorkspace("Cursor Agents", workWin)).toBe(false);
     expect(titleMatchesWorkspace("work - other - Cursor", workWin)).toBe(false);
   });
+
+  test("CLI .code-workspace window titled folder (Workspace) matches that folder", () => {
+    expect(titleMatchesWorkspace("desk (Workspace)", "desk")).toBe(true);
+    expect(titleMatchesWorkspace("work (Workspace)", workWin)).toBe(true);
+    expect(titleMatchesWorkspace("armada-open-desk (Workspace)", "desk")).toBe(false);
+  });
 });
 
 describe("pickCdpPage", () => {

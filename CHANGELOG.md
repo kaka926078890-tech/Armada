@@ -12,6 +12,21 @@ Armada 按 **面** 发版：扩展、桌面、iOS、Android 可以不同号。RE
 
 ---
 
+## 2026-09-21 — 扩展 0.4.40 · iOS TF 27 · Android 0.1.13 · 桌面 0.1.0
+
+### 修复
+
+- 同机并排第二条新任务：peer 窗用 `cursor --new-window` 打开以文件夹命名的 `.code-workspace`（标题 `desk (Workspace)`），不再 `openFolder` 已经打开的目录（Cursor 会复用原窗，新窗从不 register）。
+- 两扇同仓窗时 CDP 不再把注入打进已盖章的忙碌窗（本机「测试：你好v1 / 测试你好：v2」进了正在跑的 desk 对话，新窗 `BIND_TIMEOUT`）。只给未盖章的那一页盖章。
+- `run.openWindow` 发给已是 0.4.40 的窗，不再发给仍是 0.4.38、正在跑任务因而没 Reload 的忙碌窗。
+- overlay / hub 重启时，先连上的 sibling 窗不再把其它工作区的排队卡打成 `WORKSPACE_NOT_OPEN`（15:23 v1/v2 进异常）。只有本进程已经见过该工作区、随后从心跳并集里消失，才算关仓。
+
+### 操作员注意
+
+Windows 被控须 **先装** `armada-agent-0.4.40.vsix` 再 Reload。只空闲、只点 Reload，本地没有这个包不会升级。中台须 overlay 到含 `REQUIRED_EXTENSION_VERSION=0.4.40` 的包装 hub。桌面仍是 **0.1.0**；iOS TestFlight **27**；Android **0.1.13**。
+
+---
+
 ## 2026-09-21 — 扩展 0.4.39 · iOS TF 27 · Android 0.1.13 · 桌面 0.1.0
 
 ### 修复

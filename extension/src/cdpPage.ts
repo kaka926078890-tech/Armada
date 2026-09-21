@@ -38,7 +38,10 @@ export function workspaceFolderName(workspaceRoot: string): string {
 
 export function titleMatchesWorkspace(title: string, folder: string): boolean {
   if (!folder) return false;
-  const parts = splitTitleSegments(title.trim());
+  const trimmed = title.trim();
+  const workspaceTitle = /^(.*) \(Workspace\)$/.exec(trimmed);
+  if (workspaceTitle && workspaceTitle[1] === folder) return true;
+  const parts = splitTitleSegments(trimmed);
   if (!parts.length) return false;
   const product = findProductRange(parts);
   if (!product) return parts[parts.length - 1] === folder;

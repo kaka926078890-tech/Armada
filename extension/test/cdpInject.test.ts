@@ -509,6 +509,75 @@ describe("connectWorkspacePage window stamp", () => {
     expect(logs.some((c) => c.method === "Input.insertText")).toBe(false);
   });
 
+  test("title-unique page already stamped by another window is not stolen", async () => {
+    const logs = new Map<string, CallLog[]>();
+    const submit = createCdpSubmitter(deps({
+      windowId: "sess-new",
+      fetchJson: async () => [
+        { type: "page", title: "Cursor Settings — desk", webSocketDebuggerUrl: "ws://busy" },
+        { type: "page", title: "armada-open-desk (Workspace)", webSocketDebuggerUrl: "ws://new" },
+      ],
+      connect: async (wsUrl) => {
+        const log: CallLog[] = [];
+        logs.set(wsUrl, log);
+        return stampSession({
+          stamp: wsUrl === "ws://busy" ? "sess-busy" : null,
+          evalResults: ["OK", "OK", "OK"],
+          log,
+        });
+      },
+    }));
+    const r = await submit("/Users/apple/Desktop/desk", "测试你好：v2");
+    expect(r).toEqual({ ok: false, reason: "WINDOW_TARGET_NOT_FOUND" });
+    expect(logs.get("ws://busy")?.some((c) => c.method === "Input.insertText")).toBe(false);
+  });
+
+  test("two same-folder pages: inject the unstamped one, not the already-stamped sibling", async () => {
+    const logs = new Map<string, CallLog[]>();
+    const submit = createCdpSubmitter(deps({
+      windowId: "sess-new",
+      fetchJson: async () => [
+        { type: "page", title: "a.ts — desk", webSocketDebuggerUrl: "ws://busy" },
+        { type: "page", title: "b.ts — desk", webSocketDebuggerUrl: "ws://new" },
+      ],
+      connect: async (wsUrl) => {
+        const log: CallLog[] = [];
+        logs.set(wsUrl, log);
+        return stampSession({
+          stamp: wsUrl === "ws://busy" ? "sess-busy" : null,
+          evalResults: ["OK", "OK", "OK"],
+          log,
+        });
+      },
+    }));
+    expect((await submit("/Users/apple/Desktop/desk", "v2")).ok).toBe(true);
+    expect(logs.get("ws://new")?.some((c) => c.method === "Input.insertText")).toBe(true);
+    expect(logs.get("ws://busy")?.some((c) => c.method === "Input.insertText")).toBe(false);
+  });
+
+  test("unstamped desk (Workspace) page is used when the folder window is already stamped", async () => {
+    const logs = new Map<string, CallLog[]>();
+    const submit = createCdpSubmitter(deps({
+      windowId: "sess-new",
+      fetchJson: async () => [
+        { type: "page", title: "Cursor Settings — desk", webSocketDebuggerUrl: "ws://busy" },
+        { type: "page", title: "desk (Workspace)", webSocketDebuggerUrl: "ws://new" },
+      ],
+      connect: async (wsUrl) => {
+        const log: CallLog[] = [];
+        logs.set(wsUrl, log);
+        return stampSession({
+          stamp: wsUrl === "ws://busy" ? "sess-busy" : null,
+          evalResults: ["OK", "OK", "OK"],
+          log,
+        });
+      },
+    }));
+    expect((await submit("/Users/apple/Desktop/desk", "v2")).ok).toBe(true);
+    expect(logs.get("ws://new")?.some((c) => c.method === "Input.insertText")).toBe(true);
+    expect(logs.get("ws://busy")?.some((c) => c.method === "Input.insertText")).toBe(false);
+  });
+
   test("windowId set, no stamp, dirty title still v1-matches and writes stamp", async () => {
     const log: CallLog[] = [];
     const closed = { n: 0 };

@@ -3,7 +3,7 @@ import { mkdtempSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { openDb } from "../src/db";
-import { Registry, workspaceListChanged } from "../src/registry";
+import { Registry, workspaceListChanged, pickOpenWindowExecutor } from "../src/registry";
 import type { ArmadaSocket } from "../src/ws";
 
 function setup() {
@@ -141,6 +141,26 @@ describe("Registry", () => {
     expect(JSON.parse(reg.getMachine("m-1")!.open_workspaces)).toEqual([]);
     expect(reg.getMachine("m-1")!.status).toBe("online");
     expect(n).toBe(1);
+  });
+
+  test("pickOpenWindowExecutor prefers 0.4.40 peer over busy unrestored window", () => {
+    expect(pickOpenWindowExecutor([
+      { windowId: "w-busy", openWorkspaces: ["/ws/a"], extensionVersion: "0.4.38" },
+      { windowId: "w-peer", openWorkspaces: ["/ws/b"], extensionVersion: "0.4.40" },
+    ], "/ws/a")).toBe("w-peer");
+  });
+
+  test("pickOpenWindowExecutor uses the 0.4.40 window that already has the root", () => {
+    expect(pickOpenWindowExecutor([
+      { windowId: "w-other", openWorkspaces: ["/ws/b"], extensionVersion: "0.4.40" },
+      { windowId: "w-same", openWorkspaces: ["/ws/a"], extensionVersion: "0.4.40" },
+    ], "/ws/a")).toBe("w-same");
+  });
+
+  test("pickOpenWindowExecutor falls back to the workspace window when nobody is 0.4.40", () => {
+    expect(pickOpenWindowExecutor([
+      { windowId: "w-busy", openWorkspaces: ["/ws/a"], extensionVersion: "0.4.38" },
+    ], "/ws/a")).toBe("w-busy");
   });
 
   test("windowsForWorkspace lists every live window of that root", () => {

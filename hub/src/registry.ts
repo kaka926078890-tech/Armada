@@ -1,5 +1,7 @@
 import type { Database } from "bun:sqlite";
 import type { ArmadaSocket } from "./ws";
+import { cmpSemver } from "../../desktop-core/src/cursorReload";
+import { workspacePathIn, workspacePathsEqual } from "../../extension/src/workspacePath";
 
 export interface MachineInfo {
   id: string; name: string; os: string;
@@ -39,8 +41,32 @@ export function workspaceListChanged(prev: string[], next: string[]): boolean {
   return false;
 }
 
+/** First vsix that actually opens a second OS window (`duplicateWorkspaceInNewWindow`). */
+export const OPEN_WINDOW_MIN_EXT = "0.4.40";
+
+export type OpenWindowCandidate = {
+  windowId: string;
+  openWorkspaces: string[];
+  extensionVersion: string | null;
+};
+
+/** Prefer a 0.4.40+ peer so a busy unrestored window is not asked to openFolder its own folder. */
+export function pickOpenWindowExecutor(
+  windows: OpenWindowCandidate[],
+  workspaceRoot: string,
+): string | null {
+  const capable = windows.filter((w) =>
+    typeof w.extensionVersion === "string" && cmpSemver(w.extensionVersion, OPEN_WINDOW_MIN_EXT) >= 0,
+  );
+  const pool = capable.length > 0 ? capable : windows;
+  const same = pool.find((w) => workspacePathIn(workspaceRoot, w.openWorkspaces));
+  return same?.windowId ?? pool[0]?.windowId ?? null;
+}
+
 export class Registry {
   private conns = new Map<string, Conn>();
+  /** Workspaces this process has seen on a live socket. Cleared when the machine has no connections. */
+  private everOpen = new Map<string, Set<string>>();
   public onMachineOffline: (machineId: string) => void = () => {};
   public onMachinesChanged: () => void = () => {};
   public onRegistered: (machineId: string, windowId: string) => void = () => {};
@@ -175,11 +201,26 @@ export class Registry {
       for (const w of c.openWorkspaces) union.add(w);
     }
     const next = [...union];
+    let seen = this.everOpen.get(machineId);
+    if (!seen) {
+      seen = new Set();
+      this.everOpen.set(machineId, seen);
+    }
+    for (const w of next) seen.add(w);
     const prev = this.storedWorkspaces(machineId);
     if (!workspaceListChanged(prev, next)) return false;
     this.db.query("UPDATE machines SET open_workspaces=?1 WHERE id=?2")
       .run(JSON.stringify(next), machineId);
     return true;
+  }
+
+  /** True only if this process already saw the root on a live socket and it is gone from the union. */
+  workspaceDropped(machineId: string, workspaceRoot: string): boolean {
+    const seen = this.everOpen.get(machineId);
+    if (!seen) return false;
+    const known = [...seen].some((r) => workspacePathsEqual(r, workspaceRoot));
+    if (!known) return false;
+    return !workspacePathIn(workspaceRoot, this.storedWorkspaces(machineId));
   }
 
   onClose(ws: ArmadaSocket): void {
@@ -190,6 +231,8 @@ export class Registry {
       const prevReady = mid ? this.machineCdpReady(mid) : null;
       this.conns.delete(key);
       if (mid) {
+        const still = [...this.conns.values()].some((c) => c.machineId === mid);
+        if (!still) this.everOpen.delete(mid);
         const wsChanged = this.refreshMachineWorkspaces(mid);
         const readyChanged = this.machineCdpReady(mid) !== prevReady;
         if (wsChanged || readyChanged) this.onMachinesChanged();
@@ -232,6 +275,20 @@ export class Registry {
   findWindowForWorkspace(machineId: string, workspaceRoot: string): { machineId: string; windowId: string } | null {
     const ids = this.windowsForWorkspace(machineId, workspaceRoot);
     return ids.length ? { machineId, windowId: ids[0]! } : null;
+  }
+
+  findWindowToOpenWorkspace(machineId: string, workspaceRoot: string): { machineId: string; windowId: string } | null {
+    const windows: OpenWindowCandidate[] = [];
+    for (const c of this.conns.values()) {
+      if (c.machineId !== machineId) continue;
+      windows.push({
+        windowId: c.windowId,
+        openWorkspaces: c.openWorkspaces,
+        extensionVersion: c.extensionVersion,
+      });
+    }
+    const windowId = pickOpenWindowExecutor(windows, workspaceRoot);
+    return windowId ? { machineId, windowId } : null;
   }
 
   windowsForWorkspace(machineId: string, workspaceRoot: string): string[] {

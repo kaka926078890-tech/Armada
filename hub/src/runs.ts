@@ -289,7 +289,7 @@ export class RunService {
     const key = `${machineId}\n${workspaceRoot}`;
     const now = Date.now();
     if ((this.lastOpenWindowAt.get(key) ?? 0) + 2000 > now) return;
-    const win = this.registry.findWindowForWorkspace(machineId, workspaceRoot);
+    const win = this.registry.findWindowToOpenWorkspace(machineId, workspaceRoot);
     if (!win) return;
     if (!this.registry.sendTo(machineId, win.windowId, { type: "run.openWindow", workspaceRoot })) return;
     this.lastOpenWindowAt.set(key, now);
@@ -308,8 +308,12 @@ export class RunService {
       for (const row of rows) {
         const m = this.registry.getMachine(machineId);
         const open = m ? JSON.parse(m.open_workspaces) as string[] : [];
-        if (!open.includes(row.workspace_root)) {
-          toFail.push({ id: row.id, error: "WORKSPACE_NOT_OPEN" });
+        if (!workspacePathIn(row.workspace_root, open)) {
+          if (this.registry.workspaceDropped(row.machine_id ?? machineId, row.workspace_root)) {
+            toFail.push({ id: row.id, error: "WORKSPACE_NOT_OPEN" });
+          } else {
+            this.requestOpenWindow(machineId, row.workspace_root);
+          }
           continue;
         }
         const startWin = this.findStartWindow(machineId, row.workspace_root);

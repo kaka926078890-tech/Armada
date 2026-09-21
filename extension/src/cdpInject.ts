@@ -19,7 +19,7 @@
  */
 
 import { parseAskInspect, parsePlanInspect, planInspectToAsk, type AskInspect } from "./askDetect";
-import { pickCdpPage } from "./cdpPage";
+import { pickCdpPage, titleMatchesWorkspace, workspaceFolderName } from "./cdpPage";
 
 export interface CdpSubmitResult {
   ok: boolean;
@@ -613,32 +613,26 @@ async function connectWorkspacePage(
     const pages = (Array.isArray(targets) ? targets : []).filter(
       (t) => t?.type === "page" && typeof t.webSocketDebuggerUrl === "string" && t.webSocketDebuggerUrl,
     );
-    const opened: CdpSession[] = [];
-    const hits: CdpSession[] = [];
+    const opened: { session: CdpSession; stamp: string | null; title: string }[] = [];
     for (const t of pages) {
       try {
         const session = await connect(String(t.webSocketDebuggerUrl), 2000);
-        opened.push(session);
         const stamp = await readWindowStamp(session);
-        if (stamp === windowId) hits.push(session);
+        opened.push({
+          session,
+          stamp,
+          title: typeof t.title === "string" ? t.title : "",
+        });
       } catch {
         // 连不上或读失败当未盖章，不据此 AMBIGUOUS
       }
     }
-    if (hits.length === 1) {
-      for (const s of opened) {
-        if (s !== hits[0]) s.close();
+    const closeExcept = (keep: CdpSession | null) => {
+      for (const o of opened) {
+        if (o.session !== keep) o.session.close();
       }
-      return { ok: true, session: hits[0]! };
-    }
-    for (const s of opened) s.close();
-    if (hits.length > 1) return { ok: false, reason: "WINDOW_TARGET_AMBIGUOUS" };
-  }
-  const picked = pickCdpPage(targets, workspaceRoot);
-  if (!picked.ok) return picked;
-  try {
-    const session = await connect(picked.wsUrl, 2000);
-    if (windowId) {
+    };
+    const writeStamp = async (session: CdpSession) => {
       try {
         await session.call("Runtime.evaluate", {
           expression: windowStampWriteExpression(windowId),
@@ -647,7 +641,31 @@ async function connectWorkspacePage(
       } catch (e) {
         log(`window stamp write failed: ${String(e)}`);
       }
+    };
+    const hits = opened.filter((o) => o.stamp === windowId);
+    if (hits.length === 1) {
+      closeExcept(hits[0]!.session);
+      return { ok: true, session: hits[0]!.session };
     }
+    if (hits.length > 1) {
+      closeExcept(null);
+      return { ok: false, reason: "WINDOW_TARGET_AMBIGUOUS" };
+    }
+    const titleHits = opened.filter((o) => titleMatchesWorkspace(o.title, workspaceFolderName(workspaceRoot)));
+    const unstamped = titleHits.filter((o) => !o.stamp);
+    if (unstamped.length === 1) {
+      closeExcept(unstamped[0]!.session);
+      await writeStamp(unstamped[0]!.session);
+      return { ok: true, session: unstamped[0]!.session };
+    }
+    closeExcept(null);
+    if (unstamped.length > 1) return { ok: false, reason: "WINDOW_TARGET_AMBIGUOUS" };
+    return { ok: false, reason: "WINDOW_TARGET_NOT_FOUND" };
+  }
+  const picked = pickCdpPage(targets, workspaceRoot);
+  if (!picked.ok) return picked;
+  try {
+    const session = await connect(picked.wsUrl, 2000);
     return { ok: true, session };
   } catch (e) {
     return { ok: false, reason: `CDP_CONNECT_FAIL:${String(e)}` };
