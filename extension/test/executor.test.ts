@@ -6,9 +6,14 @@ import { join } from "path";
 const clipboardWrites: string[] = [];
 const commands: string[] = [];
 const commandArgs: unknown[][] = [];
+let workspaceFolderPaths = ["/ws/a"];
 
 mock.module("vscode", () => ({
-  workspace: { workspaceFolders: [{ uri: { fsPath: "/ws/a" } }] },
+  workspace: {
+    get workspaceFolders() {
+      return workspaceFolderPaths.map((fsPath) => ({ uri: { fsPath } }));
+    },
+  },
   window: { showInformationMessage: async () => "允许" },
   commands: { executeCommand: async (cmd: string, ...args: unknown[]) => { commands.push(cmd); commandArgs.push(args); } },
   env: { clipboard: { writeText: async (t: string) => { clipboardWrites.push(t); } } },
@@ -21,6 +26,7 @@ function makeExec(over: Partial<ConstructorParameters<typeof Executor>[0]> = {})
   clipboardWrites.length = 0;
   commands.length = 0;
   commandArgs.length = 0;
+  workspaceFolderPaths = ["/ws/a"];
   const acks: Record<string, unknown>[] = [];
   const lockPath = join(mkdtempSync(join(tmpdir(), "armada-exec-")), "cdp.lock");
   const ex = new Executor({
@@ -329,11 +335,26 @@ describe("Executor dirty composer", () => {
     expect(acks[acks.length - 1]).toEqual({ type: "run.ack", runId: "r1", status: "accepted" });
   });
 
-  test("openWorkspaceWindow uses vscode.openFolder forceNewWindow", async () => {
+  test("openWorkspaceWindow duplicates current workspace instead of openFolder same path", async () => {
     const { ex } = makeExec();
     await ex.openWorkspaceWindow("/ws/a");
+    expect(commands).toEqual(["workbench.action.duplicateWorkspaceInNewWindow"]);
+    expect(commandArgs[0] ?? []).toEqual([]);
+  });
+
+  test("openWorkspaceWindow duplicates Windows same folder despite slash and drive case", async () => {
+    workspaceFolderPaths = ["c:\\Users\\PC\\Desktop\\work"];
+    const { ex } = makeExec();
+    workspaceFolderPaths = ["c:\\Users\\PC\\Desktop\\work"];
+    await ex.openWorkspaceWindow("C:/Users/PC/Desktop/work");
+    expect(commands).toEqual(["workbench.action.duplicateWorkspaceInNewWindow"]);
+  });
+
+  test("openWorkspaceWindow uses vscode.openFolder forceNewWindow for a different folder", async () => {
+    const { ex } = makeExec();
+    await ex.openWorkspaceWindow("/ws/b");
     expect(commands).toEqual(["vscode.openFolder"]);
-    expect(commandArgs[0]?.[0]).toEqual({ fsPath: "/ws/a", scheme: "file" });
+    expect(commandArgs[0]?.[0]).toEqual({ fsPath: "/ws/b", scheme: "file" });
     expect(commandArgs[0]?.[1]).toEqual({ forceNewWindow: true });
   });
 

@@ -12,6 +12,18 @@ Armada 按 **面** 发版：扩展、桌面、iOS、Android 可以不同号。RE
 
 ---
 
+## 2026-09-21 — 扩展 0.4.39 · iOS TF 27 · Android 0.1.13 · 桌面 0.1.0
+
+### 修复
+
+- Windows 同工作区第二条新任务不再假排队：忙碌窗改走 Cursor 的 `duplicateWorkspaceInNewWindow`，不再 `openFolder` 同一个已打开目录（Windows 会复用原窗，新窗从不 register，`r-d4aa8dc3` 一直停在排队中）。
+
+### 操作员注意
+
+Windows 被控须 **先装** `armada-agent-0.4.39.vsix` 再 Reload。只空闲、只点 Reload，本地没有这个包不会升级。中台须 overlay 到含 `REQUIRED_EXTENSION_VERSION=0.4.39` 的包装 hub。桌面仍是 **0.1.0**；iOS TestFlight **27**；Android **0.1.13**。
+
+---
+
 ## 2026-09-21 — 扩展 0.4.38 · iOS TF 27 · Android 0.1.13 · 桌面 0.1.0
 
 ### 新增
