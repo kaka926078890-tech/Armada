@@ -12,7 +12,7 @@
 | --- | --- | --- |
 | 桌面 Armada.app | **0.1.0** | `desktop/src-tauri/tauri.conf.json` |
 | 扩展 armada-agent | **0.4.42** | `extension/package.json` |
-| iOS ArmadaRemote | **0.1.0** · TestFlight **27** | `mobile/ios` `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` |
+| iOS ArmadaRemote | **0.1.0** · TestFlight **28** | `mobile/ios` `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` |
 | Android | **0.1.13**（versionCode 14） | `mobile/android/app/build.gradle.kts` |
 
 每面发版都记进 [CHANGELOG.md](CHANGELOG.md)。能力下限（例如「续聊须 ≥ 0.4.19」）和当前发版号不是一回事：装包请用上表。
