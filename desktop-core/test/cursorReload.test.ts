@@ -11,6 +11,8 @@ import {
   parsePendingReload,
   parseReloadAttempt,
   pendingFromAction,
+  reloadAttemptBlocksWindow,
+  mergeReloadAttempt,
   reloadStillNeeded,
   reloadStillNeededForFleet,
   neededReloadMachineIds,
@@ -42,6 +44,22 @@ describe("parseReloadAttempt", () => {
     expect(parseReloadAttempt({ setAt: 1000 })).toEqual({ setAt: 1000 });
     expect(parseReloadAttempt({ setAt: 0 })).toBeNull();
     expect(parseReloadAttempt(null)).toBeNull();
+  });
+
+  test("legacy file without windowIds stays machine-wide", () => {
+    expect(parseReloadAttempt({ setAt: 1000 })).toEqual({ setAt: 1000 });
+    expect(reloadAttemptBlocksWindow({ setAt: 1000 }, 1000, "w-desk")).toBe(true);
+  });
+
+  test("windowIds only latch those windows", () => {
+    expect(parseReloadAttempt({ setAt: 1000, windowIds: ["w-finclip"] })).toEqual({
+      setAt: 1000, windowIds: ["w-finclip"],
+    });
+    expect(reloadAttemptBlocksWindow({ setAt: 1000, windowIds: ["w-finclip"] }, 1000, "w-finclip")).toBe(true);
+    expect(reloadAttemptBlocksWindow({ setAt: 1000, windowIds: ["w-finclip"] }, 1000, "w-desk")).toBe(false);
+    expect(mergeReloadAttempt({ setAt: 1000, windowIds: ["w-finclip"] }, 1000, "w-desk")).toEqual({
+      setAt: 1000, windowIds: ["w-finclip", "w-desk"],
+    });
   });
 });
 
@@ -250,6 +268,14 @@ describe("decideReloadFire", () => {
     expect(busy.fire).toBe(false);
     const idleAgain = decideReloadFire(busy.next, { decision: "reload", pendingSetAt: setAt });
     expect(idleAgain.fire).toBe(true);
+  });
+
+  test("sibling window disk latch does not block a window that never fired", () => {
+    const fresh: ReloadFireState = { lastFiredSetAt: null, lastDecision: null, inFlight: false };
+    const r = decideReloadFire(fresh, {
+      decision: "reload", pendingSetAt: setAt, attemptedSetAt: setAt, thisWindowAttempted: false,
+    });
+    expect(r.fire).toBe(true);
   });
 
   test("disk latch blocks busy→idle re-fire of the same pending (01:27 10s loop)", () => {
@@ -541,7 +567,9 @@ describe("extension delivers hub reload over ws", () => {
     expect(src).toContain("thisWindowHasOpenComposerTurn");
     expect(src).toContain("decideReloadFire");
     expect(src).toContain("noteReloadCommandSettled");
-    expect(src).toContain("attemptedSetAt");
+    expect(src).toContain("thisWindowAttempted");
+    expect(src).toContain("reloadAttemptBlocksWindow");
+    expect(src).toContain("mergeReloadAttempt");
     expect(src).toContain("PENDING_RELOAD_ATTEMPT_NAME");
     expect(src).toContain("windowHasRecentSettle");
     expect(src).toContain("thisWindowRecentlySettled");

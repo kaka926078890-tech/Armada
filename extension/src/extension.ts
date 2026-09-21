@@ -20,9 +20,9 @@ import { hubRunsNeedingTranscriptFollow, shouldArmFollowupStopOnAdopt } from "./
 import { noteOwnerBsp, clearGeneration, synthesizedStopPayload, noteHubGeneration, onFollowupBindGeneration } from "./generationStamp";
 import { parseAskInspect, askPollActions, coalesceAskInspect } from "./askDetect";
 import { enrichPlanAsk, planDirsFor } from "./planFile";
-import { PENDING_RELOAD_ATTEMPT_NAME, PENDING_RELOAD_NAME, decideReloadFire, decideWindowReload, highestInstalledArmadaAgent, highestInstalledVsix, noteReloadCommandSettled, parsePendingReload, parseReloadAttempt, windowHasInFlightArmadaRun, windowHasOpenComposerTurn, windowHasRecentSettle, type ReloadFireState } from "../../desktop-core/src/cursorReload";
+import { PENDING_RELOAD_ATTEMPT_NAME, PENDING_RELOAD_NAME, decideReloadFire, decideWindowReload, highestInstalledArmadaAgent, highestInstalledVsix, mergeReloadAttempt, noteReloadCommandSettled, parsePendingReload, parseReloadAttempt, reloadAttemptBlocksWindow, windowHasInFlightArmadaRun, windowHasOpenComposerTurn, windowHasRecentSettle, type ReloadFireState } from "../../desktop-core/src/cursorReload";
 
-const EXTENSION_VERSION = "0.4.40";
+const EXTENSION_VERSION = "0.4.41";
 
 let client: { dispose: () => void } | null = null;
 
@@ -566,11 +566,13 @@ export function activate(context: vscode.ExtensionContext): void {
       try { unlinkSync(reloadAttemptPath); } catch { /* missing */ }
       return;
     }
-    writeFileSync(reloadAttemptPath, JSON.stringify({ setAt }), { mode: 0o600 });
+    let prev = null as ReturnType<typeof parseReloadAttempt>;
+    try { prev = parseReloadAttempt(JSON.parse(readFileSync(reloadAttemptPath, "utf8"))); } catch { /* missing */ }
+    writeFileSync(reloadAttemptPath, JSON.stringify(mergeReloadAttempt(prev, setAt, windowId)), { mode: 0o600 });
   };
-  const readReloadAttemptSetAt = (): number | null => {
+  const readReloadAttempt = (): ReturnType<typeof parseReloadAttempt> => {
     try {
-      return parseReloadAttempt(JSON.parse(readFileSync(reloadAttemptPath, "utf8")))?.setAt ?? null;
+      return parseReloadAttempt(JSON.parse(readFileSync(reloadAttemptPath, "utf8")));
     } catch {
       return null;
     }
@@ -619,10 +621,12 @@ export function activate(context: vscode.ExtensionContext): void {
       installedVsix: diskVsix,
       machineId: machineId ?? undefined,
     });
+    const attemptFile = readReloadAttempt();
     const attempt = decideReloadFire(reloadFire, {
       decision,
       pendingSetAt: pending?.setAt ?? null,
-      attemptedSetAt: readReloadAttemptSetAt(),
+      attemptedSetAt: attemptFile?.setAt ?? null,
+      thisWindowAttempted: reloadAttemptBlocksWindow(attemptFile, pending?.setAt ?? null, windowId),
     });
     reloadFire = attempt.next;
     if (decision === "expired") {
@@ -633,7 +637,10 @@ export function activate(context: vscode.ExtensionContext): void {
       log(`vsix pending-reload skipped; ${pending?.vsix} not installed (running ${EXTENSION_VERSION}, disk ${diskVsix ?? "none"})`);
       return;
     }
-    if (!attempt.fire) return;
+    if (!attempt.fire) {
+      if (decision === "reload") log("vsix pending-reload skipped; this window already attempted this pending");
+      return;
+    }
     persistReloadAttempt(pending?.setAt ?? null);
     log(`vsix pending-reload: reloading window for ${pending?.vsix}`);
     void Promise.resolve(vscode.commands.executeCommand("workbench.action.reloadWindow")).then(

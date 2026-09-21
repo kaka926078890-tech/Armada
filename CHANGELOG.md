@@ -12,6 +12,18 @@ Armada 按 **面** 发版：扩展、桌面、iOS、Android 可以不同号。RE
 
 ---
 
+## 2026-09-21 — 扩展 0.4.41 · iOS TF 27 · Android 0.1.13 · 桌面 0.1.0
+
+### 修复
+
+- 空闲 Reload 的磁盘闩按窗口记：finclip 先 Reload 不再把 desk 那扇还在跑的窗一并闩死（任务收口后等了三分钟也不升）。旧文件没有 `windowIds` 时仍当整机闩，避免 10 秒连刷。
+
+### 操作员注意
+
+Windows 被控须 **先装** `armada-agent-0.4.41.vsix` 再 Reload。只空闲、只点 Reload，本地没有这个包不会升级。中台须 overlay 到含 `REQUIRED_EXTENSION_VERSION=0.4.41` 的包装 hub。桌面仍是 **0.1.0**；iOS TestFlight **27**；Android **0.1.13**。
+
+---
+
 ## 2026-09-21 — 扩展 0.4.40 · iOS TF 27 · Android 0.1.13 · 桌面 0.1.0
 
 ### 修复

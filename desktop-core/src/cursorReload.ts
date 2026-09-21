@@ -45,11 +45,39 @@ export function pendingFromAction(
   return { action, vsix: v, setAt: now, notBefore: start, ...(mid ? { machineId: mid } : {}) };
 }
 
-export function parseReloadAttempt(raw: unknown): { setAt: number } | null {
+export type ReloadAttempt = {
+  setAt: number;
+  /** Present = only these windows already fired. Absent = legacy machine-wide latch. */
+  windowIds?: string[];
+};
+
+export function parseReloadAttempt(raw: unknown): ReloadAttempt | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
-  const setAt = (raw as { setAt?: unknown }).setAt;
+  const o = raw as Record<string, unknown>;
+  const setAt = o.setAt;
   if (typeof setAt !== "number" || !Number.isFinite(setAt) || setAt <= 0) return null;
-  return { setAt };
+  if (!("windowIds" in o)) return { setAt };
+  if (!Array.isArray(o.windowIds)) return { setAt };
+  const windowIds = o.windowIds.filter((id): id is string => typeof id === "string" && id.trim() !== "").map((id) => id.trim());
+  return { setAt, windowIds };
+}
+
+/** Disk latch is per window. Legacy `{setAt}` without windowIds still blocks every window. */
+export function reloadAttemptBlocksWindow(
+  attempt: ReloadAttempt | null,
+  pendingSetAt: number | null,
+  windowId: string,
+): boolean {
+  if (!attempt || pendingSetAt == null || attempt.setAt !== pendingSetAt) return false;
+  if (!attempt.windowIds) return true;
+  return attempt.windowIds.includes(windowId);
+}
+
+export function mergeReloadAttempt(prev: ReloadAttempt | null, setAt: number, windowId: string): ReloadAttempt {
+  const ids = prev && prev.setAt === setAt ? [...(prev.windowIds ?? [])] : [];
+  const id = windowId.trim();
+  if (id && !ids.includes(id)) ids.push(id);
+  return { setAt, windowIds: ids };
 }
 
 export function cmpSemver(a: string, b: string): number {
@@ -291,7 +319,13 @@ export type ReloadFireState = {
 
 export function decideReloadFire(
   state: ReloadFireState,
-  opts: { decision: WindowReloadDecision; pendingSetAt: number | null; attemptedSetAt?: number | null },
+  opts: {
+    decision: WindowReloadDecision;
+    pendingSetAt: number | null;
+    attemptedSetAt?: number | null;
+    /** False = a sibling window wrote the disk latch; this window may still fire. */
+    thisWindowAttempted?: boolean;
+  },
 ): { fire: boolean; next: ReloadFireState } {
   const lastDecision = opts.decision;
   if (opts.decision !== "reload" || opts.pendingSetAt == null) {
@@ -299,7 +333,8 @@ export function decideReloadFire(
   }
   // Survived a real Reload Window: in-memory latch is gone, but retrying the
   // same pending cannot install a missing vsix — it only restacks reloads.
-  if (opts.attemptedSetAt === opts.pendingSetAt) {
+  // Must be this window's attempt; a sibling idle Reload must not latch the busy desk.
+  if (opts.attemptedSetAt === opts.pendingSetAt && opts.thisWindowAttempted !== false) {
     return { fire: false, next: { ...state, lastFiredSetAt: opts.pendingSetAt, lastDecision } };
   }
   if (state.inFlight) {
