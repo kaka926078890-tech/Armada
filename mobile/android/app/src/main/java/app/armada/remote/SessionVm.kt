@@ -26,6 +26,7 @@ data class UiState(
     val workspaces: List<WorkspaceDto> = emptyList(),
     val snippets: List<PromptSnippet> = emptyList(),
     val cursorReload: CursorReloadDto? = null,
+    val reloadBusy: Map<String, String> = emptyMap(),
     val board: BoardLists = BoardLists(emptyList(), emptyList(), emptySet(), emptySet()),
     val streamHealthy: Boolean = false,
     val pendingOpenRunId: String? = null,
@@ -69,10 +70,27 @@ class SessionVm(app: Application) : AndroidViewModel(app) {
     fun api(): RelayClient = RelayClient(store.relay, store.token)
 
     fun setCursorReload(action: String, machineId: String? = null) {
+        if (machineId != null && _state.value.reloadBusy.containsKey(machineId)) return
+        if (machineId != null) {
+            _state.value = _state.value.copy(reloadBusy = _state.value.reloadBusy + (machineId to action))
+        }
         viewModelScope.launch {
             runCatching { withContext(Dispatchers.IO) { api().setCursorReload(action, machineId) } }
             refresh()
+            if (machineId != null) {
+                _state.value = _state.value.copy(reloadBusy = _state.value.reloadBusy - machineId)
+            }
         }
+    }
+
+    fun machineReloadPending(machineId: String): String? {
+        val busy = _state.value.reloadBusy[machineId]
+        if (busy != null) return busy
+        if (!machineNeedsReload(machineId)) return null
+        val reload = _state.value.cursorReload ?: return null
+        val scoped = reload.pendingMachineId
+        if (!scoped.isNullOrBlank() && scoped != machineId) return null
+        return reload.action
     }
 
     fun bind(uri: String) {

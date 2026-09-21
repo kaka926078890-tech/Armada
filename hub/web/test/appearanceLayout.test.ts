@@ -23,9 +23,11 @@ describe("appearance layout stays coordinated when text scales", () => {
     expect(header).toContain("shrink-0");
   });
 
-  test("run detail overlay covers the machine sidebar below the header", () => {
+  test("run detail overlay dims the board, not the machine sidebar", () => {
     const app = readFileSync(join(web, "src/App.tsx"), "utf8");
+    const sidebar = readFileSync(join(web, "src/components/Sidebar.tsx"), "utf8");
     const body = app.slice(app.indexOf("</header>"));
+    expect(sidebar).toContain("relative z-50");
     expect(body).toMatch(/flex flex-1 min-h-0 relative[\s\S]*<Sidebar[\s\S]*absolute inset-0 z-40/);
     expect(body).not.toMatch(/<Sidebar[\s\S]*flex-col relative[\s\S]*absolute inset-0 z-40/);
     expect(app).not.toContain("fixed inset-0 z-40");
@@ -63,6 +65,9 @@ describe("appearance layout stays coordinated when text scales", () => {
     const sidebar = readFileSync(join(web, "src/components/Sidebar.tsx"), "utf8");
     expect(sidebar).toContain("onReloadMachine");
     expect(sidebar).toContain("现在 Reload");
+    expect(sidebar).toContain("grid-cols-3");
+    expect(sidebar).toContain("正在 Reload");
+    expect(sidebar).not.toContain("flex-wrap gap-1");
     expect(sidebar).toContain("packNotice");
     expect(ios).toContain("cursorReload?.notice");
     expect(android).toContain("cursorReload?.notice");

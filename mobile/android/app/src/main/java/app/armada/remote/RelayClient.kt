@@ -294,6 +294,7 @@ fun parseCursorReload(o: JSONObject): CursorReloadDto {
         needed = o.optBoolean("needed"),
         vsix = pending?.optString("vsix")?.ifBlank { null },
         action = pending?.optString("action")?.ifBlank { null },
+        pendingMachineId = pending?.optString("machineId")?.ifBlank { null },
         neededMachineIds = ids?.let { arr ->
             buildList {
                 for (i in 0 until arr.length()) {

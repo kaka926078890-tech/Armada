@@ -17,11 +17,22 @@ const COL_ACCENT: Record<ColumnKey, string> = {
 
 const BADGE_COLOR: Record<ColumnKey, string> = {
   waiting: "text-amber-400",
-  running: "text-sky-400 animate-pulse",
+  running: "text-sky-400",
   completed: "text-emerald-400",
   cancelled: "text-zinc-500",
   error: "text-red-400",
 };
+
+function CardSpinner() {
+  return (
+    <span
+      className="size-3 shrink-0 rounded-full border-[1.5px] border-sky-500/30 border-t-sky-400 animate-spin"
+      role="img"
+      aria-label="任务执行中"
+      title="任务执行中"
+    />
+  );
+}
 
 export default function Board({ runs, machines, selected, onSelect, showArchived, onHide, onUnhide, readMap, onRename, onRetry }: {
   runs: RunRow[]; machines: Machine[]; selected: string | null; onSelect: (id: string) => void;
@@ -99,6 +110,7 @@ export default function Board({ runs, machines, selected, onSelect, showArchived
                       <div className={`${UI_META} text-muted-foreground mt-1 flex justify-between items-center gap-2`}>
                         <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
                           {unread ? <span className={`size-1.5 shrink-0 rounded-full ${chrome === "done" ? "bg-emerald-400" : "bg-red-400"}`} title={chrome === "need" ? "待处理" : chrome === "fail" ? "异常未读" : "未读"} /> : null}
+                          {col === "running" ? <CardSpinner /> : null}
                           <Badge variant="outline" className={BADGE_COLOR[col]}>{v.badge}</Badge>
                         </span>
                         <span className="text-muted-foreground whitespace-nowrap shrink-0">{v.elapsed}</span>

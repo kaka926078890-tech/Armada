@@ -71,7 +71,7 @@ export const api = {
       return j as { snippets: PromptSnippet[] };
     }),
   getCursorReload: () => req("/api/cursor-reload").then((r) => r.json()) as Promise<{
-    pending: { action: "now" | "when-idle"; vsix: string; setAt: number; notBefore: number } | null;
+    pending: { action: "now" | "when-idle"; vsix: string; setAt: number; notBefore: number; machineId?: string } | null;
     needed: boolean;
     neededMachineIds?: string[];
     required?: string;
@@ -82,7 +82,13 @@ export const api = {
     req("/api/cursor-reload", { method: "POST", body: JSON.stringify({ action, ...(machineId ? { machineId } : {}) }) }).then(async (r) => {
       const j = await r.json().catch(() => ({})) as { error?: string };
       if (!r.ok) throw new Error(j.error ?? `cursor-reload ${r.status}`);
-      return j as { pending: { action: "now" | "when-idle"; vsix: string } | null; needed: boolean; neededMachineIds?: string[] };
+      return j as {
+        pending: { action: "now" | "when-idle"; vsix: string; machineId?: string } | null;
+        needed: boolean;
+        neededMachineIds?: string[];
+        required?: string;
+        notice?: string | null;
+      };
     }),
   streamUrl: (id: string) => `/api/runs/${id}/stream?token=${encodeURIComponent(getToken())}`,
 };

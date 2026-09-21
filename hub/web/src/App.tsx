@@ -4,7 +4,7 @@ import { consumeQueryToken, isDesktopShell, searchWithoutToken } from "./tokenBo
 import { requestDesktop, parseHostOpenRun } from "./desktopBridge";
 import { decideAuthLoss } from "./authSession";
 import type { Machine } from "./types";
-import type { RunRow } from "./boardState";
+import type { CursorReloadPendingView, RunRow } from "./boardState";
 import {
   decodeWorkspaceKey, encodeWorkspaceKey, filterRunsByWorkspace, listWorkspaceSlots, sortConversations,
   workspaceFolderName, resolveSelectedWorkspace,
@@ -44,6 +44,34 @@ function loadReadMap(): Record<string, number> {
   try { return JSON.parse(localStorage.getItem(READ_KEY) || "{}"); } catch { return {}; }
 }
 
+function cursorReloadFromApi(reload: {
+  needed?: boolean;
+  neededMachineIds?: string[];
+  required?: string;
+  notice?: string | null;
+  pending?: { action?: string; machineId?: string } | null;
+} | null): {
+  needed: boolean;
+  neededMachineIds: string[];
+  required?: string;
+  notice?: string | null;
+  pending: CursorReloadPendingView | null;
+} {
+  const pending = reload?.pending;
+  return {
+    needed: !!reload?.needed,
+    neededMachineIds: Array.isArray(reload?.neededMachineIds) ? reload.neededMachineIds.filter((id): id is string => typeof id === "string") : [],
+    required: typeof reload?.required === "string" ? reload.required : undefined,
+    notice: typeof reload?.notice === "string" && reload.notice.trim() ? reload.notice : null,
+    pending: pending && (pending.action === "now" || pending.action === "when-idle")
+      ? {
+        action: pending.action,
+        ...(typeof pending.machineId === "string" && pending.machineId.trim() ? { machineId: pending.machineId.trim() } : {}),
+      }
+      : null,
+  };
+}
+
 export default function App() {
   const [authed, setAuthed] = useState(() => !!bootstrapTokenFromQuery());
   const [machines, setMachines] = useState<Machine[]>([]);
@@ -72,7 +100,9 @@ export default function App() {
     neededMachineIds: string[];
     required?: string;
     notice?: string | null;
-  }>({ needed: false, neededMachineIds: [] });
+    pending: CursorReloadPendingView | null;
+  }>({ needed: false, neededMachineIds: [], pending: null });
+  const [reloadBusy, setReloadBusy] = useState<Record<string, "now" | "when-idle" | "skip">>({});
   const desktop = isDesktopShell(window.location.search);
   const askedHost = useRef(false);
   const readMapRef = useRef(readMap);
@@ -167,12 +197,7 @@ export default function App() {
         setMachines(m);
         setRuns(Array.isArray(r) ? r : []);
         setHiddenRuns(Array.isArray(hidden) ? hidden : []);
-        setCursorReload({
-          needed: !!reload?.needed,
-          neededMachineIds: Array.isArray(reload?.neededMachineIds) ? reload.neededMachineIds.filter((id): id is string => typeof id === "string") : [],
-          required: typeof reload?.required === "string" ? reload.required : undefined,
-          notice: typeof reload?.notice === "string" && reload.notice.trim() ? reload.notice : null,
-        });
+        setCursorReload(cursorReloadFromApi(reload));
         setLoadError("");
       })
       .catch((e) => {
@@ -459,8 +484,34 @@ export default function App() {
           onOpenWorkspace={() => requestDesktop("open-workspace")}
           onRepairCdp={() => requestDesktop("repair-cdp")}
           onGetShareLink={() => requestDesktop("get-share-link")}
-          onReloadMachine={(id, action) => { void api.postCursorReload(action, id).then(() => refresh(), () => refresh()); }}
+          onReloadMachine={(id, action) => {
+            let started = false;
+            setReloadBusy((prev) => {
+              if (prev[id]) return prev;
+              started = true;
+              return { ...prev, [id]: action };
+            });
+            if (!started) return;
+            void api.postCursorReload(action, id).then((view) => {
+              setCursorReload(cursorReloadFromApi(view));
+              setReloadBusy((prev) => {
+                const next = { ...prev };
+                delete next[id];
+                return next;
+              });
+              refresh();
+            }, () => {
+              setReloadBusy((prev) => {
+                const next = { ...prev };
+                delete next[id];
+                return next;
+              });
+              refresh();
+            });
+          }}
           reloadMachineIds={cursorReload.neededMachineIds}
+          reloadPending={cursorReload.pending}
+          reloadBusy={reloadBusy}
           requiredVsix={cursorReload.required}
           packNotice={cursorReload.notice}
         />

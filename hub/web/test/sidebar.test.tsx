@@ -148,4 +148,56 @@ describe("Sidebar vsix pack notice", () => {
     expect(html).toContain(extensionLagNotice("0.4.18")!);
     expect(html).not.toContain("现在 Reload");
   });
+
+  test("needed machines get a one-row Reload strip, not three wrapping buttons", () => {
+    const html = renderToStaticMarkup(
+      <Sidebar
+        slots={[slot]}
+        machines={[{
+          id: "m-win", name: "PF39WTSM", os: "win32", cursor_version: "1.128.0",
+          extension_version: "0.4.18", open_workspaces: "[]", status: "online", last_seen_at: 1,
+          display_name: "Win Destop",
+        }]}
+        allRuns={[]}
+        selectedKey={null}
+        onSelectWorkspace={() => {}}
+        readMap={{}}
+        onDispatch={() => {}}
+        onRename={() => {}}
+        onReloadMachine={() => {}}
+        reloadMachineIds={["m-win"]}
+      />,
+    );
+    expect(html).toContain("现在 Reload");
+    expect(html).toContain("扩展待 Reload");
+    expect(html).toContain("立即");
+    expect(html).toContain("grid-cols-3");
+    expect(html).not.toContain("空闲后自动</");
+  });
+
+  test("pending Reload replaces the three actions with a spinner", () => {
+    const html = renderToStaticMarkup(
+      <Sidebar
+        slots={[slot]}
+        machines={[{
+          id: "m-win", name: "PF39WTSM", os: "win32", cursor_version: "1.128.0",
+          extension_version: "0.4.18", open_workspaces: "[]", status: "online", last_seen_at: 1,
+          display_name: "Win Destop",
+        }]}
+        allRuns={[]}
+        selectedKey={null}
+        onSelectWorkspace={() => {}}
+        readMap={{}}
+        onDispatch={() => {}}
+        onRename={() => {}}
+        onReloadMachine={() => {}}
+        reloadMachineIds={["m-win"]}
+        reloadPending={{ action: "when-idle", machineId: "m-win" }}
+      />,
+    );
+    expect(html).toContain("空闲后 Reload");
+    expect(html).toContain("任务执行中");
+    expect(html).toContain("取消");
+    expect(html).not.toContain("扩展待 Reload");
+  });
 });

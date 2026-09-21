@@ -149,6 +149,23 @@ export function extensionLagNotice(
   return null;
 }
 
+export type CursorReloadPendingView = {
+  action: "now" | "when-idle";
+  machineId?: string;
+};
+
+/** Pending chrome follows the scoped machine; fleet-wide pending only on machines that still need Reload. */
+export function reloadPendingForMachine(
+  pending: CursorReloadPendingView | null | undefined,
+  machineId: string,
+  needed: boolean,
+): "now" | "when-idle" | null {
+  if (!pending) return null;
+  if (pending.machineId && pending.machineId !== machineId) return null;
+  if (!needed) return null;
+  return pending.action;
+}
+
 export function listWorkspaceSlots(machines: Array<{
   id: string; name: string; os: string; status: string; open_workspaces: string; display_name?: string | null;
   cdp_ready?: boolean | null;

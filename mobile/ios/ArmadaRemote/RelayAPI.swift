@@ -49,6 +49,7 @@ struct WorkspacesResponse: Decodable {
 struct CursorReloadPending: Decodable, Equatable {
     var action: String
     var vsix: String
+    var machineId: String?
 }
 
 struct CursorReloadDTO: Decodable, Equatable {

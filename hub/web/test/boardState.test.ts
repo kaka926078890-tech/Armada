@@ -6,7 +6,7 @@ import {
   filterRunsByWorkspace, sortConversations, groupSlotsByMachine, isUnreadCompleted, isUnreadMessage,
   workspaceHasUnread, workspaceUnreadCount, formatUnreadCount, canArchiveRun, canRetryRun, isHubArchived,
   workspaceFolderName, workspaceHasLiveRun, resolveSelectedWorkspace, isUnreadNeedInput, cardChromeClass, cardChromeOf, columnHasAlert,
-  extensionLagNotice, REQUIRED_EXTENSION_VERSION, type RunRow,
+  extensionLagNotice, REQUIRED_EXTENSION_VERSION, reloadPendingForMachine, type RunRow,
   BOARD_SSE_DEBOUNCE_MS, boardSseShouldRefresh,
 } from "../src/boardState";
 
@@ -321,6 +321,21 @@ describe("extensionLagNotice", () => {
   test("required version tracks the shipped vsix", () => {
     const pkg = JSON.parse(readFileSync(join(import.meta.dir, "../../../extension/package.json"), "utf8")) as { version: string };
     expect(REQUIRED_EXTENSION_VERSION).toBe(pkg.version);
+  });
+});
+
+describe("reloadPendingForMachine", () => {
+  test("scoped pending only lights that machine", () => {
+    const pending = { action: "now" as const, machineId: "m-win" };
+    expect(reloadPendingForMachine(pending, "m-win", true)).toBe("now");
+    expect(reloadPendingForMachine(pending, "m-mac", true)).toBeNull();
+  });
+
+  test("fleet pending follows needed, not every online machine", () => {
+    const pending = { action: "when-idle" as const };
+    expect(reloadPendingForMachine(pending, "m-win", true)).toBe("when-idle");
+    expect(reloadPendingForMachine(pending, "m-mac", false)).toBeNull();
+    expect(reloadPendingForMachine(null, "m-win", true)).toBeNull();
   });
 });
 

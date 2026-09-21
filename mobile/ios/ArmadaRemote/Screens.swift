@@ -344,14 +344,35 @@ struct WorkspaceListView: View {
                             }
                         }
                         if session.machineNeedsReload(group.id), group.slots.contains(where: \.online) {
-                            Button("现在 Reload") {
-                                Task { _ = try? await session.api().setCursorReload(action: "now", machineId: group.id); await session.refresh() }
-                            }
-                            Button("空闲后自动") {
-                                Task { _ = try? await session.api().setCursorReload(action: "when-idle", machineId: group.id); await session.refresh() }
-                            }
-                            Button("这次跳过") {
-                                Task { _ = try? await session.api().setCursorReload(action: "skip", machineId: group.id); await session.refresh() }
+                            let pending = session.machineReloadPending(group.id)
+                            if let pending {
+                                HStack(spacing: 8) {
+                                    ProgressView().scaleEffect(0.8)
+                                    Text(pending == "skip" ? "正在跳过…" : pending == "now" ? "正在 Reload…" : "空闲后 Reload…")
+                                        .foregroundStyle(.secondary)
+                                    Spacer(minLength: 8)
+                                    if pending != "skip" {
+                                        Button("取消") {
+                                            Task { await session.setCursorReload(action: "skip", machineId: group.id) }
+                                        }
+                                        .disabled(session.reloadBusy[group.id] != nil)
+                                    }
+                                }
+                            } else {
+                                HStack(spacing: 8) {
+                                    Button("立即") {
+                                        Task { await session.setCursorReload(action: "now", machineId: group.id) }
+                                    }
+                                    .accessibilityLabel("现在 Reload")
+                                    Button("空闲后") {
+                                        Task { await session.setCursorReload(action: "when-idle", machineId: group.id) }
+                                    }
+                                    .accessibilityLabel("空闲后自动")
+                                    Button("跳过") {
+                                        Task { await session.setCursorReload(action: "skip", machineId: group.id) }
+                                    }
+                                    .accessibilityLabel("这次跳过")
+                                }
                             }
                         }
                     } header: {

@@ -3,7 +3,8 @@ import type { Machine } from "../types";
 import type { RunRow } from "../boardState";
 import {
   encodeWorkspaceKey, extensionLagNotice, filterRunsByWorkspace, formatUnreadCount, groupSlotsByMachine,
-  workspaceFolderName, workspaceHasLiveRun, workspaceUnreadCount, type WorkspaceSlot,
+  reloadPendingForMachine, workspaceFolderName, workspaceHasLiveRun, workspaceUnreadCount,
+  type CursorReloadPendingView, type WorkspaceSlot,
 } from "../boardState";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -43,10 +44,47 @@ function LiveSpinner() {
   );
 }
 
+function ReloadChrome({
+  machineId, pendingAction, busyAction, onReload,
+}: {
+  machineId: string;
+  pendingAction: "now" | "when-idle" | null;
+  busyAction?: "now" | "when-idle" | "skip";
+  onReload: (machineId: string, action: "now" | "when-idle" | "skip") => void;
+}) {
+  const wait = !!busyAction;
+  const phase = busyAction && busyAction !== "skip" ? busyAction : pendingAction;
+  const skipping = busyAction === "skip";
+  if (phase || skipping) {
+    const label = skipping ? "正在跳过…" : phase === "now" ? "正在 Reload…" : "空闲后 Reload…";
+    return (
+      <div className="mx-3 mb-1 rounded-md border border-sky-500/25 bg-sky-500/10 px-2 py-1.5 flex items-center gap-1.5">
+        <LiveSpinner />
+        <span className={`${UI_META} text-sky-400 min-w-0 flex-1 truncate`} title={label}>{label}</span>
+        {skipping ? null : (
+          <Button type="button" size="xs" variant="ghost" disabled={wait} onClick={() => onReload(machineId, "skip")}>
+            取消
+          </Button>
+        )}
+      </div>
+    );
+  }
+  return (
+    <div className="mx-3 mb-1 rounded-md border border-amber-500/25 bg-amber-500/10 p-1">
+      <div className={`${UI_META} text-amber-400 px-1 pb-1`}>扩展待 Reload</div>
+      <div className="grid grid-cols-3 gap-1">
+        <Button type="button" size="xs" className="min-w-0 px-1" disabled={wait} aria-label="现在 Reload" title="现在 Reload" onClick={() => onReload(machineId, "now")}>立即</Button>
+        <Button type="button" size="xs" variant="outline" className="min-w-0 px-1" disabled={wait} aria-label="空闲后自动" title="空闲后自动" onClick={() => onReload(machineId, "when-idle")}>空闲后</Button>
+        <Button type="button" size="xs" variant="ghost" className="min-w-0 px-1" disabled={wait} aria-label="这次跳过" title="这次跳过" onClick={() => onReload(machineId, "skip")}>跳过</Button>
+      </div>
+    </div>
+  );
+}
+
 export default function Sidebar({
   slots, machines, allRuns, selectedKey, onSelectWorkspace, readMap, onDispatch, onRename,
   showDesktopActions, onOpenWorkspace, onRepairCdp, onGetShareLink, onReloadMachine, reloadMachineIds,
-  requiredVsix, packNotice,
+  reloadPending, reloadBusy, requiredVsix, packNotice,
 }: {
   slots: WorkspaceSlot[];
   machines: Machine[];
@@ -62,6 +100,8 @@ export default function Sidebar({
   onGetShareLink?: () => void;
   onReloadMachine?: (machineId: string, action: "now" | "when-idle" | "skip") => void;
   reloadMachineIds?: string[];
+  reloadPending?: CursorReloadPendingView | null;
+  reloadBusy?: Record<string, "now" | "when-idle" | "skip">;
   requiredVsix?: string;
   packNotice?: string | null;
 }) {
@@ -82,17 +122,17 @@ export default function Sidebar({
   };
 
   return (
-    <aside className="w-[224px] shrink-0 border-r border-border flex flex-col bg-sidebar text-sidebar-foreground overflow-x-hidden">
+    <aside className="relative z-50 w-[224px] shrink-0 border-r border-border flex flex-col bg-sidebar text-sidebar-foreground overflow-x-hidden">
       {showDesktopActions ? (
-        <div className="mx-3 mt-3 mb-1.5 flex flex-col gap-1.5">
-          <Button type="button" variant="outline" className="w-full" onClick={onOpenWorkspace}>
-            打开工作区
+        <div className="mx-3 mt-3 mb-1.5 grid grid-cols-3 gap-1">
+          <Button type="button" size="xs" variant="outline" className="min-w-0 px-1" title="打开工作区" aria-label="打开工作区" onClick={onOpenWorkspace}>
+            打开
           </Button>
-          <Button type="button" variant="outline" className="w-full" onClick={onRepairCdp}>
-            修复调试口
+          <Button type="button" size="xs" variant="outline" className="min-w-0 px-1" title="修复调试口" aria-label="修复调试口" onClick={onRepairCdp}>
+            调试口
           </Button>
-          <Button type="button" variant="outline" className="w-full" onClick={onGetShareLink}>
-            获取分享链接
+          <Button type="button" size="xs" variant="outline" className="min-w-0 px-1" title="获取分享链接" aria-label="获取分享链接" onClick={onGetShareLink}>
+            分享
           </Button>
         </div>
       ) : null}
@@ -149,12 +189,13 @@ export default function Sidebar({
             {lag ? (
               <div className={`pl-7 pr-3 pb-1 ${UI_META} text-amber-400 leading-snug`}>{lag}</div>
             ) : null}
-            {g.online && !packNotice && reloadMachineIds?.includes(g.machineId) && onReloadMachine ? (
-              <div className="pl-7 pr-3 pb-1 flex flex-wrap gap-1">
-                <Button type="button" size="sm" className="whitespace-nowrap" onClick={() => onReloadMachine(g.machineId, "now")}>现在 Reload</Button>
-                <Button type="button" size="sm" variant="outline" className="whitespace-nowrap" onClick={() => onReloadMachine(g.machineId, "when-idle")}>空闲后自动</Button>
-                <Button type="button" size="sm" variant="ghost" className="whitespace-nowrap" onClick={() => onReloadMachine(g.machineId, "skip")}>这次跳过</Button>
-              </div>
+            {g.online && !packNotice && onReloadMachine && (reloadMachineIds?.includes(g.machineId) || reloadBusy?.[g.machineId]) ? (
+              <ReloadChrome
+                machineId={g.machineId}
+                pendingAction={reloadPendingForMachine(reloadPending, g.machineId, !!reloadMachineIds?.includes(g.machineId))}
+                busyAction={reloadBusy?.[g.machineId]}
+                onReload={onReloadMachine}
+              />
             ) : null}
             {g.workspaces.map((s) => {
               const key = encodeWorkspaceKey(s.machineId, s.root);

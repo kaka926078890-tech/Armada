@@ -334,10 +334,36 @@ fun FleetScreen(vm: SessionVm, state: UiState, onOpen: (WorkspaceDto) -> Unit, o
                         }
                         if (vm.machineNeedsReload(mid) && online) {
                             GroupedDivider()
-                            Row(Modifier.padding(horizontal = 8.dp).fillMaxWidth().horizontalScroll(rememberScrollState())) {
-                                TextButton(onClick = { vm.setCursorReload("now", machineId = mid) }) { Text("现在 Reload") }
-                                TextButton(onClick = { vm.setCursorReload("when-idle", machineId = mid) }) { Text("空闲后自动") }
-                                TextButton(onClick = { vm.setCursorReload("skip", machineId = mid) }) { Text("这次跳过") }
+                            val pending = vm.machineReloadPending(mid)
+                            if (pending != null) {
+                                Row(
+                                    Modifier.padding(horizontal = 16.dp, vertical = 10.dp).fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp, color = StatusGray)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        when (pending) {
+                                            "skip" -> "正在跳过…"
+                                            "now" -> "正在 Reload…"
+                                            else -> "空闲后 Reload…"
+                                        },
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    if (pending != "skip") {
+                                        TextButton(
+                                            onClick = { vm.setCursorReload("skip", machineId = mid) },
+                                            enabled = state.reloadBusy[mid] == null,
+                                        ) { Text("取消") }
+                                    }
+                                }
+                            } else {
+                                Row(Modifier.padding(horizontal = 8.dp).fillMaxWidth()) {
+                                    TextButton(onClick = { vm.setCursorReload("now", machineId = mid) }) { Text("立即") } // 现在 Reload
+                                    TextButton(onClick = { vm.setCursorReload("when-idle", machineId = mid) }) { Text("空闲后") } // 空闲后自动
+                                    TextButton(onClick = { vm.setCursorReload("skip", machineId = mid) }) { Text("跳过") } // 这次跳过
+                                }
                             }
                         }
                     }

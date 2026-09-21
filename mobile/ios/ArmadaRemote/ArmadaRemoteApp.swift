@@ -60,6 +60,7 @@ final class Session: ObservableObject {
     @Published var streamHealthy = false
     @Published var snippets: [PromptSnippet] = []
     @Published var cursorReload: CursorReloadDTO?
+    @Published var reloadBusy: [String: String] = [:]
 
     private var live: Task<Void, Never>?
     private var foreground = true
@@ -520,6 +521,25 @@ final class Session: ObservableObject {
             return ids.contains(machineId)
         }
         return reload.needed
+    }
+
+    func machineReloadPending(_ machineId: String) -> String? {
+        if let busy = reloadBusy[machineId] { return busy }
+        guard machineNeedsReload(machineId), let pending = cursorReload?.pending else { return nil }
+        if let scoped = pending.machineId, scoped != machineId { return nil }
+        return pending.action
+    }
+
+    func setCursorReload(action: String, machineId: String) async {
+        if reloadBusy[machineId] != nil { return }
+        var start = reloadBusy
+        start[machineId] = action
+        reloadBusy = start
+        _ = try? await api().setCursorReload(action: action, machineId: machineId)
+        await refresh()
+        var done = reloadBusy
+        done.removeValue(forKey: machineId)
+        reloadBusy = done
     }
 
     var machineGroups: [(id: String, name: String, slots: [WorkspaceDTO])] {

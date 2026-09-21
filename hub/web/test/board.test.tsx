@@ -147,4 +147,22 @@ describe("Board unread chrome", () => {
     );
     expect(html).not.toContain(extensionLagNotice("0.4.18")!);
   });
+
+  test("running card shows a spinner next to the badge", () => {
+    const html = renderToStaticMarkup(
+      <Board
+        runs={[{ ...run, status: "running", ended_at: null, end_reason: null }]}
+        machines={[{ id: "m-1", name: "Mac-A", os: "darwin", cursor_version: null, extension_version: null, open_workspaces: "[]", status: "online", last_seen_at: 1 }]}
+        selected={null}
+        onSelect={() => {}}
+        showArchived={false}
+        onHide={() => {}}
+        onUnhide={() => {}}
+        readMap={{}}
+        onRename={() => {}}
+      />,
+    );
+    expect(html).toContain("任务执行中");
+    expect(html).toContain("animate-spin");
+  });
 });

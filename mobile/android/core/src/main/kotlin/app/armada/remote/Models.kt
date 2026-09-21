@@ -17,6 +17,7 @@ data class CursorReloadDto(
     val needed: Boolean,
     val vsix: String? = null,
     val action: String? = null,
+    val pendingMachineId: String? = null,
     val neededMachineIds: List<String>? = null,
     val notice: String? = null,
 )
