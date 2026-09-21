@@ -45,6 +45,7 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
   };
   registry.onMachinesChanged = () => sse.broadcast("*", { type: "machine.updated" });
   registry.onRegistered = (machineId, windowId) => {
+    runs.promoteNextQueued(machineId);
     const pending = readPendingReload(home);
     if (!pending) return;
     if (pending.machineId && pending.machineId !== machineId) return;

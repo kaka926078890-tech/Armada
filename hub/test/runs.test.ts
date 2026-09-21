@@ -154,9 +154,24 @@ describe("Run dispatch", () => {
     ws.send(JSON.stringify({ type: "run.bound", runId: a.id, conversationId: "cid-a", transcriptPath: null, promptMatch: true }));
     await new Promise((r) => setTimeout(r, 150));
     expect(((await (await api(`/api/runs/${a.id}`)).json()) as any).status).toBe("running");
+    expect(((await (await api(`/api/runs/${body2.run.id}`)).json()) as any).status).toBe("queued");
+    expect(inbound.filter((m) => m.type === "run.openWindow" && m.workspaceRoot === "/ws/a")).toHaveLength(1);
+    const ws2: WebSocket = await new Promise((res, rej) => {
+      const w = new WebSocket(`ws://127.0.0.1:${hub!.port}/ws?token=${hub!.token}`);
+      w.onopen = () => res(w); w.onerror = rej;
+    });
+    const inbound2: any[] = [];
+    ws2.addEventListener("message", (e) => inbound2.push(JSON.parse(String(e.data))));
+    ws2.send(JSON.stringify({
+      type: "register", machineId: "m-1", windowId: "w-2", name: "Mac-A",
+      os: "darwin-arm64", openWorkspaces: ["/ws/a"], extensionVersion: "0.4.0", cdpReady: true,
+    }));
+    await new Promise((r) => setTimeout(r, 200));
     expect(((await (await api(`/api/runs/${body2.run.id}`)).json()) as any).status).toBe("dispatched");
-    expect(inbound.filter((m) => m.type === "run.start").map((m) => m.prompt).sort()).toEqual(["a", "b"]);
+    expect(inbound2.find((m) => m.type === "run.start" && m.prompt === "b")).toBeTruthy();
+    expect(((await (await api(`/api/runs/${a.id}`)).json()) as any).status).toBe("running");
     ws.close();
+    ws2.close();
   });
 
   test("identical prompt on same workspace → 409 PROMPT_COLLISION even after running", async () => {
@@ -279,6 +294,10 @@ describe("Run dispatch", () => {
     await new Promise((r) => setTimeout(r, 150));
     expect(((await (await api(`/api/runs/${gone.id}`)).json()) as any).status).toBe("error");
     expect(((await (await api(`/api/runs/${gone.id}`)).json()) as any).end_reason).toBe("WORKSPACE_NOT_OPEN");
+    expect(((await (await api(`/api/runs/${next.id}`)).json()) as any).status).toBe("queued");
+    inbound.length = 0;
+    ws.send(JSON.stringify({ type: "run.event", runId: hold.id, source: "hook", hookEventName: "stop", payload: { status: "completed" }, ts: Date.now(), seq: 1 }));
+    await new Promise((r) => setTimeout(r, 150));
     expect(((await (await api(`/api/runs/${next.id}`)).json()) as any).status).toBe("dispatched");
     expect(inbound.filter((m) => m.type === "run.start").map((m) => m.prompt)).toEqual(["a"]);
     ws.close();
@@ -521,12 +540,16 @@ describe("Run dispatch", () => {
     }));
     await new Promise((r) => setTimeout(r, 150));
     expect(((await (await api(`/api/runs/${a.id}`)).json()) as any).pending_ask).toBeNull();
+    expect(((await (await api(`/api/runs/${body2.run.id}`)).json()) as any).status).toBe("queued");
+    inbound.length = 0;
+    ws.send(JSON.stringify({ type: "run.event", runId: a.id, source: "hook", hookEventName: "stop", payload: { status: "completed" }, ts: Date.now(), seq: 3 }));
+    await new Promise((r) => setTimeout(r, 150));
     expect(((await (await api(`/api/runs/${body2.run.id}`)).json()) as any).status).toBe("dispatched");
     expect(inbound.filter((m) => m.type === "run.start" && m.prompt === "next")).toHaveLength(1);
     ws.close();
   });
 
-  test("running sibling without pending ask still accepts a new start", async () => {
+  test("running sibling without pending ask opens a new window instead of createNew", async () => {
     const { ws, inbound, api } = await startWithExt({ extensionVersion: "0.4.31" });
     const r1 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "live" }) });
     const { run: a } = await r1.json() as any;
@@ -536,10 +559,25 @@ describe("Run dispatch", () => {
     inbound.length = 0;
     const r2 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "peer" }) });
     const body2 = await r2.json() as any;
-    expect(body2.run.status).toBe("dispatched");
-    await new Promise((r) => setTimeout(r, 80));
-    expect(inbound.find((m) => m.type === "run.start" && m.prompt === "peer")).toBeTruthy();
+    expect(body2.run.status).toBe("queued");
+    expect(inbound.find((m) => m.type === "run.start" && m.prompt === "peer")).toBeUndefined();
+    expect(inbound.find((m) => m.type === "run.openWindow" && m.workspaceRoot === "/ws/a")).toBeTruthy();
+    const ws2: WebSocket = await new Promise((res, rej) => {
+      const w = new WebSocket(`ws://127.0.0.1:${hub!.port}/ws?token=${hub!.token}`);
+      w.onopen = () => res(w); w.onerror = rej;
+    });
+    const inbound2: any[] = [];
+    ws2.addEventListener("message", (e) => inbound2.push(JSON.parse(String(e.data))));
+    ws2.send(JSON.stringify({
+      type: "register", machineId: "m-1", windowId: "w-2", name: "Mac-A",
+      os: "darwin-arm64", openWorkspaces: ["/ws/a"], extensionVersion: "0.4.31", cdpReady: true,
+    }));
+    await new Promise((r) => setTimeout(r, 200));
+    expect(((await (await api(`/api/runs/${body2.run.id}`)).json()) as any).status).toBe("dispatched");
+    expect(inbound2.find((m) => m.type === "run.start" && m.prompt === "peer")).toBeTruthy();
+    expect(((await (await api(`/api/runs/${a.id}`)).json()) as any).status).toBe("running");
     ws.close();
+    ws2.close();
   });
 
   test("cancel with pending ask sends skip then run.cancel", async () => {

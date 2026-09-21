@@ -10,7 +10,7 @@ import { SpoolForwarder } from "./spool";
 import { matchHookToPending, claimConversation, eventBelongsToWindow, transcriptPathBelongsToCid, runIdForHook, rememberSubagent, isAmbiguousMatch, dropPendingRuns, type PendingRun, type BindingMatch } from "./binding";
 import { TranscriptTailer } from "./transcript";
 import { Executor, CancelWatcher } from "./executor";
-import { createCdpSubmitter, createImagePaster, createFileMentionPaster, createComposerFinisher, createAskQuestionDriver, probeCdpReady, type AskCdpInspect } from "./cdpInject";
+import { createCdpSubmitter, createImagePaster, createFileMentionPaster, createComposerFinisher, createAskQuestionDriver, probeCdpReady, probeCdpReadyForInject, type AskCdpInspect } from "./cdpInject";
 import { createOsClipboardWriter } from "./osClipboard";
 import { mergeHooks, hooksDriftHash, spoolScriptName, shouldInstallArmadaHooks } from "./hooksInstall";
 import { collectTranscriptViews, collectTranscriptTails, matchTranscriptToPending, stopPayloadFromTranscriptLine, stopFromTranscriptFileContent, transcriptsDirForWorkspace, isWithinTranscriptBindWindow, FollowupStopGuard, listSubagentTranscripts, childCidFromSubagentPath, decideLateTranscriptAttach, transcriptJsonlPath } from "./transcriptBind";
@@ -22,7 +22,7 @@ import { parseAskInspect, askPollActions, coalesceAskInspect } from "./askDetect
 import { enrichPlanAsk, planDirsFor } from "./planFile";
 import { PENDING_RELOAD_ATTEMPT_NAME, PENDING_RELOAD_NAME, decideReloadFire, decideWindowReload, highestInstalledArmadaAgent, highestInstalledVsix, noteReloadCommandSettled, parsePendingReload, parseReloadAttempt, windowHasInFlightArmadaRun, windowHasOpenComposerTurn, windowHasRecentSettle, type ReloadFireState } from "../../desktop-core/src/cursorReload";
 
-const EXTENSION_VERSION = "0.4.37";
+const EXTENSION_VERSION = "0.4.38";
 
 let client: { dispose: () => void } | null = null;
 
@@ -293,7 +293,7 @@ export function activate(context: vscode.ExtensionContext): void {
     },
     onInjected: (runId) => cancelWatcher.noteInjection(runId),
     probeCdp: async () => {
-      const ok = await probeCdpReady({ port: config.cdpPort });
+      const ok = await probeCdpReadyForInject({ port: config.cdpPort });
       return ok ? { ok: true } : { ok: false, reason: "CDP_UNREACHABLE" };
     },
     bindKnown: ({ runId, conversationId, workspaceRoot }) => {
@@ -706,6 +706,11 @@ export function activate(context: vscode.ExtensionContext): void {
           // pendingRuns is populated inside Executor after auth + newAgentChat (not here).
           noteHubGeneration(lastGenerationId, msg.runId, msg.generation_id);
           void executor.startRun(msg).catch((e) => log(`startRun error: ${String(e)}`));
+          break;
+        case "run.openWindow":
+          void executor.openWorkspaceWindow(String(msg.workspaceRoot ?? "")).catch((e) => {
+            log(`openWindow error: ${String(e)}`);
+          });
           break;
         case "run.cancel": {
           const b = boundRuns.get(msg.runId);

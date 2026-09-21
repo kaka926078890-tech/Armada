@@ -197,6 +197,14 @@ export class Executor {
     return this.deps.globalState.get<string[]>("armada.authorizedWorkspaces", []) ?? [];
   }
 
+  /** 首次派发没有空闲窗时：同工作区再开一扇 Cursor 窗，不在当前窗 createNew。 */
+  async openWorkspaceWindow(workspaceRoot: string): Promise<void> {
+    const root = String(workspaceRoot ?? "").trim();
+    if (!root) return;
+    const vscode = vs();
+    await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(root), { forceNewWindow: true });
+  }
+
   async startRun(msg: {
     runId: string; workspaceRoot: string; prompt: string; dispatchedAt?: number;
     attachments?: { id?: string; sha256?: string; mime?: string; size?: number; name?: string }[];

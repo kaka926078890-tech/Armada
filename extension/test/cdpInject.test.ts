@@ -8,6 +8,7 @@ import {
   createFileMentionPaster,
   createAskQuestionDriver,
   probeCdpReady,
+  probeCdpReadyForInject,
   COMPOSER_FOCUS_JS,
   COMPOSER_FOCUS_IMAGE_JS,
   COMPOSER_CHIP_COUNT_JS,
@@ -263,6 +264,35 @@ describe("probeCdpReady", () => {
     expect(await probeCdpReady({ port: 9222, fetchJson: async () => [{ type: "page" }] })).toBe(true);
     expect(await probeCdpReady({ port: 9222, fetchJson: async () => { throw new Error("ECONNREFUSED"); } })).toBe(false);
     expect(await probeCdpReady({ port: 9222, fetchJson: async () => ({ error: "not array" }) as never })).toBe(false);
+  });
+});
+
+describe("probeCdpReadyForInject", () => {
+  test("second try after ECONNREFUSED is ready", async () => {
+    let n = 0;
+    expect(await probeCdpReadyForInject({
+      port: 9222,
+      sleep: async () => {},
+      fetchJson: async () => {
+        n += 1;
+        if (n < 2) throw new Error("ECONNREFUSED");
+        return [{ type: "page" }];
+      },
+    })).toBe(true);
+    expect(n).toBe(2);
+  });
+
+  test("three throws stay down", async () => {
+    let n = 0;
+    expect(await probeCdpReadyForInject({
+      port: 9222,
+      sleep: async () => {},
+      fetchJson: async () => {
+        n += 1;
+        throw new Error("ECONNREFUSED");
+      },
+    })).toBe(false);
+    expect(n).toBe(3);
   });
 });
 

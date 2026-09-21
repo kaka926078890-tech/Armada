@@ -6,7 +6,6 @@ import {
   type ConcurrencyLimits,
   limitsFromEnv,
   normalizePrompt,
-  extensionSupportsMultiRunPerWindow,
   OCCUPYING_STATUSES,
   ACTIVE_STATUSES,
   ENDED_STATUSES,
@@ -264,18 +263,37 @@ export class RunService {
   }
 
   /**
-   * New start = `composer.createNew`（首次派发 / 未绑 cid 的失败重试）。
-   * 0.4.0+ 同窗可以再开一条，不因已有 progressing 整卡排队。
-   * 窗上未答 Ask 仍占位。跨窗 / 同卡 followup 不走这里。
+   * New start 只能进空闲窗。同窗已有 progressing / 未答 Ask → 不 createNew（会换掉当前对话）。
+   * 没有空闲窗时 requestOpenWindow，等新窗 register 再 start。续聊不走这里。
    */
   private windowCanAcceptStart(machineId: string, windowId: string): boolean {
     if (this.windowHasPendingAsk(machineId, windowId)) return false;
-    const ver = this.registry.windowExtensionVersion(machineId, windowId);
-    if (extensionSupportsMultiRunPerWindow(ver)) return true;
     const row = this.db.query(
       `SELECT id FROM runs WHERE machine_id=?1 AND window_id=?2 AND status IN (${sqlStatusIn(PROGRESSING_STATUSES)}) LIMIT 1`,
     ).get(machineId, windowId);
     return !row;
+  }
+
+  private findStartWindow(machineId: string, workspaceRoot: string): string | null {
+    for (const windowId of this.registry.windowsForWorkspace(machineId, workspaceRoot)) {
+      if (this.registry.windowCdpReady(machineId, windowId) !== true) continue;
+      if (!this.windowCanAcceptStart(machineId, windowId)) continue;
+      return windowId;
+    }
+    return null;
+  }
+
+  private lastOpenWindowAt = new Map<string, number>();
+
+  private requestOpenWindow(machineId: string, workspaceRoot: string): void {
+    const key = `${machineId}\n${workspaceRoot}`;
+    const now = Date.now();
+    if ((this.lastOpenWindowAt.get(key) ?? 0) + 2000 > now) return;
+    const win = this.registry.findWindowForWorkspace(machineId, workspaceRoot);
+    if (!win) return;
+    if (!this.registry.sendTo(machineId, win.windowId, { type: "run.openWindow", workspaceRoot })) return;
+    this.lastOpenWindowAt.set(key, now);
+    this.audit("hub", "run.openWindow", machineId, { workspaceRoot, windowId: win.windowId });
   }
 
   promoteNextQueued(machineId: string): void {
@@ -294,19 +312,19 @@ export class RunService {
           toFail.push({ id: row.id, error: "WORKSPACE_NOT_OPEN" });
           continue;
         }
-        const routed = this.registry.routeForInject(machineId, row.workspace_root);
-        if (!routed.ok) {
-          toFail.push({ id: row.id, error: routed.error });
+        const startWin = this.findStartWindow(machineId, row.workspace_root);
+        if (!startWin) {
+          this.requestOpenWindow(machineId, row.workspace_root);
           continue;
         }
-        if (!this.windowCanAcceptStart(machineId, routed.windowId)) continue;
         const now = Date.now();
-        this.db.query(`UPDATE runs SET status='dispatched', queued_at=NULL, started_at=?1 WHERE id=?2`).run(now, row.id);
+        this.db.query(`UPDATE runs SET status='dispatched', queued_at=NULL, started_at=?1, window_id=?2 WHERE id=?3`)
+          .run(now, startWin, row.id);
         this.audit("hub", "run.dispatched", row.id);
         this.sse.broadcast(row.id, { type: "run.status", runId: row.id, status: "dispatched" });
         this.attachHubGenerationIfWindows(row.id, machineId);
         const live = this.get(row.id);
-        this.registry.sendTo(machineId, routed.windowId, this.startMessage(live ?? row, now));
+        this.registry.sendTo(machineId, startWin, this.startMessage(live ?? row, now));
         break;
       }
     } finally {
@@ -352,9 +370,13 @@ export class RunService {
     const m = this.registry.getMachine(machineId);
     if (!m || m.status !== "online") return { error: "MACHINE_OFFLINE" };
     if (!JSON.parse(m.open_workspaces).includes(workspaceRoot)) return { error: "WORKSPACE_NOT_OPEN" };
-    const routed = this.registry.routeForInject(machineId, workspaceRoot);
-    if (!routed.ok) return { error: routed.error };
-    const win = { windowId: routed.windowId };
+    const windows = this.registry.windowsForWorkspace(machineId, workspaceRoot);
+    if (windows.length === 0) return { error: "WORKSPACE_NOT_OPEN" };
+    if (!windows.some((w) => this.registry.windowCdpReady(machineId, w) === true)) {
+      return { error: "CDP_NOT_READY" };
+    }
+    const startWin = this.findStartWindow(machineId, workspaceRoot);
+    const win = { windowId: startWin ?? windows[0]! };
 
     const attachmentIds = opts.attachmentIds ?? [];
     if (this.blobs && attachmentIds.length) {
@@ -385,7 +407,7 @@ export class RunService {
 
     const id = `r-${randomUUID()}`;
     const slotFree = this.injectSlotCount(machineId) === 0;
-    const canStartNow = slotFree && this.windowCanAcceptStart(machineId, win.windowId);
+    const canStartNow = slotFree && !!startWin;
     const status = canStartNow ? "dispatched" : "queued";
     const now = Date.now();
     const attachmentsJson = JSON.stringify(attachmentIds);
@@ -398,6 +420,8 @@ export class RunService {
       this.attachHubGenerationIfWindows(id, machineId);
       this.registry.sendTo(machineId, win.windowId, this.startMessage(this.get(id), now));
       this.audit("hub", "run.dispatched", id);
+    } else if (!startWin) {
+      this.requestOpenWindow(machineId, workspaceRoot);
     }
     const queuePosition = status === "queued"
       ? (this.db.query(`SELECT COUNT(*) AS n FROM runs WHERE machine_id=?1 AND status='queued' AND dispatch_seq<=?2`).get(machineId, nextSeq) as { n: number }).n
@@ -1120,9 +1144,13 @@ export class RunService {
     const m = this.registry.getMachine(run.machine_id);
     if (!m || m.status !== "online") return { error: "MACHINE_OFFLINE" };
     if (!JSON.parse(m.open_workspaces).includes(run.workspace_root)) return { error: "WORKSPACE_NOT_OPEN" };
-    const routed = this.registry.routeForInject(run.machine_id, run.workspace_root);
-    if (!routed.ok) return { error: routed.error };
-    const win = { windowId: routed.windowId };
+    const windows = this.registry.windowsForWorkspace(run.machine_id, run.workspace_root);
+    if (windows.length === 0) return { error: "WORKSPACE_NOT_OPEN" };
+    if (!windows.some((w) => this.registry.windowCdpReady(run.machine_id, w) === true)) {
+      return { error: "CDP_NOT_READY" };
+    }
+    const startWin = this.findStartWindow(run.machine_id, run.workspace_root);
+    const win = { windowId: startWin ?? windows[0]! };
     if (!normalizePrompt(run.prompt ?? "") && attachmentIds.length === 0) return { error: "EMPTY_PROMPT" };
     if (this.countOccupying(run.machine_id) >= this.limits.maxPerMachine) return { error: "RUN_LIMIT" };
     if (this.countOccupying(run.machine_id, run.workspace_root) >= this.limits.maxPerWorkspace) return { error: "RUN_LIMIT" };
@@ -1139,23 +1167,24 @@ export class RunService {
       `SELECT COALESCE(MAX(dispatch_seq), 0) AS n FROM runs WHERE machine_id=?1`,
     ).get(run.machine_id) as { n: number }).n) + 1;
     const slotFree = this.injectSlotCount(run.machine_id) === 0;
-    const canStartNow = slotFree && this.windowCanAcceptStart(run.machine_id, win.windowId);
+    const canStartNow = slotFree && !!startWin;
     const now = Date.now();
     this.cancelRequested.delete(run.id);
     this.retireLiveGeneration(run.id);
-    if (canStartNow) {
+    if (canStartNow && startWin) {
       this.setStatus(run.id, "dispatched", {
-        ended_at: null, end_reason: null, started_at: now, window_id: win.windowId,
+        ended_at: null, end_reason: null, started_at: now, window_id: startWin,
         queued_at: null, dispatch_seq: nextSeq,
       });
       this.attachHubGenerationIfWindows(run.id, run.machine_id);
       const live = this.get(run.id);
-      this.registry.sendTo(run.machine_id, win.windowId, this.startMessage(live ?? run, now));
+      this.registry.sendTo(run.machine_id, startWin, this.startMessage(live ?? run, now));
     } else {
       this.setStatus(run.id, "queued", {
         ended_at: null, end_reason: null, started_at: null, window_id: win.windowId,
         queued_at: now, dispatch_seq: nextSeq,
       });
+      if (!startWin) this.requestOpenWindow(run.machine_id, run.workspace_root);
     }
     return { run: this.get(run.id) };
   }

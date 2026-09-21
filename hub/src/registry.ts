@@ -230,13 +230,17 @@ export class Registry {
   }
 
   findWindowForWorkspace(machineId: string, workspaceRoot: string): { machineId: string; windowId: string } | null {
+    const ids = this.windowsForWorkspace(machineId, workspaceRoot);
+    return ids.length ? { machineId, windowId: ids[0]! } : null;
+  }
+
+  windowsForWorkspace(machineId: string, workspaceRoot: string): string[] {
+    const ids: string[] = [];
     for (const c of this.conns.values()) {
       if (c.machineId !== machineId) continue;
-      if (c.openWorkspaces.includes(workspaceRoot)) {
-        return { machineId: c.machineId, windowId: c.windowId };
-      }
+      if (c.openWorkspaces.includes(workspaceRoot)) ids.push(c.windowId);
     }
-    return null;
+    return ids;
   }
 
   windowCdpReady(machineId: string, windowId: string): boolean | null {

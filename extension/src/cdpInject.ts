@@ -228,6 +228,33 @@ async function defaultFetchJson(url: string, timeoutMs: number): Promise<any[]> 
   }
 }
 
+async function nap(ms: number, sleep?: (n: number) => Promise<void>): Promise<void> {
+  if (sleep) {
+    await sleep(ms);
+    return;
+  }
+  await new Promise((r) => setTimeout(r, ms));
+}
+
+export async function fetchJsonWithRetry(
+  fetchJson: (url: string, timeoutMs: number) => Promise<unknown>,
+  url: string,
+  timeoutMs: number,
+  opts?: { tries?: number; gapMs?: number; sleep?: (n: number) => Promise<void> },
+): Promise<{ ok: true; body: unknown } | { ok: false }> {
+  const tries = opts?.tries ?? 3;
+  const gapMs = opts?.gapMs ?? 400;
+  for (let i = 0; i < tries; i++) {
+    try {
+      return { ok: true, body: await fetchJson(url, timeoutMs) };
+    } catch {
+      if (i === tries - 1) return { ok: false };
+      await nap(gapMs, opts?.sleep);
+    }
+  }
+  return { ok: false };
+}
+
 /** 口通不通：GET /json 300ms。不 pick workspace page（残实例是口都不通）。 */
 export async function probeCdpReady(opts: {
   port: number;
@@ -241,6 +268,23 @@ export async function probeCdpReady(opts: {
   } catch {
     return false;
   }
+}
+
+/** 注入前探口：9222 闪断重试，心跳仍用 probeCdpReady。 */
+export async function probeCdpReadyForInject(opts: {
+  port: number;
+  fetchJson?: (url: string, timeoutMs: number) => Promise<unknown>;
+  timeoutMs?: number;
+  sleep?: (n: number) => Promise<void>;
+}): Promise<boolean> {
+  const fetchJson = opts.fetchJson ?? defaultFetchJson;
+  const got = await fetchJsonWithRetry(
+    fetchJson,
+    `http://127.0.0.1:${opts.port}/json`,
+    opts.timeoutMs ?? 300,
+    { sleep: opts.sleep },
+  );
+  return got.ok && Array.isArray(got.body);
 }
 
 function defaultConnect(wsUrl: string, timeoutMs: number): Promise<CdpSession> {
@@ -556,12 +600,14 @@ async function connectWorkspacePage(
   const fetchJson = deps.fetchJson ?? defaultFetchJson;
   const connect = deps.connect ?? defaultConnect;
   const log = deps.log ?? (() => {});
-  let targets: any[];
-  try {
-    targets = await fetchJson(`http://127.0.0.1:${deps.port}/json`, 1500);
-  } catch {
-    return { ok: false, reason: "CDP_UNREACHABLE" };
-  }
+  const listed = await fetchJsonWithRetry(
+    fetchJson,
+    `http://127.0.0.1:${deps.port}/json`,
+    1500,
+    { sleep: deps.sleep },
+  );
+  if (!listed.ok) return { ok: false, reason: "CDP_UNREACHABLE" };
+  const targets = listed.body as any[];
   const windowId = typeof deps.windowId === "string" ? deps.windowId.trim() : "";
   if (windowId) {
     const pages = (Array.isArray(targets) ? targets : []).filter(

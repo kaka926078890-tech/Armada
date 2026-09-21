@@ -5,12 +5,14 @@ import { join } from "path";
 
 const clipboardWrites: string[] = [];
 const commands: string[] = [];
+const commandArgs: unknown[][] = [];
 
 mock.module("vscode", () => ({
   workspace: { workspaceFolders: [{ uri: { fsPath: "/ws/a" } }] },
   window: { showInformationMessage: async () => "允许" },
-  commands: { executeCommand: async (cmd: string) => { commands.push(cmd); } },
+  commands: { executeCommand: async (cmd: string, ...args: unknown[]) => { commands.push(cmd); commandArgs.push(args); } },
   env: { clipboard: { writeText: async (t: string) => { clipboardWrites.push(t); } } },
+  Uri: { file: (p: string) => ({ fsPath: p, scheme: "file" }) },
 }));
 
 import { CancelWatcher, Executor } from "../src/executor";
@@ -18,6 +20,7 @@ import { CancelWatcher, Executor } from "../src/executor";
 function makeExec(over: Partial<ConstructorParameters<typeof Executor>[0]> = {}) {
   clipboardWrites.length = 0;
   commands.length = 0;
+  commandArgs.length = 0;
   const acks: Record<string, unknown>[] = [];
   const lockPath = join(mkdtempSync(join(tmpdir(), "armada-exec-")), "cdp.lock");
   const ex = new Executor({
@@ -324,6 +327,14 @@ describe("Executor dirty composer", () => {
     expect(added).toBe(0);
     expect(commands).toContain("composer.openComposer");
     expect(acks[acks.length - 1]).toEqual({ type: "run.ack", runId: "r1", status: "accepted" });
+  });
+
+  test("openWorkspaceWindow uses vscode.openFolder forceNewWindow", async () => {
+    const { ex } = makeExec();
+    await ex.openWorkspaceWindow("/ws/a");
+    expect(commands).toEqual(["vscode.openFolder"]);
+    expect(commandArgs[0]?.[0]).toEqual({ fsPath: "/ws/a", scheme: "file" });
+    expect(commandArgs[0]?.[1]).toEqual({ forceNewWindow: true });
   });
 
   test("CDP_UNREACHABLE rejects startRun without createNew or clipboard", async () => {

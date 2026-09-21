@@ -10,12 +10,21 @@ Armada 按 **面** 发版：扩展、桌面、iOS、Android 可以不同号。RE
 
 ## Unreleased
 
+---
+
+## 2026-09-21 — 扩展 0.4.38 · iOS TF 26 · Android 0.1.12 · 桌面 0.1.0
+
 ### 修复
 
-- 撤回同窗新派发整卡排队（`512c120`）。0.4.0+ 首次派发 / 未绑 cid 的失败重试仍立刻 `createNew`，注入槽空了就可以并发；续聊仍跟 Cursor 的 steer/queue。未答 Ask 占位不变。中台须 overlay 这份 hub。
+- 同工作区再派一条新任务：不再在忙碌窗 `createNew`（Windows `r-a7cce90d` 会换掉当前对话），也不再整卡等到上一条跑完。中台让已有窗 `vscode.openFolder` 开新窗，新窗 register 后注入；注入槽空了就可以并发。续聊仍跟 Cursor 的 steer/queue。
+- 注入前探 9222：闪断重试三次，减少 Windows 续聊被打成 `CDP_NOT_READY`。心跳探口仍是一次。
 - 包装桌面时 `hub/web` 构建目标改为 es2022，避免 esbuild 在默认 chrome87 下无法降级 shadcn 大段解构（Windows `tauri build`）。
 - overlay 不再用 ad-hoc 签名。TCC「允许访问桌面」跟证书走，点一次之后覆盖安装不再当新 App 重弹；那个系统框没法无人值守代点。第一次从 ad-hoc 换到开发证书仍要点一次。
 - 某一机的单机 Reload leftover 不再把其它落后机器的「现在 / 空闲 Reload」按钮藏掉。执行仍只打那一台；看板按钮按机是否落后独立画。中台须 overlay 这份 hub，不必升 vsix。
+
+### 操作员注意
+
+Windows 被控须 **先装** `armada-agent-0.4.38.vsix` 再 Reload。只空闲、只点 Reload，本地没有这个包不会升级。中台须 overlay 到含 `REQUIRED_EXTENSION_VERSION=0.4.38` 的包装 hub。桌面仍是 **0.1.0**；iOS TestFlight **26**；Android **0.1.12**。
 
 ---
 

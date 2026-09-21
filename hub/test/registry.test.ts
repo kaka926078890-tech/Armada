@@ -143,6 +143,16 @@ describe("Registry", () => {
     expect(n).toBe(1);
   });
 
+  test("windowsForWorkspace lists every live window of that root", () => {
+    const { reg } = setup();
+    const a = fakeWs();
+    const b = fakeWs();
+    register(reg, a, { windowId: "w-1", openWorkspaces: ["/ws/a"] });
+    register(reg, b, { windowId: "w-2", openWorkspaces: ["/ws/a"] });
+    expect(reg.windowsForWorkspace("m-1", "/ws/a").sort()).toEqual(["w-1", "w-2"]);
+    expect(reg.windowsForWorkspace("m-1", "/ws/b")).toEqual([]);
+  });
+
   test("closing one of two windows keeps the other workspace", () => {
     const { reg } = setup();
     const a = fakeWs();
