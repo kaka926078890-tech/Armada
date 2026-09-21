@@ -2,7 +2,7 @@ import type { Database } from "bun:sqlite";
 import type { RunService } from "./runs";
 import type { SseHub } from "./sse";
 import { hookSubmitPrompt, transcriptUserPrompt } from "./outboundClaim";
-import { stopFromCursorSessionEnd } from "./generationOwnership";
+import { stopFromCursorSessionEnd, stopFromJsonlTurnEnded, genOf } from "./generationOwnership";
 import { ACTIVE_STATUSES, OCCUPYING_STATUSES, TERMINAL_STATUSES } from "./concurrency";
 
 /** runId → 该任务派出的子代理 conversation_id。缓存；重启后从 run_events 重建。 */
@@ -62,6 +62,19 @@ function rememberedChildCids(db: Database, runId: string): Set<string> {
 const TRANSCRIPT_SOURCES = new Set(["transcript", "subagent-transcript"]);
 /** Identical `turn_ended` from a second tailer lands in the same second; a later turn is minutes later. */
 const REPEAT_TURN_ENDED_MS = 60_000;
+
+function jsonlTurnEndedMayStop(db: Database, runId: string): boolean {
+  const hubBsp = db.query(
+    `SELECT seq FROM run_events WHERE run_id=?1 AND source='hub' AND hook_event_name='beforeSubmitPrompt'
+     ORDER BY seq DESC LIMIT 1`,
+  ).get(runId) as { seq: number } | undefined;
+  if (!hubBsp) return true;
+  const user = db.query(
+    `SELECT 1 AS n FROM run_events WHERE run_id=?1 AND source='transcript'
+     AND json_extract(payload, '$.role')='user' AND seq > ?2 LIMIT 1`,
+  ).get(runId, hubBsp.seq) as { n: number } | null;
+  return !!user;
+}
 
 /** Second Cursor window tails the same cid jsonl with a different ext_seq clock (r-182f5c19). */
 export function isRepeatTranscriptPayload(
@@ -167,6 +180,18 @@ export function ingestEvent(db: Database, runs: RunService, sse: SseHub, machine
   if (msg.source === "transcript") {
     const user = transcriptUserPrompt(msg.payload);
     if (user) runs.claimOutbound(runId, user, msg.ts ?? Date.now());
+    const mapped = stopFromJsonlTurnEnded(msg.payload);
+    if (mapped && jsonlTurnEndedMayStop(db, runId)) {
+      run = runs.get(runId) ?? run;
+      const live = genOf(run.live_generation_id);
+      const payloadGen = genOf((msg.payload as { generation_id?: unknown } | undefined)?.generation_id);
+      runs.onStopEvent(runId, {
+        ...mapped,
+        conversation_id: cid ?? run.conversation_id,
+        ...(payloadGen || live ? { generation_id: payloadGen ?? live } : {}),
+      });
+      if (run.conversation_id && cid === run.conversation_id) subagentCids.delete(runId);
+    }
   }
   if (msg.hookEventName === "subagentStart" && typeof cid === "string" && run.conversation_id && cid !== run.conversation_id) {
     rememberedChildCids(db, runId).add(cid);

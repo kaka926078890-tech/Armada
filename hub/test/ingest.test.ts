@@ -1292,4 +1292,61 @@ describe("event ingest", () => {
     expect(after.status).toBe("completed");
     ws.close();
   });
+
+  // r-3d1f1169 11:51 jsonl turn_ended success, no BSP, no live gen. Extension
+  // synthesizedStopPayload returns ok:false without lastGenerationId, so no hook stop.
+  test("r-3d1f1169: owner jsonl turn_ended without BSP completes", async () => {
+    const { ws, api, runId } = await startBoundRun();
+    ws.send(JSON.stringify({
+      type: "run.event", runId, source: "transcript", seq: 23, ts: Date.now(),
+      payload: { type: "turn_ended", status: "success" },
+    }));
+    await new Promise((r) => setTimeout(r, 120));
+    const after = (await (await api(`/api/runs/${runId}`)).json()) as any;
+    expect(after.status).toBe("completed");
+    expect(after.end_reason).toBe("completed");
+    ws.close();
+  });
+
+  test("idle followup jsonl turn_ended before the new user line stays running", async () => {
+    const { ws, api, runId } = await startBoundRun();
+    ws.send(JSON.stringify(ev(runId, 1, "stop", { status: "completed" })));
+    await new Promise((r) => setTimeout(r, 80));
+    const f = await api(`/api/runs/${runId}/followup`, { method: "POST", body: JSON.stringify({ prompt: "下一轮" }) });
+    expect(f.status).toBe(200);
+    ws.send(JSON.stringify({ type: "run.ack", runId, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId, conversationId: "cid-1", transcriptPath: "/tmp/t.jsonl", promptMatch: true }));
+    await new Promise((r) => setTimeout(r, 80));
+    ws.send(JSON.stringify({
+      type: "run.event", runId, source: "transcript", seq: 10, ts: Date.now(),
+      payload: { type: "turn_ended", status: "success" },
+    }));
+    await new Promise((r) => setTimeout(r, 120));
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).status).toBe("running");
+    ws.close();
+  });
+
+  test("idle followup user jsonl then turn_ended completes without hook stop (Reload dropped synth)", async () => {
+    const { ws, api, runId } = await startBoundRun();
+    ws.send(JSON.stringify(ev(runId, 1, "stop", { status: "completed" })));
+    await new Promise((r) => setTimeout(r, 80));
+    const f = await api(`/api/runs/${runId}/followup`, { method: "POST", body: JSON.stringify({ prompt: "为什么还是显示loading状态？" }) });
+    expect(f.status).toBe(200);
+    ws.send(JSON.stringify({ type: "run.ack", runId, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId, conversationId: "cid-1", transcriptPath: "/tmp/t.jsonl", promptMatch: true }));
+    await new Promise((r) => setTimeout(r, 80));
+    ws.send(JSON.stringify({
+      type: "run.event", runId, source: "transcript", seq: 10, ts: Date.now(),
+      payload: { role: "user", message: { content: [{ type: "text", text: "<user_query>\n为什么还是显示loading状态？\n</user_query>" }] } },
+    }));
+    ws.send(JSON.stringify({
+      type: "run.event", runId, source: "transcript", seq: 11, ts: Date.now(),
+      payload: { type: "turn_ended", status: "success" },
+    }));
+    await new Promise((r) => setTimeout(r, 120));
+    const after = (await (await api(`/api/runs/${runId}`)).json()) as any;
+    expect(after.status).toBe("completed");
+    expect(after.end_reason).toBe("completed");
+    ws.close();
+  });
 });

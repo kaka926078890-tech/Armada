@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseRetiredIds, appendRetired, decideArm, decideStop, isWindowsMachineOs, stopFromCursorSessionEnd } from "../src/generationOwnership";
+import { parseRetiredIds, appendRetired, decideArm, decideStop, isWindowsMachineOs, stopFromCursorSessionEnd, stopFromJsonlTurnEnded } from "../src/generationOwnership";
 
 const CID = "cid-1";
 const G = "gen-new";
@@ -118,7 +118,7 @@ describe("decideStop", () => {
     expect(decideStop({ ...base, stopCid: undefined })).toEqual({ action: "apply" });
   });
   test("Cursor 3.18 session stop uses a sidecar gen; apply only after live turn settled", () => {
-    // Real 17:43: AAR c65e24cc then stop 6ff69bf9 same cid â€” composer never emits its own stop.
+    // Real 17:43: AAR c65e24cc then stop 6ff69bf9 same cid — composer never emits its own stop.
     const sidecar = { ...base, stopGenerationId: "6ff69bf9-237c-45c6-a7fb-a77b554fb0cb", liveGenerationId: G };
     expect(decideStop(sidecar)).toEqual({ action: "ignore", audit: "STOP_GEN_MISMATCH" });
     expect(decideStop({ ...sidecar, liveTurnSettled: true })).toEqual({ action: "apply", audit: "STOP_SESSION_GEN" });
@@ -157,8 +157,19 @@ describe("decideStop", () => {
   });
 });
 
+describe("stopFromJsonlTurnEnded", () => {
+  test("maps owner jsonl turn_ended the same way synth stop does", () => {
+    expect(stopFromJsonlTurnEnded({ type: "turn_ended", status: "success" })).toEqual({ status: "completed" });
+    expect(stopFromJsonlTurnEnded({ type: "turn_ended", status: "aborted" })).toEqual({ status: "aborted" });
+    expect(stopFromJsonlTurnEnded({ type: "turn_ended", status: "error", error: "boom" }))
+      .toEqual({ status: "error", error: "boom" });
+    expect(stopFromJsonlTurnEnded({ role: "assistant" })).toBeNull();
+    expect(stopFromJsonlTurnEnded(null)).toBeNull();
+  });
+});
+
 describe("stopFromCursorSessionEnd", () => {
-  // r-a0bc34a5 18:05:27 / 18:33:10 â€” real hub.db sessionEnd payloads (Cursor 3.21.9)
+  // r-a0bc34a5 18:05:27 / 18:33:10 — real hub.db sessionEnd payloads (Cursor 3.21.9)
   const CID = "a7b63dc9-1d51-45b7-a9f6-59a10c8bb5d9";
   const G = "46e45631-22f2-4d0e-aec7-4d9db35db614";
   const generating = {
@@ -186,7 +197,7 @@ describe("stopFromCursorSessionEnd", () => {
     expect(stopFromCursorSessionEnd(generating)).toBeNull();
   });
 
-  test("r-a0bc34a5: user_close + aborted is composer teardown after idle â†’ completed stop", () => {
+  test("r-a0bc34a5: user_close + aborted is composer teardown after idle ? completed stop", () => {
     expect(stopFromCursorSessionEnd(userCloseAborted)).toEqual({
       status: "completed",
       generation_id: G,

@@ -157,3 +157,14 @@ export function stopFromCursorSessionEnd(payload: unknown): {
   }
   return null;
 }
+
+/** Owner jsonl `turn_ended` is the durable idle signal. Hooks and synth stop can miss it. */
+export function stopFromJsonlTurnEnded(payload: unknown): { status: string; error?: string } | null {
+  if (!payload || typeof payload !== "object") return null;
+  const p = payload as Record<string, unknown>;
+  if (p.type !== "turn_ended") return null;
+  const s = typeof p.status === "string" ? p.status : "";
+  if (s === "aborted" || s === "cancelled" || s === "canceled") return { status: "aborted" };
+  if (s === "error") return { status: "error", error: typeof p.error === "string" ? p.error : "error" };
+  return { status: "completed" };
+}

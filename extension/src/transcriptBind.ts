@@ -3,6 +3,7 @@ import { dirname, join } from "path";
 import { hasImageMarkers, stripImageMarkers } from "./imageMarkers";
 import { normalizePrompt } from "./promptNormalize";
 import { normalizeWorkspacePath } from "./workspacePath";
+import { stopFromJsonlTurnEnded } from "../../hub/src/generationOwnership";
 import type { HookMatch, PendingRun } from "./binding";
 
 const TOLERANCE_MS = 5_000;
@@ -215,13 +216,7 @@ export function matchTranscriptToPending(
 
 /** Map a Cursor jsonl line to hub `onStopEvent` payload. Null = not a terminal line. */
 export function stopPayloadFromTranscriptLine(line: string): { status: string; error?: string } | null {
-  let j: { type?: unknown; status?: unknown; error?: unknown };
-  try { j = JSON.parse(line); } catch { return null; }
-  if (j.type !== "turn_ended") return null;
-  const s = typeof j.status === "string" ? j.status : "";
-  if (s === "aborted" || s === "cancelled" || s === "canceled") return { status: "aborted" };
-  if (s === "error") return { status: "error", error: typeof j.error === "string" ? j.error : "error" };
-  return { status: "completed" };
+  try { return stopFromJsonlTurnEnded(JSON.parse(line)); } catch { return null; }
 }
 
 /** Last complete jsonl record. Null if the turn is still open (user started another). */
