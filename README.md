@@ -6,14 +6,14 @@
 
 发送默认 **CDP 全自动**。桌面「打开工作区」会用启动器带调试口拉起 Cursor；若窗口不是这样开的，派发会降级为剪贴板预填 + 本机回车。
 
-### 当前版本（2026-09-20）
+### 当前版本（2026-09-21）
 
 | 面 | 当前发版 | 权威文件 |
 | --- | --- | --- |
 | 桌面 Armada.app | **0.1.0** | `desktop/src-tauri/tauri.conf.json` |
 | 扩展 armada-agent | **0.4.36** | `extension/package.json` |
-| iOS ArmadaRemote | **0.1.0** · TestFlight **25** | `mobile/ios` `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` |
-| Android | **0.1.11**（versionCode 12） | `mobile/android/app/build.gradle.kts` |
+| iOS ArmadaRemote | **0.1.0** · TestFlight **26** | `mobile/ios` `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` |
+| Android | **0.1.12**（versionCode 13） | `mobile/android/app/build.gradle.kts` |
 
 每面发版都记进 [CHANGELOG.md](CHANGELOG.md)。能力下限（例如「续聊须 ≥ 0.4.19」）和当前发版号不是一回事：装包请用上表。
 

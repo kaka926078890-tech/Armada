@@ -10,9 +10,17 @@ Armada 按 **面** 发版：扩展、桌面、iOS、Android 可以不同号。RE
 
 ## Unreleased
 
+---
+
+## 2026-09-21 — 扩展 0.4.36 · iOS TF 26 · Android 0.1.12 · 桌面 0.1.0
+
 ### 修复
 
 - 公网 uuWAF 会把大约 10KiB 以上的 JSON 打成 HTML 500。派发 / 续发长提示词改成和发图一样的 6KiB JSON 分片，中转拼好再一次 `cmd.dispatch` / `cmd.followup`。iOS 不再把长任务误报成 HTTP 500。
+
+### 操作员注意
+
+装 iOS TestFlight **26**（或 Android **0.1.12**）。TF **25** 仍会把长任务一次 POST，被 WAF 打成 500。扩展仍是 **0.4.36**；桌面仍是 **0.1.0**。公网中转须先于 App 装上这版分片协议。
 
 ---
 
