@@ -122,17 +122,17 @@ export default function Sidebar({
   };
 
   return (
-    <aside className="relative z-50 w-[224px] shrink-0 border-r border-border flex flex-col bg-sidebar text-sidebar-foreground overflow-x-hidden">
+    <aside className="w-[224px] shrink-0 border-r border-border flex flex-col bg-sidebar text-sidebar-foreground overflow-x-hidden">
       {showDesktopActions ? (
-        <div className="mx-3 mt-3 mb-1.5 grid grid-cols-3 gap-1">
-          <Button type="button" size="xs" variant="outline" className="min-w-0 px-1" title="打开工作区" aria-label="打开工作区" onClick={onOpenWorkspace}>
-            打开
+        <div className="mx-3 mt-3 mb-1.5 flex flex-col gap-1.5">
+          <Button type="button" variant="outline" className="w-full" onClick={onOpenWorkspace}>
+            打开工作区
           </Button>
-          <Button type="button" size="xs" variant="outline" className="min-w-0 px-1" title="修复调试口" aria-label="修复调试口" onClick={onRepairCdp}>
-            调试口
+          <Button type="button" variant="outline" className="w-full" onClick={onRepairCdp}>
+            修复调试口
           </Button>
-          <Button type="button" size="xs" variant="outline" className="min-w-0 px-1" title="获取分享链接" aria-label="获取分享链接" onClick={onGetShareLink}>
-            分享
+          <Button type="button" variant="outline" className="w-full" onClick={onGetShareLink}>
+            获取分享链接
           </Button>
         </div>
       ) : null}

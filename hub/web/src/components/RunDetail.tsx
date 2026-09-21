@@ -525,6 +525,9 @@ export default function RunDetail({
             }}
           />
           <form className="flex flex-col gap-2" onSubmit={sendFollowup}>
+          {followupError ? (
+            <div className={`${UI_TYPE} text-destructive`} role="alert">{followupError}</div>
+          ) : null}
           <div className="flex gap-2 items-end">
             <Textarea
               value={followup}

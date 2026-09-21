@@ -23,14 +23,15 @@ describe("appearance layout stays coordinated when text scales", () => {
     expect(header).toContain("shrink-0");
   });
 
-  test("run detail overlay dims the board, not the machine sidebar", () => {
+  test("run detail overlay covers the machine sidebar below the header", () => {
     const app = readFileSync(join(web, "src/App.tsx"), "utf8");
     const sidebar = readFileSync(join(web, "src/components/Sidebar.tsx"), "utf8");
     const body = app.slice(app.indexOf("</header>"));
-    expect(sidebar).toContain("relative z-50");
+    expect(sidebar).not.toContain("relative z-50");
     expect(body).toMatch(/flex flex-1 min-h-0 relative[\s\S]*<Sidebar[\s\S]*absolute inset-0 z-40/);
     expect(body).not.toMatch(/<Sidebar[\s\S]*flex-col relative[\s\S]*absolute inset-0 z-40/);
     expect(app).not.toContain("fixed inset-0 z-40");
+    expect(body).toContain("{selectedRun &&");
   });
 
   test("kanban titles wrap by word and clamp later lines", () => {
@@ -75,6 +76,14 @@ describe("appearance layout stays coordinated when text scales", () => {
     expect(board).not.toContain("extensionLagNotice");
     expect(ios).not.toContain("本机 Cursor 扩展已更新");
     expect(android).not.toContain("本机 Cursor 扩展已更新");
+  });
+
+  test("followup errors render in the composer instead of failing silently", () => {
+    const detail = readFileSync(join(web, "src/components/RunDetail.tsx"), "utf8");
+    expect(detail).toContain("运行中续发暂只支持纯文本。");
+    expect(detail).toContain('role="alert"');
+    expect(detail).toContain("{followupError ?");
+    expect(detail).toMatch(/\{followupError \?[\s\S]*role="alert"/);
   });
 
   test("desktop window is a board, not an 800x600 document", () => {
