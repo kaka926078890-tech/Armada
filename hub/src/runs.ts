@@ -6,6 +6,7 @@ import {
   type ConcurrencyLimits,
   limitsFromEnv,
   normalizePrompt,
+  extensionSupportsMultiRunPerWindow,
   OCCUPYING_STATUSES,
   ACTIVE_STATUSES,
   ENDED_STATUSES,
@@ -263,12 +264,14 @@ export class RunService {
   }
 
   /**
-   * New start = `composer.createNew` in this window. Cursor Agents 同窗只有一个输入框，
-   * 再开会换掉当前对话（台账 W2 blocked；2026-09-21 r-a7cce90d 打包仍 running 时第二条 start 打断）。
-   * 0.4.0+ 不得因此放行；同窗 progressing 时只排队。跨窗 / 同卡 followup 不走这里。
+   * New start = `composer.createNew`（首次派发 / 未绑 cid 的失败重试）。
+   * 0.4.0+ 同窗可以再开一条，不因已有 progressing 整卡排队。
+   * 窗上未答 Ask 仍占位。跨窗 / 同卡 followup 不走这里。
    */
   private windowCanAcceptStart(machineId: string, windowId: string): boolean {
     if (this.windowHasPendingAsk(machineId, windowId)) return false;
+    const ver = this.registry.windowExtensionVersion(machineId, windowId);
+    if (extensionSupportsMultiRunPerWindow(ver)) return true;
     const row = this.db.query(
       `SELECT id FROM runs WHERE machine_id=?1 AND window_id=?2 AND status IN (${sqlStatusIn(PROGRESSING_STATUSES)}) LIMIT 1`,
     ).get(machineId, windowId);
