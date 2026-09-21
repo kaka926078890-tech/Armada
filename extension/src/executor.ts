@@ -243,7 +243,7 @@ export class Executor {
     return this.deps.globalState.get<string[]>("armada.authorizedWorkspaces", []) ?? [];
   }
 
-  /** 首次派发没有空闲窗时：同工作区再开一扇 Cursor 窗，不在当前窗 createNew。 */
+  /** 工作区未出现在任何窗时再开一扇。已打开的 Desk 走 createNew，不要 duplicate 成 Untitled。 */
   async openWorkspaceWindow(workspaceRoot: string): Promise<void> {
     const root = String(workspaceRoot ?? "").trim();
     if (!root) return;

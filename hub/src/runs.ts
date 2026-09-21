@@ -14,6 +14,7 @@ import {
   sqlStatusIn,
   isStatus,
   canRetryStatus,
+  extensionSupportsMultiRunPerWindow,
 } from "./concurrency";
 import { workspacePathIn } from "../../extension/src/workspacePath";
 import { BIND_TIMEOUT_MS, WINDOWS_BIND_TIMEOUT_MS } from "../../extension/src/transcriptBind";
@@ -263,24 +264,32 @@ export class RunService {
   }
 
   /**
-   * New start 只能进空闲窗。同窗已有 progressing / 未答 Ask → 不 createNew（会换掉当前对话）。
-   * 没有空闲窗时 requestOpenWindow，等新窗 register 再 start。续聊不走这里。
+   * New start = `composer.createNew` in an already-open window (Desk).
+   * Do not duplicate the folder into Untitled (Workspace) (2026-09-21 v4).
+   * Unanswered Ask still occupies (B1). Old ext / multiRunPerWindow=0 stay one-run-per-window.
    */
-  private windowCanAcceptStart(machineId: string, windowId: string): boolean {
-    if (this.windowHasPendingAsk(machineId, windowId)) return false;
-    const row = this.db.query(
+  private windowHasProgressing(machineId: string, windowId: string): boolean {
+    return !!this.db.query(
       `SELECT id FROM runs WHERE machine_id=?1 AND window_id=?2 AND status IN (${sqlStatusIn(PROGRESSING_STATUSES)}) LIMIT 1`,
     ).get(machineId, windowId);
-    return !row;
+  }
+
+  private windowCanAcceptStart(machineId: string, windowId: string): boolean {
+    if (this.windowHasPendingAsk(machineId, windowId)) return false;
+    if (!this.windowHasProgressing(machineId, windowId)) return true;
+    if (!this.limits.multiRunPerWindow) return false;
+    return extensionSupportsMultiRunPerWindow(this.registry.windowExtensionVersion(machineId, windowId));
   }
 
   private findStartWindow(machineId: string, workspaceRoot: string): string | null {
+    const ready: string[] = [];
     for (const windowId of this.registry.windowsForWorkspace(machineId, workspaceRoot)) {
       if (this.registry.windowCdpReady(machineId, windowId) !== true) continue;
       if (!this.windowCanAcceptStart(machineId, windowId)) continue;
-      return windowId;
+      ready.push(windowId);
     }
-    return null;
+    const idle = ready.find((w) => !this.windowHasProgressing(machineId, w));
+    return idle ?? ready[0] ?? null;
   }
 
   private lastOpenWindowAt = new Map<string, number>();
@@ -318,7 +327,6 @@ export class RunService {
         }
         const startWin = this.findStartWindow(machineId, row.workspace_root);
         if (!startWin) {
-          this.requestOpenWindow(machineId, row.workspace_root);
           continue;
         }
         const now = Date.now();
@@ -424,8 +432,6 @@ export class RunService {
       this.attachHubGenerationIfWindows(id, machineId);
       this.registry.sendTo(machineId, win.windowId, this.startMessage(this.get(id), now));
       this.audit("hub", "run.dispatched", id);
-    } else if (!startWin) {
-      this.requestOpenWindow(machineId, workspaceRoot);
     }
     const queuePosition = status === "queued"
       ? (this.db.query(`SELECT COUNT(*) AS n FROM runs WHERE machine_id=?1 AND status='queued' AND dispatch_seq<=?2`).get(machineId, nextSeq) as { n: number }).n
@@ -1188,7 +1194,6 @@ export class RunService {
         ended_at: null, end_reason: null, started_at: null, window_id: win.windowId,
         queued_at: now, dispatch_seq: nextSeq,
       });
-      if (!startWin) this.requestOpenWindow(run.machine_id, run.workspace_root);
     }
     return { run: this.get(run.id) };
   }
