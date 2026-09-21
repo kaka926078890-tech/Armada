@@ -5,7 +5,7 @@ import { originOf } from "../../relay/src/uri";
 import { eventsToChat, lastTurnAssistantBody } from "../web/src/chatView";
 import { runDisplayName } from "../web/src/boardState";
 import type { RunEvent } from "../web/src/types";
-import { canRetryStatus, TERMINAL_STATUSES } from "./concurrency";
+import { canRetryStatus, LIVE_STATUSES, TERMINAL_STATUSES } from "./concurrency";
 import { createRelayCommandHandler, startRelayHeartbeat } from "./relayCommandHandler";
 import { cursorReloadView } from "./cursorReloadStore";
 import type { Registry } from "./registry";
@@ -114,6 +114,48 @@ export function loadEventsForSnap(status: string): boolean {
   return (TERMINAL_STATUSES as readonly string[]).includes(status) || status === "unknown";
 }
 
+/** Matches relay GET /mobile/runs page size so a reconnect can fully replace the operator list. */
+export const RELAY_DUMP_LIMIT = 50;
+
+export type RelayDumpRow = {
+  id: string;
+  status: string;
+  archived_at?: number | null;
+  ended_at?: number | null;
+  started_at?: number | null;
+  created_at?: number | null;
+};
+
+function dumpActivityTs(row: RelayDumpRow): number {
+  return Number(row.ended_at ?? row.started_at ?? row.created_at ?? 0);
+}
+
+/**
+ * Runs that must reconverge on hub↔relay open: every live/unknown card, plus the
+ * same 50+50 window the phone lists. Stale `running` on relay after MACHINE_OFFLINE
+ * is recovered here — live SSE `snap.run` is not durable across a dropped WS.
+ */
+export function runIdsForRelayDump(rows: RelayDumpRow[], limit = RELAY_DUMP_LIMIT): string[] {
+  const live = new Set<string>(LIVE_STATUSES as readonly string[]);
+  const seen = new Set<string>();
+  const ids: string[] = [];
+  const add = (id: string) => {
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    ids.push(id);
+  };
+  for (const row of rows) {
+    const status = String(row.status ?? "");
+    if (live.has(status) || status === "unknown") add(row.id);
+  }
+  const byActivity = (a: RelayDumpRow, b: RelayDumpRow) => dumpActivityTs(b) - dumpActivityTs(a);
+  const open = rows.filter((r) => !(Number(r.archived_at) > 0)).sort(byActivity).slice(0, limit);
+  const hidden = rows.filter((r) => Number(r.archived_at) > 0).sort(byActivity).slice(0, limit);
+  for (const row of open) add(row.id);
+  for (const row of hidden) add(row.id);
+  return ids;
+}
+
 export function runToSnap(run: any, events: RunEvent[]): RunSnap {
   const body = lastTurnAssistantBody(eventsToChat(events));
   const status = String(run.status ?? "unknown");
@@ -191,6 +233,15 @@ export function startRelayClient(opts: {
     if (run) send({ type: "snap.run", run });
   };
 
+  const dumpRuns = () => {
+    const rows = opts.db.query(
+      "SELECT id, status, archived_at, ended_at, started_at, created_at FROM runs",
+    ).all() as RelayDumpRow[];
+    for (const id of runIdsForRelayDump(rows)) {
+      try { pushRun(id); } catch { /* one bad snap must not skip the rest */ }
+    }
+  };
+
   const pushSoon = new Map<string, ReturnType<typeof setTimeout>>();
   const schedulePush = (runId: string) => {
     const prev = pushSoon.get(runId);
@@ -240,6 +291,7 @@ export function startRelayClient(opts: {
     next.addEventListener("open", () => {
       backoff = 1000;
       pushWorkspaces();
+      dumpRuns();
       heartbeat?.();
       heartbeat = startRelayHeartbeat(next);
     });

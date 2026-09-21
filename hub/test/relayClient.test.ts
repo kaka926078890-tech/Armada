@@ -3,7 +3,8 @@ import { mkdtempSync, readFileSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { createServer, type HubServer } from "../src/index";
-import { loadEventsForSnap, loadRelayConfig, runToSnap } from "../src/relayClient";
+import { Database } from "bun:sqlite";
+import { loadEventsForSnap, loadRelayConfig, RELAY_DUMP_LIMIT, runIdsForRelayDump, runToSnap } from "../src/relayClient";
 import { createRelayServer, type RelayServer } from "../../relay/src/server";
 import { encodeWorkspaceId } from "../../relay/src/uri";
 import type { RunEvent } from "../web/src/types";
@@ -208,6 +209,24 @@ describe("runToSnap", () => {
       id: "r-1", machine_id: "m-1", workspace_root: "/ws/a",
       prompt: "hi", conversation_id: "  ", status: "running", created_at: 1,
     }, []).conversationId).toBeNull();
+  });
+
+  test("runIdsForRelayDump always includes live and unknown even past the list window", () => {
+    const completed = Array.from({ length: RELAY_DUMP_LIMIT }, (_, i) => ({
+      id: `c-${i}`, status: "completed", created_at: 1_000 + i, ended_at: 2_000 + i,
+    }));
+    const liveOld = { id: "r-live", status: "running", created_at: 1, started_at: 2 };
+    const unknownOld = {
+      id: "r-3d1f1169", status: "unknown", created_at: 3, started_at: 4, ended_at: 5,
+    };
+    const hiddenUnknown = {
+      id: "r-hidden-unknown", status: "unknown", archived_at: 9, created_at: 1, ended_at: 1,
+    };
+    const ids = runIdsForRelayDump([...completed, liveOld, unknownOld, hiddenUnknown]);
+    expect(ids).toContain("r-live");
+    expect(ids).toContain("r-3d1f1169");
+    expect(ids).toContain("r-hidden-unknown");
+    expect(ids.filter((id) => id.startsWith("c-")).length).toBe(RELAY_DUMP_LIMIT);
   });
 
   test("runToSnap includes attachment metas and omits empty", () => {
@@ -609,6 +628,8 @@ describe("hub outbound to relay", () => {
     const src = readFileSync(join(import.meta.dir, "../src/relayClient.ts"), "utf8");
     expect(src).toContain("createRelayCommandHandler");
     expect(src).toContain("cursorReloadView");
+    expect(src).toContain("dumpRuns");
+    expect(src).toContain("runIdsForRelayDump");
     const handler = readFileSync(join(import.meta.dir, "../src/relayCommandHandler.ts"), "utf8");
     for (const cmd of [
       "cmd.dispatch", "cmd.followup", "cmd.retry", "cmd.answer", "cmd.cancel",
@@ -687,6 +708,66 @@ describe("hub outbound to relay", () => {
     });
     expect(JSON.parse(posts[1])).toEqual({
       machineId: "m-1", workspaceRoot: "/ws/a", prompt: "", attachmentIds: ids,
+    });
+  });
+
+  test("hub restart dumps MACHINE_OFFLINE so mobile leaves running (r-3d1f1169)", async () => {
+    const relayHome = mkdtempSync(join(tmpdir(), "armada-relay-"));
+    const hubHome = mkdtempSync(join(tmpdir(), "armada-hub-"));
+    relay = createRelayServer({
+      port: 0, hostname: "127.0.0.1", home: relayHome,
+      publicBase: "http://127.0.0.1", adminToken: "adm",
+    });
+    const fleet = relay.createFleet();
+    writeFileSync(join(hubHome, "relay.json"), JSON.stringify({
+      relay: `http://127.0.0.1:${relay.port}`, fleet: fleet.fleet, secret: fleet.hubSecret,
+    }), { mode: 0o600 });
+
+    hub = createServer({ port: 0, home: hubHome });
+    const ext: WebSocket = await new Promise((res, rej) => {
+      const w = new WebSocket(`ws://127.0.0.1:${hub!.port}/ws?token=${hub!.token}`);
+      w.onopen = () => res(w);
+      w.onerror = rej;
+    });
+    ext.send(JSON.stringify({
+      type: "register", machineId: "m-1", windowId: "w-1", name: "A", os: "darwin",
+      extensionVersion: "0.4.0", openWorkspaces: ["/ws/a"], cdpReady: true,
+    }));
+    const headers = { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" };
+    await waitUntil(async () => {
+      const j = await (await fetch(`http://127.0.0.1:${relay!.port}/mobile/workspaces`, { headers })).json() as any;
+      return j.hubOffline === false && j.workspaces?.[0]?.workspaceRoot === "/ws/a";
+    });
+    const d = await fetch(`http://127.0.0.1:${relay.port}/mobile/runs`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ workspaceId: encodeWorkspaceId("m-1", "/ws/a"), prompt: "拉取一下最新的Armada代码然后重新打包" }),
+    });
+    const body = await d.json() as any;
+    const runId = body.run.runId as string;
+    ext.send(JSON.stringify({ type: "run.ack", runId, status: "accepted" }));
+    ext.send(JSON.stringify({
+      type: "run.bound", runId, conversationId: "70ec6f4a-9645-479d-8e75-bee4c207cd4b",
+      transcriptPath: null, promptMatch: true,
+    }));
+    await waitUntil(() => hub!.runs.get(runId)?.status === "running");
+    await waitUntil(async () => {
+      const j = await (await fetch(`http://127.0.0.1:${relay!.port}/mobile/runs/${runId}`, { headers })).json() as any;
+      return j.status === "running";
+    });
+    ext.close();
+    hub.stop();
+    hub = null;
+
+    const db = new Database(join(hubHome, "hub.db"));
+    db.query("UPDATE runs SET status='unknown', end_reason='MACHINE_OFFLINE', ended_at=?1 WHERE id=?2")
+      .run(Date.now(), runId);
+    db.close();
+
+    hub = createServer({ port: 0, home: hubHome });
+    await waitUntil(async () => {
+      const j = await (await fetch(`http://127.0.0.1:${relay!.port}/mobile/runs/${runId}`, { headers })).json() as any;
+      return j.status === "unknown" && j.error === "MACHINE_OFFLINE";
     });
   });
 });
