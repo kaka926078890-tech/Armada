@@ -12,6 +12,18 @@ Armada 按 **面** 发版：扩展、桌面、iOS、Android 可以不同号。RE
 
 ---
 
+## 2026-09-21 — 扩展 0.4.42 · iOS TF 27 · Android 0.1.13 · 桌面 0.1.0
+
+### 修复
+
+- 同仓再开一扇窗仍走 `duplicateWorkspaceInNewWindow`，不改 Cursor 启动方式、也不重开 `.code-workspace`。duplicate 出来的标题是 `Untitled (Workspace)`（16:09 v2 真机 `/json`），CDP 给这一页盖章再注入，不再 `WINDOW_TARGET_NOT_FOUND`。
+
+### 操作员注意
+
+Windows 被控须 **先装** `armada-agent-0.4.42.vsix` 再 Reload。只空闲、只点 Reload，本地没有这个包不会升级。中台须 overlay 到含 `REQUIRED_EXTENSION_VERSION=0.4.42` 的包装 hub。桌面仍是 **0.1.0**；iOS TestFlight **27**；Android **0.1.13**。
+
+---
+
 ## 2026-09-21 — 扩展 0.4.41 · iOS TF 27 · Android 0.1.13 · 桌面 0.1.0
 
 ### 修复

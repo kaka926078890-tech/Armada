@@ -555,6 +555,43 @@ describe("connectWorkspacePage window stamp", () => {
     expect(logs.get("ws://busy")?.some((c) => c.method === "Input.insertText")).toBe(false);
   });
 
+  test("r-b703b94a: duplicateWorkspaceInNewWindow titles Untitled (Workspace); stamp that page, do not reopen .code-workspace", async () => {
+    const logs = new Map<string, CallLog[]>();
+    const submit = createCdpSubmitter(deps({
+      windowId: "0e3307cd-72b5-4412-aa9f-ddd58f410ef81789978151988",
+      fetchJson: async () => [
+        { type: "page", title: "Cursor Settings — desk", webSocketDebuggerUrl: "ws://busy" },
+        { type: "page", title: "Untitled (Workspace)", webSocketDebuggerUrl: "ws://dup" },
+      ],
+      connect: async (wsUrl) => {
+        const log: CallLog[] = [];
+        logs.set(wsUrl, log);
+        return stampSession({
+          stamp: wsUrl === "ws://busy" ? "7fa4d650-4f1d-45f6-8ee6-ea5bc6a2afe31789978034875" : null,
+          evalResults: ["OK", "OK", "OK"],
+          log,
+        });
+      },
+    }));
+    expect((await submit("/Users/apple/Desktop/desk", "测试：10s后回复我，v2")).ok).toBe(true);
+    expect(logs.get("ws://dup")?.some((c) => c.method === "Input.insertText")).toBe(true);
+    expect(logs.get("ws://busy")?.some((c) => c.method === "Input.insertText")).toBe(false);
+  });
+
+  test("two unstamped Untitled (Workspace) pages stay AMBIGUOUS", async () => {
+    const submit = createCdpSubmitter(deps({
+      windowId: "sess-new",
+      fetchJson: async () => [
+        { type: "page", title: "Untitled (Workspace)", webSocketDebuggerUrl: "ws://a" },
+        { type: "page", title: "Untitled (Workspace)", webSocketDebuggerUrl: "ws://b" },
+      ],
+      connect: async () => stampSession({ stamp: null, evalResults: ["OK", "OK", "OK"] }),
+    }));
+    expect(await submit("/Users/apple/Desktop/desk", "v2")).toEqual({
+      ok: false, reason: "WINDOW_TARGET_AMBIGUOUS",
+    });
+  });
+
   test("unstamped desk (Workspace) page is used when the folder window is already stamped", async () => {
     const logs = new Map<string, CallLog[]>();
     const submit = createCdpSubmitter(deps({

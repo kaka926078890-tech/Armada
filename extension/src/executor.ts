@@ -250,7 +250,8 @@ export class Executor {
     const vscode = vs();
     const folders = (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath);
     // Same folder is already open: vscode.openFolder+forceNewWindow reuses that window on
-    // Windows (r-d4aa8dc3 stayed queued). Duplicate is the command Cursor uses for a second OS window.
+    // Windows (r-d4aa8dc3 stayed queued). Duplicate is a second OS window of the same
+    // workspace (title Untitled (Workspace)); do not relaunch via .code-workspace.
     if (workspacePathIn(root, folders)) {
       await vscode.commands.executeCommand("workbench.action.duplicateWorkspaceInNewWindow");
       return;

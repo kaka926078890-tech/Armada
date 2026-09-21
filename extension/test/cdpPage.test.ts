@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { pickCdpPage, titleMatchesWorkspace } from "../src/cdpPage";
+import { isDuplicateWorkspaceTitle, pickCdpPage, titleMatchesWorkspace } from "../src/cdpPage";
 
 describe("titleMatchesWorkspace", () => {
   test("matches Cursor em-dash title and exact folder title", () => {
@@ -55,6 +55,14 @@ describe("titleMatchesWorkspace", () => {
     expect(titleMatchesWorkspace("desk (Workspace)", "desk")).toBe(true);
     expect(titleMatchesWorkspace("work (Workspace)", workWin)).toBe(true);
     expect(titleMatchesWorkspace("armada-open-desk (Workspace)", "desk")).toBe(false);
+  });
+
+  test("duplicateWorkspaceInNewWindow title is not a folder match (r-b703b94a)", () => {
+    expect(titleMatchesWorkspace("Untitled (Workspace)", "desk")).toBe(false);
+    expect(isDuplicateWorkspaceTitle("Untitled (Workspace)")).toBe(true);
+    expect(isDuplicateWorkspaceTitle("● Untitled (Workspace)")).toBe(true);
+    expect(isDuplicateWorkspaceTitle("desk (Workspace)")).toBe(false);
+    expect(isDuplicateWorkspaceTitle("armada-open-desk (Workspace)")).toBe(false);
   });
 });
 
