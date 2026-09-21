@@ -110,21 +110,6 @@ func detailPromptShownHeight(_ contentHeight: CGFloat, cap: CGFloat = detailProm
     min(max(contentHeight, 24), cap)
 }
 
-struct UnreadBadge: View {
-    let count: Int
-    var body: some View {
-        if count > 0 {
-            Text(count > 99 ? "99+" : "\(count)")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 5)
-                .frame(minWidth: 18, minHeight: 18)
-                .background(Color.red)
-                .clipShape(Capsule())
-        }
-    }
-}
-
 /// 页内主操作。导航栏必须用系统 `Button`，塞进 `ToolbarItem` 会被 iOS 26 玻璃胶囊裁成「源发 / 查看已藏」。
 struct VolumeButton: View {
     enum Kind { case accent, quiet, danger }
@@ -339,7 +324,6 @@ struct WorkspaceListView: View {
                                             .lineLimit(1)
                                     }
                                     Spacer(minLength: 8)
-                                    UnreadBadge(count: session.unreadCount(in: w))
                                 }
                             }
                             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
@@ -397,7 +381,6 @@ struct WorkspaceListView: View {
                                 }
                                 .font(.caption.weight(.semibold))
                                 .buttonStyle(.borderless)
-                                UnreadBadge(count: n)
                             }
                         }
                     }

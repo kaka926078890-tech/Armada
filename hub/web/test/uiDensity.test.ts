@@ -119,12 +119,15 @@ describe("App UI density is one scale", () => {
     expect(models).toContain("class Machine");
     expect(models).toContain("class Workspace");
     expect(models).toContain("class Column");
+    expect(ios).not.toContain("struct UnreadBadge");
     expect(iosList).toContain("全部已读");
+    expect(iosList).not.toContain("UnreadBadge");
     expect(iosList).toContain("markAllRead(.machine");
     expect(iosList).toContain("markAllRead(.workspace");
     expect(iosHome).toContain("本列已读");
     expect(iosHome).toContain("markAllRead(.column");
     expect(fleet).toContain("全部已读");
+    expect(fleet).not.toContain("UnreadBadge");
     expect(fleet).toContain("MarkReadScope.Machine");
     expect(fleet).toContain("MarkReadScope.Workspace");
     expect(workspace).toContain("本列已读");

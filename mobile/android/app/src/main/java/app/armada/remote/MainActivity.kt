@@ -310,16 +310,13 @@ fun FleetScreen(vm: SessionVm, state: UiState, onOpen: (WorkspaceDto) -> Unit, o
                         },
                         headerTrailing = {
                             if (machineUnread > 0) {
-                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Text(
-                                        "全部已读",
-                                        color = AccentBlue,
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        modifier = Modifier.clickable { vm.markAllRead(MarkReadScope.Machine(mid)) },
-                                    )
-                                    UnreadBadge(machineUnread)
-                                }
+                                Text(
+                                    "全部已读",
+                                    color = AccentBlue,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.clickable { vm.markAllRead(MarkReadScope.Machine(mid)) },
+                                )
                             }
                         },
                     ) {
@@ -350,7 +347,6 @@ fun FleetScreen(vm: SessionVm, state: UiState, onOpen: (WorkspaceDto) -> Unit, o
                                         }
                                         Text(w.workspaceRoot, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                                     }
-                                    UnreadBadge(unread)
                                     Text("›", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 8.dp))
                                 }
                             }
