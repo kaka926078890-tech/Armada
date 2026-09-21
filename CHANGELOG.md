@@ -13,6 +13,7 @@ Armada 按 **面** 发版：扩展、桌面、iOS、Android 可以不同号。RE
 ### 修复
 
 - 同工作区再派一条新任务：回到原先 Desk 里的 `composer.createNew`。已打开的窗不再 `duplicateWorkspaceInNewWindow` 出 `Untitled (Workspace)`（16:28 v4），也不再因此整卡排队。注入槽仍串行；未答 Ask 仍占窗。续聊仍跟 Cursor 的 steer/queue。
+- 舰队页有未读的工作区仍用红点标出；「全部已读」旁不再叠数字角标。
 
 ---
 

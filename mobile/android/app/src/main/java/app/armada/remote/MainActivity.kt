@@ -347,6 +347,9 @@ fun FleetScreen(vm: SessionVm, state: UiState, onOpen: (WorkspaceDto) -> Unit, o
                                         }
                                         Text(w.workspaceRoot, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                                     }
+                                    if (unread > 0) {
+                                        Box(Modifier.size(8.dp).clip(CircleShape).background(StatusRed))
+                                    }
                                     Text("›", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 8.dp))
                                 }
                             }

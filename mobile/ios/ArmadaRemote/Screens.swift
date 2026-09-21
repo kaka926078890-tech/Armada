@@ -324,6 +324,12 @@ struct WorkspaceListView: View {
                                             .lineLimit(1)
                                     }
                                     Spacer(minLength: 8)
+                                    if session.unreadCount(in: w) > 0 {
+                                        Circle()
+                                            .fill(Color.red)
+                                            .frame(width: 8, height: 8)
+                                            .accessibilityLabel("未读")
+                                    }
                                 }
                             }
                             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
