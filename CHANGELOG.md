@@ -13,6 +13,7 @@ Armada 按 **面** 发版：扩展、桌面、iOS、Android 可以不同号。RE
 ### 修复
 
 - 同一 Cursor 窗口已有 dispatched/binding/running 时，新派发不再立刻 `composer.createNew`。任务进 `queued`，等当前条收口再注入。Cursor Agents 同窗只有一个输入框，再开会换掉/打断正在跑的对话（Windows `r-a7cce90d`）。跨窗并行和同卡 followup 不变。中台须 overlay 这份 hub，不必升 vsix。
+- 包装桌面时 `hub/web` 构建目标改为 es2022，避免 esbuild 在默认 chrome87 下无法降级 shadcn 大段解构（Windows `tauri build`）。
 
 ---
 

@@ -11,7 +11,12 @@ export default defineConfig({
   resolve: {
     alias: { "@": resolve(root, "src") },
   },
-  build: { outDir: "dist" },
+  build: {
+    outDir: "dist",
+    // WebView2 / packaged Chromium. Default baseline-widely-available (chrome87)
+    // asks esbuild to downlevel large rest/destructuring (shadcn/streamdown) and fails.
+    target: "es2022",
+  },
   server: {
     fs: { allow: [resolve(root, "../..")] },
     proxy: { "/api": "http://127.0.0.1:7380", "/ws": { target: "ws://127.0.0.1:7380", ws: true } },
