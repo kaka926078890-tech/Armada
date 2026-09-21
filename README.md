@@ -12,8 +12,8 @@
 | --- | --- | --- |
 | 桌面 Armada.app | **0.1.0** | `desktop/src-tauri/tauri.conf.json` |
 | 扩展 armada-agent | **0.4.38** | `extension/package.json` |
-| iOS ArmadaRemote | **0.1.0** · TestFlight **26** | `mobile/ios` `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` |
-| Android | **0.1.12**（versionCode 13） | `mobile/android/app/build.gradle.kts` |
+| iOS ArmadaRemote | **0.1.0** · TestFlight **27** | `mobile/ios` `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` |
+| Android | **0.1.13**（versionCode 14） | `mobile/android/app/build.gradle.kts` |
 
 每面发版都记进 [CHANGELOG.md](CHANGELOG.md)。能力下限（例如「续聊须 ≥ 0.4.19」）和当前发版号不是一回事：装包请用上表。
 
@@ -30,7 +30,7 @@
 
 ### 手机遥控器
 
-舰队页按 **机器 → 工作区**；点仓看五列任务；详情里看终态正文，可续聊、复制、标未读、隐藏。
+舰队页按 **机器 → 工作区**；点仓看五列任务；详情里看终态正文，可续聊、复制、标未读、隐藏。舰队可按机器 / 工作区全部已读，仓内当前列可本列已读。
 
 <p>
   <img src="docs/assets/mobile-fleet.png" alt="iOS 舰队：按机器列出工作区" width="30%" />
