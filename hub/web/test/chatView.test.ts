@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { assistantBodyForPrompt, assistantBodyText, lastTurnAssistantBody, eventsToChat, extractUserText, segmentChat, INITIAL_VISIBLE_TURNS, initialHiddenPrefixTurns, recentTurnsWindow, mergeOutboundChat, mergePendingAsk, queuedOutbound, collapseRepeatedTools, processFoldLabel, CURSOR_PROTOCOL_USER_PREFIXES } from "../src/chatView";
+import { assistantBodyForPrompt, assistantBodyText, lastTurnAssistantBody, eventsToChat, extractUserText, segmentChat, INITIAL_VISIBLE_TURNS, initialHiddenPrefixTurns, recentTurnsWindow, mergeOutboundChat, mergePendingAsk, queuedOutbound, collapseRepeatedTools, processFoldLabel, CURSOR_PROTOCOL_USER_PREFIXES, userMessageCaption, stampFallbackImageIds } from "../src/chatView";
 import type { ChatBlock } from "../src/chatView";
 import type { RunEvent } from "../src/types";
 
@@ -361,7 +361,17 @@ describe("eventsToChat", () => {
     const blocks = eventsToChat([
       ev({ seq: 1, hook_event_name: "beforeSubmitPrompt", payload: JSON.stringify({ prompt: "", attachmentIds: ["abc"] }) }),
     ]);
-    expect(blocks).toEqual([{ kind: "user", text: "[图片]", seq: 1 }]);
+    expect(blocks).toEqual([{ kind: "user", text: "[图片]", seq: 1, imageIds: ["abc"] }]);
+  });
+
+  test("transcript [图片] keeps hook attachmentIds for thumbnails", () => {
+    const blocks = eventsToChat([
+      ev({ seq: 1, hook_event_name: "beforeSubmitPrompt", payload: JSON.stringify({ prompt: "", attachmentIds: ["abc"] }) }),
+      ev({ seq: 2, source: "transcript", payload: JSON.stringify({
+        role: "user", message: { content: [{ type: "text", text: "<user_query>\n[Image]\n<image_files>x.png</image_files>\n</user_query>" }] },
+      }) }),
+    ]);
+    expect(blocks).toEqual([{ kind: "user", text: "[图片]", seq: 2, imageIds: ["abc"] }]);
   });
 
   // 现网曾靠 hookHasPrompt 走纯 hook 路径碰巧同形；现在测 fromEnd 合并。
@@ -1059,5 +1069,36 @@ describe("collapseRepeatedTools", () => {
       { kind: "tool", seq: 2, name: "Read", summary: "Read · 552282.txt", count: 1250 },
     ])).toBe("思考过程 · Read · 552282.txt × 1250");
     expect(processFoldLabel([{ kind: "thought", seq: 1, text: "想" }])).toBe("思考过程 · 1 步");
+  });
+});
+
+describe("userMessageCaption", () => {
+  test("strips [图片] when thumbs will render", () => {
+    expect(userMessageCaption("[图片]", ["abc"])).toBe("");
+    expect(userMessageCaption("[2 张图片]", ["a", "b"])).toBe("");
+    expect(userMessageCaption("[图片] 看这张", ["abc"])).toBe("看这张");
+  });
+
+  test("keeps [图片] when there are no blob ids", () => {
+    expect(userMessageCaption("[图片]")).toBe("[图片]");
+    expect(userMessageCaption("[图片] 看这张")).toBe("[图片] 看这张");
+  });
+});
+
+describe("stampFallbackImageIds", () => {
+  test("stamps run attachments onto the only [图片] user bubble", () => {
+    const blocks = stampFallbackImageIds(
+      [{ kind: "user", text: "[图片] 看图", seq: 1 }, { kind: "assistant", text: "ok", seq: 2 }],
+      ["abc"],
+    );
+    expect(blocks[0]).toEqual({ kind: "user", text: "[图片] 看图", seq: 1, imageIds: ["abc"] });
+  });
+
+  test("does not stamp when the bubble already has ids", () => {
+    const blocks = stampFallbackImageIds(
+      [{ kind: "user", text: "[图片]", seq: 1, imageIds: ["keep"] }],
+      ["other"],
+    );
+    expect(blocks[0]).toEqual({ kind: "user", text: "[图片]", seq: 1, imageIds: ["keep"] });
   });
 });

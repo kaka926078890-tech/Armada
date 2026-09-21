@@ -10,6 +10,10 @@ Armada 按 **面** 发版：扩展、桌面、iOS、Android 可以不同号。RE
 
 ## Unreleased
 
+### 新增
+
+- 中台派发/续聊选中的 PNG/JPEG 显示 Cursor 式 56px 圆角缩略图，点开可看大图；详情用户气泡同样出缩略图（blob 走 Header 鉴权，不把 token 写进图片 URL）。
+
 ### 修复
 
 - 同工作区再派一条新任务：回到原先 Desk 里的 `composer.createNew`。已打开的窗不再 `duplicateWorkspaceInNewWindow` 出 `Untitled (Workspace)`（16:28 v4），也不再因此整卡排队。注入槽仍串行；未答 Ask 仍占窗。续聊仍跟 Cursor 的 steer/queue。

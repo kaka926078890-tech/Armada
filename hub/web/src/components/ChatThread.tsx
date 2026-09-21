@@ -3,7 +3,8 @@ import Markdown from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import { askOptionDisplayText, isFreeformAskOption, visibleAskOptions } from "../askOptions";
-import { segmentChat, processFoldLabel, type ChatBlock } from "../chatView";
+import { segmentChat, processFoldLabel, userMessageCaption, type ChatBlock } from "../chatView";
+import { HubImageRow } from "./ImageThumb";
 import { Button } from "./ui/button";
 import { Textarea } from "./ui/textarea";
 import { UI_BODY, UI_META, UI_OPTION_OFF, UI_OPTION_ON, UI_TYPE } from "../ui";
@@ -376,10 +377,16 @@ export default function ChatThread({ blocks, onAnswerAsk }: {
         const key = `${s.kind}-${s.seq}-${i}`;
         if (s.kind === "process") return <ProcessFold key={key} steps={s.steps} />;
         if (s.kind === "user") {
+          const caption = userMessageCaption(s.text, s.imageIds);
           return (
             <div key={key} className="flex justify-end">
               <div className="max-w-[78%] rounded-2xl bg-muted px-3.5 py-2 text-foreground leading-relaxed">
-                <UserMarkdown text={s.text} />
+                {s.imageIds?.length ? (
+                  <div className={caption ? "mb-2" : undefined}>
+                    <HubImageRow ids={s.imageIds} />
+                  </div>
+                ) : null}
+                {caption ? <UserMarkdown text={caption} /> : null}
               </div>
             </div>
           );

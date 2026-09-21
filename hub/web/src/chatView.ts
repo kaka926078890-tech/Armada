@@ -2,7 +2,7 @@ import type { RunEvent } from "./types";
 import { displayUserText } from "../../../extension/src/imageMarkers";
 
 export type ChatBlock =
-  | { kind: "user"; text: string; seq: number }
+  | { kind: "user"; text: string; seq: number; imageIds?: string[] }
   | { kind: "assistant"; text: string; seq: number }
   | { kind: "thought"; text: string; seq: number }
   | { kind: "turn_end"; seq: number }
@@ -171,11 +171,49 @@ function isCursorInternalContext(text: string): boolean {
   return CURSOR_INTERNAL_CONTEXT_MARKERS.some((marker) => text.includes(marker));
 }
 
-function emitUser(text: string, seq: number): ChatBlock[] {
+const IMAGE_CAPTION_RE = /^\[(?:图片|\d+ 张图片)\]\s*/;
+
+export function userMessageCaption(text: string, imageIds?: string[]): string {
+  if (!imageIds?.length) return text;
+  return text.replace(IMAGE_CAPTION_RE, "");
+}
+
+function parseHookAttachmentIds(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((x): x is string => typeof x === "string" && x.length > 0);
+}
+
+function emitUser(text: string, seq: number, imageIds?: string[]): ChatBlock[] {
   if (!text) return [];
   if (isCursorProtocolUser(text)) return [];
   if (isCursorInternalContext(text)) return [{ kind: "thought", text, seq }];
-  return [{ kind: "user", text, seq }];
+  return [{ kind: "user", text, seq, ...(imageIds?.length ? { imageIds } : {}) }];
+}
+
+/** 首轮派发的 Cursor hook 没有 blob id；run.attachments 仍是当轮引用。多条无 id 的图片用户句只盖最后一条。 */
+export function stampFallbackImageIds(blocks: ChatBlock[], attachmentIds: string[]): ChatBlock[] {
+  if (!attachmentIds.length) return blocks;
+  const need = blocks.filter((b): b is Extract<ChatBlock, { kind: "user" }> =>
+    b.kind === "user" && !b.imageIds?.length && IMAGE_CAPTION_RE.test(b.text),
+  );
+  if (!need.length) return blocks;
+  const target = need.length === 1 ? need[0] : need.at(-1)!;
+  return blocks.map((b) => (b === target ? { ...b, imageIds: attachmentIds } : b));
+}
+
+/** transcript 用户句没有 blob id；hook BSP 有。同文案按出现顺序盖回去，供缩略图。 */
+function stampUserImageIds(blocks: ChatBlock[], donors: ChatBlock[]): ChatBlock[] {
+  const unused = donors.filter((b): b is Extract<ChatBlock, { kind: "user" }> =>
+    b.kind === "user" && !!b.imageIds?.length,
+  );
+  if (!unused.length) return blocks;
+  return blocks.map((b) => {
+    if (b.kind !== "user" || b.imageIds?.length) return b;
+    const i = unused.findIndex((h) => h.text === b.text);
+    if (i < 0) return b;
+    const [h] = unused.splice(i, 1);
+    return h?.imageIds?.length ? { ...b, imageIds: h.imageIds } : b;
+  });
 }
 
 function basename(p: string): string {
@@ -253,9 +291,9 @@ function transcriptBlocks(ev: RunEvent, p: any): ChatBlock[] {
 function hookBlocks(ev: RunEvent, p: any): ChatBlock[] {
   const hook = ev.hook_event_name;
   if (hook === "beforeSubmitPrompt" && typeof p?.prompt === "string") {
-    const ids = Array.isArray(p?.attachmentIds) ? p.attachmentIds : [];
+    const ids = parseHookAttachmentIds(p?.attachmentIds);
     const shown = displayUserText(p.prompt, ids.length);
-    return emitUser(shown, ev.seq);
+    return emitUser(shown, ev.seq, ids);
   }
   if (hook === "afterAgentThought" && typeof p?.text === "string" && p.text.trim()) {
     return [{ kind: "thought", text: p.text.trim(), seq: ev.seq }];
@@ -526,7 +564,10 @@ export function eventsToChat(events: RunEvent[]): ChatBlock[] {
     pendingUsers.filter((b) => b.kind === "user" && !txUser.has(b.text)),
   );
   const skeleton = [...prefixHooks, ...fromTx];
-  return attachChildText(finish(orderBySeq([...skeleton, ...extraUsers, ...live, ...subFromHooks])), children);
+  return attachChildText(
+    finish(orderBySeq(stampUserImageIds([...skeleton, ...extraUsers, ...live, ...subFromHooks], pendingUsers))),
+    children,
+  );
 }
 
 export type PendingAskView = {

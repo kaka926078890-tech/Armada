@@ -74,7 +74,7 @@ describe("DispatchModal prompt", () => {
     expect(html).toContain("min-w-0");
   });
 
-  test("picked Feishu jpeg shows an ellipsized name instead of the native filename string", () => {
+  test("picked Feishu jpeg shows a Cursor-style thumbnail, not the native filename string", () => {
     const f = new File(
       [new Uint8Array([1])],
       "img_v3_0215n_5cf580dd-ad94-4f31-95b8-477e2325cddg.jpg",
@@ -83,9 +83,23 @@ describe("DispatchModal prompt", () => {
     const html = renderToStaticMarkup(<ConsoleFilePicker files={[f]} onFiles={() => {}} />);
     expect(html).toContain("sr-only");
     expect(html).toContain("min-w-0");
-    expect(html).toContain("truncate");
-    expect(html).toContain(">img_v3_0215n_5cf580dd-ad94-4f31….jpg<");
+    expect(html).toContain("size-14");
+    expect(html).toContain("rounded-lg");
     expect(html).toContain(`title="img_v3_0215n_5cf580dd-ad94-4f31-95b8-477e2325cddg.jpg"`);
+    expect(html).toContain("查看 img_v3_0215n_5cf580dd-ad94-4f31-95b8-477e2325cddg.jpg");
+    expect(html).not.toContain("Choose Files");
+  });
+
+  test("picked pdf keeps an ellipsized name chip, not an image thumb", () => {
+    const f = new File(
+      [new Uint8Array([1])],
+      "img_v3_0215n_5cf580dd-ad94-4f31-95b8-477e2325cddg.pdf",
+      { type: "application/pdf" },
+    );
+    const html = renderToStaticMarkup(<ConsoleFilePicker files={[f]} onFiles={() => {}} />);
+    expect(html).toContain("truncate");
+    expect(html).toContain(">img_v3_0215n_5cf580dd-ad94-4f31….pdf<");
+    expect(html).not.toContain("size-14");
   });
 
   test("shows prompt snippet bar above the textarea without submitting", () => {

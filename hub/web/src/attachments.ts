@@ -38,3 +38,12 @@ export function displayAttachmentName(name: string, max = ATTACHMENT_NAME_DISPLA
   if (budget < 4) return `${raw.slice(0, Math.max(1, max - 1))}…`;
   return `${raw.slice(0, budget)}…${ext}`;
 }
+
+export function parseRunAttachmentIds(raw: string | null | undefined): string[] {
+  try {
+    const p = JSON.parse(raw || "[]");
+    return Array.isArray(p) ? p.filter((x): x is string => typeof x === "string" && x.length > 0) : [];
+  } catch {
+    return [];
+  }
+}

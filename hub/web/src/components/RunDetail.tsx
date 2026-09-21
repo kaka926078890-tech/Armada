@@ -3,9 +3,9 @@ import { api, getToken } from "../api";
 import type { Machine, RunEvent } from "../types";
 import { workspaceFolderName, runDisplayName, canRetryRun, CDP_NOT_READY_COPY, type RunRow } from "../boardState";
 import ChatThread from "./ChatThread";
-import { eventsToChat, mergePendingAsk, mergeOutboundChat, queuedOutbound, INITIAL_VISIBLE_TURNS, initialHiddenPrefixTurns, recentTurnsWindow } from "../chatView";
+import { eventsToChat, mergePendingAsk, mergeOutboundChat, queuedOutbound, INITIAL_VISIBLE_TURNS, initialHiddenPrefixTurns, recentTurnsWindow, stampFallbackImageIds } from "../chatView";
 import { collectEventPages, mergeEvents, EVENT_PAGE_SIZE, hasOlderEvents, olderEventsQuery, shouldLoadOlder, prependPreserveScroll } from "../loadEvents";
-import { mergeAttachmentFiles, isConsoleAttachment } from "../attachments";
+import { mergeAttachmentFiles, isConsoleAttachment, parseRunAttachmentIds } from "../attachments";
 import { ConsoleFilePicker } from "./ConsoleFilePicker";
 import { endFollowupSend, isFollowupSendEnter, tryBeginFollowupSend } from "../followupSend";
 import { WIDTH_KEY, type PromptSnippet } from "../uiPrefs";
@@ -358,7 +358,10 @@ export default function RunDetail({
     dispatched: "已派发", binding: "绑定中", running: "运行中",
     completed: "已完成", cancelled: "已取消", aborted: "已中止", error: "异常", unknown: "未知",
   };
-  const chatAll = mergePendingAsk(mergeOutboundChat(eventsToChat(events), run.outbound), run.pending_ask);
+  const chatAll = stampFallbackImageIds(
+    mergePendingAsk(mergeOutboundChat(eventsToChat(events), run.outbound), run.pending_ask),
+    parseRunAttachmentIds(run.attachments),
+  );
   const queued = queuedOutbound(run.outbound);
   const chat = recentTurnsWindow(chatAll, hiddenPrefixTurns);
   const hasOlder = hiddenPrefixTurns > 0 || hasOlderEvents(events);

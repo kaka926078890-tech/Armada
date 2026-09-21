@@ -43,6 +43,12 @@ export const api = {
     if (r.status === 401) { window.dispatchEvent(new Event("armada:unauthorized")); throw new Error("unauthorized"); }
     return r.json() as Promise<{ blob?: { id: string; sha256: string; mime: string; name: string; size: number }; error?: string }>;
   },
+  getBlob: async (id: string) => {
+    const r = await fetch(`/api/blobs/${encodeURIComponent(id)}`, { headers: { authorization: `Bearer ${getToken()}` } });
+    if (r.status === 401) { window.dispatchEvent(new Event("armada:unauthorized")); throw new Error("unauthorized"); }
+    if (!r.ok) throw new Error("ATTACHMENT_NOT_FOUND");
+    return r.blob();
+  },
   cancel: (id: string) => req(`/api/runs/${id}/cancel`, { method: "POST" }).then((r) => r.json()),
   close: (id: string) => req(`/api/runs/${id}/close`, { method: "POST" }).then((r) => r.json()),
   archive: (id: string) => req(`/api/runs/${id}/archive`, { method: "POST" }).then((r) => r.json()),

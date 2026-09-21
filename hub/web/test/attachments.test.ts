@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ATTACHMENT_NAME_DISPLAY_MAX, displayAttachmentName, mergeAttachmentFiles } from "../src/attachments";
+import { ATTACHMENT_NAME_DISPLAY_MAX, displayAttachmentName, mergeAttachmentFiles, parseRunAttachmentIds } from "../src/attachments";
 
 function png(name: string): File {
   return new File([new Uint8Array([1])], name, { type: "image/png" });
@@ -35,5 +35,14 @@ describe("displayAttachmentName", () => {
     expect(shown.endsWith("….jpg")).toBe(true);
     expect(shown).not.toBe(long);
     expect(shown.startsWith("img_v3_0215n_")).toBe(true);
+  });
+});
+
+describe("parseRunAttachmentIds", () => {
+  test("reads a json array of sha256 ids", () => {
+    expect(parseRunAttachmentIds(JSON.stringify(["abc", "def"]))).toEqual(["abc", "def"]);
+    expect(parseRunAttachmentIds("[]")).toEqual([]);
+    expect(parseRunAttachmentIds(null)).toEqual([]);
+    expect(parseRunAttachmentIds("nope")).toEqual([]);
   });
 });

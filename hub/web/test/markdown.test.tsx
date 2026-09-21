@@ -35,6 +35,17 @@ describe("user bubble markdown", () => {
     expect(html).not.toContain("### 标题");
   });
 
+  test("user bubble with imageIds shows a Cursor-sized thumb and hides [图片]", () => {
+    const html = renderToStaticMarkup(
+      <ChatThread blocks={[{ kind: "user", seq: 1, text: "[图片] 看这张", imageIds: ["abc"] }]} />,
+    );
+    expect(html).toContain("size-36");
+    expect(html).toContain("rounded-xl");
+    expect(html).toContain("查看 图片");
+    expect(html).toContain("看这张");
+    expect(html).not.toContain("[图片]");
+  });
+
   test("ask card prompt renders markdown line breaks", () => {
     const blocks: ChatBlock[] = [{
       kind: "ask",
