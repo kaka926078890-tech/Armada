@@ -102,6 +102,36 @@ describe("App UI density is one scale", () => {
     expect(androidRow).not.toContain("size(8.dp).clip(CircleShape).background(statusColor");
   });
 
+  test("fleet can mark a machine or workspace read; workspace page can mark the open column", () => {
+    const ios = readFileSync(join(repoRoot, "mobile/ios/ArmadaRemote/Screens.swift"), "utf8");
+    const api = readFileSync(join(repoRoot, "mobile/ios/ArmadaRemote/RelayAPI.swift"), "utf8");
+    const android = androidUi();
+    const models = readFileSync(join(repoRoot, "mobile/android/core/src/main/kotlin/app/armada/remote/Models.kt"), "utf8");
+    const iosList = ios.slice(ios.indexOf("struct WorkspaceListView"), ios.indexOf("struct WorkspaceHome"));
+    const iosHome = ios.slice(ios.indexOf("struct WorkspaceHome"), ios.indexOf("struct PromptSnippetChips"));
+    const fleet = android.slice(android.indexOf("fun FleetScreen"), android.indexOf("fun WorkspaceScreen"));
+    const workspace = android.slice(android.indexOf("fun WorkspaceScreen"), android.indexOf("fun RunRow"));
+    expect(api).toContain("func applyMarkAllRead");
+    expect(api).toContain("case machine(");
+    expect(api).toContain("case workspace(");
+    expect(api).toContain("case column(");
+    expect(models).toContain("fun applyMarkAllRead");
+    expect(models).toContain("class Machine");
+    expect(models).toContain("class Workspace");
+    expect(models).toContain("class Column");
+    expect(iosList).toContain("全部已读");
+    expect(iosList).toContain("markAllRead(.machine");
+    expect(iosList).toContain("markAllRead(.workspace");
+    expect(iosHome).toContain("本列已读");
+    expect(iosHome).toContain("markAllRead(.column");
+    expect(fleet).toContain("全部已读");
+    expect(fleet).toContain("MarkReadScope.Machine");
+    expect(fleet).toContain("MarkReadScope.Workspace");
+    expect(workspace).toContain("本列已读");
+    expect(workspace).toContain("MarkReadScope.Column");
+    expect(workspace).not.toContain("TextButton");
+  });
+
   test("workspace swipe reveals hide and mark-unread on the same trailing edge", () => {
     const ios = readFileSync(join(repoRoot, "mobile/ios/ArmadaRemote/Screens.swift"), "utf8");
     const android = androidUi();

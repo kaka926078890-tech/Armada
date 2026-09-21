@@ -207,6 +207,56 @@ func shouldStampReadAt(seen: Double?, activityTs: Int?) -> Bool {
     return Double(activityTs ?? 0) > seen
 }
 
+enum MarkReadScope: Equatable {
+    case machine(String)
+    case workspace(machineId: String, workspaceRoot: String)
+    case column(machineId: String, workspaceRoot: String, column: BoardColumn)
+}
+
+struct MarkAllReadResult {
+    let readAt: [String: Double]
+    let stampedIds: Set<String>
+}
+
+func runMatchesMarkReadScope(_ run: RunDTO, _ scope: MarkReadScope) -> Bool {
+    switch scope {
+    case .machine(let machineId):
+        return run.machineId == machineId
+    case .workspace(let machineId, let workspaceRoot):
+        return run.machineId == machineId && run.workspaceRoot == workspaceRoot
+    case .column(let machineId, let workspaceRoot, let column):
+        return run.machineId == machineId && run.workspaceRoot == workspaceRoot && run.column == column
+    }
+}
+
+func runIsUnread(_ run: RunDTO, readAt: [String: Double]) -> Bool {
+    let seen = readAt[run.runId]
+    if run.pendingAsk != nil {
+        if seen == nil { return true }
+        if Double(run.activityTs) > seen! { return true }
+    }
+    if ["completed", "error", "unknown", "aborted"].contains(run.status) {
+        return seen == nil || Double(run.activityTs) > seen!
+    }
+    return false
+}
+
+func unreadMatchingCount(runs: [RunDTO], readAt: [String: Double], scope: MarkReadScope) -> Int {
+    runs.filter { runMatchesMarkReadScope($0, scope) && runIsUnread($0, readAt: readAt) }.count
+}
+
+func applyMarkAllRead(readAt: [String: Double], runs: [RunDTO], nowMs: Double, scope: MarkReadScope) -> MarkAllReadResult {
+    var next = readAt
+    var stamped = Set<String>()
+    for run in runs {
+        guard runMatchesMarkReadScope(run, scope), runIsUnread(run, readAt: readAt) else { continue }
+        guard shouldStampReadAt(seen: next[run.runId], activityTs: run.activityTs) else { continue }
+        next[run.runId] = stampReadAt(nowMs: nowMs, activityTs: run.activityTs)
+        stamped.insert(run.runId)
+    }
+    return MarkAllReadResult(readAt: stamped.isEmpty ? readAt : next, stampedIds: stamped)
+}
+
 /// SSE / 列表会省略 `finalText`；本地已有正文时不得冲掉。与 Android `coalesceFinalText` 对齐。
 func coalesceFinalText(_ incoming: RunDTO, prior: RunDTO?) -> RunDTO {
     guard incoming.finalText == nil, let prev = prior?.finalText, !prev.isEmpty else { return incoming }

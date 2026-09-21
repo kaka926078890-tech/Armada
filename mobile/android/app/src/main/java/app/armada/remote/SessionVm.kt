@@ -178,6 +178,21 @@ class SessionVm(app: Application) : AndroidViewModel(app) {
         _state.value = _state.value.copy(readRev = _state.value.readRev + 1)
     }
 
+    fun markAllRead(scope: MarkReadScope) {
+        val result = applyMarkAllRead(
+            readAt,
+            _state.value.board.runs,
+            System.currentTimeMillis().toDouble(),
+            scope,
+        )
+        if (result.stampedIds.isEmpty()) return
+        readAt.clear()
+        readAt.putAll(result.readAt)
+        unreadHold.removeAll(result.stampedIds)
+        store.saveReadAt(readAt)
+        _state.value = _state.value.copy(readRev = _state.value.readRev + 1)
+    }
+
     fun clearUnreadHold(runId: String) {
         unreadHold.remove(runId)
     }
@@ -185,6 +200,8 @@ class SessionVm(app: Application) : AndroidViewModel(app) {
     fun canMarkUnread(run: RunDto) = app.armada.remote.canMarkUnread(run, readAt)
 
     fun isUnread(run: RunDto) = app.armada.remote.isUnread(run, readAt)
+
+    fun unreadCount(scope: MarkReadScope) = unreadMatchingCount(_state.value.board.runs, readAt, scope)
 
     fun machineNeedsReload(machineId: String): Boolean {
         val reload = _state.value.cursorReload ?: return false

@@ -290,6 +290,65 @@ class ModelsTest {
     }
 
     @Test
+    fun markAllReadScopesMachineWorkspaceAndColumn() {
+        fun task(
+            id: String,
+            status: String,
+            machineId: String = "m1",
+            root: String = "/a",
+            ask: PendingAskDto? = null,
+            updatedAt: Long = 10,
+        ) = RunDto(id, machineId, root, "p", status, pendingAsk = ask, updatedAt = updatedAt)
+
+        val doneA = task("done-a", "completed")
+        val doneB = task("done-b", "completed", root = "/b")
+        val errA = task("err-a", "error")
+        val otherMachine = task("done-m2", "completed", machineId = "m2")
+        val askA = task("ask-a", "running", ask = PendingAskDto("q"))
+        val liveA = task("live-a", "running")
+        val abortedA = task("aborted-a", "aborted")
+        val already = task("seen-a", "completed")
+        val rows = listOf(doneA, doneB, errA, otherMachine, askA, liveA, abortedA, already)
+        val seen = mapOf("seen-a" to 20.0)
+
+        val none = applyMarkAllRead(seen, emptyList(), 50.0, MarkReadScope.Machine("m1"))
+        assertTrue(none.readAt === seen)
+        assertTrue(none.stampedIds.isEmpty())
+        assertEquals(0, unreadMatchingCount(emptyList(), seen, MarkReadScope.Machine("m1")))
+
+        val machine = applyMarkAllRead(seen, rows, 50.0, MarkReadScope.Machine("m1"))
+        assertEquals(setOf("done-a", "done-b", "err-a", "ask-a", "aborted-a"), machine.stampedIds)
+        assertEquals(50.0, machine.readAt["done-a"])
+        assertEquals(20.0, machine.readAt["seen-a"])
+        assertEquals(null, machine.readAt["done-m2"])
+        assertEquals(null, machine.readAt["live-a"])
+        assertFalse(isUnread(doneA, machine.readAt))
+        assertTrue(isUnread(otherMachine, machine.readAt))
+        assertEquals(0, unreadMatchingCount(rows, machine.readAt, MarkReadScope.Machine("m1")))
+        assertEquals(1, unreadMatchingCount(rows, machine.readAt, MarkReadScope.Machine("m2")))
+
+        val workspace = applyMarkAllRead(seen, rows, 50.0, MarkReadScope.Workspace("m1", "/a"))
+        assertEquals(setOf("done-a", "err-a", "ask-a", "aborted-a"), workspace.stampedIds)
+        assertTrue(isUnread(doneB, workspace.readAt))
+
+        val completed = applyMarkAllRead(seen, rows, 50.0, MarkReadScope.Column("m1", "/a", BoardColumn.Completed))
+        assertEquals(setOf("done-a"), completed.stampedIds)
+        assertTrue(isUnread(errA, completed.readAt))
+        assertTrue(isUnread(askA, completed.readAt))
+
+        val errorCol = applyMarkAllRead(seen, rows, 50.0, MarkReadScope.Column("m1", "/a", BoardColumn.Error))
+        assertEquals(setOf("err-a"), errorCol.stampedIds)
+        assertTrue(isUnread(doneA, errorCol.readAt))
+
+        val runningCol = applyMarkAllRead(seen, rows, 50.0, MarkReadScope.Column("m1", "/a", BoardColumn.Running))
+        assertEquals(setOf("ask-a"), runningCol.stampedIds)
+
+        val cancelledCol = applyMarkAllRead(seen, rows, 9.0, MarkReadScope.Column("m1", "/a", BoardColumn.Cancelled))
+        assertEquals(setOf("aborted-a"), cancelledCol.stampedIds)
+        assertEquals(10.0, cancelledCol.readAt["aborted-a"])
+    }
+
+    @Test
     fun liveWorkspacePrefersSessionSlotOverStaleSnapshot() {
         val stale = WorkspaceDto("w", "m", "/p", "p", online = true, cdpReady = false)
         val live = stale.copy(cdpReady = true)

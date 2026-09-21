@@ -247,6 +247,47 @@ fun shouldStampOpened(unreadHold: Set<String>, runId: String): Boolean {
     return runId !in unreadHold
 }
 
+sealed class MarkReadScope {
+    data class Machine(val machineId: String) : MarkReadScope()
+    data class Workspace(val machineId: String, val workspaceRoot: String) : MarkReadScope()
+    data class Column(val machineId: String, val workspaceRoot: String, val column: BoardColumn) : MarkReadScope()
+}
+
+data class MarkAllReadResult(
+    val readAt: Map<String, Double>,
+    val stampedIds: Set<String>,
+)
+
+fun runMatchesMarkReadScope(run: RunDto, scope: MarkReadScope): Boolean = when (scope) {
+    is MarkReadScope.Machine -> run.machineId == scope.machineId
+    is MarkReadScope.Workspace -> run.machineId == scope.machineId && run.workspaceRoot == scope.workspaceRoot
+    is MarkReadScope.Column ->
+        run.machineId == scope.machineId &&
+            run.workspaceRoot == scope.workspaceRoot &&
+            run.column == scope.column
+}
+
+fun unreadMatchingCount(runs: List<RunDto>, readAt: Map<String, Double>, scope: MarkReadScope): Int {
+    return runs.count { runMatchesMarkReadScope(it, scope) && isUnread(it, readAt) }
+}
+
+fun applyMarkAllRead(
+    readAt: Map<String, Double>,
+    runs: List<RunDto>,
+    nowMs: Double,
+    scope: MarkReadScope,
+): MarkAllReadResult {
+    val next = readAt.toMutableMap()
+    val stamped = mutableSetOf<String>()
+    for (run in runs) {
+        if (!runMatchesMarkReadScope(run, scope) || !isUnread(run, readAt)) continue
+        if (!shouldStampReadAt(next[run.runId], run.activityTs)) continue
+        next[run.runId] = stampReadAt(nowMs, run.activityTs)
+        stamped.add(run.runId)
+    }
+    return MarkAllReadResult(if (stamped.isEmpty()) readAt else next, stamped)
+}
+
 /** 仓页必须跟 SSE 列表走；导航快照的 cdpReady 会过期。 */
 fun liveWorkspace(id: String, slots: List<WorkspaceDto>, fallback: WorkspaceDto? = null): WorkspaceDto? {
     return slots.firstOrNull { it.workspaceId == id } ?: fallback

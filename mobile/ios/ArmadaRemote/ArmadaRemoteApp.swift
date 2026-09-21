@@ -487,6 +487,20 @@ final class Session: ObservableObject {
         applyBadge()
     }
 
+    func markAllRead(_ scope: MarkReadScope) {
+        let result = applyMarkAllRead(
+            readAt: readAt,
+            runs: runs,
+            nowMs: Date().timeIntervalSince1970 * 1000,
+            scope: scope
+        )
+        guard !result.stampedIds.isEmpty else { return }
+        readAt = result.readAt
+        unreadHold.subtract(result.stampedIds)
+        persistRead()
+        applyBadge()
+    }
+
     func clearUnreadHold(_ runId: String) {
         unreadHold.remove(runId)
     }
@@ -496,19 +510,19 @@ final class Session: ObservableObject {
     }
 
     func isUnread(_ run: RunDTO) -> Bool {
-        let seen = readAt[run.runId]
-        if run.pendingAsk != nil {
-            if seen == nil { return true }
-            if Double(run.activityTs) > seen! { return true }
-        }
-        if ["completed", "error", "unknown", "aborted"].contains(run.status) {
-            return seen == nil || Double(run.activityTs) > seen!
-        }
-        return false
+        runIsUnread(run, readAt: readAt)
+    }
+
+    func unreadCount(_ scope: MarkReadScope) -> Int {
+        unreadMatchingCount(runs: runs, readAt: readAt, scope: scope)
     }
 
     func unreadCount(in workspace: WorkspaceDTO) -> Int {
-        runs(in: workspace).filter(isUnread).count
+        unreadCount(.workspace(machineId: workspace.machineId, workspaceRoot: workspace.workspaceRoot))
+    }
+
+    func unreadCount(machineId: String) -> Int {
+        unreadCount(.machine(machineId))
     }
 
     func hasLive(_ workspace: WorkspaceDTO) -> Bool {

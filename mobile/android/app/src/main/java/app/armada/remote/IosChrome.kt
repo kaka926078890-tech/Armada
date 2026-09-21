@@ -232,20 +232,29 @@ fun GroupedSection(
     header: String? = null,
     modifier: Modifier = Modifier,
     headerLeading: @Composable (() -> Unit)? = null,
+    headerTrailing: @Composable (() -> Unit)? = null,
     footer: String? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Column(modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-        if (header != null || headerLeading != null) {
+        if (header != null || headerLeading != null || headerTrailing != null) {
             Row(
-                Modifier.padding(horizontal = 4.dp, vertical = 6.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 headerLeading?.invoke()
                 if (header != null) {
-                    Text(header, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        header,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.weight(1f),
+                    )
+                } else {
+                    Spacer(Modifier.weight(1f))
                 }
+                headerTrailing?.invoke()
             }
         }
         Column(

@@ -302,34 +302,57 @@ fun FleetScreen(vm: SessionVm, state: UiState, onOpen: (WorkspaceDto) -> Unit, o
                 item {
                     val name = slots.firstOrNull { it.machineName.isNotEmpty() }?.machineName ?: mid
                     val online = slots.any { it.online }
+                    val machineUnread = vm.unreadCount(MarkReadScope.Machine(mid))
                     GroupedSection(
                         header = name,
                         headerLeading = {
                             Box(Modifier.size(8.dp).clip(CircleShape).background(if (online) StatusGreen else StatusGray))
                         },
+                        headerTrailing = {
+                            if (machineUnread > 0) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text(
+                                        "全部已读",
+                                        color = AccentBlue,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        modifier = Modifier.clickable { vm.markAllRead(MarkReadScope.Machine(mid)) },
+                                    )
+                                    UnreadBadge(machineUnread)
+                                }
+                            }
+                        },
                     ) {
                         slots.forEachIndexed { index, w ->
-                            val unread = state.board.runs.filter { it.machineId == w.machineId && it.workspaceRoot == w.workspaceRoot }.count { vm.isUnread(it) }
+                            val unread = vm.unreadCount(MarkReadScope.Workspace(w.machineId, w.workspaceRoot))
                             val live = state.board.runs.any { it.machineId == w.machineId && it.workspaceRoot == w.workspaceRoot && it.isLive }
                             if (index > 0) GroupedDivider()
-                            Row(
-                                Modifier.fillMaxWidth().clickable { onOpen(w) }.padding(horizontal = 16.dp, vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
+                            SwipeActionRow(
+                                trailing = if (unread > 0) listOf(
+                                    SwipeAction("全部已读", AccentBlue) {
+                                        vm.markAllRead(MarkReadScope.Workspace(w.machineId, w.workspaceRoot))
+                                    },
+                                ) else emptyList(),
                             ) {
-                                Text("–", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Spacer(Modifier.width(8.dp))
-                                Column(Modifier.weight(1f)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(w.label, fontSize = 17.sp)
-                                        if (live) {
-                                            Spacer(Modifier.width(6.dp))
-                                            CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp, color = StatusGray)
+                                Row(
+                                    Modifier.fillMaxWidth().clickable { onOpen(w) }.padding(horizontal = 16.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text("–", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Spacer(Modifier.width(8.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(w.label, fontSize = 17.sp)
+                                            if (live) {
+                                                Spacer(Modifier.width(6.dp))
+                                                CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp, color = StatusGray)
+                                            }
                                         }
+                                        Text(w.workspaceRoot, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                                     }
-                                    Text(w.workspaceRoot, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                                    UnreadBadge(unread)
+                                    Text("›", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 8.dp))
                                 }
-                                UnreadBadge(unread)
-                                Text("›", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 8.dp))
                             }
                         }
                         if (vm.machineNeedsReload(mid) && online) {
@@ -423,6 +446,23 @@ fun WorkspaceScreen(vm: SessionVm, state: UiState, workspace: WorkspaceDto, onBa
                 Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                val columnUnread = if (showArchived) 0 else vm.unreadCount(
+                    MarkReadScope.Column(workspace.machineId, workspace.workspaceRoot, tab),
+                )
+                if (columnUnread > 0) {
+                    Row(
+                        Modifier.clip(RoundedCornerShape(50))
+                            .background(AccentBlue.copy(alpha = 0.18f))
+                            .clickable {
+                                vm.markAllRead(MarkReadScope.Column(workspace.machineId, workspace.workspaceRoot, tab))
+                            }
+                            .heightIn(min = 36.dp)
+                            .padding(horizontal = 12.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("本列已读", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                    }
+                }
                 BoardColumn.entries.forEach { col ->
                     val n = openRuns.count { it.column == col }
                     val selected = archiveChipSelected(showArchived, tab == col)

@@ -342,6 +342,14 @@ struct WorkspaceListView: View {
                                     UnreadBadge(count: session.unreadCount(in: w))
                                 }
                             }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                if session.unreadCount(in: w) > 0 {
+                                    Button("全部已读") {
+                                        session.markAllRead(.workspace(machineId: w.machineId, workspaceRoot: w.workspaceRoot))
+                                    }
+                                    .tint(.blue)
+                                }
+                            }
                         }
                         if session.machineNeedsReload(group.id), group.slots.contains(where: \.online) {
                             let pending = session.machineReloadPending(group.id)
@@ -376,11 +384,21 @@ struct WorkspaceListView: View {
                             }
                         }
                     } header: {
+                        let n = session.unreadCount(machineId: group.id)
                         HStack(spacing: 6) {
                             Circle()
                                 .fill(group.slots.contains(where: \.online) ? Color.green : Color.gray)
                                 .frame(width: 8, height: 8)
                             Text(group.name)
+                            Spacer(minLength: 8)
+                            if n > 0 {
+                                Button("全部已读") {
+                                    session.markAllRead(.machine(group.id))
+                                }
+                                .font(.caption.weight(.semibold))
+                                .buttonStyle(.borderless)
+                                UnreadBadge(count: n)
+                            }
                         }
                     }
                 }
@@ -453,10 +471,38 @@ struct WorkspaceHome: View {
         return boardRuns.filter { $0.column == tab }
     }
 
+    private var columnUnread: Int {
+        guard !showArchived else { return 0 }
+        return session.unreadCount(.column(
+            machineId: live.machineId,
+            workspaceRoot: live.workspaceRoot,
+            column: tab
+        ))
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
+                    if columnUnread > 0 {
+                        Button {
+                            session.markAllRead(.column(
+                                machineId: live.machineId,
+                                workspaceRoot: live.workspaceRoot,
+                                column: tab
+                            ))
+                        } label: {
+                            Text("本列已读")
+                                .font(.subheadline.weight(.semibold))
+                                .lineLimit(1)
+                                .fixedSize(horizontal: true, vertical: false)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 7)
+                                .background(Color.accentColor.opacity(0.18))
+                                .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
                     ForEach(BoardColumn.allCases) { col in
                         let n = openRuns.filter { $0.column == col }.count
                         let selected = !showArchived && tab == col
