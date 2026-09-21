@@ -90,8 +90,9 @@ export function reloadStillNeededForFleet(
 }
 
 /**
- * Per-machine Reload chrome. A machine that already runs pending.vsix (or the
- * required vsix when nothing is pending) must not keep showing the buttons.
+ * Per-machine Reload chrome. A machine that already runs the target vsix must
+ * not keep showing the buttons. A leftover or in-flight pending scoped to one
+ * machine must not hide buttons on other machines still behind required.
  */
 export function vsixFileName(version: string): string {
   const v = version.trim();
@@ -130,16 +131,16 @@ export function neededReloadMachineIds(
 ): string[] {
   const target = reloadTargetVsix(pending, requiredVsix);
   if (!target) return [];
-  const online = machines.filter((m) => m.status === "online");
-  const pendingStale = !!(pending?.vsix && requiredVsix.trim() && cmpSemver(pending.vsix, requiredVsix.trim()) < 0);
-  const scoped = pending?.machineId && !pendingStale ? online.filter((m) => m.id === pending.machineId) : online;
   const probe: PendingReload = {
     action: pending?.action ?? "when-idle",
     vsix: target,
     setAt: pending?.setAt ?? 1,
     notBefore: pending?.notBefore ?? 1,
   };
-  return scoped.filter((m) => reloadStillNeeded(probe, [m.extension_version])).map((m) => m.id);
+  return machines
+    .filter((m) => m.status === "online")
+    .filter((m) => reloadStillNeeded(probe, [m.extension_version]))
+    .map((m) => m.id);
 }
 
 /**

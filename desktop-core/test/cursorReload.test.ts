@@ -388,6 +388,22 @@ describe("neededReloadMachineIds", () => {
       { id: "win", status: "online", extension_version: "0.4.33" },
     ], "0.4.34")).toEqual(["mac", "win"]);
   });
+  test("done scoped pending on one machine still names a peer behind required", () => {
+    expect(neededReloadMachineIds({
+      action: "now", vsix: "0.4.37", setAt: 1, notBefore: 1, machineId: "mac",
+    }, [
+      { id: "mac", status: "online", extension_version: "0.4.37" },
+      { id: "win", status: "online", extension_version: "0.4.36" },
+    ], "0.4.37")).toEqual(["win"]);
+  });
+  test("in-flight scoped pending does not hide other machines behind required", () => {
+    expect(neededReloadMachineIds({
+      action: "now", vsix: "0.4.37", setAt: 1, notBefore: 1, machineId: "mac",
+    }, [
+      { id: "mac", status: "online", extension_version: "0.4.36" },
+      { id: "win", status: "online", extension_version: "0.4.36" },
+    ], "0.4.37")).toEqual(["mac", "win"]);
+  });
   test("missing vsix pack copy names the file and says pack first", () => {
     expect(vsixPackMissingNotice("0.4.34")).toContain("armada-agent-0.4.34.vsix");
     expect(vsixPackMissingNotice("0.4.34")).toContain("需要先打包");

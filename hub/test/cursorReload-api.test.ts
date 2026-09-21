@@ -116,6 +116,23 @@ describe("GET/POST /api/cursor-reload", () => {
     expect(await get.json()).toMatchObject({ needed: true, neededMachineIds: ["m-win"] });
   });
 
+  test("scoped leftover pending on an up-to-date machine does not hide a lagging peer", async () => {
+    const { base, tok } = start();
+    s!.registry.upsertMachine({
+      id: "m-mac", name: "Mac", os: "darwin", extensionVersion: REQUIRED_EXTENSION_VERSION, openWorkspaces: [],
+    });
+    s!.registry.upsertMachine({
+      id: "m-win", name: "Win", os: "win32", extensionVersion: "0.4.18", openWorkspaces: [],
+    });
+    await fetch(`${base}/api/cursor-reload`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${tok}`, "content-type": "application/json" },
+      body: JSON.stringify({ action: "now", machineId: "m-mac" }),
+    });
+    const get = await fetch(`${base}/api/cursor-reload`, { headers: { Authorization: `Bearer ${tok}` } });
+    expect(await get.json()).toMatchObject({ needed: true, neededMachineIds: ["m-win"] });
+  });
+
   test("POST pushes ext.cursorReload on connected sockets", async () => {
     const { base, tok } = start();
     const sent: unknown[] = [];
