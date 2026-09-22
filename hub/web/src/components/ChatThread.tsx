@@ -5,6 +5,7 @@ import remarkGfm from "remark-gfm";
 import { askOptionDisplayText, isFreeformAskOption, visibleAskOptions } from "../askOptions";
 import { segmentChat, processFoldLabel, userMessageCaption, type ChatBlock } from "../chatView";
 import { HubImageRow } from "./ImageThumb";
+import { workspaceFilePathFromHref } from "../../../../extension/src/workspaceFile";
 import { Button } from "./ui/button";
 import { Textarea } from "./ui/textarea";
 import { UI_BODY, UI_META, UI_OPTION_OFF, UI_OPTION_ON, UI_TYPE } from "../ui";
@@ -23,7 +24,7 @@ function durationLabel(ms?: number): string {
   return s >= 60 ? `${Math.floor(s / 60)}m${s % 60}s` : `${s}s`;
 }
 
-function ProcessStep({ block }: { block: ChatBlock }) {
+function ProcessStep({ block, onOpenFile }: { block: ChatBlock; onOpenFile?: (path: string) => void }) {
   if (block.kind === "thought") return <ThoughtLive text={block.text} />;
   if (block.kind === "tool") {
     const times = block.count && block.count > 1 ? ` × ${block.count}` : "";
@@ -51,7 +52,7 @@ function ProcessStep({ block }: { block: ChatBlock }) {
           </div>
           {block.text ? (
             <div className="mt-1.5 text-muted-foreground whitespace-pre-wrap leading-relaxed max-h-64 overflow-y-auto">
-              <AssistantMarkdown text={block.text} />
+              <AssistantMarkdown text={block.text} onOpenFile={onOpenFile} />
             </div>
           ) : null}
         </div>
@@ -59,12 +60,22 @@ function ProcessStep({ block }: { block: ChatBlock }) {
     );
   }
   if (block.kind === "file") {
-    return <div className="text-[12px] text-emerald-600/80">已编辑 {block.path.split(/[\\/]/).pop()}</div>;
+    const name = block.path.split(/[\\/]/).pop() ?? block.path;
+    if (!onOpenFile) return <div className="text-[12px] text-emerald-600/80">已编辑 {name}</div>;
+    return (
+      <button
+        type="button"
+        className="text-left text-[12px] text-emerald-600/80 hover:underline"
+        onClick={() => onOpenFile(block.path)}
+      >
+        已编辑 {name}
+      </button>
+    );
   }
   return null;
 }
 
-function ProcessFold({ steps }: { steps: ChatBlock[] }) {
+function ProcessFold({ steps, onOpenFile }: { steps: ChatBlock[]; onOpenFile?: (path: string) => void }) {
   const [open, setOpen] = useState(false);
   return (
     <div>
@@ -77,50 +88,67 @@ function ProcessFold({ steps }: { steps: ChatBlock[] }) {
       </button>
       {open ? (
         <div className="mt-2 flex flex-col gap-2 pl-3 border-l border-border">
-          {steps.map((s, i) => <ProcessStep key={`${s.kind}-${s.seq}-${i}`} block={s} />)}
+          {steps.map((s, i) => <ProcessStep key={`${s.kind}-${s.seq}-${i}`} block={s} onOpenFile={onOpenFile} />)}
         </div>
       ) : null}
     </div>
   );
 }
 
-const mdComponents = {
-  h1: ({ children }: { children?: ReactNode }) => <h1 className="text-[16px] font-semibold text-foreground mt-3 mb-1">{children}</h1>,
-  h2: ({ children }: { children?: ReactNode }) => <h2 className="text-[15px] font-semibold text-foreground mt-3 mb-1">{children}</h2>,
-  h3: ({ children }: { children?: ReactNode }) => <h3 className="text-[14px] font-medium text-foreground mt-3 mb-1">{children}</h3>,
-  p: ({ children }: { children?: ReactNode }) => <p className="mb-2 last:mb-0">{children}</p>,
-  ul: ({ children }: { children?: ReactNode }) => <ul className="list-disc pl-5 mb-2 space-y-1">{children}</ul>,
-  ol: ({ children }: { children?: ReactNode }) => <ol className="list-decimal pl-5 mb-2 space-y-1">{children}</ol>,
-  li: ({ children }: { children?: ReactNode }) => <li className="pl-0.5">{children}</li>,
-  strong: ({ children }: { children?: ReactNode }) => <strong className="font-medium text-foreground">{children}</strong>,
-  em: ({ children }: { children?: ReactNode }) => <em className="italic">{children}</em>,
-  hr: () => <hr className="border-border my-3" />,
-  blockquote: ({ children }: { children?: ReactNode }) => (
-    <blockquote className="border-l-2 border-border pl-3 text-muted-foreground mb-2">{children}</blockquote>
-  ),
-  a: ({ href, children }: { href?: string; children?: ReactNode }) => (
-    <a href={href} className="text-primary hover:underline" target="_blank" rel="noreferrer">{children}</a>
-  ),
-  table: ({ children }: { children?: ReactNode }) => (
-    <div className="overflow-x-auto mb-2">
-      <table className="text-[12px] border-collapse">{children}</table>
-    </div>
-  ),
-  th: ({ children }: { children?: ReactNode }) => <th className="border border-border px-2 py-1 text-left text-foreground">{children}</th>,
-  td: ({ children }: { children?: ReactNode }) => <td className="border border-border px-2 py-1 text-foreground">{children}</td>,
-  pre: ({ children }: { children?: ReactNode }) => (
-    <pre className="mb-2 p-2.5 rounded-md bg-muted overflow-x-auto text-[12px]">{children}</pre>
-  ),
-  code: ({ className, children }: { className?: string; children?: ReactNode }) => {
-    if (className) return <code className={className}>{children}</code>;
-    return <code className="px-1 py-px rounded bg-muted text-foreground text-[12px]">{children}</code>;
-  },
-};
+function mdComponents(onOpenFile?: (path: string) => void) {
+  return {
+    h1: ({ children }: { children?: ReactNode }) => <h1 className="text-[16px] font-semibold text-foreground mt-3 mb-1">{children}</h1>,
+    h2: ({ children }: { children?: ReactNode }) => <h2 className="text-[15px] font-semibold text-foreground mt-3 mb-1">{children}</h2>,
+    h3: ({ children }: { children?: ReactNode }) => <h3 className="text-[14px] font-medium text-foreground mt-3 mb-1">{children}</h3>,
+    p: ({ children }: { children?: ReactNode }) => <p className="mb-2 last:mb-0">{children}</p>,
+    ul: ({ children }: { children?: ReactNode }) => <ul className="list-disc pl-5 mb-2 space-y-1">{children}</ul>,
+    ol: ({ children }: { children?: ReactNode }) => <ol className="list-decimal pl-5 mb-2 space-y-1">{children}</ol>,
+    li: ({ children }: { children?: ReactNode }) => <li className="pl-0.5">{children}</li>,
+    strong: ({ children }: { children?: ReactNode }) => <strong className="font-medium text-foreground">{children}</strong>,
+    em: ({ children }: { children?: ReactNode }) => <em className="italic">{children}</em>,
+    hr: () => <hr className="border-border my-3" />,
+    blockquote: ({ children }: { children?: ReactNode }) => (
+      <blockquote className="border-l-2 border-border pl-3 text-muted-foreground mb-2">{children}</blockquote>
+    ),
+    a: ({ href, children }: { href?: string; children?: ReactNode }) => {
+      const path = workspaceFilePathFromHref(href);
+      if (path && onOpenFile) {
+        return (
+          <a
+            href={href}
+            className="text-primary hover:underline"
+            onClick={(e) => {
+              e.preventDefault();
+              onOpenFile(path);
+            }}
+          >
+            {children}
+          </a>
+        );
+      }
+      return <a href={href} className="text-primary hover:underline" target="_blank" rel="noreferrer">{children}</a>;
+    },
+    table: ({ children }: { children?: ReactNode }) => (
+      <div className="overflow-x-auto mb-2">
+        <table className="text-[12px] border-collapse">{children}</table>
+      </div>
+    ),
+    th: ({ children }: { children?: ReactNode }) => <th className="border border-border px-2 py-1 text-left text-foreground">{children}</th>,
+    td: ({ children }: { children?: ReactNode }) => <td className="border border-border px-2 py-1 text-foreground">{children}</td>,
+    pre: ({ children }: { children?: ReactNode }) => (
+      <pre className="mb-2 p-2.5 rounded-md bg-muted overflow-x-auto text-[12px]">{children}</pre>
+    ),
+    code: ({ className, children }: { className?: string; children?: ReactNode }) => {
+      if (className) return <code className={className}>{children}</code>;
+      return <code className="px-1 py-px rounded bg-muted text-foreground text-[12px]">{children}</code>;
+    },
+  };
+}
 
-export function AssistantMarkdown({ text }: { text: string }) {
+export function AssistantMarkdown({ text, onOpenFile }: { text: string; onOpenFile?: (path: string) => void }) {
   return (
     <div className={`break-words leading-[1.65] ${UI_BODY} text-foreground`}>
-      <Markdown remarkPlugins={[remarkGfm, remarkBreaks]} components={mdComponents}>{text}</Markdown>
+      <Markdown remarkPlugins={[remarkGfm, remarkBreaks]} components={mdComponents(onOpenFile)}>{text}</Markdown>
     </div>
   );
 }
@@ -128,7 +156,7 @@ export function AssistantMarkdown({ text }: { text: string }) {
 function UserMarkdown({ text }: { text: string }) {
   return (
     <div className={`break-words leading-[1.65] ${UI_BODY} text-foreground`}>
-      <Markdown remarkPlugins={[remarkGfm, remarkBreaks]} components={mdComponents}>{text}</Markdown>
+      <Markdown remarkPlugins={[remarkGfm, remarkBreaks]} components={mdComponents()}>{text}</Markdown>
     </div>
   );
 }
@@ -363,9 +391,10 @@ function AskCard({ block, onAnswerAsk }: {
   );
 }
 
-export default function ChatThread({ blocks, onAnswerAsk }: {
+export default function ChatThread({ blocks, onAnswerAsk, onOpenFile }: {
   blocks: ChatBlock[];
   onAnswerAsk?: (body: AnswerAskBody) => Promise<boolean | void> | boolean | void;
+  onOpenFile?: (path: string) => void;
 }) {
   if (blocks.length === 0) {
     return <div className={`${UI_TYPE} text-muted-foreground px-1 py-8 text-center`}>等待对话内容…</div>;
@@ -375,7 +404,7 @@ export default function ChatThread({ blocks, onAnswerAsk }: {
     <div className="flex flex-col gap-4">
       {segs.map((s, i) => {
         const key = `${s.kind}-${s.seq}-${i}`;
-        if (s.kind === "process") return <ProcessFold key={key} steps={s.steps} />;
+        if (s.kind === "process") return <ProcessFold key={key} steps={s.steps} onOpenFile={onOpenFile} />;
         if (s.kind === "user") {
           const caption = userMessageCaption(s.text, s.imageIds);
           return (
@@ -394,7 +423,7 @@ export default function ChatThread({ blocks, onAnswerAsk }: {
         if (s.kind === "assistant") {
           return (
             <div key={key} className="px-0.5">
-              <AssistantMarkdown text={s.text} />
+              <AssistantMarkdown text={s.text} onOpenFile={onOpenFile} />
               <CopyIconButton text={s.text} />
             </div>
           );
@@ -402,7 +431,7 @@ export default function ChatThread({ blocks, onAnswerAsk }: {
         if (s.kind === "ask") {
           return <AskCard key={key} block={s} onAnswerAsk={onAnswerAsk} />;
         }
-        return <ProcessStep key={key} block={s} />;
+        return <ProcessStep key={key} block={s} onOpenFile={onOpenFile} />;
       })}
     </div>
   );

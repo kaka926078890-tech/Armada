@@ -178,6 +178,20 @@ export function createRelayCommandHandler(deps: RelayCommandDeps): (msg: any) =>
         if (run) deps.send({ type: "snap.run", run });
         return;
       }
+      if (msg.type === "cmd.workspaceFileGet") {
+        if (typeof msg.runId !== "string" || !msg.runId) return fail("INVALID");
+        const path = typeof msg.path === "string" ? msg.path : "";
+        const r = await deps.hubFetch(`/api/runs/${encodeURIComponent(msg.runId)}/file?path=${encodeURIComponent(path)}`);
+        const body = await r.json().catch(() => ({})) as any;
+        if (!r.ok) return fail(body.error ?? "HUB_ERROR");
+        deps.send({
+          type: "cmd.result",
+          requestId,
+          ok: true,
+          file: { path: body.path, name: body.name, mime: body.mime, text: body.text },
+        });
+        return;
+      }
       return fail("UNKNOWN_CMD");
     } catch {
       fail("HUB_ERROR");

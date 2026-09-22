@@ -21,8 +21,9 @@ import { noteOwnerBsp, clearGeneration, synthesizedStopPayload, noteHubGeneratio
 import { parseAskInspect, askPollActions, coalesceAskInspect } from "./askDetect";
 import { enrichPlanAsk, planDirsFor } from "./planFile";
 import { PENDING_RELOAD_ATTEMPT_NAME, PENDING_RELOAD_NAME, decideReloadFire, decideWindowReload, highestInstalledArmadaAgent, highestInstalledVsix, mergeReloadAttempt, noteReloadCommandSettled, parsePendingReload, parseReloadAttempt, reloadAttemptBlocksWindow, windowHasInFlightArmadaRun, windowHasOpenComposerTurn, windowHasRecentSettle, type ReloadFireState } from "../../desktop-core/src/cursorReload";
+import { readWorkspaceFile } from "./workspaceFileRead";
 
-const EXTENSION_VERSION = "0.4.43";
+const EXTENSION_VERSION = "0.4.44";
 
 let client: { dispose: () => void } | null = null;
 
@@ -755,6 +756,15 @@ export function activate(context: vscode.ExtensionContext): void {
         case "ext.cursorReload":
           applyHubCursorReload(msg.pending);
           break;
+        case "workspace.readFile": {
+          const result = readWorkspaceFile({
+            workspaceRoot: String(msg.workspaceRoot ?? ""),
+            path: String(msg.path ?? ""),
+            openWorkspaces: workspaces(),
+          });
+          core.enqueue({ type: "workspace.file", requestId: msg.requestId, ...result });
+          break;
+        }
         case "event.ack":
           forwarder.ack(msg.lastSeq);
           break;

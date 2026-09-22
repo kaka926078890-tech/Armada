@@ -634,7 +634,7 @@ describe("hub outbound to relay", () => {
     for (const cmd of [
       "cmd.dispatch", "cmd.followup", "cmd.retry", "cmd.answer", "cmd.cancel",
       "cmd.archive", "cmd.unarchive", "cmd.promptSnippetsGet", "cmd.promptSnippetsPut",
-      "cmd.cursorReloadGet", "cmd.cursorReloadPost", "cmd.blobPut", "UNKNOWN_CMD",
+      "cmd.cursorReloadGet", "cmd.cursorReloadPost", "cmd.blobPut", "cmd.workspaceFileGet", "UNKNOWN_CMD",
     ]) {
       expect(handler).toContain(cmd);
     }
@@ -650,6 +650,24 @@ describe("hub outbound to relay", () => {
     });
     await handle({ type: "cmd.notARealCommand", requestId: "req-1" });
     expect(sent).toEqual([{ type: "cmd.result", requestId: "req-1", ok: false, error: "UNKNOWN_CMD" }]);
+  });
+
+  test("cmd.workspaceFileGet fetches /api/runs/:id/file", async () => {
+    const { createRelayCommandHandler } = await import("../src/relayCommandHandler");
+    const file = { path: "/ws/a/docs/foo.md", name: "foo.md", mime: "text/markdown", text: "# hi\n" };
+    const calls: string[] = [];
+    const sent: object[] = [];
+    const handle = createRelayCommandHandler({
+      hubFetch: async (path) => {
+        calls.push(path);
+        return new Response(JSON.stringify(file), { status: 200 });
+      },
+      snapOf: async () => null,
+      send: (msg) => sent.push(msg),
+    });
+    await handle({ type: "cmd.workspaceFileGet", requestId: "f1", runId: "r-1", path: "docs/foo.md" });
+    expect(calls[0]).toBe("/api/runs/r-1/file?path=docs%2Ffoo.md");
+    expect(sent).toEqual([{ type: "cmd.result", requestId: "f1", ok: true, file }]);
   });
 
   test("cmd.blobPut posts decoded bytes to /api/blobs", async () => {

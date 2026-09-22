@@ -56,7 +56,12 @@ describe("classifyRelayHttp", () => {
     const root = join(import.meta.dir, "../..");
     const swift = readFileSync(join(root, "mobile/ios/ArmadaRemote/RelayAPI.swift"), "utf8");
     const kt = readFileSync(join(root, "mobile/android/core/src/main/kotlin/app/armada/remote/OperatorMessages.kt"), "utf8");
-    for (const code of ["ASK_INVALID_OPTION", "ASK_IN_FLIGHT", "NO_PENDING_ASK", "ASK_MISMATCH", "NO_ASSISTANT_BODY", "ASK_TEXT_EMPTY", "ASK_TEXT_TOO_LONG"]) {
+    for (const code of [
+      "ASK_INVALID_OPTION", "ASK_IN_FLIGHT", "NO_PENDING_ASK", "ASK_MISMATCH", "NO_ASSISTANT_BODY",
+      "ASK_TEXT_EMPTY", "ASK_TEXT_TOO_LONG",
+      "FILE_NOT_FOUND", "PATH_OUTSIDE_WORKSPACE", "FILE_TOO_LARGE", "FILE_NOT_TEXT",
+      "FILE_READ_TIMEOUT", "FILE_VIEW_UNSUPPORTED",
+    ]) {
       expect(swift).toContain(`case "${code}"`);
       expect(kt).toContain(`"${code}"`);
       expect(operatorCopy(code)).not.toBe(code);

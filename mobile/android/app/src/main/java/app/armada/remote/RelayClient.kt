@@ -68,6 +68,17 @@ class RelayClient(base: String, private val token: String) {
 
     suspend fun run(id: String): RunDto = parseRun(JSONObject(get("/mobile/runs/$id")))
 
+    suspend fun workspaceFile(runId: String, path: String): WorkspaceFileDto {
+        val q = java.net.URLEncoder.encode(path, Charsets.UTF_8).replace("+", "%20")
+        val o = JSONObject(get("/mobile/runs/$runId/file?path=$q"))
+        return WorkspaceFileDto(
+            path = o.optString("path"),
+            name = o.optString("name"),
+            mime = o.optString("mime"),
+            text = o.optString("text"),
+        )
+    }
+
     suspend fun dispatch(workspaceId: String, prompt: String, attachmentIds: List<String> = emptyList()): RunDto {
         val body = JSONObject().put("workspaceId", workspaceId).put("prompt", prompt)
         if (attachmentIds.isNotEmpty()) body.put("attachmentIds", JSONArray(attachmentIds))

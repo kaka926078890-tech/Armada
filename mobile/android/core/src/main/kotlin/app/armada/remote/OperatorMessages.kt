@@ -39,6 +39,12 @@ fun operatorMessage(code: String): String = when (code) {
     "NO_PENDING_ASK" -> "当前没有待回答的问题"
     "ASK_MISMATCH" -> "问题已更新，请刷新后再答"
     "NO_ASSISTANT_BODY" -> "任务已完成，正文尚未生成"
+    "FILE_NOT_FOUND" -> "文件不存在"
+    "PATH_OUTSIDE_WORKSPACE" -> "只能查看该工作区内的文件"
+    "FILE_TOO_LARGE" -> "文件太大，无法预览"
+    "FILE_NOT_TEXT" -> "这不是可预览的文本"
+    "FILE_READ_TIMEOUT" -> "读取超时，请确认被控机在线且已装最新扩展"
+    "FILE_VIEW_UNSUPPORTED" -> "被控扩展太旧，请升级后再查看文件"
     else -> code
 }
 

@@ -1009,11 +1009,12 @@ struct DetailReplyBlock: View {
     let text: String?
     let isLive: Bool
     @Binding var height: CGFloat
+    var onWorkspaceFile: ((String) -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let text, !text.isEmpty {
-                MarkdownWebView(text: text, height: $height)
+                MarkdownWebView(text: text, height: $height, onWorkspaceFile: onWorkspaceFile)
                     .frame(height: max(height, 80))
             } else if isLive {
                 Text("还没有终态正文").font(.subheadline).foregroundStyle(.secondary)
@@ -1034,6 +1035,7 @@ struct RunDetailView: View {
     @State private var promptHeight: CGFloat = 40
     @State private var showDispatch = false
     @State private var copied = false
+    @State private var filePath: String?
     @Environment(\.dismiss) private var dismiss
 
     private var slot: WorkspaceDTO? {
@@ -1062,7 +1064,7 @@ struct RunDetailView: View {
                         Text(RelayAPIError.operatorMessage("CDP_NOT_READY")).foregroundStyle(.red)
                     }
                     DetailPromptCard(text: run.prompt, contentHeight: $promptHeight)
-                    DetailReplyBlock(text: run.finalText, isLive: run.isLive, height: $mdHeight)
+                    DetailReplyBlock(text: run.finalText, isLive: run.isLive, height: $mdHeight, onWorkspaceFile: { filePath = $0 })
                     if let ask = run.pendingAsk {
                         AskView(runId: runId, ask: ask) { await reload() }
                     }
@@ -1175,6 +1177,14 @@ struct RunDetailView: View {
             session.clearUnreadHold(runId)
         }
         .refreshable { await reload() }
+        .navigationDestination(isPresented: Binding(
+            get: { filePath != nil },
+            set: { if !$0 { filePath = nil } }
+        )) {
+            if let filePath {
+                WorkspaceFileView(runId: runId, path: filePath)
+            }
+        }
     }
 
     private func housekeepingItems(_ run: RunDTO) -> [DetailActionBar.Item] {
@@ -1261,6 +1271,68 @@ struct RunDetailView: View {
             err = nil
         } catch {
             err = error.localizedDescription
+        }
+    }
+}
+
+struct WorkspaceFileView: View {
+    @EnvironmentObject var session: Session
+    let runId: String
+    let path: String
+    @State private var file: WorkspaceFileDTO?
+    @State private var err: String?
+    @State private var height: CGFloat = 120
+    @State private var nestedPath: String?
+
+    private var title: String {
+        file?.name ?? path.split { $0 == "/" || $0 == "\\" }.map(String.init).last ?? path
+    }
+
+    private var markdown: Bool {
+        let mime = file?.mime ?? ""
+        let name = file?.name ?? path
+        return mime == "text/markdown" || name.lowercased().hasSuffix(".md") || name.lowercased().hasSuffix(".markdown")
+    }
+
+    var body: some View {
+        Group {
+            if let err {
+                Text(err).foregroundStyle(.red).padding()
+            } else if let file {
+                ScrollView {
+                    if markdown {
+                        MarkdownWebView(text: file.text, height: $height, onWorkspaceFile: { nestedPath = $0 })
+                            .frame(height: max(height, 80))
+                            .padding()
+                    } else {
+                        Text(file.text)
+                            .font(.system(.footnote, design: .monospaced))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding()
+                    }
+                }
+            } else {
+                ProgressView().padding()
+            }
+        }
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+        .task(id: path) {
+            err = nil
+            file = nil
+            do {
+                file = try await session.api().workspaceFile(runId: runId, path: path)
+            } catch {
+                err = error.localizedDescription
+            }
+        }
+        .navigationDestination(isPresented: Binding(
+            get: { nestedPath != nil },
+            set: { if !$0 { nestedPath = nil } }
+        )) {
+            if let nestedPath {
+                WorkspaceFileView(runId: runId, path: nestedPath)
+            }
         }
     }
 }

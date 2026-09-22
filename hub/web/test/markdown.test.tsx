@@ -285,6 +285,28 @@ describe("ask / plan action buttons", () => {
   });
 });
 
+describe("workspace file links", () => {
+  test("md links intercept when onOpenFile is set", () => {
+    const html = renderToStaticMarkup(
+      <ChatThread
+        blocks={[{ kind: "assistant", seq: 1, text: "[spec](docs/foo.md)" }]}
+        onOpenFile={() => {}}
+      />,
+    );
+    expect(html).toContain("docs/foo.md");
+    expect(html).toContain("spec");
+    expect(html).not.toContain("target=\"_blank\"");
+  });
+
+  test("http links stay external", () => {
+    const html = renderToStaticMarkup(
+      <AssistantMarkdown text={"[docs](https://example.com/foo.md)"} onOpenFile={() => {}} />,
+    );
+    expect(html).toContain("https://example.com/foo.md");
+    expect(html).toContain("target=\"_blank\"");
+  });
+});
+
 describe("Cursor-like tool fold", () => {
   test("collapsed process header shows merged Read count, not 1250 rows", () => {
     const html = renderToStaticMarkup(

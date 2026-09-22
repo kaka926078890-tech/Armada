@@ -18,6 +18,12 @@ export function operatorCopy(code: string): string {
     case "NO_PENDING_ASK": return "当前没有待回答的问题";
     case "ASK_MISMATCH": return "问题已更新，请刷新后再答";
     case "NO_ASSISTANT_BODY": return "任务已完成，正文尚未生成";
+    case "FILE_NOT_FOUND": return "文件不存在";
+    case "PATH_OUTSIDE_WORKSPACE": return "只能查看该工作区内的文件";
+    case "FILE_TOO_LARGE": return "文件太大，无法预览";
+    case "FILE_NOT_TEXT": return "这不是可预览的文本";
+    case "FILE_READ_TIMEOUT": return "读取超时，请确认被控机在线且已装最新扩展";
+    case "FILE_VIEW_UNSUPPORTED": return "被控扩展太旧，请升级后再查看文件";
     default: return code;
   }
 }

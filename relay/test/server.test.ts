@@ -286,6 +286,37 @@ describe("relay serve", () => {
     ws.close();
   });
 
+  test("GET /mobile/runs/:id/file round-trips via fake hub", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    autoHub(ws);
+    ws.addEventListener("message", (e) => {
+      const msg = JSON.parse(String(e.data));
+      if (msg.type === "cmd.workspaceFileGet") {
+        ws.send(JSON.stringify({
+          type: "cmd.result",
+          requestId: msg.requestId,
+          ok: true,
+          file: { path: "/ws/docs/foo.md", name: "foo.md", mime: "text/markdown", text: "# hi\n" },
+        }));
+      }
+    });
+    await Bun.sleep(50);
+    const headers = { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" };
+    const d = await fetch(url(s, "/mobile/runs"), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ workspaceId: "m-1|/Users/me/proj", prompt: "hi" }),
+    });
+    expect(d.status).toBe(201);
+    const got = await fetch(url(s, "/mobile/runs/r-1/file?path=docs%2Ffoo.md"), { headers });
+    expect(got.status).toBe(200);
+    expect(await got.json()).toEqual({ path: "/ws/docs/foo.md", name: "foo.md", mime: "text/markdown", text: "# hi\n" });
+    expect((await fetch(url(s, "/mobile/runs/nope/file?path=a.md"), { headers })).status).toBe(404);
+    ws.close();
+  });
+
   test("cursor-reload hub offline → 503", async () => {
     const s = start();
     const fleet = s.createFleet();

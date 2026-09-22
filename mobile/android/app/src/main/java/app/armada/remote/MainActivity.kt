@@ -254,7 +254,30 @@ fun FleetNav(vm: SessionVm, state: UiState) {
             "run?id={id}",
             arguments = listOf(navArgument("id") { type = NavType.StringType }),
         ) { entry ->
-            RunDetailScreen(vm, state, entry.arguments?.getString("id").orEmpty(), onBack = { nav.popBackStack() })
+            RunDetailScreen(
+                vm,
+                state,
+                entry.arguments?.getString("id").orEmpty(),
+                onBack = { nav.popBackStack() },
+                onOpenFile = { nav.navigate(fileNavRoute(entry.arguments?.getString("id").orEmpty(), it)) },
+            )
+        }
+        composable(
+            "file?runId={runId}&path={path}",
+            arguments = listOf(
+                navArgument("runId") { type = NavType.StringType },
+                navArgument("path") { type = NavType.StringType },
+            ),
+        ) { entry ->
+            val runId = entry.arguments?.getString("runId").orEmpty()
+            val path = entry.arguments?.getString("path").orEmpty()
+            WorkspaceFileScreen(
+                vm,
+                runId,
+                path,
+                onBack = { nav.popBackStack() },
+                onOpenFile = { nav.navigate(fileNavRoute(runId, it)) },
+            )
         }
     }
 }
@@ -842,7 +865,7 @@ fun DispatchSheet(vm: SessionVm, workspace: WorkspaceDto, followupRunId: String?
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String, onBack: () -> Unit) {
+fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String, onBack: () -> Unit, onOpenFile: (String) -> Unit = {}) {
     var run by remember { mutableStateOf(state.board.runs.find { it.runId == runId } ?: state.board.hidden.find { it.runId == runId }) }
     var err by remember { mutableStateOf<String?>(null) }
     var showFollow by remember { mutableStateOf(false) }
@@ -972,7 +995,7 @@ fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String, onBack: () -> 
                 r.displayError?.let { Text(operatorMessage(it), color = StatusRed) }
                 if (slot?.canInject == false && r.displayError != "CDP_NOT_READY") Text(operatorMessage("CDP_NOT_READY"), color = StatusRed)
                 DetailPromptCard(r.prompt)
-                DetailReplyBlock(r.finalText, r.isLive)
+                DetailReplyBlock(r.finalText, r.isLive, onOpenFile)
                 r.pendingAsk?.let { AskBlock(vm, runId, it) { runCatching { adopt(vm.api().run(runId)) } } }
                 if (r.queuedOutbound.isNotEmpty()) {
                     Text("${r.queuedOutbound.size} 条排队消息", style = MaterialTheme.typography.bodySmall)
@@ -1029,11 +1052,11 @@ fun DetailPromptCard(text: String) {
 }
 
 @Composable
-fun DetailReplyBlock(text: String?, isLive: Boolean) {
+fun DetailReplyBlock(text: String?, isLive: Boolean, onOpenFile: (String) -> Unit = {}) {
     var height by remember(text) { mutableFloatStateOf(80f) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (!text.isNullOrEmpty()) {
-            MarkdownFrame(text, heightDp = detailReplyShownHeight(height), onHeight = { height = it })
+            MarkdownFrame(text, heightDp = detailReplyShownHeight(height), onHeight = { height = it }, onWorkspaceFile = onOpenFile)
         } else {
             Text(if (isLive) "还没有终态正文" else "没有正文", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
         }
@@ -1180,10 +1203,11 @@ fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend (
 private class MarkdownHolder {
     var lastKey = ""
     var onHeight: (Float) -> Unit = {}
+    var onWorkspaceFile: ((String) -> Unit)? = null
 }
 
 @Composable
-fun MarkdownFrame(text: String, heightDp: Float? = null, onHeight: ((Float) -> Unit)? = null) {
+fun MarkdownFrame(text: String, heightDp: Float? = null, onHeight: ((Float) -> Unit)? = null, onWorkspaceFile: ((String) -> Unit)? = null) {
     val fontScale = LocalFontScale.current
     val theme = LocalAppTheme.current
     var measured by remember(text, fontScale, theme) { mutableFloatStateOf(heightDp ?: 80f) }
@@ -1192,6 +1216,7 @@ fun MarkdownFrame(text: String, heightDp: Float? = null, onHeight: ((Float) -> U
         measured = h
         onHeight?.invoke(h)
     }
+    holder.onWorkspaceFile = onWorkspaceFile
     val shown = heightDp ?: maxOf(measured, 80f)
     AndroidView(
         factory = { c ->
@@ -1217,6 +1242,11 @@ fun MarkdownFrame(text: String, heightDp: Float? = null, onHeight: ((Float) -> U
                     }
                     override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                         val uri = request.url
+                        val path = WorkspaceFile.pathFromHref(uri.toString())
+                        if (path != null) {
+                            holder.onWorkspaceFile?.invoke(path)
+                            return true
+                        }
                         val scheme = uri.scheme ?: return false
                         if (scheme == "http" || scheme == "https") {
                             runCatching { view.context.startActivity(Intent(Intent.ACTION_VIEW, uri)) }
@@ -1236,6 +1266,49 @@ fun MarkdownFrame(text: String, heightDp: Float? = null, onHeight: ((Float) -> U
         },
         modifier = Modifier.fillMaxWidth().height(shown.dp),
     )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun WorkspaceFileScreen(
+    vm: SessionVm,
+    runId: String,
+    path: String,
+    onBack: () -> Unit,
+    onOpenFile: (String) -> Unit,
+) {
+    var file by remember(path) { mutableStateOf<WorkspaceFileDto?>(null) }
+    var err by remember(path) { mutableStateOf<String?>(null) }
+    LaunchedEffect(runId, path) {
+        err = null
+        file = null
+        try {
+            file = vm.api().workspaceFile(runId, path)
+        } catch (e: Exception) {
+            err = e.message
+        }
+    }
+    val title = file?.name ?: path.substringAfterLast('/').substringAfterLast('\\')
+    val markdown = (file?.mime == "text/markdown") || title.endsWith(".md", true) || title.endsWith(".markdown", true)
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            Column(Modifier.statusBarsPadding()) {
+                IosNavBar(title = title, leading = NavAction("返回") { onBack() })
+                HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+            }
+        },
+    ) { pad ->
+        Column(Modifier.padding(pad).padding(16.dp).verticalScroll(rememberScrollState())) {
+            err?.let { Text(it, color = StatusRed) }
+            val body = file
+            if (body == null && err == null) CircularProgressIndicator()
+            else if (body != null) {
+                if (markdown) MarkdownFrame(body.text, onWorkspaceFile = onOpenFile)
+                else Text(body.text, style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+    }
 }
 
 @Composable

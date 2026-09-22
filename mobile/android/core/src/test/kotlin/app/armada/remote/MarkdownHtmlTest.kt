@@ -59,6 +59,7 @@ class MarkdownHtmlTest {
         assertTrue(html.contains("<hr>"), html)
         assertTrue(html.contains("<ol>"), html)
         assertTrue(html.contains("<a href=\"https://example.com\">docs</a>"), html)
+        assertTrue(html.contains("armada-file://preview?p="), MarkdownHtml.from("[spec](docs/foo.md)"))
         assertTrue(html.contains("blockquote {"), html)
         assertTrue(html.contains("table {"), html)
     }

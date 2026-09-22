@@ -16,6 +16,7 @@ import { startRelayClient } from "./relayClient";
 import { cursorReloadView, findVsixPack, readPendingReload, vsixPackSearchDirs, writePendingReload } from "./cursorReloadStore";
 import { REQUIRED_EXTENSION_VERSION } from "../web/src/boardState";
 import { cmpSemver } from "../../desktop-core/src/cursorReload";
+import { fileHttpStatus, WorkspaceFileBroker } from "./workspaceFileBroker";
 
 export interface HubServer {
   server: ReturnType<typeof Bun.serve>;
@@ -27,7 +28,7 @@ export interface HubServer {
   stop: () => void;
 }
 
-export function createServer(opts: { port?: number; hostname?: string; home?: string; concurrency?: ConcurrencyLimits; vsixSearchDirs?: string[] } = {}): HubServer {
+export function createServer(opts: { port?: number; hostname?: string; home?: string; concurrency?: ConcurrencyLimits; vsixSearchDirs?: string[]; fileReadTimeoutMs?: number } = {}): HubServer {
   const home = ARMADA_HOME(opts.home);
   const token = loadToken(home);
   const db = openDb(home);
@@ -37,6 +38,7 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
   const blobs = new BlobStore(db, home);
   const tickets = new JoinTickets(db);
   const runs = new RunService(db, registry, sse, { limits, blobs });
+  const fileBroker = new WorkspaceFileBroker(opts.fileReadTimeoutMs);
   const vsixDirs = opts.vsixSearchDirs ?? vsixPackSearchDirs(process.cwd());
   const packPresent = () => findVsixPack(REQUIRED_EXTENSION_VERSION, vsixDirs) != null;
   const reloadView = () => cursorReloadView(home, registry.listMachines(), packPresent());
@@ -56,6 +58,10 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
 
   registry.inboundHandler = (ws, msg) => {
     const machineId = ws.data.machineId!;
+    if (msg.type === "workspace.file") {
+      fileBroker.onReply(msg);
+      return;
+    }
     switch (msg.type) {
       case "run.ack": runs.onRunAck(machineId, msg); break;
       case "run.progress": runs.onRunProgress(machineId, msg); break;
@@ -169,6 +175,19 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
   app.get("/api/runs/:id", (c) => {
     const r = runs.get(c.req.param("id"));
     return r ? c.json(r) : c.json({ error: "NOT_FOUND" }, 404);
+  });
+  app.get("/api/runs/:id/file", async (c) => {
+    const run = runs.get(c.req.param("id"));
+    if (!run) return c.json({ error: "NOT_FOUND" }, 404);
+    const path = c.req.query("path") ?? "";
+    const result = await fileBroker.request({
+      registry,
+      machineId: run.machine_id,
+      workspaceRoot: run.workspace_root,
+      path,
+    });
+    if (!result.ok) return c.json({ error: result.error }, fileHttpStatus(result.error));
+    return c.json({ path: result.path, name: result.name, mime: result.mime, text: result.text });
   });
   app.patch("/api/runs/:id", async (c) => {
     const body = await c.req.json().catch(() => ({}));
@@ -385,6 +404,7 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
     server, db, registry, runs, token,
     port,
     stop() {
+      fileBroker.dispose();
       relay?.stop();
       clearInterval(sweepTimer);
       sse.closeAll();

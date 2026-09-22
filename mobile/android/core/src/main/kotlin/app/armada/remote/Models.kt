@@ -66,6 +66,13 @@ data class BlobDto(
     val size: Long,
 )
 
+data class WorkspaceFileDto(
+    val path: String,
+    val name: String,
+    val mime: String,
+    val text: String,
+)
+
 const val MAX_RUN_ATTACHMENTS = 4
 const val MAX_BLOB_BYTES = 8 * 1024 * 1024
 

@@ -97,4 +97,10 @@ export const api = {
       };
     }),
   streamUrl: (id: string) => `/api/runs/${id}/stream?token=${encodeURIComponent(getToken())}`,
+  workspaceFile: async (runId: string, path: string) => {
+    const r = await req(`/api/runs/${encodeURIComponent(runId)}/file?path=${encodeURIComponent(path)}`);
+    const j = await r.json().catch(() => ({})) as { error?: string; path?: string; name?: string; mime?: string; text?: string };
+    if (!r.ok) return { error: j.error ?? `HTTP ${r.status}` };
+    return { path: j.path ?? path, name: j.name ?? "", mime: j.mime ?? "text/plain", text: j.text ?? "" };
+  },
 };

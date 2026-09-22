@@ -98,7 +98,7 @@ type PromptSnippet = { id: string; title: string; body: string };
 type BlobSnap = { id: string; sha256: string; mime: string; name: string; size: number };
 
 type Pending = {
-  resolve: (v: { ok: boolean; error?: string; run?: RunSnap; snippets?: PromptSnippet[]; cursorReload?: unknown; blob?: BlobSnap }) => void;
+  resolve: (v: { ok: boolean; error?: string; run?: RunSnap; snippets?: PromptSnippet[]; cursorReload?: unknown; blob?: BlobSnap; file?: { path: string; name: string; mime: string; text: string } }) => void;
 };
 
 function hex64(): string {
@@ -504,7 +504,7 @@ export function createRelayServer(opts: {
     return true;
   }
 
-  function waitHub(requestId: string): Promise<{ ok: boolean; error?: string; run?: RunSnap; snippets?: PromptSnippet[]; cursorReload?: unknown; blob?: BlobSnap }> {
+  function waitHub(requestId: string): Promise<{ ok: boolean; error?: string; run?: RunSnap; snippets?: PromptSnippet[]; cursorReload?: unknown; blob?: BlobSnap; file?: { path: string; name: string; mime: string; text: string } }> {
     return new Promise((resolve) => {
       const t = setTimeout(() => {
         pending.delete(requestId);
@@ -518,7 +518,7 @@ export function createRelayServer(opts: {
 
   function hubCmdStatus(err: string): 400 | 404 | 409 | 413 | 429 | 500 | 502 | 503 {
     if (err === "HUB_OFFLINE" || err === "READ_FAIL") return 503;
-    if (err === "HUB_TIMEOUT") return 502;
+    if (err === "HUB_TIMEOUT" || err === "FILE_READ_TIMEOUT") return 502;
     if (err === "WRITE_FAIL") return 500;
     if (err === "PACK_MISSING") return 409;
     return httpStatusForRunError(err);
@@ -880,6 +880,27 @@ export function createRelayServer(opts: {
     return c.json({ runs: rows.map((row) => runToJson(row, true)) });
   });
 
+  app.get("/mobile/runs/:id/file", async (c) => {
+    const tok = (c as any).get("opToken") as string;
+    const fleet = (c as any).get("fleet") as { id: string; hub_online: number };
+    if (!checkRate(tok)) return c.json({ error: "RATE_LIMIT" }, 429);
+    if (fleet.hub_online !== 1) return c.json({ error: "HUB_OFFLINE" }, 503);
+    const runId = c.req.param("id");
+    const row = db.query("SELECT id FROM runs WHERE id=?1 AND fleet_id=?2").get(runId, fleet.id);
+    if (!row) return c.json({ error: "NOT_FOUND" }, 404);
+    const path = c.req.query("path") ?? "";
+    const requestId = `r${++reqSeq}`;
+    if (!sendHub(fleet.id, { type: "cmd.workspaceFileGet", requestId, runId, path })) {
+      return c.json({ error: "HUB_OFFLINE" }, 503);
+    }
+    const result = await waitHub(requestId);
+    if (!result.ok) {
+      const err = result.error ?? "HUB_TIMEOUT";
+      return c.json({ error: err }, hubCmdStatus(err) as 400);
+    }
+    return c.json(result.file ?? { path: "", name: "", mime: "text/plain", text: "" });
+  });
+
   app.get("/mobile/runs/:id", (c) => {
     const fleet = (c as any).get("fleet") as { id: string };
     const row = db.query("SELECT * FROM runs WHERE id=?1 AND fleet_id=?2").get(c.req.param("id"), fleet.id);
@@ -1082,7 +1103,7 @@ export function createRelayServer(opts: {
           const p = pending.get(msg.requestId);
           if (p) {
             pending.delete(msg.requestId);
-            p.resolve({ ok: !!msg.ok, error: msg.error, run: msg.run, snippets: msg.snippets, cursorReload: msg.cursorReload, blob: msg.blob });
+            p.resolve({ ok: !!msg.ok, error: msg.error, run: msg.run, snippets: msg.snippets, cursorReload: msg.cursorReload, blob: msg.blob, file: msg.file });
           }
         }
       },

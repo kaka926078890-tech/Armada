@@ -3,6 +3,7 @@ import { api, getToken } from "../api";
 import type { Machine, RunEvent } from "../types";
 import { workspaceFolderName, runDisplayName, canRetryRun, CDP_NOT_READY_COPY, type RunRow } from "../boardState";
 import ChatThread from "./ChatThread";
+import FilePreview from "./FilePreview";
 import { eventsToChat, mergePendingAsk, mergeOutboundChat, queuedOutbound, INITIAL_VISIBLE_TURNS, initialHiddenPrefixTurns, recentTurnsWindow, stampFallbackImageIds } from "../chatView";
 import { collectEventPages, mergeEvents, EVENT_PAGE_SIZE, hasOlderEvents, olderEventsQuery, shouldLoadOlder, prependPreserveScroll } from "../loadEvents";
 import { mergeAttachmentFiles, isConsoleAttachment, parseRunAttachmentIds } from "../attachments";
@@ -110,6 +111,7 @@ export default function RunDetail({
   const [titleDraft, setTitleDraft] = useState("");
   const [titleError, setTitleError] = useState("");
   const [askError, setAskError] = useState("");
+  const [filePath, setFilePath] = useState<string | null>(null);
   const [hiddenPrefixTurns, setHiddenPrefixTurns] = useState(0);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -140,6 +142,7 @@ export default function RunDetail({
     setMissing(false);
     setEditingTitle(false);
     setTitleError("");
+    setFilePath(null);
     setHiddenPrefixTurns(0);
     setLoadingOlder(false);
     sendingRef.current = false;
@@ -462,6 +465,14 @@ export default function RunDetail({
         {retryError && <div className={`mt-2 text-destructive ${UI_TYPE}`}>{retryError}</div>}
         {askError && <div className={`mt-2 text-destructive ${UI_TYPE}`}>{askError}</div>}
       </div>
+      {filePath ? (
+        <FilePreview
+          runId={run.id}
+          path={filePath}
+          onBack={() => setFilePath(null)}
+          onOpenFile={setFilePath}
+        />
+      ) : (
       <div
         ref={scrollRef}
         onScroll={() => {
@@ -488,6 +499,7 @@ export default function RunDetail({
         )}
         <ChatThread
           blocks={chat}
+          onOpenFile={setFilePath}
           onAnswerAsk={run.pending_ask ? async (body) => {
             setAskError("");
             const r = await api.answerAsk(run.id, body);
@@ -517,6 +529,7 @@ export default function RunDetail({
           </div>
         )}
       </div>
+      )}
       {run.conversation_id && (
         <div className="p-3 border-t border-border flex flex-col gap-2">
           <PromptSnippetBar

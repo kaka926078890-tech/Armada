@@ -218,8 +218,31 @@ enum MarkdownHTML {
         s = replace(s, pattern: "`([^`]+)`", template: "<code>$1</code>")
         s = replace(s, pattern: #"\*\*([^*]+)\*\*"#, template: "<strong>$1</strong>")
         s = replace(s, pattern: #"\*([^*]+)\*"#, template: "<em>$1</em>")
-        s = replace(s, pattern: #"\[([^\]]+)\]\(([^)]+)\)"#, template: "<a href=\"$2\">$1</a>")
+        s = rewriteLinks(s)
         return s
+    }
+
+    private static func rewriteLinks(_ s: String) -> String {
+        guard let re = try? NSRegularExpression(pattern: #"\[([^\]]+)\]\(([^)]+)\)"#) else { return s }
+        let ns = s as NSString
+        let matches = re.matches(in: s, range: NSRange(location: 0, length: ns.length))
+        var out = ""
+        var cursor = 0
+        for m in matches {
+            let full = m.range
+            if full.location > cursor {
+                out += ns.substring(with: NSRange(location: cursor, length: full.location - cursor))
+            }
+            let label = ns.substring(with: m.range(at: 1))
+            let href = WorkspaceFileLink.rewrite(ns.substring(with: m.range(at: 2)))
+            let escaped = href.replacingOccurrences(of: "\"", with: "&quot;")
+            out += "<a href=\"\(escaped)\">\(label)</a>"
+            cursor = full.location + full.length
+        }
+        if cursor < ns.length {
+            out += ns.substring(from: cursor)
+        }
+        return out
     }
 
     private static func replace(_ s: String, pattern: String, template: String) -> String {
@@ -232,6 +255,74 @@ enum MarkdownHTML {
         s.replacingOccurrences(of: "&", with: "&amp;")
             .replacingOccurrences(of: "<", with: "&lt;")
             .replacingOccurrences(of: ">", with: "&gt;")
+    }
+}
+
+enum WorkspaceFileLink {
+    static let scheme = "armada-file"
+    private static let previewExts: Set<String> = [
+        "md", "markdown", "txt", "json", "csv", "xml", "yaml", "yml", "html", "htm", "log", "toml",
+    ]
+
+    static func extOf(_ name: String) -> String {
+        let base = name.split { $0 == "/" || $0 == "\\" }.map(String.init).last ?? name
+        guard let i = base.lastIndex(of: "."), i > base.startIndex else { return "" }
+        return String(base[base.index(after: i)...]).lowercased()
+    }
+
+    static func decodeHref(_ href: String) -> String {
+        var s = href.trimmingCharacters(in: .whitespacesAndNewlines)
+        if s.isEmpty { return "" }
+        if s.lowercased().hasPrefix("\(scheme):") {
+            if let r = s.range(of: "p=", options: .backwards) {
+                let q = String(s[r.upperBound...]).split(separator: "&").first.map(String.init) ?? ""
+                return q.removingPercentEncoding ?? q
+            }
+            return ""
+        }
+        if s.lowercased().hasPrefix("file:") {
+            s = s.replacingOccurrences(of: "file://", with: "", options: .caseInsensitive)
+            s = s.removingPercentEncoding ?? s
+            if s.count >= 3, s.hasPrefix("/"), s.dropFirst().first?.isLetter == true, s.dropFirst().dropFirst().first == ":" {
+                s.removeFirst()
+            }
+            return s
+        }
+        return s.removingPercentEncoding ?? s
+    }
+
+    static func looksLike(_ href: String) -> Bool {
+        let t = href.trimmingCharacters(in: .whitespacesAndNewlines)
+        if t.isEmpty { return false }
+        let lower = t.lowercased()
+        if lower.hasPrefix("http:") || lower.hasPrefix("https:") || lower.hasPrefix("mailto:") || lower.hasPrefix("tel:") || lower.hasPrefix("data:") || lower.hasPrefix("#") {
+            return false
+        }
+        return previewExts.contains(extOf(decodeHref(t)))
+    }
+
+    static func rewrite(_ href: String) -> String {
+        guard looksLike(href) else { return href }
+        let path = decodeHref(href)
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
+        let enc = path.addingPercentEncoding(withAllowedCharacters: allowed) ?? path
+        return "\(scheme)://preview?p=\(enc)"
+    }
+
+    static func path(from href: String) -> String? {
+        guard looksLike(href) else { return nil }
+        let p = decodeHref(href).trimmingCharacters(in: .whitespacesAndNewlines)
+        return p.isEmpty ? nil : p
+    }
+
+    static func path(from url: URL) -> String? {
+        if url.scheme?.lowercased() == scheme {
+            let q = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "p" })?.value
+            let p = (q ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return p.isEmpty ? nil : p
+        }
+        return path(from: url.absoluteString)
     }
 }
 
@@ -260,6 +351,7 @@ final class MarkdownMeasuringWebView: WKWebView {
 struct MarkdownWebView: UIViewRepresentable {
     let text: String
     @Binding var height: CGFloat
+    var onWorkspaceFile: ((String) -> Void)? = nil
     @EnvironmentObject var appearance: Appearance
 
     func makeCoordinator() -> Coord { Coord() }
@@ -283,6 +375,7 @@ struct MarkdownWebView: UIViewRepresentable {
 
     func updateUIView(_ webView: MarkdownMeasuringWebView, context: Context) {
         context.coordinator.height = $height
+        context.coordinator.onWorkspaceFile = onWorkspaceFile
         let key = "\(text)|\(appearance.fontScale)|\(appearance.theme)"
         if context.coordinator.lastKey != key {
             context.coordinator.lastKey = key
@@ -295,6 +388,7 @@ struct MarkdownWebView: UIViewRepresentable {
         var lastKey = ""
         var pageReady = false
         var height: Binding<CGFloat> = .constant(120)
+        var onWorkspaceFile: ((String) -> Void)?
 
         func measureIfReady(_ webView: WKWebView) {
             guard pageReady, webView.bounds.width > 0 else { return }
@@ -312,7 +406,14 @@ struct MarkdownWebView: UIViewRepresentable {
         }
         func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
             if navigationAction.navigationType == .linkActivated, let url = navigationAction.request.url {
-                UIApplication.shared.open(url)
+                if let path = WorkspaceFileLink.path(from: url) {
+                    onWorkspaceFile?(path)
+                    decisionHandler(.cancel)
+                    return
+                }
+                if url.scheme == "http" || url.scheme == "https" {
+                    UIApplication.shared.open(url)
+                }
                 decisionHandler(.cancel)
                 return
             }

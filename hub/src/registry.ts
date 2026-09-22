@@ -254,6 +254,13 @@ export class Registry {
     return this.conns.has(`${machineId}:${windowId}`);
   }
 
+  isMachineConnected(machineId: string): boolean {
+    for (const c of this.conns.values()) {
+      if (c.machineId === machineId) return true;
+    }
+    return false;
+  }
+
   sendTo(machineId: string, windowId: string, msg: object): boolean {
     const c = this.conns.get(`${machineId}:${windowId}`);
     if (!c) return false;

@@ -11,7 +11,7 @@
 | 面 | 当前发版 | 权威文件 |
 | --- | --- | --- |
 | 桌面 Armada.app | **0.1.0** | `desktop/src-tauri/tauri.conf.json` |
-| 扩展 armada-agent | **0.4.43** | `extension/package.json` |
+| 扩展 armada-agent | **0.4.44** | `extension/package.json` |
 | iOS ArmadaRemote | **0.1.0** · TestFlight **30** | `mobile/ios` `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` |
 | Android | **0.1.13**（versionCode 14） | `mobile/android/app/build.gradle.kts` |
 
@@ -66,7 +66,7 @@
 
 点开卡片进入右侧对话抽屉，对齐被控 Cursor 里那一轮真实会话：
 
-- 思考过程、工具调用、子代理、已编辑文件、Markdown 回复
+- 思考过程、工具调用、子代理、已编辑文件、Markdown 回复。回复里的 md/txt 等链接和「已编辑」芯片可点开预览（被控机在线且扩展 ≥ 0.4.44）
 - **续聊同一对话**（Enter 发送，Shift+Enter 换行），可再附 PNG/JPEG
 - Agent 的 **AskQuestion** 可在中台选选项后点 Continue / Skip，不必跑到那台电脑
 - 取消、隐藏/取消隐藏、异常卡「人工关闭」、导出审计
@@ -78,7 +78,7 @@
 
 被控侧看到的就是普通 Cursor 窗口：文件树、Agent 对话、该机自己的账号与模型选择。派发沿用该窗口当前选中的模型。
 
-同一机器可并行多条任务（默认每机 8、每工作区 4）；整机同时只有 1 条处于派发/绑定（CDP 注入串行）。同工作区再派新任务时，已打开的窗走 `composer.createNew`，**不再**再开一扇 Untitled 工作区。注入槽空了就可以并发；未答 Ask 仍占窗。超出限额 → `429 RUN_LIMIT`。同工作区相同 prompt → `409 PROMPT_COLLISION`。关着的工作区不能派（`400 WORKSPACE_NOT_OPEN`）。收口与续聊请用 **armada-agent ≥ 0.4.19**；**文件附件请用 ≥ 0.4.22**（Windows `@` 菜单会等 typeahead）。**当前请装 0.4.43**（空闲 Reload 只在本机已经解包了目标 vsix 时才执行；没有新包不会因为窗口空闲就 Reload。有包时还要等未收口 composer jsonl，且收口后再等 2 分钟）。
+同一机器可并行多条任务（默认每机 8、每工作区 4）；整机同时只有 1 条处于派发/绑定（CDP 注入串行）。同工作区再派新任务时，已打开的窗走 `composer.createNew`，**不再**再开一扇 Untitled 工作区。注入槽空了就可以并发；未答 Ask 仍占窗。超出限额 → `429 RUN_LIMIT`。同工作区相同 prompt → `409 PROMPT_COLLISION`。关着的工作区不能派（`400 WORKSPACE_NOT_OPEN`）。收口与续聊请用 **armada-agent ≥ 0.4.19**；**文件附件请用 ≥ 0.4.22**（Windows `@` 菜单会等 typeahead）。**当前请装 0.4.44**（空闲 Reload 只在本机已经解包了目标 vsix 时才执行；没有新包不会因为窗口空闲就 Reload。有包时还要等未收口 composer jsonl，且收口后再等 2 分钟）。
 
 完成、失败、需要处理选择题时，桌面会弹系统通知，浏览器会闪标题；点通知可回到那张卡。
 
@@ -325,7 +325,7 @@ npx tsup
 npx vsce package --no-dependencies    # 没有 vsce：npm i -g @vscode/vsce
 ```
 
-受控端也可 clone 后自己打包。当前包名 `armada-agent-0.4.43.vsix`。
+受控端也可 clone 后自己打包。当前包名 `armada-agent-0.4.44.vsix`。
 
 6. **日常：打开控制台**（任意电脑浏览器均可，同一令牌）
 
@@ -359,7 +359,7 @@ curl -sS http://192.168.1.10:7380/api/health
 sh hooks/install.sh
 ```
 
-4. **安装扩展** `armada-agent` **0.4.43**（能力下限 ≥ 0.4.19）  
+4. **安装扩展** `armada-agent` **0.4.44**（能力下限 ≥ 0.4.19）  
    Cursor → 扩展 → **Install from VSIX** → `extension/armada-agent-*.vsix`  
    （没有现成 vsix 且这台有 Node 时：`cd extension && npx tsup && npx vsce package --no-dependencies`）
 
@@ -389,7 +389,7 @@ chmod +x scripts/armada-cursor.sh
 | 要带上 Windows 的 | 从哪来 | 说明 |
 | --- | --- | --- |
 | 本仓库 | `git clone` 本仓，或把整个 `Armada` 文件夹拷过去 | 用来跑 `hooks\install.ps1` 和启动器 |
-| `armada-agent-0.4.43.vsix` | 中台 `extension\armada-agent-0.4.43.vsix`，或 Windows 自己 `npm install && npx tsup && npx --yes @vscode/vsce package --no-dependencies`（当前 **0.4.43**，能力下限 ≥ 0.4.19） | 0.4.11 Reload 会把 `ext_seq` 重数到已占用号段，hub 丢掉 `stop`。0.4.16 续聊 fromEnd 会清掉 hub 签发的 `generation_id`。**0.4.17 只在 Windows 合成 stop**；**0.4.18 起全平台合成**。请不要用更旧的 vsix。 |
+| `armada-agent-0.4.44.vsix` | 中台 `extension\armada-agent-0.4.44.vsix`，或 Windows 自己 `npm install && npx tsup && npx --yes @vscode/vsce package --no-dependencies`（当前 **0.4.44**，能力下限 ≥ 0.4.19） | 0.4.11 Reload 会把 `ext_seq` 重数到已占用号段，hub 丢掉 `stop`。0.4.16 续聊 fromEnd 会清掉 hub 签发的 `generation_id`。**0.4.17 只在 Windows 合成 stop**；**0.4.18 起全平台合成**。请不要用更旧的 vsix。 |
 | 中台 IP + token | 中台 `ipconfig getifaddr en0` 和 `~/.armada/token` | token 不要换行；不要在 Windows 上新生成 |
 
 下面把 `192.168.1.10` 换成你的中台局域网 IP。所有命令都在 **PowerShell** 里执行，先 `cd` 到仓库根目录（里面能看到 `hooks` 和 `scripts` 文件夹）。
@@ -418,7 +418,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File hooks\install.ps1
 **4. 安装扩展**
 
 1. 先用图标正常打开一次 Cursor（这次还不用启动器）。
-2. 左侧扩展 → `...` → **Install from VSIX** → 选中 `armada-agent-0.4.43.vsix`。
+2. 左侧扩展 → `...` → **Install from VSIX** → 选中 `armada-agent-0.4.44.vsix`。
 3. 装完先不要关。
 
 **5. 指向中台**（`Ctrl+Shift+P` → 输入 **Armada: Configure Hub Connection**）
@@ -471,7 +471,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\armada-cursor.ps1 C:
 | `OUTBOUND_LIMIT` | **中台**：该卡待消化续发已达 8 条 |
 | `OUTBOUND_TEXT_ONLY` | **中台**：运行中续发暂只支持纯文本 |
 | `WINDOW_BUSY` | **中台**：关了 `ARMADA_MULTI_RUN_PER_WINDOW` 时，该窗口已有占用项则 409。默认会开新窗再注入。同卡 running 续聊仍走 followup |
-| 一直「待本机回车」但黄字是「绑定中」，超时后进异常 | **受控**：须装 **armada-agent ≥ 0.4.19**（当前 **0.4.43**）并 Reload。0.4.10 扫描窗 20s 会 BIND_TIMEOUT。Windows 无 hook，绑定等 jsonl，约 **3 分钟**；macOS 约 **1 分钟** |
+| 一直「待本机回车」但黄字是「绑定中」，超时后进异常 | **受控**：须装 **armada-agent ≥ 0.4.19**（当前 **0.4.44**）并 Reload。0.4.10 扫描窗 20s 会 BIND_TIMEOUT。Windows 无 hook，绑定等 jsonl，约 **3 分钟**；macOS 约 **1 分钟** |
 | 本机对话已结束，看板仍「运行中」 | **受控**：须 ≥ 0.4.18。日志：`stop synthesized` / `adopt r-…`。Hub 须把 `status: success` 收成 completed |
 | 一直「待本机回车」且蓝字是「已预填,待本机回车」 | **受控**：Cursor 不是启动器/桌面打开的（Windows：托盘未退干净就又点了图标） |
 | 详情串了别的对话 | **受控**：扩展 ≥ 0.4.3，不要用旧 vsix |
@@ -535,6 +535,8 @@ Token **仅** query 鉴权；消息体不再带 token。连上后 10s 内必须 
 | Ext → Hub | `run.bound` | conversationId + promptMatch |
 | Ext → Hub | `run.event` | hook / transcript 事件（带 `seq`） |
 | Hub → Ext | `event.ack` | `{ machineId, lastSeq }` |
+| Hub → Ext | `workspace.readFile` | 读工作区文本（`requestId` + `path`） |
+| Ext → Hub | `workspace.file` | 预览正文或错误码 |
 | Hub → Ext | `run.cancel` | 取消请求 |
 | Ext → Hub | `run.note` / `hooks.status` | 备注 / hooks 健康 |
 
@@ -557,6 +559,7 @@ Token **仅** query 鉴权；消息体不再带 token。连上后 10s 内必须 
 | POST | `/api/runs/:id/close` | 关闭 `error`/`unknown` → `cancelled` |
 | POST | `/api/runs/:id/archive` | 从看板隐藏（数据保留） |
 | POST | `/api/runs/:id/unarchive` | 取消隐藏 |
+| GET | `/api/runs/:id/file` | 读该任务工作区内的文本文件（`?path=`，md/txt 等白名单） |
 | GET | `/api/runs/:id/events` | 事件（`afterSeq` / `beforeSeq` / `fromEnd` / `limit`） |
 | GET | `/api/runs/:id/stream` | 单 run SSE |
 | GET | `/api/events` | 全局 SSE |
@@ -571,6 +574,7 @@ Token **仅** query 鉴权；消息体不再带 token。连上后 10s 内必须 
 | GET | `/mobile/workspaces` | 已打开的仓；`hubOffline` 时列表为空 |
 | GET | `/mobile/runs` | 快照列表（默认非隐藏；`?view=hidden` 仅已隐藏；`?archived=1` 仍兼容；列表不含 `finalText`） |
 | GET | `/mobile/runs/:id` | 含 `finalText`、`pendingAsk`；已隐藏仍返回 |
+| GET | `/mobile/runs/:id/file` | 读该任务工作区内的文本文件（`?path=`） |
 | POST | `/mobile/runs` | 新派发 |
 | POST | `/mobile/runs/:id/followup` | 续聊同一对话 |
 | POST | `/mobile/runs/:id/answer` | 回答 Ask |
@@ -580,7 +584,7 @@ Token **仅** query 鉴权；消息体不再带 token。连上后 10s 内必须 
 | POST | `/mobile/push-token` | 登记推送 token。缺 `platform` 视为 `apns`（64 hex）；`platform=fcm` 为 FCM 注册串 → 204 |
 | DELETE | `/mobile/push-token` | 解绑该 token；不存在也 204 |
 
-常见错误码：`MACHINE_OFFLINE`、`WORKSPACE_NOT_OPEN`、`RUN_LIMIT`、`PROMPT_COLLISION`、`CONVERSATION_BUSY`、`INJECT_SLOT_BUSY`、`OUTBOUND_LIMIT`、`OUTBOUND_TEXT_ONLY`、`WINDOW_BUSY`、`NOT_FOUND`、`INVALID_STATE`、`NO_CONVERSATION`、`IMAGE_PASTE_FAILED`、`CLIPBOARD_TIMEOUT`、`CHIP_COUNT`、`FILE_MENTION_FAILED`、`ATTACHMENT_TOO_LARGE`、`ASK_IN_FLIGHT`、`HUB_OFFLINE`、`OPERATOR_REQUIRED`、`HUB_REQUIRED`。
+常见错误码：`MACHINE_OFFLINE`、`WORKSPACE_NOT_OPEN`、`RUN_LIMIT`、`PROMPT_COLLISION`、`CONVERSATION_BUSY`、`INJECT_SLOT_BUSY`、`OUTBOUND_LIMIT`、`OUTBOUND_TEXT_ONLY`、`WINDOW_BUSY`、`NOT_FOUND`、`INVALID_STATE`、`NO_CONVERSATION`、`IMAGE_PASTE_FAILED`、`CLIPBOARD_TIMEOUT`、`CHIP_COUNT`、`FILE_MENTION_FAILED`、`ATTACHMENT_TOO_LARGE`、`ASK_IN_FLIGHT`、`HUB_OFFLINE`、`OPERATOR_REQUIRED`、`HUB_REQUIRED`、`FILE_NOT_FOUND`、`PATH_OUTSIDE_WORKSPACE`、`FILE_TOO_LARGE`、`FILE_NOT_TEXT`、`FILE_READ_TIMEOUT`、`FILE_VIEW_UNSUPPORTED`。
 
 ## 开发指南
 
@@ -623,6 +627,7 @@ hub 静态托管路径相对 `hub/src`，**请从仓库根**执行 `bun run dev:
 
 - 发版记录：[CHANGELOG.md](CHANGELOG.md)
 - 中转 + iOS：[docs/superpowers/specs/2026-09-12-armada-relay-mobile-design.md](docs/superpowers/specs/2026-09-12-armada-relay-mobile-design.md)
+- 工作区文件预览：[docs/superpowers/specs/2026-09-22-armada-workspace-file-preview-design.md](docs/superpowers/specs/2026-09-22-armada-workspace-file-preview-design.md)
 - Android 遥控器：[docs/superpowers/specs/2026-09-17-armada-android-app-design.md](docs/superpowers/specs/2026-09-17-armada-android-app-design.md)
 - App 任务隐藏：[docs/superpowers/specs/2026-09-16-armada-app-run-hide-design.md](docs/superpowers/specs/2026-09-16-armada-app-run-hide-design.md)
 - App 可见 APNs：[docs/superpowers/specs/2026-09-16-armada-app-push-design.md](docs/superpowers/specs/2026-09-16-armada-app-push-design.md)

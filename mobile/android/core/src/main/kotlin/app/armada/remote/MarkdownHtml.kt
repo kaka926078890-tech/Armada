@@ -210,7 +210,11 @@ th { font-weight: 600; }
         s = s.replace(Regex("`([^`]+)`"), "<code>$1</code>")
         s = s.replace(Regex("""\*\*([^*]+)\*\*"""), "<strong>$1</strong>")
         s = s.replace(Regex("""\*([^*]+)\*"""), "<em>$1</em>")
-        s = s.replace(Regex("""\[([^\]]+)\]\(([^)]+)\)"""), "<a href=\"$2\">$1</a>")
+        s = s.replace(Regex("""\[([^\]]+)\]\(([^)]+)\)""")) { m ->
+            val label = m.groupValues[1]
+            val href = WorkspaceFile.rewriteHref(m.groupValues[2])
+            """<a href="${href.replace("\"", "&quot;")}">$label</a>"""
+        }
         return s
     }
 

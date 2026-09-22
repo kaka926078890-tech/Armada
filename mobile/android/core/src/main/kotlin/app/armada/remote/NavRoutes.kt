@@ -20,3 +20,6 @@ fun decodeNavArg(value: String): String = java.net.URLDecoder.decode(value, Char
 fun workspaceNavRoute(id: String): String = "ws?id=${encodeNavArg(id)}"
 
 fun runNavRoute(id: String): String = "run?id=${encodeNavArg(id)}"
+
+fun fileNavRoute(runId: String, path: String): String =
+    "file?runId=${encodeNavArg(runId)}&path=${encodeNavArg(path)}"

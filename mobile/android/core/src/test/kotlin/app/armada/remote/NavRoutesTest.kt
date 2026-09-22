@@ -27,10 +27,15 @@ class NavRoutesTest {
     }
 
     @Test
-    fun runIdUsesQueryNotPathSlash() {
-        val id = "r-81d114a1-82ef-4dc7-b78b-f432627c007c"
-        val route = runNavRoute(id)
-        assertEquals("run?id=$id", route)
-        assertEquals(id, decodeNavArg(route.removePrefix("run?id=")))
+    fun filePathUsesQueryNotPathSlash() {
+        val path = "docs/superpowers/specs/foo.md"
+        val route = fileNavRoute("r-1", path)
+        assertTrue(route.startsWith("file?runId="), route)
+        assertFalse(route.contains("/docs"), route)
+        val q = route.removePrefix("file?").split("&")
+        val runId = decodeNavArg(q.first { it.startsWith("runId=") }.removePrefix("runId="))
+        val got = decodeNavArg(q.first { it.startsWith("path=") }.removePrefix("path="))
+        assertEquals("r-1", runId)
+        assertEquals(path, got)
     }
 }
