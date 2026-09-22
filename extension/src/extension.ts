@@ -10,7 +10,7 @@ import { SpoolForwarder } from "./spool";
 import { matchHookToPending, claimConversation, eventBelongsToWindow, transcriptPathBelongsToCid, runIdForHook, rememberSubagent, isAmbiguousMatch, dropPendingRuns, type PendingRun, type BindingMatch } from "./binding";
 import { TranscriptTailer } from "./transcript";
 import { Executor, CancelWatcher } from "./executor";
-import { createCdpSubmitter, createImagePaster, createFileMentionPaster, createComposerFinisher, createAskQuestionDriver, probeCdpReady, probeCdpReadyForInject, type AskCdpInspect } from "./cdpInject";
+import { createCdpSubmitter, createImagePaster, createFileMentionPaster, createComposerFinisher, createAskQuestionDriver, probeCdpReadyForInject, type AskCdpInspect } from "./cdpInject";
 import { createOsClipboardWriter } from "./osClipboard";
 import { mergeHooks, hooksDriftHash, spoolScriptName, shouldInstallArmadaHooks } from "./hooksInstall";
 import { collectTranscriptViews, collectTranscriptTails, matchTranscriptToPending, stopPayloadFromTranscriptLine, stopFromTranscriptFileContent, transcriptsDirForWorkspace, isWithinTranscriptBindWindow, FollowupStopGuard, listSubagentTranscripts, childCidFromSubagentPath, decideLateTranscriptAttach, transcriptJsonlPath } from "./transcriptBind";
@@ -436,7 +436,7 @@ export function activate(context: vscode.ExtensionContext): void {
     try {
       queueMessageDefaultBehavior = vscode.workspace.getConfiguration("cursor.composer").get("queueMessageDefaultBehavior");
     } catch { /* tests / missing config */ }
-    void probeCdpReady({ port: config.cdpPort }).then((cdpReady) => {
+    void probeCdpReadyForInject({ port: config.cdpPort }).then((cdpReady) => {
       core.enqueue({
         type: "heartbeat",
         openWorkspaces: workspaces(),
@@ -676,7 +676,7 @@ export function activate(context: vscode.ExtensionContext): void {
       if (ws !== sock) return;
       log("ws open, registering");
       core.onOpen();
-      void probeCdpReady({ port: config.cdpPort }).then((cdpReady) => {
+      void probeCdpReadyForInject({ port: config.cdpPort }).then((cdpReady) => {
         if (ws !== sock) return;
         core.sendRegister({
           type: "register", machineId, windowId,

@@ -1192,6 +1192,12 @@ describe("AskQuestion CDP driver", () => {
     expect(src).toMatch(/askDriver\.submit\(\s*workspaceRoot,\s*action,\s*letter,\s*kind/);
   });
 
+  test("register and heartbeat retry the 9222 probe so one blip does not clear cdpReady", () => {
+    const src = readFileSync(join(import.meta.dir, "../src/extension.ts"), "utf8");
+    expect(src).not.toMatch(/probeCdpReady\(\{ port: config\.cdpPort \}\)/);
+    expect(src.match(/probeCdpReadyForInject\(\{ port: config\.cdpPort \}\)/g)).toHaveLength(3);
+  });
+
   test("extension shares windowId CDP deps and returns image paste result object", () => {
     const src = readFileSync(join(import.meta.dir, "../src/extension.ts"), "utf8");
     expect(src).toMatch(/const cdpDeps = \{ port: config\.cdpPort, log, windowId \}/);

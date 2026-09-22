@@ -249,7 +249,7 @@ export async function probeCdpReady(opts: {
   }
 }
 
-/** 注入前探口：9222 闪断重试，心跳仍用 probeCdpReady。 */
+/** 注入前、注册、心跳都走这条：9222 闪断重试三次。一次超时不再把 cdpReady 打成 false。 */
 export async function probeCdpReadyForInject(opts: {
   port: number;
   fetchJson?: (url: string, timeoutMs: number) => Promise<unknown>;
