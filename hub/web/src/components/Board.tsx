@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { groupRuns, cardView, clipCardTitle, COLUMN_LABELS, canArchiveRun, canRetryRun, isUnreadAlert, isUnreadNeedInput, machineLabel, workspaceFolderName, runDisplayName, cardChromeClass, cardChromeOf, columnHasAlert, type ColumnKey, type RunRow } from "../boardState";
+import { groupRuns, cardView, clipCardTitle, COLUMN_LABELS, canArchiveRun, canRetryRun, isUnreadAlert, isUnreadNeedInput, machineLabel, workspaceFolderName, runDisplayName, cardChromeClass, cardChromeOf, columnHasAlert, unreadAlertDotClass, type ColumnKey, type RunRow } from "../boardState";
 import type { Machine } from "../types";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -34,7 +34,7 @@ function CardSpinner() {
   );
 }
 
-export default function Board({ runs, machines, selected, onSelect, showArchived, onHide, onUnhide, readMap, onRename, onRetry }: {
+export default function Board({ runs, machines, selected, onSelect, showArchived, onHide, onUnhide, readMap, onRename, onRetry, quietUnread = false }: {
   runs: RunRow[]; machines: Machine[]; selected: string | null; onSelect: (id: string) => void;
   showArchived: boolean;
   onHide: (id: string) => void;
@@ -42,6 +42,7 @@ export default function Board({ runs, machines, selected, onSelect, showArchived
   readMap: Record<string, number>;
   onRename: (id: string, title: string) => void;
   onRetry?: (id: string) => void;
+  quietUnread?: boolean;
 }) {
   const g = groupRuns(runs);
   const now = Date.now();
@@ -69,7 +70,7 @@ export default function Board({ runs, machines, selected, onSelect, showArchived
           <h2 className={`${UI_META} tracking-wide uppercase text-muted-foreground px-2.5 pb-2 pt-2 inline-flex items-center gap-1.5 whitespace-nowrap`}>
             {COLUMN_LABELS[col]} <span className="text-muted-foreground/70 normal-case tracking-normal">{g[col].length}</span>
             {columnHasAlert(runs, col, readMap) ? (
-              <span className="size-1.5 shrink-0 rounded-full bg-red-400" data-col-alert={col} title="待处理或未读异常" />
+              <span className={`size-1.5 shrink-0 rounded-full ${unreadAlertDotClass(quietUnread)}`} data-col-alert={col} title={quietUnread ? "待处理或未读异常（免打扰）" : "待处理或未读异常"} />
             ) : null}
           </h2>
           <div className="flex-1 overflow-y-auto flex flex-col gap-1.5 px-1.5 pb-2">
@@ -109,7 +110,7 @@ export default function Board({ runs, machines, selected, onSelect, showArchived
                       )}
                       <div className={`${UI_META} text-muted-foreground mt-1 flex justify-between items-center gap-2`}>
                         <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
-                          {unread ? <span className={`size-1.5 shrink-0 rounded-full ${chrome === "done" ? "bg-emerald-400" : "bg-red-400"}`} title={chrome === "need" ? "待处理" : chrome === "fail" ? "异常未读" : "未读"} /> : null}
+                          {unread ? <span className={`size-1.5 shrink-0 rounded-full ${chrome === "done" ? "bg-emerald-400" : unreadAlertDotClass(quietUnread)}`} title={chrome === "need" ? "待处理" : chrome === "fail" ? "异常未读" : "未读"} /> : null}
                           {col === "running" ? <CardSpinner /> : null}
                           <Badge variant="outline" className={BADGE_COLOR[col]}>{v.badge}</Badge>
                         </span>

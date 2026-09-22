@@ -82,6 +82,15 @@ describe("readUiPrefs / writeUiPrefs / merge", () => {
     expect(mergeUiPrefs(base, { theme: "light" }).readRuns).toEqual({ r1: 9 });
   });
 
+  test("quietUnread defaults off and only accepts true", () => {
+    expect(normalizeUiPrefs({}).quietUnread).toBe(false);
+    expect(normalizeUiPrefs({ quietUnread: true }).quietUnread).toBe(true);
+    expect(normalizeUiPrefs({ quietUnread: "yes" }).quietUnread).toBe(false);
+    const base = { ...UI_PREFS_DEFAULTS, quietUnread: true };
+    expect(mergeUiPrefs(base, { theme: "light" }).quietUnread).toBe(true);
+    expect(mergeUiPrefs(base, { quietUnread: false }).quietUnread).toBe(false);
+  });
+
   test("merge PUT fontScale keeps theme", () => {
     const base = { ...UI_PREFS_DEFAULTS, theme: "light" as const };
     const next = mergeUiPrefs(base, { fontScale: "large" });

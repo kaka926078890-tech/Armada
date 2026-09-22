@@ -20,6 +20,8 @@ export type UiPrefs = {
   readRunsSeeded: boolean;
   detailWidth: number;
   promptSnippets: PromptSnippet[];
+  /** 消息免打扰：未读红点改为灰点，未读本身还在。 */
+  quietUnread: boolean;
 };
 
 export type UiPrefsGetResponse = UiPrefs & { source: "file" | "defaults" };
@@ -33,6 +35,7 @@ export const UI_PREFS_DEFAULTS: UiPrefs = {
   readRunsSeeded: false,
   detailWidth: 0.4,
   promptSnippets: [],
+  quietUnread: false,
 };
 
 function asSnippetItem(raw: unknown): { id?: string; title: string; body: string } | null {
@@ -139,6 +142,7 @@ export function normalizeUiPrefs(raw: unknown): UiPrefs {
     readRunsSeeded: o.readRunsSeeded === true,
     detailWidth,
     promptSnippets: normalizePromptSnippets(o.promptSnippets),
+    quietUnread: o.quietUnread === true,
   };
 }
 
@@ -167,7 +171,7 @@ export function writeUiPrefs(home: string, prefs: UiPrefs): void {
 }
 
 export function mergeUiPrefs(base: UiPrefs, patch: Record<string, unknown>): UiPrefs {
-  const known = ["theme", "fontScale", "selectedWorkspace", "readRuns", "readRunsSeeded", "detailWidth", "promptSnippets"] as const;
+  const known = ["theme", "fontScale", "selectedWorkspace", "readRuns", "readRunsSeeded", "detailWidth", "promptSnippets", "quietUnread"] as const;
   const next: Record<string, unknown> = { ...base };
   for (const k of known) {
     if (Object.prototype.hasOwnProperty.call(patch, k)) next[k] = patch[k];

@@ -336,6 +336,45 @@ export function workspaceHasUnread(runs: RunRow[], readMap: Record<string, numbe
   return workspaceUnreadCount(runs, readMap) > 0;
 }
 
+/** 侧栏角标和卡片红点共用的未读：终态未读，或 Ask 检出时间晚于已读戳。 */
+export function isBoardUnread(run: RunRow, readAt: number | undefined): boolean {
+  return isUnreadAlert(run, readAt) || isUnreadNeedInput(run, readAt);
+}
+
+/** 盖已读时不能早于活动时间或 Ask 检出时间，否则红点会立刻回来。 */
+export function unreadWatermark(run: RunRow): number {
+  return Math.max(runActivityTs(run), run.pending_ask?.detected_at ?? 0);
+}
+
+export function applyMarkAllRead(
+  readAt: Record<string, number>,
+  runs: RunRow[],
+  nowMs: number,
+): { readAt: Record<string, number>; stampedIds: string[] } {
+  let next: Record<string, number> | null = null;
+  const stampedIds: string[] = [];
+  for (const run of runs) {
+    if (!isBoardUnread(run, readAt[run.id])) continue;
+    const watermark = unreadWatermark(run);
+    const seen = (next ?? readAt)[run.id];
+    if (seen != null && !(watermark > seen)) continue;
+    if (!next) next = { ...readAt };
+    next[run.id] = Math.max(nowMs, watermark);
+    stampedIds.push(run.id);
+  }
+  if (!next) return { readAt, stampedIds: [] };
+  return { readAt: next, stampedIds };
+}
+
+/** 免打扰只改红点颜色。已完成未读仍是绿点。 */
+export function unreadAlertDotClass(quiet: boolean): string {
+  return quiet ? "bg-zinc-400" : "bg-red-400";
+}
+
+export function unreadBadgeClass(quiet: boolean): string {
+  return quiet ? "bg-zinc-400 text-zinc-950" : "bg-red-500 text-white";
+}
+
 export function isHubArchived(run: Pick<RunRow, "archived_at">): boolean {
   return run.archived_at != null && run.archived_at > 0;
 }

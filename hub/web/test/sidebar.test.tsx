@@ -12,6 +12,35 @@ const slot: WorkspaceSlot = {
   cdpReady: true,
 };
 
+describe("Sidebar unread quiet", () => {
+  test("quiet mode grays the workspace unread count", () => {
+    const html = renderToStaticMarkup(
+      <Sidebar
+        slots={[slot]}
+        machines={[{
+          id: "m-win", name: "PF39WTSM", os: "win32", cursor_version: "1.128.0",
+          extension_version: REQUIRED_EXTENSION_VERSION, open_workspaces: "[]", status: "online", last_seen_at: 1,
+          display_name: "Win Destop",
+        }]}
+        allRuns={[{
+          id: "r-1", machine_id: "m-win", window_id: null, workspace_root: slot.root,
+          prompt: "done", status: "completed", conversation_id: null, transcript_path: null,
+          parent_run_id: null, created_at: 1, started_at: 2, ended_at: 3, end_reason: "completed",
+        }]}
+        selectedKey={null}
+        onSelectWorkspace={() => {}}
+        readMap={{}}
+        onDispatch={() => {}}
+        onRename={() => {}}
+        quietUnread
+      />,
+    );
+    expect(html).toContain("bg-zinc-400");
+    expect(html).not.toContain("bg-red-500");
+    expect(html).toContain(">1<");
+  });
+});
+
 describe("Sidebar extension lag", () => {
   test("stale vsix shows under the machine name", () => {
     const html = renderToStaticMarkup(

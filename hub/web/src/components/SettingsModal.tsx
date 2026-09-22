@@ -70,6 +70,7 @@ function SnippetRow({
 export default function SettingsModal({
   theme, fontScale, onTheme, onFontScale, onClose,
   snippets = [], saveSnippets, reloadSnippets, snippetError = "",
+  quietUnread = false, onQuietUnread, canMarkAllRead = false, onMarkAllRead,
 }: {
   theme: ThemeName;
   fontScale: FontScale;
@@ -80,6 +81,10 @@ export default function SettingsModal({
   saveSnippets?: (next: PromptSnippet[]) => Promise<void>;
   reloadSnippets?: () => void;
   snippetError?: string;
+  quietUnread?: boolean;
+  onQuietUnread?: (next: boolean) => void;
+  canMarkAllRead?: boolean;
+  onMarkAllRead?: () => void;
 }) {
   useEffect(() => { reloadSnippets?.(); }, [reloadSnippets]);
 
@@ -108,6 +113,23 @@ export default function SettingsModal({
             <Button type="button" variant={fontScale === "normal" ? "secondary" : "outline"} onClick={() => onFontScale("normal")}>正常</Button>
             <Button type="button" variant={fontScale === "large" ? "secondary" : "outline"} onClick={() => onFontScale("large")}>大</Button>
             <Button type="button" variant={fontScale === "xlarge" ? "secondary" : "outline"} onClick={() => onFontScale("xlarge")}>超大</Button>
+          </div>
+        </div>
+        <div>
+          <div className={`${UI_LABEL} uppercase tracking-wide mb-1.5`}>消息</div>
+          <div className="flex flex-col gap-2">
+            <Button
+              type="button"
+              variant={quietUnread ? "secondary" : "outline"}
+              aria-pressed={quietUnread}
+              onClick={() => onQuietUnread?.(!quietUnread)}
+            >
+              消息免打扰
+            </Button>
+            <p className={`${UI_META} text-muted-foreground`}>开启后，未读红点改为灰点，未读数量仍在。</p>
+            <Button type="button" variant="outline" disabled={!canMarkAllRead} onClick={() => onMarkAllRead?.()}>
+              清除所有已读
+            </Button>
           </div>
         </div>
         <div>

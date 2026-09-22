@@ -19,6 +19,7 @@ describe("shouldMigrateLocal", () => {
     expect(localDiffersFromDefaults({ ...UI_PREFS_DEFAULTS, detailWidth: 800 })).toBe(true);
     expect(localDiffersFromDefaults({ ...UI_PREFS_DEFAULTS, readRunsSeeded: true })).toBe(true);
     expect(localDiffersFromDefaults({ ...UI_PREFS_DEFAULTS, fontScale: "large" })).toBe(true);
+    expect(localDiffersFromDefaults({ ...UI_PREFS_DEFAULTS, quietUnread: true })).toBe(true);
     expect(localDiffersFromDefaults({ ...UI_PREFS_DEFAULTS, promptSnippets: [] })).toBe(false);
     expect(localDiffersFromDefaults({
       ...UI_PREFS_DEFAULTS,

@@ -84,6 +84,29 @@ describe("Board unread chrome", () => {
     expect(html).toContain("border-l-red-400");
     expect(html).not.toContain("border-l-emerald-400");
     expect(html).toContain("data-col-alert=\"error\"");
+    expect(html).toContain("bg-red-400");
+  });
+
+  test("quiet mode turns the error dot gray and leaves the red status bar", () => {
+    const html = renderToStaticMarkup(
+      <Board
+        runs={[{ ...run, status: "error", end_reason: "REJECTED", conversation_id: null }]}
+        machines={[{ id: "m-1", name: "Mac-A", os: "darwin", cursor_version: null, extension_version: null, open_workspaces: "[]", status: "online", last_seen_at: 1 }]}
+        selected={null}
+        onSelect={() => {}}
+        showArchived={false}
+        onHide={() => {}}
+        onUnhide={() => {}}
+        readMap={{}}
+        onRename={() => {}}
+        onRetry={() => {}}
+        quietUnread
+      />,
+    );
+    expect(html).toContain("bg-zinc-400");
+    expect(html).not.toContain("bg-red-400");
+    expect(html).toContain("border-l-red-400");
+    expect(html).toContain("data-col-alert=\"error\"");
   });
 
   test("error card shows a retry button", () => {

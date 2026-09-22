@@ -7,7 +7,7 @@ import type { Machine } from "./types";
 import type { CursorReloadPendingView, RunRow } from "./boardState";
 import {
   decodeWorkspaceKey, encodeWorkspaceKey, filterRunsByWorkspace, listWorkspaceSlots, sortConversations,
-  workspaceFolderName, resolveSelectedWorkspace,
+  workspaceFolderName, resolveSelectedWorkspace, applyMarkAllRead, isBoardUnread,
   BOARD_SSE_DEBOUNCE_MS, boardSseShouldRefresh,
 } from "./boardState";
 import { applyAlertOpen } from "./alertOpen";
@@ -23,7 +23,7 @@ import { Input } from "./components/ui/input";
 import { UI_META, UI_TYPE } from "./ui";
 import {
   WS_KEY, READ_KEY, READ_SEEDED,
-  loadLocalUiPrefsMirror, applyUiPrefsToLocalStorage,
+  loadLocalUiPrefsMirror, applyUiPrefsToLocalStorage, loadQuietUnread, saveQuietUnread,
   shouldMigrateLocal, shouldSeedReadRuns,
   type UiPrefs, type UiPrefsGetResponse, type PromptSnippet,
 } from "./uiPrefs";
@@ -93,6 +93,7 @@ export default function App() {
   const [theme, setTheme] = useState<ThemeName>(() => loadTheme());
   const [fontScale, setFontScale] = useState<FontScale>(() => loadFontScale());
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [quietUnread, setQuietUnread] = useState(loadQuietUnread);
   const [snippets, setSnippets] = useState<PromptSnippet[]>([]);
   const [snippetError, setSnippetError] = useState("");
   const [cursorReload, setCursorReload] = useState<{
@@ -125,6 +126,23 @@ export default function App() {
     return sortConversations(filterRunsByWorkspace(boardSource, selected.machineId, selected.root));
   }, [boardSource, selected?.machineId, selected?.root]);
   const boardRuns = conversations;
+
+  const canMarkAllRead = useMemo(
+    () => [...runs, ...hiddenRuns].some((r) => isBoardUnread(r, readMap[r.id])),
+    [runs, hiddenRuns, readMap],
+  );
+
+  const markAllRead = useCallback(() => {
+    const result = applyMarkAllRead(readMapRef.current, [...runs, ...hiddenRuns], Date.now());
+    if (result.stampedIds.length === 0) return;
+    try { localStorage.setItem(READ_KEY, JSON.stringify(result.readAt)); } catch { /* quota / private */ }
+    readMapRef.current = result.readAt;
+    setReadMap(result.readAt);
+    if (readPatchTimer.current) clearTimeout(readPatchTimer.current);
+    readPatchTimer.current = setTimeout(() => {
+      void api.putUiPrefs({ readRuns: readMapRef.current }).catch(() => {});
+    }, 300);
+  }, [runs, hiddenRuns]);
 
   const persistRead = useCallback((runId: string) => {
     setReadMap((prev) => {
@@ -251,6 +269,7 @@ export default function App() {
         setSelectedWs(prefs.selectedWorkspace);
         setReadMap(prefs.readRuns);
         setReadRunsSeeded(prefs.readRunsSeeded);
+        setQuietUnread(prefs.quietUnread === true);
         if (shouldMigrateLocal(source, local)) {
           try {
             const migrated = await api.putUiPrefs({
@@ -260,6 +279,7 @@ export default function App() {
               readRuns: local.readRuns,
               readRunsSeeded: local.readRunsSeeded,
               detailWidth: local.detailWidth,
+              quietUnread: local.quietUnread,
             }) as UiPrefs;
             if (cancelled) return;
             applyUiPrefsToLocalStorage(migrated);
@@ -268,6 +288,7 @@ export default function App() {
             setSelectedWs(migrated.selectedWorkspace);
             setReadMap(migrated.readRuns);
             setReadRunsSeeded(migrated.readRunsSeeded);
+            setQuietUnread(migrated.quietUnread === true);
           } catch { /* keep hub defaults already applied */ }
         }
       } catch {
@@ -514,6 +535,7 @@ export default function App() {
           reloadBusy={reloadBusy}
           requiredVsix={cursorReload.required}
           packNotice={cursorReload.notice}
+          quietUnread={quietUnread}
         />
         <div className="flex-1 min-w-0 min-h-0 flex flex-col">
           {showArchived && (
@@ -528,6 +550,7 @@ export default function App() {
             onSelect={openRun}
             showArchived={showArchived}
             readMap={readMap}
+            quietUnread={quietUnread}
             onHide={(id) => { api.archive(id).then(() => { setSelectedRun((cur) => cur === id ? null : cur); refresh(); }); }}
             onUnhide={(id) => { api.unarchive(id).then(refresh); }}
             onRename={(id, prompt) => { api.renameRun(id, prompt).then(refresh); }}
@@ -587,6 +610,14 @@ export default function App() {
             setFontScale(next);
             void api.putUiPrefs({ fontScale: next }).catch(() => {});
           }}
+          quietUnread={quietUnread}
+          onQuietUnread={(next) => {
+            saveQuietUnread(next);
+            setQuietUnread(next);
+            void api.putUiPrefs({ quietUnread: next }).catch(() => {});
+          }}
+          canMarkAllRead={canMarkAllRead}
+          onMarkAllRead={markAllRead}
           onClose={() => setSettingsOpen(false)}
         />
       )}

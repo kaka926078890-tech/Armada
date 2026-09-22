@@ -6,6 +6,7 @@ import {
   filterRunsByWorkspace, sortConversations, groupSlotsByMachine, isUnreadCompleted, isUnreadMessage,
   workspaceHasUnread, workspaceUnreadCount, formatUnreadCount, canArchiveRun, canRetryRun, isHubArchived,
   workspaceFolderName, workspaceHasLiveRun, resolveSelectedWorkspace, isUnreadNeedInput, cardChromeClass, cardChromeOf, columnHasAlert,
+  applyMarkAllRead, isBoardUnread, unreadAlertDotClass, unreadBadgeClass,
   extensionLagNotice, REQUIRED_EXTENSION_VERSION, reloadPendingForMachine, type RunRow,
   BOARD_SSE_DEBOUNCE_MS, boardSseShouldRefresh,
 } from "../src/boardState";
@@ -200,6 +201,40 @@ describe("unread dots", () => {
     const aborted = { ...base, id: "a1", status: "aborted", ended_at: 9 };
     expect(columnHasAlert([aborted], "cancelled", {})).toBe(true);
     expect(columnHasAlert([aborted], "cancelled", { a1: 9000 })).toBe(false);
+  });
+
+  test("mark all read stamps unread terminal and ask rows, and leaves the map when nothing is unread", () => {
+    const done = { ...base, id: "done", status: "completed", ended_at: 5000 };
+    const ask = {
+      ...base,
+      id: "ask",
+      pending_ask: { request_id: "a1", questions: [], detected_at: 8000 },
+    };
+    const live = { ...base, id: "live", status: "running" };
+    const seen = { ...base, id: "seen", status: "error", ended_at: 4000 };
+    const prior = { seen: 9000 };
+    const marked = applyMarkAllRead(prior, [done, ask, live, seen], 100);
+    expect(marked.stampedIds.sort()).toEqual(["ask", "done"]);
+    expect(marked.readAt.done).toBe(5000);
+    expect(marked.readAt.ask).toBe(8000);
+    expect(marked.readAt.seen).toBe(9000);
+    expect(marked.readAt.live).toBeUndefined();
+    expect(isBoardUnread(done, marked.readAt.done)).toBe(false);
+    expect(isBoardUnread(ask, marked.readAt.ask)).toBe(false);
+    expect(isBoardUnread(live, marked.readAt.live)).toBe(false);
+    const again = applyMarkAllRead(marked.readAt, [done, ask, live, seen], 100);
+    expect(again.stampedIds).toEqual([]);
+    expect(again.readAt).toBe(marked.readAt);
+    const ahead = applyMarkAllRead({}, [done], 9000);
+    expect(ahead.readAt.done).toBe(9000);
+  });
+
+  test("quiet mode grays red unread marks and leaves the green completed dot class alone", () => {
+    expect(unreadAlertDotClass(false)).toBe("bg-red-400");
+    expect(unreadAlertDotClass(true)).toBe("bg-zinc-400");
+    expect(unreadBadgeClass(false)).toContain("bg-red-500");
+    expect(unreadBadgeClass(true)).toContain("bg-zinc-400");
+    expect(unreadBadgeClass(true)).not.toContain("bg-red-500");
   });
 
   test("pending_ask unread adds to workspace count with terminal unread", () => {

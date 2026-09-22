@@ -3,7 +3,7 @@ import type { Machine } from "../types";
 import type { RunRow } from "../boardState";
 import {
   encodeWorkspaceKey, extensionLagNotice, filterRunsByWorkspace, formatUnreadCount, groupSlotsByMachine,
-  reloadPendingForMachine, workspaceFolderName, workspaceHasLiveRun, workspaceUnreadCount,
+  reloadPendingForMachine, unreadBadgeClass, workspaceFolderName, workspaceHasLiveRun, workspaceUnreadCount,
   type CursorReloadPendingView, type WorkspaceSlot,
 } from "../boardState";
 import { Button } from "./ui/button";
@@ -11,13 +11,13 @@ import { Input } from "./ui/input";
 import { ScrollArea } from "./ui/scroll-area";
 import { UI_META, UI_TYPE } from "../ui";
 
-function UnreadCount({ n }: { n: number }) {
+function UnreadCount({ n, quiet }: { n: number; quiet: boolean }) {
   const label = formatUnreadCount(n);
   if (!label) return null;
   return (
     <span
-      className="ml-auto shrink-0 min-w-[1.125rem] h-[1.125rem] px-1 rounded-full bg-red-500 text-white text-[12px] font-medium leading-[1.125rem] text-center tabular-nums"
-      title={`${n} 个终态未读`}
+      className={`ml-auto shrink-0 min-w-[1.125rem] h-[1.125rem] px-1 rounded-full text-[12px] font-medium leading-[1.125rem] text-center tabular-nums ${unreadBadgeClass(quiet)}`}
+      title={quiet ? `${n} 个未读（免打扰）` : `${n} 个终态未读`}
     >
       {label}
     </span>
@@ -84,7 +84,7 @@ function ReloadChrome({
 export default function Sidebar({
   slots, machines, allRuns, selectedKey, onSelectWorkspace, readMap, onDispatch, onRename,
   showDesktopActions, onOpenWorkspace, onRepairCdp, onGetShareLink, onReloadMachine, reloadMachineIds,
-  reloadPending, reloadBusy, requiredVsix, packNotice,
+  reloadPending, reloadBusy, requiredVsix, packNotice, quietUnread = false,
 }: {
   slots: WorkspaceSlot[];
   machines: Machine[];
@@ -104,6 +104,7 @@ export default function Sidebar({
   reloadBusy?: Record<string, "now" | "when-idle" | "skip">;
   requiredVsix?: string;
   packNotice?: string | null;
+  quietUnread?: boolean;
 }) {
   const groups = groupSlotsByMachine(slots);
   const selected = slots.find((s) => encodeWorkspaceKey(s.machineId, s.root) === selectedKey);
@@ -213,7 +214,7 @@ export default function Sidebar({
                     <span className={`min-w-0 truncate ${UI_TYPE}`} title={s.root}>{workspaceFolderName(s.root)}</span>
                     {live ? <LiveSpinner /> : null}
                   </span>
-                  <UnreadCount n={unread} />
+                  <UnreadCount n={unread} quiet={quietUnread} />
                 </button>
               );
             })}

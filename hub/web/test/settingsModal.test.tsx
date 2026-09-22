@@ -45,6 +45,28 @@ describe("SettingsModal", () => {
     expect(html).toContain("还没有快捷提示词，在输入框上方点添加");
     expect(html).not.toContain("解绑");
     expect(html).not.toContain("跟随系统");
+    expect(html).toContain("消息免打扰");
+    expect(html).toContain("清除所有已读");
+    expect(html).toContain("未读红点改为灰点");
+    expect(html).toContain('disabled=""');
+  });
+
+  test("quiet mode is pressed and clear-all is enabled when there is unread", () => {
+    const html = renderToStaticMarkup(
+      <SettingsModal
+        theme="dark"
+        fontScale="normal"
+        onTheme={() => {}}
+        onFontScale={() => {}}
+        onClose={() => {}}
+        quietUnread
+        canMarkAllRead
+        onQuietUnread={() => {}}
+        onMarkAllRead={() => {}}
+      />,
+    );
+    expect(html).toContain('aria-pressed="true"');
+    expect(html).not.toContain('disabled=""');
   });
 
   test("edits each snippet with title, body, save, and delete", () => {
