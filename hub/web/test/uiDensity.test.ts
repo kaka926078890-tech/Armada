@@ -236,13 +236,17 @@ describe("App UI density is one scale", () => {
     expect(android).not.toContain("DC2626");
   });
 
-  test("settings snippet row is save then delete as text actions", () => {
+  test("settings snippets are chips; edit sheet saves, corner mark deletes", () => {
     const android = androidUi();
-    const row = android.slice(android.indexOf("fun PromptSnippetSettingsRow"), android.indexOf("fun statusLabel"));
-    expect(row.indexOf("\"保存\"")).toBeGreaterThan(-1);
-    expect(row.indexOf("\"保存\"")).toBeLessThan(row.indexOf("\"删除\""));
-    expect(row).not.toContain("BarButton(\"删除\"");
-    expect(row).not.toContain("BarButton(if (busy)");
+    const settings = android.slice(android.indexOf("fun SettingsScreen"), android.indexOf("fun SnippetEditSheet"));
+    const sheet = android.slice(android.indexOf("fun SnippetEditSheet"), android.indexOf("fun statusLabel"));
+    expect(settings).toContain("BarButton(snippet.title, compact = true)");
+    expect(settings).toContain("\"×\"");
+    expect(settings).not.toContain("PromptSnippetSettingsRow");
+    expect(sheet).toContain("编辑快捷提示词");
+    expect(sheet.indexOf("\"取消\"")).toBeGreaterThan(-1);
+    expect(sheet.indexOf("\"保存\"")).toBeGreaterThan(sheet.indexOf("\"取消\""));
+    expect(sheet).not.toContain("\"删除\"");
   });
 
   test("nav back uses chevron plus previous title; detail bar pads home indicator", () => {

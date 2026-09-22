@@ -36,6 +36,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -1311,11 +1312,14 @@ fun WorkspaceFileScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(vm: SessionVm, onBack: () -> Unit) {
     val state by vm.state.collectAsState()
     val theme by vm.theme.collectAsState()
     val fontScale by vm.fontScale.collectAsState()
+    var editing by remember { mutableStateOf<PromptSnippet?>(null) }
+    val scope = rememberCoroutineScope()
     LaunchedEffect(Unit) { vm.loadSnippets() }
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -1348,79 +1352,93 @@ fun SettingsScreen(vm: SessionVm, onBack: () -> Unit) {
                 if (state.snippets.isEmpty()) {
                     Text("还没有快捷提示词，请在中台添加", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp))
                 } else {
-                    state.snippets.forEachIndexed { index, snippet ->
-                        if (index > 0) GroupedDivider()
-                        androidx.compose.runtime.key(snippet.id) {
-                            PromptSnippetSettingsRow(
-                                snippet = snippet,
-                                onSave = { next ->
-                                    vm.saveSnippets(state.snippets.map { if (it.id == next.id) next else it })
-                                },
-                                onDelete = {
-                                    vm.saveSnippets(state.snippets.filter { it.id != snippet.id })
-                                },
-                            )
+                    Row(
+                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        state.snippets.forEach { snippet ->
+                            androidx.compose.runtime.key(snippet.id) {
+                                Box {
+                                    BarButton(snippet.title, compact = true) { editing = snippet }
+                                    Text(
+                                        "×",
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontSize = 10.sp,
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .offset(x = 4.dp, y = (-4).dp)
+                                            .clip(CircleShape)
+                                            .background(MaterialTheme.colorScheme.surface)
+                                            .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.18f), CircleShape)
+                                            .clickable {
+                                                scope.launch {
+                                                    vm.saveSnippets(state.snippets.filter { it.id != snippet.id })
+                                                }
+                                            }
+                                            .padding(horizontal = 4.dp, vertical = 1.dp),
+                                    )
+                                }
+                            }
                         }
                     }
                 }
             }
         }
     }
+    editing?.let { snippet ->
+        SnippetEditSheet(
+            snippet = snippet,
+            onSave = { next ->
+                vm.saveSnippets(state.snippets.map { if (it.id == next.id) next else it })
+            },
+            onDismiss = { editing = null },
+        )
+    }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PromptSnippetSettingsRow(
+fun SnippetEditSheet(
     snippet: PromptSnippet,
     onSave: suspend (PromptSnippet) -> Unit,
-    onDelete: suspend () -> Unit,
+    onDismiss: () -> Unit,
 ) {
     var title by remember { mutableStateOf(snippet.title) }
     var body by remember { mutableStateOf(snippet.body) }
     var busy by remember { mutableStateOf(false) }
     var rowError by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
-    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        IosTextField(title, { title = it }, "标题", Modifier.fillMaxWidth())
-        IosTextField(body, { body = it }, "提示词", Modifier.fillMaxWidth().height(90.dp), minLines = 3, maxLines = 8)
-        rowError?.let { Text(it, color = StatusRed, style = MaterialTheme.typography.bodySmall) }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            Text(
-                "保存",
-                color = if (busy) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f) else AccentBlue,
-                modifier = Modifier
-                    .clickable(enabled = !busy) {
-                        busy = true
-                        scope.launch {
-                            try {
-                                onSave(snippet.copy(title = title, body = body))
-                                rowError = null
-                            } catch (e: Exception) {
-                                rowError = e.message
-                            } finally {
-                                busy = false
-                            }
+    ModalBottomSheet(
+        onDismissRequest = { if (!busy) onDismiss() },
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = MaterialTheme.colorScheme.background,
+    ) {
+        Column(Modifier.navigationBarsPadding().imePadding()) {
+            IosNavBar(
+                title = "编辑快捷提示词",
+                leading = NavAction("取消", enabled = !busy, onClick = onDismiss),
+                trailing = listOf(NavAction(if (busy) "保存中…" else "保存", enabled = !busy) {
+                    if (busy) return@NavAction
+                    busy = true
+                    scope.launch {
+                        try {
+                            onSave(snippet.copy(title = title, body = body))
+                            rowError = null
+                            busy = false
+                            onDismiss()
+                        } catch (e: Exception) {
+                            rowError = e.message
+                            busy = false
                         }
                     }
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
+                }),
             )
-            Text(
-                "删除",
-                color = if (busy) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f) else StatusRed,
-                modifier = Modifier
-                    .clickable(enabled = !busy) {
-                        busy = true
-                        scope.launch {
-                            try {
-                                onDelete()
-                            } catch (e: Exception) {
-                                rowError = e.message
-                            } finally {
-                                busy = false
-                            }
-                        }
-                    }
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
-            )
+            HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                IosTextField(title, { title = it }, "标题", Modifier.fillMaxWidth())
+                IosTextField(body, { body = it }, "提示词", Modifier.fillMaxWidth().height(140.dp), minLines = 4, maxLines = 10)
+                rowError?.let { Text(it, color = StatusRed, style = MaterialTheme.typography.bodySmall) }
+            }
         }
     }
 }

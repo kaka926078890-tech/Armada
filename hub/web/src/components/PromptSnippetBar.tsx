@@ -35,7 +35,7 @@ export function AddSnippetDialog({
         onKeyDown={(e) => { if (e.key === "Escape") onCancel(); }}
       >
         <DialogHeader>
-          <DialogTitle id="add-snippet-title" className="text-[15px]">{heading}</DialogTitle>
+          <DialogTitle id="add-snippet-title" className={`${UI_TYPE} font-sans leading-snug`}>{heading}</DialogTitle>
           <p className={`mt-1 ${UI_META} leading-relaxed text-muted-foreground`}>{lead}</p>
         </DialogHeader>
         <label className="flex flex-col gap-1.5">

@@ -147,7 +147,7 @@ export default function SettingsModal({
                     aria-label={`删除 ${s.title}`}
                     title="删除"
                     disabled={busy}
-                    className="absolute -top-1 -right-1 z-10 flex size-4 items-center justify-center rounded-full border border-border bg-background text-[10px] leading-none text-muted-foreground hover:text-destructive disabled:opacity-50"
+                    className="absolute -top-1 -right-1 z-10 flex size-4 items-center justify-center rounded-full border border-border bg-background text-[11px] leading-none text-muted-foreground hover:text-destructive disabled:opacity-50"
                     onClick={() => { void remove(s.id); }}
                   >
                     ×

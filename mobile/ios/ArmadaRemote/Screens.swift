@@ -1529,10 +1529,38 @@ struct AskView: View {
     }
 }
 
-struct PromptSnippetSettingsRow: View {
+struct SnippetSettingChip: View {
+    let snippet: PromptSnippet
+    let onEdit: () -> Void
+    let onDelete: () -> Void
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Button(snippet.title, action: onEdit)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .clipShape(Capsule())
+            Button(action: onDelete) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 16, height: 16)
+                    .background(Circle().fill(Color(.systemBackground)))
+                    .overlay(Circle().strokeBorder(Color.primary.opacity(0.15), lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("删除 \(snippet.title)")
+            .offset(x: 6, y: -6)
+        }
+        .padding(.top, 6)
+        .padding(.trailing, 6)
+    }
+}
+
+struct SnippetEditSheet: View {
     let snippet: PromptSnippet
     let onSave: (PromptSnippet) async throws -> Void
-    let onDelete: () async throws -> Void
+    let onClose: () -> Void
     @State private var title: String
     @State private var snippetBody: String
     @State private var busy = false
@@ -1541,40 +1569,51 @@ struct PromptSnippetSettingsRow: View {
     init(
         snippet: PromptSnippet,
         onSave: @escaping (PromptSnippet) async throws -> Void,
-        onDelete: @escaping () async throws -> Void
+        onClose: @escaping () -> Void
     ) {
         self.snippet = snippet
         self.onSave = onSave
-        self.onDelete = onDelete
+        self.onClose = onClose
         _title = State(initialValue: snippet.title)
         _snippetBody = State(initialValue: snippet.body)
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            TextField("标题", text: $title)
-            TextEditor(text: $snippetBody)
-                .frame(minHeight: 90)
-            if let rowError {
-                Text(rowError).foregroundStyle(.red).font(.caption)
-            }
-            HStack {
-                Spacer()
-                Button("保存") {
-                    Task {
-                        await run {
-                            try await onSave(PromptSnippet(id: snippet.id, title: title, body: snippetBody))
-                        }
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("标题", text: $title)
+                }
+                Section("提示词") {
+                    TextEditor(text: $snippetBody)
+                        .frame(minHeight: 140)
+                }
+                if let rowError {
+                    Section {
+                        Text(rowError).foregroundStyle(.red)
                     }
                 }
-                .disabled(busy)
-                Button("删除", role: .destructive) {
-                    Task { await run { try await onDelete() } }
+            }
+            .navigationTitle("编辑快捷提示词")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消", action: onClose).disabled(busy)
                 }
-                .disabled(busy)
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("保存") {
+                        Task {
+                            await run {
+                                try await onSave(PromptSnippet(id: snippet.id, title: title, body: snippetBody))
+                                onClose()
+                            }
+                        }
+                    }
+                    .disabled(busy)
+                }
             }
         }
-        .padding(.vertical, 4)
+        .presentationDetents([.medium, .large])
     }
 
     private func run(_ operation: () async throws -> Void) async {
@@ -1593,6 +1632,7 @@ struct PromptSnippetSettingsRow: View {
 struct SettingsView: View {
     @EnvironmentObject var appearance: Appearance
     @EnvironmentObject var session: Session
+    @State private var editingSnippet: PromptSnippet?
 
     var body: some View {
         List {
@@ -1629,25 +1669,39 @@ struct SettingsView: View {
                     Text("还没有快捷提示词，请在中台添加")
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(session.snippets) { snippet in
-                        PromptSnippetSettingsRow(
-                            snippet: snippet,
-                            onSave: { next in
-                                try await session.saveSnippets(
-                                    session.snippets.map { $0.id == next.id ? next : $0 }
-                                )
-                            },
-                            onDelete: {
-                                try await session.saveSnippets(
-                                    session.snippets.filter { $0.id != snippet.id }
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(session.snippets) { snippet in
+                                SnippetSettingChip(
+                                    snippet: snippet,
+                                    onEdit: { editingSnippet = snippet },
+                                    onDelete: {
+                                        Task {
+                                            try? await session.saveSnippets(
+                                                session.snippets.filter { $0.id != snippet.id }
+                                            )
+                                        }
+                                    }
                                 )
                             }
-                        )
+                        }
                     }
+                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                 }
             }
         }
         .navigationTitle("设置")
+        .sheet(item: $editingSnippet) { snippet in
+            SnippetEditSheet(
+                snippet: snippet,
+                onSave: { next in
+                    try await session.saveSnippets(
+                        session.snippets.map { $0.id == next.id ? next : $0 }
+                    )
+                },
+                onClose: { editingSnippet = nil }
+            )
+        }
         .task { await session.loadSnippets() }
     }
 }
