@@ -36,6 +36,10 @@ class OperatorMessagesTest {
         assertEquals("这不是可预览的文本", operatorMessage("FILE_NOT_TEXT"))
         assertEquals("读取超时，请确认被控机在线且已装最新扩展", operatorMessage("FILE_READ_TIMEOUT"))
         assertEquals("被控扩展太旧，请升级后再查看文件", operatorMessage("FILE_VIEW_UNSUPPORTED"))
+        assertEquals(
+            "Cursor 反复续轮没有进展，这一轮已停。切到该对话后，本机 Resume 会自己消失，生成不会继续。请在中台或 App 发一条续聊接着跑。",
+            operatorMessage("Agent turn stopped after repeated resume attempts made no progress"),
+        )
         assertEquals("先写回复，或不选选项去点上面的答案", operatorMessage("ASK_TEXT_EMPTY"))
         assertEquals("回复太长，请缩短后再发", operatorMessage("ASK_TEXT_TOO_LONG"))
         assertEquals("写点字或加一张图", operatorMessage("EMPTY_PROMPT"))

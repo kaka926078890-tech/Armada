@@ -128,6 +128,17 @@ export const REQUIRED_EXTENSION_VERSION = "0.4.44";
 export const CDP_NOT_READY_COPY =
   "Cursor 在线但无法注入。请确认已安装最新 Armada 扩展，并用 Armada 打开工作区。若窗口已开、调试口不通：请完全退出 Cursor（Mac Cmd+Q / Windows 托盘 Exit），不要点 Cursor 图标。";
 
+/** Cursor jsonl `turn_ended.error` when its own resume retries made no progress. */
+export const RESUME_STALL_REASON =
+  "Agent turn stopped after repeated resume attempts made no progress";
+
+export const RESUME_STALL_COPY =
+  "Cursor 反复续轮没有进展，这一轮已停。切到该对话后，本机 Resume 会自己消失，生成不会继续。请在中台或 App 发一条续聊接着跑。";
+
+export function resumeStallCopy(endReason: string | null | undefined): string | null {
+  return endReason === RESUME_STALL_REASON ? RESUME_STALL_COPY : null;
+}
+
 function parseExtVersion(raw: string | null | undefined): [number, number, number] | null {
   if (typeof raw !== "string") return null;
   const m = raw.trim().match(/^(\d+)\.(\d+)\.(\d+)/);

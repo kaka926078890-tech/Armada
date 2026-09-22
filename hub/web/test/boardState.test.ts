@@ -7,7 +7,7 @@ import {
   workspaceHasUnread, workspaceUnreadCount, formatUnreadCount, canArchiveRun, canRetryRun, isHubArchived,
   workspaceFolderName, workspaceHasLiveRun, resolveSelectedWorkspace, isUnreadNeedInput, cardChromeClass, cardChromeOf, columnHasAlert,
   applyMarkAllRead, isBoardUnread, unreadAlertDotClass, unreadBadgeClass,
-  extensionLagNotice, REQUIRED_EXTENSION_VERSION, reloadPendingForMachine, type RunRow,
+  extensionLagNotice, REQUIRED_EXTENSION_VERSION, reloadPendingForMachine, resumeStallCopy, RESUME_STALL_REASON, type RunRow,
   BOARD_SSE_DEBOUNCE_MS, boardSseShouldRefresh,
 } from "../src/boardState";
 
@@ -384,6 +384,13 @@ describe("board SSE refresh filter", () => {
     expect(boardSseShouldRefresh(JSON.stringify({ type: "run.outbound" }))).toBe(true);
     expect(boardSseShouldRefresh(JSON.stringify({ type: "run.event" }))).toBe(false);
     expect(boardSseShouldRefresh("not-json")).toBe(false);
+  });
+
+  test("resume stall copy matches only Cursor's no-progress stop", () => {
+    expect(resumeStallCopy(RESUME_STALL_REASON)).toContain("本机 Resume");
+    expect(resumeStallCopy(RESUME_STALL_REASON)).toContain("发一条续聊");
+    expect(resumeStallCopy("error")).toBeNull();
+    expect(resumeStallCopy(null)).toBeNull();
   });
 
   test("App.tsx filters and debounces the board EventSource", () => {

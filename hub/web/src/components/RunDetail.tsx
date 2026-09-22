@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { api, getToken } from "../api";
 import type { Machine, RunEvent } from "../types";
-import { workspaceFolderName, runDisplayName, canRetryRun, CDP_NOT_READY_COPY, type RunRow } from "../boardState";
+import { workspaceFolderName, runDisplayName, canRetryRun, CDP_NOT_READY_COPY, resumeStallCopy, type RunRow } from "../boardState";
 import ChatThread from "./ChatThread";
 import FilePreview from "./FilePreview";
 import { eventsToChat, mergePendingAsk, mergeOutboundChat, queuedOutbound, INITIAL_VISIBLE_TURNS, initialHiddenPrefixTurns, recentTurnsWindow, stampFallbackImageIds } from "../chatView";
@@ -415,6 +415,9 @@ export default function RunDetail({
         <div className="truncate" title={run.workspace_root}>{workspaceFolderName(run.workspace_root)}</div>
         {titleError && <div className="mt-1 text-destructive">{titleError}</div>}
         {!injectReady && <div className="mt-1 text-destructive">{CDP_NOT_READY_COPY}</div>}
+        {resumeStallCopy(run.end_reason) && (
+          <div className="mt-1 text-amber-600 dark:text-amber-400" role="status">{resumeStallCopy(run.end_reason)}</div>
+        )}
         <div className="mt-2 flex gap-2 flex-wrap">
           {active && <Button variant="destructive" onClick={() => {
             setCancelError("");

@@ -1,4 +1,4 @@
-import type { RunRow } from "./boardState";
+import { resumeStallCopy, type RunRow } from "./boardState";
 import { requestDesktopAlert } from "./desktopBridge";
 
 export const BASE_TITLE = "Armada";
@@ -36,6 +36,18 @@ export function seedRunStatus(runs: RunRow[]): Map<string, string> {
 }
 
 export const NEED_INPUT_TITLE = "Armada 需要你处理";
+export const RESUME_STALL_TITLE = "Armada 需要续聊";
+
+export function alertTitle(run: RunRow): string {
+  if (resumeStallCopy(run.end_reason)) return RESUME_STALL_TITLE;
+  if (pendingAskId(run)) return NEED_INPUT_TITLE;
+  if (isAlertStatus(run.status)) return ALERT_TITLE[run.status];
+  return ALERT_TITLE.completed;
+}
+
+export function alertBody(run: RunRow): string {
+  return resumeStallCopy(run.end_reason) ?? (pendingAskId(run) ? needInputBody(run) : completionBody(run));
+}
 
 export function pendingAskId(run: RunRow): string | null {
   const id = run.pending_ask?.request_id;
@@ -128,10 +140,8 @@ export async function ensureNotifyPermission(): Promise<boolean> {
 export function showDesktopNotification(run: RunRow, onOpen?: (id: string) => void): void {
   if (!canNotify() || Notification.permission !== "granted") return;
   try {
-    const title = pendingAskId(run) ? NEED_INPUT_TITLE
-      : isAlertStatus(run.status) ? ALERT_TITLE[run.status] : ALERT_TITLE.completed;
-    const n = new Notification(title, {
-      body: pendingAskId(run) ? needInputBody(run) : completionBody(run),
+    const n = new Notification(alertTitle(run), {
+      body: alertBody(run),
       tag: pendingAskId(run) ? `armada-ask-${run.id}` : `armada-run-${run.id}`,
     });
     n.onclick = () => {
@@ -173,7 +183,10 @@ export function alertCompletions(
 ): void {
   const alertable = runs.filter((r) => shouldAlert(r, { watchingId: opts.watchingId }));
   if (alertable.length === 0) return;
-  if (!opts.tabVisible) startTitleMarquee(completionHeadline(alertable));
+  if (!opts.tabVisible) {
+    const stall = alertable.some((r) => resumeStallCopy(r.end_reason));
+    startTitleMarquee(stall ? `${RESUME_STALL_TITLE}     ` : completionHeadline(alertable));
+  }
   if (opts.desktop) {
     for (const r of alertable) {
       if (!isAlertStatus(r.status)) continue;
@@ -181,8 +194,8 @@ export function alertCompletions(
         runId: r.id,
         machineId: r.machine_id,
         workspaceRoot: r.workspace_root,
-        title: ALERT_TITLE[r.status],
-        body: completionBody(r),
+        title: alertTitle(r),
+        body: alertBody(r),
       });
     }
     return;

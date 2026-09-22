@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { groupRuns, cardView, clipCardTitle, COLUMN_LABELS, canArchiveRun, canRetryRun, isUnreadAlert, isUnreadNeedInput, machineLabel, workspaceFolderName, runDisplayName, cardChromeClass, cardChromeOf, columnHasAlert, unreadAlertDotClass, type ColumnKey, type RunRow } from "../boardState";
+import { groupRuns, cardView, clipCardTitle, COLUMN_LABELS, canArchiveRun, canRetryRun, isUnreadAlert, isUnreadNeedInput, machineLabel, workspaceFolderName, runDisplayName, cardChromeClass, cardChromeOf, columnHasAlert, unreadAlertDotClass, resumeStallCopy, type ColumnKey, type RunRow } from "../boardState";
 import type { Machine } from "../types";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -102,6 +102,9 @@ export default function Board({ runs, machines, selected, onSelect, showArchived
                     <button onClick={() => onSelect(r.id)} className="w-full min-w-0 text-left px-2.5 py-2">
                       <div className={`${UI_TYPE} font-medium leading-snug text-foreground break-words line-clamp-2`} title={v.title}>{clipCardTitle(v.title)}</div>
                       <div className={`${UI_META} text-muted-foreground mt-1 truncate`}>{nameOf(r.machine_id)} · {workspaceFolderName(r.workspace_root)}</div>
+                      {resumeStallCopy(r.end_reason) && (
+                        <div className={`${UI_META} text-amber-600 dark:text-amber-400 mt-1 line-clamp-3`}>{resumeStallCopy(r.end_reason)}</div>
+                      )}
                       {r.status === "binding" && (
                         <div className={`${UI_META} text-sky-500/80 mt-1`}>已提交,正在关联会话</div>
                       )}

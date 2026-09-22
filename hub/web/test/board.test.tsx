@@ -188,4 +188,26 @@ describe("Board unread chrome", () => {
     expect(html).toContain("任务执行中");
     expect(html).toContain("animate-spin");
   });
+
+  test("resume stall card tells the operator to follow up from the hub", () => {
+    const html = renderToStaticMarkup(
+      <Board
+        runs={[{
+          ...run,
+          status: "error",
+          end_reason: "Agent turn stopped after repeated resume attempts made no progress",
+        }]}
+        machines={[{ id: "m-1", name: "Mac-A", os: "darwin", cursor_version: null, extension_version: null, open_workspaces: "[]", status: "online", last_seen_at: 1 }]}
+        selected={null}
+        onSelect={() => {}}
+        showArchived={false}
+        onHide={() => {}}
+        onUnhide={() => {}}
+        readMap={{}}
+        onRename={() => {}}
+      />,
+    );
+    expect(html).toContain("本机 Resume 会自己消失");
+    expect(html).toContain("发一条续聊");
+  });
 });

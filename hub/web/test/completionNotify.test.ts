@@ -3,6 +3,7 @@ import type { RunRow } from "../src/boardState";
 import {
   BASE_TITLE, completionHeadline, shouldAlert, seedRunStatus, takeNewlyAlertable,
   seedAskStatus, takeNewlyNeedInput, NEED_INPUT_TITLE, needInputBody,
+  alertTitle, alertBody, RESUME_STALL_TITLE,
 } from "../src/completionNotify";
 
 const base: RunRow = {
@@ -83,5 +84,17 @@ describe("takeNewlyNeedInput", () => {
   test("fifth title and body are the need-input sentence and prompt slice", () => {
     expect(NEED_INPUT_TITLE).toBe("Armada 需要你处理");
     expect(needInputBody({ ...base, pending_ask: pending })).toContain("Questions 框");
+  });
+
+  test("resume stall alerts as a follow-up reminder, not a generic failure", () => {
+    const stalled = {
+      ...base,
+      status: "error",
+      end_reason: "Agent turn stopped after repeated resume attempts made no progress",
+    };
+    expect(alertTitle(stalled)).toBe(RESUME_STALL_TITLE);
+    expect(alertBody(stalled)).toContain("发一条续聊");
+    expect(alertTitle({ ...base, status: "error", end_reason: "CDP_NOT_READY" })).toBe("Armada 任务失败");
+    expect(alertBody({ ...base, status: "error", end_reason: "CDP_NOT_READY" })).toBe("fix the bug");
   });
 });

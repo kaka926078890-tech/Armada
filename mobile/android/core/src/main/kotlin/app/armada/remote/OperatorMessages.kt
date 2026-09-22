@@ -45,6 +45,8 @@ fun operatorMessage(code: String): String = when (code) {
     "FILE_NOT_TEXT" -> "这不是可预览的文本"
     "FILE_READ_TIMEOUT" -> "读取超时，请确认被控机在线且已装最新扩展"
     "FILE_VIEW_UNSUPPORTED" -> "被控扩展太旧，请升级后再查看文件"
+    "Agent turn stopped after repeated resume attempts made no progress" ->
+        "Cursor 反复续轮没有进展，这一轮已停。切到该对话后，本机 Resume 会自己消失，生成不会继续。请在中台或 App 发一条续聊接着跑。"
     else -> code
 }
 
