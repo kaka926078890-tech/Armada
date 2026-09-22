@@ -243,19 +243,13 @@ export class Executor {
     return this.deps.globalState.get<string[]>("armada.authorizedWorkspaces", []) ?? [];
   }
 
-  /** 工作区未出现在任何窗时再开一扇。已打开的 Desk 走 createNew，不要 duplicate 成 Untitled。 */
+  /** 本窗已经打开该文件夹时什么都不做。同仓再派由 hub 在原窗 createNew，不要再复制出 Untitled。 */
   async openWorkspaceWindow(workspaceRoot: string): Promise<void> {
     const root = String(workspaceRoot ?? "").trim();
     if (!root) return;
     const vscode = vs();
     const folders = (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath);
-    // Same folder is already open: vscode.openFolder+forceNewWindow reuses that window on
-    // Windows (r-d4aa8dc3 stayed queued). Duplicate is a second OS window of the same
-    // workspace (title Untitled (Workspace)); do not relaunch via .code-workspace.
-    if (workspacePathIn(root, folders)) {
-      await vscode.commands.executeCommand("workbench.action.duplicateWorkspaceInNewWindow");
-      return;
-    }
+    if (workspacePathIn(root, folders)) return;
     const bin = this.deps.cursorBin?.() ?? defaultCursorBin();
     const file = writeOpenWorkspaceFile(root, this.deps.armadaHome ?? join(homedir(), ".armada"));
     if (bin) {

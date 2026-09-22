@@ -341,19 +341,19 @@ describe("Executor dirty composer", () => {
     expect(acks[acks.length - 1]).toEqual({ type: "run.ack", runId: "r1", status: "accepted" });
   });
 
-  test("openWorkspaceWindow duplicates current workspace instead of openFolder same path", async () => {
+  test("openWorkspaceWindow does nothing when this window already has the folder", async () => {
     const { ex } = makeExec();
     await ex.openWorkspaceWindow("/ws/a");
-    expect(commands).toEqual(["workbench.action.duplicateWorkspaceInNewWindow"]);
-    expect(commandArgs[0] ?? []).toEqual([]);
+    expect(commands).toEqual([]);
+    expect(spawned).toEqual([]);
   });
 
-  test("openWorkspaceWindow duplicates Windows same folder despite slash and drive case", async () => {
-    workspaceFolderPaths = ["c:\\Users\\PC\\Desktop\\work"];
+  test("openWorkspaceWindow does nothing for the same Windows folder despite slash and drive case", async () => {
     const { ex } = makeExec();
     workspaceFolderPaths = ["c:\\Users\\PC\\Desktop\\work"];
     await ex.openWorkspaceWindow("C:/Users/PC/Desktop/work");
-    expect(commands).toEqual(["workbench.action.duplicateWorkspaceInNewWindow"]);
+    expect(commands).toEqual([]);
+    expect(spawned).toEqual([]);
   });
 
   test("openWorkspaceWindow uses vscode.openFolder forceNewWindow for a different folder", async () => {

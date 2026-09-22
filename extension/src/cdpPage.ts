@@ -36,15 +36,6 @@ export function workspaceFolderName(workspaceRoot: string): string {
   return workspaceRoot.split(/[\\/]/).filter(Boolean).pop() ?? workspaceRoot;
 }
 
-/**
- * `workbench.action.duplicateWorkspaceInNewWindow` titles the peer
- * `Untitled (Workspace)` (2026-09-21 r-b703b94a /json). That is still the
- * same folder — not a new `.code-workspace` launch.
- */
-export function isDuplicateWorkspaceTitle(title: string): boolean {
-  return title.replace(/^[●•]\s*/, "").trim() === "Untitled (Workspace)";
-}
-
 export function titleMatchesWorkspace(title: string, folder: string): boolean {
   if (!folder) return false;
   const trimmed = title.trim();

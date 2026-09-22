@@ -150,17 +150,17 @@ describe("Registry", () => {
     ], "/ws/a")).toBe("w-peer");
   });
 
-  test("pickOpenWindowExecutor uses the 0.4.40 window that already has the root", () => {
+  test("pickOpenWindowExecutor skips the window that already has the root", () => {
     expect(pickOpenWindowExecutor([
       { windowId: "w-other", openWorkspaces: ["/ws/b"], extensionVersion: "0.4.40" },
       { windowId: "w-same", openWorkspaces: ["/ws/a"], extensionVersion: "0.4.40" },
-    ], "/ws/a")).toBe("w-same");
+    ], "/ws/a")).toBe("w-other");
   });
 
-  test("pickOpenWindowExecutor falls back to the workspace window when nobody is 0.4.40", () => {
+  test("pickOpenWindowExecutor does not ask the only window to reopen its own folder", () => {
     expect(pickOpenWindowExecutor([
       { windowId: "w-busy", openWorkspaces: ["/ws/a"], extensionVersion: "0.4.38" },
-    ], "/ws/a")).toBe("w-busy");
+    ], "/ws/a")).toBeNull();
   });
 
   test("windowsForWorkspace lists every live window of that root", () => {

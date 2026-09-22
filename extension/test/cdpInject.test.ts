@@ -555,7 +555,7 @@ describe("connectWorkspacePage window stamp", () => {
     expect(logs.get("ws://busy")?.some((c) => c.method === "Input.insertText")).toBe(false);
   });
 
-  test("r-b703b94a: duplicateWorkspaceInNewWindow titles Untitled (Workspace); stamp that page, do not reopen .code-workspace", async () => {
+  test("Untitled (Workspace) is not an inject target", async () => {
     const logs = new Map<string, CallLog[]>();
     const submit = createCdpSubmitter(deps({
       windowId: "0e3307cd-72b5-4412-aa9f-ddd58f410ef81789978151988",
@@ -573,12 +573,14 @@ describe("connectWorkspacePage window stamp", () => {
         });
       },
     }));
-    expect((await submit("/Users/apple/Desktop/desk", "测试：10s后回复我，v2")).ok).toBe(true);
-    expect(logs.get("ws://dup")?.some((c) => c.method === "Input.insertText")).toBe(true);
-    expect(logs.get("ws://busy")?.some((c) => c.method === "Input.insertText")).toBe(false);
+    expect(await submit("/Users/apple/Desktop/desk", "测试：10s后回复我，v2")).toEqual({
+      ok: false, reason: "WINDOW_TARGET_NOT_FOUND",
+    });
+    expect(logs.get("ws://dup")?.some((c) => c.method === "Input.insertText")).toBeFalsy();
+    expect(logs.get("ws://busy")?.some((c) => c.method === "Input.insertText")).toBeFalsy();
   });
 
-  test("two unstamped Untitled (Workspace) pages stay AMBIGUOUS", async () => {
+  test("Untitled (Workspace) pages are ignored", async () => {
     const submit = createCdpSubmitter(deps({
       windowId: "sess-new",
       fetchJson: async () => [
@@ -588,7 +590,7 @@ describe("connectWorkspacePage window stamp", () => {
       connect: async () => stampSession({ stamp: null, evalResults: ["OK", "OK", "OK"] }),
     }));
     expect(await submit("/Users/apple/Desktop/desk", "v2")).toEqual({
-      ok: false, reason: "WINDOW_TARGET_AMBIGUOUS",
+      ok: false, reason: "WINDOW_TARGET_NOT_FOUND",
     });
   });
 

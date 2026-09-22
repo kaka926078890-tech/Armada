@@ -17,6 +17,7 @@ Armada 按 **面** 发版：扩展、桌面、iOS、Android 可以不同号。RE
 ### 修复
 
 - 同工作区再派一条新任务：回到原先 Desk 里的 `composer.createNew`。已打开的窗不再 `duplicateWorkspaceInNewWindow` 出 `Untitled (Workspace)`（16:28 v4），也不再因此整卡排队。注入槽仍串行；未答 Ask 仍占窗。续聊仍跟 Cursor 的 steer/queue。
+- 扩展收到 `run.openWindow` 时，本窗已经打开该文件夹则直接返回，不再复制窗口。CDP 不再把 `Untitled (Workspace)` 当成注入目标。选窗也不再挑已经打开该文件夹的那一扇。
 
 ---
 

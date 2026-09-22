@@ -19,7 +19,7 @@
  */
 
 import { parseAskInspect, parsePlanInspect, planInspectToAsk, type AskInspect } from "./askDetect";
-import { isDuplicateWorkspaceTitle, pickCdpPage, titleMatchesWorkspace, workspaceFolderName } from "./cdpPage";
+import { pickCdpPage, titleMatchesWorkspace, workspaceFolderName } from "./cdpPage";
 
 export interface CdpSubmitResult {
   ok: boolean;
@@ -658,15 +658,8 @@ async function connectWorkspacePage(
       await writeStamp(unstamped[0]!.session);
       return { ok: true, session: unstamped[0]!.session };
     }
-    // Same-folder peer from duplicateWorkspaceInNewWindow: title is Untitled, not the folder name.
-    const duplicated = opened.filter((o) => !o.stamp && isDuplicateWorkspaceTitle(o.title));
-    if (duplicated.length === 1) {
-      closeExcept(duplicated[0]!.session);
-      await writeStamp(duplicated[0]!.session);
-      return { ok: true, session: duplicated[0]!.session };
-    }
     closeExcept(null);
-    if (unstamped.length > 1 || duplicated.length > 1) return { ok: false, reason: "WINDOW_TARGET_AMBIGUOUS" };
+    if (unstamped.length > 1) return { ok: false, reason: "WINDOW_TARGET_AMBIGUOUS" };
     return { ok: false, reason: "WINDOW_TARGET_NOT_FOUND" };
   }
   const picked = pickCdpPage(targets, workspaceRoot);

@@ -41,7 +41,7 @@ export function workspaceListChanged(prev: string[], next: string[]): boolean {
   return false;
 }
 
-/** First vsix that actually opens a second OS window (`duplicateWorkspaceInNewWindow`). */
+/** First vsix that opens a missing workspace with --new-window instead of openFolder on the busy window. */
 export const OPEN_WINDOW_MIN_EXT = "0.4.40";
 
 export type OpenWindowCandidate = {
@@ -50,7 +50,7 @@ export type OpenWindowCandidate = {
   extensionVersion: string | null;
 };
 
-/** Prefer a 0.4.40+ peer so a busy unrestored window is not asked to openFolder its own folder. */
+/** A window that already has the folder must not be asked to open it again. */
 export function pickOpenWindowExecutor(
   windows: OpenWindowCandidate[],
   workspaceRoot: string,
@@ -59,8 +59,8 @@ export function pickOpenWindowExecutor(
     typeof w.extensionVersion === "string" && cmpSemver(w.extensionVersion, OPEN_WINDOW_MIN_EXT) >= 0,
   );
   const pool = capable.length > 0 ? capable : windows;
-  const same = pool.find((w) => workspacePathIn(workspaceRoot, w.openWorkspaces));
-  return same?.windowId ?? pool[0]?.windowId ?? null;
+  const other = pool.find((w) => !workspacePathIn(workspaceRoot, w.openWorkspaces));
+  return other?.windowId ?? null;
 }
 
 export class Registry {
