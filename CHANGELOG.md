@@ -10,6 +10,10 @@ Armada 按 **面** 发版：扩展、桌面、iOS、Android 可以不同号。RE
 
 ## Unreleased
 
+### 修复
+
+- macOS / Linux 安装扩展时直接解包到 `~/.cursor/extensions`，并改写 `extensions.json`。不再调用 `cursor --install-extension`（8 秒超时，失败被丢掉，空闲 Reload 一直看到旧目录）。
+
 ---
 
 ## 2026-09-22 — 扩展 0.4.44 · iOS TF 30 · Android 0.1.13 · 桌面 0.1.0

@@ -20,12 +20,27 @@ Acceptance is **overlay-installed `/Applications/Armada.app`**, then a **spawned
 osascript -e 'display notification "中台已覆盖安装并拉起" with title "Armada"'
 ```
 
-7. If this pack **installed a newer vsix** (`ok`, not `skipped-same-version`), schedule Reload **outside Cursor’s process tree** (never `nohup` from the agent terminal):
+7. Unpack the bundled vsix into Cursor's extensions dir **before** any Reload pending. Use the script in the repo you just built (not a hardcoded path, not `cursor --install-extension`):
+
+```bash
+python3 desktop/scripts/unpack-cursor-vsix.py \
+  "/Applications/Armada.app/Contents/Resources/armada-agent-<version>.vsix"
+```
+
+`<version>` is `extension/package.json`. The script prints one line:
+
+- `ok <version>` — `~/.cursor/extensions/armada.armada-agent-<version>` exists and `extensions.json` identifier `armada.armada-agent` points at it. Schedule Reload.
+- `skipped-same-version <installed>` — do not schedule Reload.
+- anything else, or exit ≠ 0 — do **not** write `~/.armada/pending-reload.json`. Notify the failure. A pending whose folder is missing makes the extension log `missing` every 10s; after 15 minutes of a busy window it logs `expired` and still will not Reload.
+
+The desktop app unpacks on the same path when it creates or restores the fleet (macOS, Linux, and Windows). This step still runs: `finish_create` discards the install result, and a pending written first is the failure this skill is here to prevent.
+
+Only after `ok`, schedule Reload **outside Cursor’s process tree** (never `nohup` from the agent terminal). `SCHEDULE` is `desktop/scripts/schedule-cursor-reload.sh` in that same repo:
 
 ```bash
 python3 - <<'PY'
 import subprocess, pathlib
-script = pathlib.Path("/Users/apple/Desktop/desk/armada/desktop/scripts/schedule-cursor-reload.sh")
+script = pathlib.Path("<armada-repo>/desktop/scripts/schedule-cursor-reload.sh")
 subprocess.Popen(
     ["bash", str(script), "when-idle"],
     start_new_session=True,
@@ -48,7 +63,7 @@ Chicken-egg: **0.4.26 and older do not poll** `pending-reload.json`. The first j
 
 - Attach a source hub on 7380 and call it packaged verify
 - Click-automation on 创建舰队 as the restore path
-- `workbench.action.reloadWindow` or `cursor` CLI from a child of Cursor
+- `workbench.action.reloadWindow` or `cursor --install-extension` from a child of Cursor (install is unpack, on every desktop OS)
 - Reloading when vsix did not change
 - Claiming desktop acceptance before 7380 is the bundled bun
 - 只打 vsix / 只 `Install from VSIX` 就当发完（包装 `REQUIRED_EXTENSION_VERSION` 仍旧号，看板「现在 / 空闲 Reload」会空转）

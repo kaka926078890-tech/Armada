@@ -78,7 +78,7 @@
 
 被控侧看到的就是普通 Cursor 窗口：文件树、Agent 对话、该机自己的账号与模型选择。派发沿用该窗口当前选中的模型。
 
-同一机器可并行多条任务（默认每机 8、每工作区 4）；整机同时只有 1 条处于派发/绑定（CDP 注入串行）。同工作区再派新任务时，已打开的窗走 `composer.createNew`，**不再**再开一扇 Untitled 工作区。注入槽空了就可以并发；未答 Ask 仍占窗。超出限额 → `429 RUN_LIMIT`。同工作区相同 prompt → `409 PROMPT_COLLISION`。关着的工作区不能派（`400 WORKSPACE_NOT_OPEN`）。收口与续聊请用 **armada-agent ≥ 0.4.19**；**文件附件请用 ≥ 0.4.22**（Windows `@` 菜单会等 typeahead）。**当前请装 0.4.44**（空闲 Reload 只在本机已经解包了目标 vsix 时才执行；没有新包不会因为窗口空闲就 Reload。有包时还要等未收口 composer jsonl，且收口后再等 2 分钟）。
+同一机器可并行多条任务（默认每机 8、每工作区 4）；整机同时只有 1 条处于派发/绑定（CDP 注入串行）。同工作区再派新任务时，已打开的窗走 `composer.createNew`，**不再**再开一扇 Untitled 工作区。注入槽空了就可以并发；未答 Ask 仍占窗。超出限额 → `429 RUN_LIMIT`。同工作区相同 prompt → `409 PROMPT_COLLISION`。关着的工作区不能派（`400 WORKSPACE_NOT_OPEN`）。收口与续聊请用 **armada-agent ≥ 0.4.19**；**文件附件请用 ≥ 0.4.22**（Windows `@` 菜单会等 typeahead）。**当前请装 0.4.44**（桌面在 macOS / Linux / Windows 创建或恢复舰队时，把包内 vsix 解包到 `~/.cursor/extensions`。空闲 Reload 只在这个目录里已经有目标版本时才执行；没有新包不会因为窗口空闲就 Reload。有包时还要等未收口 composer jsonl，且收口后再等 2 分钟）。
 
 完成、失败、需要处理选择题时，桌面会弹系统通知，浏览器会闪标题；点通知可回到那张卡。
 

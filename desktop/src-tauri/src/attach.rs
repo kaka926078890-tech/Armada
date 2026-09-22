@@ -238,8 +238,11 @@ pub fn vsix_needs_install(
     }
 }
 
+/// Unpack into `~/.cursor/extensions`. The `cursor --install-extension` CLI
+/// times out (8s) and is not allowed from Cursor's process tree, so a
+/// successful pack never becomes the folder idle Reload checks.
 pub fn vsix_install_via_unpack(os: &str) -> bool {
-    os == "windows"
+    matches!(os, "windows" | "macos" | "linux")
 }
 
 pub fn armada_agent_extension_dir(extensions_dir: &Path, ver: (u64, u64, u64)) -> PathBuf {
@@ -965,9 +968,8 @@ mod tests {
         let _ = fs::remove_dir_all(&roots);
     }
 
-    #[cfg(windows)]
     #[test]
-    fn windows_join_unpacks_newer_vsix_without_cli() {
+    fn join_unpacks_newer_vsix_without_cli() {
         let dir = scratch("exts-old-win");
         fs::create_dir_all(dir.join("armada.armada-agent-0.4.21")).unwrap();
         let roots = scratch("vsix-new-win");
@@ -1068,10 +1070,11 @@ mod tests {
     }
 
     #[test]
-    fn vsix_install_via_unpack_is_windows_only() {
+    fn vsix_install_via_unpack_covers_desktop_hosts() {
         assert!(vsix_install_via_unpack("windows"));
-        assert!(!vsix_install_via_unpack("macos"));
-        assert!(!vsix_install_via_unpack("linux"));
+        assert!(vsix_install_via_unpack("macos"));
+        assert!(vsix_install_via_unpack("linux"));
+        assert!(!vsix_install_via_unpack("ios"));
     }
 
     #[test]
