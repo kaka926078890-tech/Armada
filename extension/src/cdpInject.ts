@@ -92,8 +92,19 @@ function armadaFileMentionCount(el) {
   var root = armadaChipRoot(el);
   return root.querySelectorAll ? root.querySelectorAll('span.mention[data-typeahead-type="file"]').length : 0;
 }
-function armadaHasAttach(el) {
-  return armadaChipCount(el) > 0 || armadaFileMentionCount(el) > 0;
+function armadaImageTarget(els) {
+  var pristine = null, pasted = null, imageOnly = null, anyImage = null, anyFile = null;
+  for (var i = 0; i < els.length; i++) {
+    var t = els[i].innerText.trim();
+    var imgs = armadaChipCount(els[i]);
+    var files = armadaFileMentionCount(els[i]);
+    if (imgs && !anyImage) anyImage = els[i];
+    if (imgs && !files && !imageOnly) imageOnly = els[i];
+    if (imgs && !files && !t && !pasted) pasted = els[i];
+    if (files && !anyFile) anyFile = els[i];
+    if (!t && !imgs && !files && !pristine) pristine = els[i];
+  }
+  return pristine || pasted || imageOnly || anyImage || anyFile || els[0];
 }`;
 
 /** 导出供单测直接 eval(注入 mock document) */
@@ -131,30 +142,14 @@ export const COMPOSER_CHIP_COUNT_JS = `function () {
   ${CHIP_HELPERS}
   var els = ${VISIBLE_ELS};
   if (!els.length) return 0;
-  var empty = null, withImg = null;
-  for (var i = 0; i < els.length; i++) {
-    var t = els[i].innerText.trim();
-    var imgs = armadaChipCount(els[i]);
-    if (imgs && !withImg) withImg = els[i];
-    if (!t && !imgs && !empty) empty = els[i];
-  }
-  var el = empty || withImg || els[0];
-  return armadaChipCount(el);
+  return armadaChipCount(armadaImageTarget(els));
 }`;
 
 export const COMPOSER_FILE_MENTION_COUNT_JS = `function () {
   ${CHIP_HELPERS}
   var els = ${VISIBLE_ELS};
   if (!els.length) return 0;
-  var empty = null, withAtt = null;
-  for (var i = 0; i < els.length; i++) {
-    var t = els[i].innerText.trim();
-    var attach = armadaHasAttach(els[i]);
-    if (attach && !withAtt) withAtt = els[i];
-    if (!t && !attach && !empty) empty = els[i];
-  }
-  var el = empty || withAtt || els[0];
-  return armadaFileMentionCount(el);
+  return armadaFileMentionCount(armadaImageTarget(els));
 }`;
 
 export const COMPOSER_CLICK_FILE_MENTION_JS = `function (needle) {
@@ -177,14 +172,7 @@ export const COMPOSER_FOCUS_IMAGE_JS = `function () {
   ${CHIP_HELPERS}
   var els = ${VISIBLE_ELS};
   if (!els.length) return "NO_INPUT";
-  var empty = null, withImg = null;
-  for (var i = 0; i < els.length; i++) {
-    var t = els[i].innerText.trim();
-    var attach = armadaHasAttach(els[i]);
-    if (attach && !withImg) withImg = els[i];
-    if (!t && !attach && !empty) empty = els[i];
-  }
-  var el = empty || withImg || els[0];
+  var el = armadaImageTarget(els);
   el.focus();
   return "OK";
 }`;
@@ -199,16 +187,7 @@ export const COMPOSER_ENTER_JS = `function (prompt) {
     var t = els[i].innerText.trim();
     if (armadaDraftHit(t, promptT) && t.length > matchedLen) { el = els[i]; matchedLen = t.length; }
   }
-  if (!el) {
-    for (var j = 0; j < els.length; j++) {
-      if (!els[j].innerText.trim()) { el = els[j]; break; }
-    }
-  }
-  if (!el) {
-    for (var k = 0; k < els.length; k++) {
-      if (armadaHasAttach(els[k])) { el = els[k]; break; }
-    }
-  }
+  if (!el) el = armadaImageTarget(els);
   if (!el) return "NO_TARGET";
   el.focus();
   var opts = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true, composed: true };

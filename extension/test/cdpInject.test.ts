@@ -53,9 +53,10 @@ function deps(over: Partial<Parameters<typeof createCdpSubmitter>[0]> = {}) {
 }
 
 /** P1 真机：芯片在 .ai-input-full-input-box 内、输入框 8 层祖先之外；composer-bar 上另有 transcript 药丸不得计入。 */
-function mockDoc(texts: string[], pillCounts: number[] = [], shareBox = false) {
+const FILE_MENTION_SEL = 'span.mention[data-typeahead-type="file"]';
+function mockDoc(texts: string[], pillCounts: number[] = [], shareBox = false, fileMentions: number[] = []) {
   const strayTranscriptPills = [{}, {}, {}];
-  const makeBox = (pills: object[]) => ({
+  const makeBox = (pills: object[], mentions: object[]) => ({
     className: "ai-input-full-input-box full-input-box ",
     offsetHeight: 113,
     parentElement: {
@@ -68,13 +69,17 @@ function mockDoc(texts: string[], pillCounts: number[] = [], shareBox = false) {
     },
     querySelectorAll(sel: string) {
       if (sel === ".context-pill-image") return pills;
+      if (sel === FILE_MENTION_SEL) return mentions;
       return [];
     },
   });
   const sharedPills = shareBox
     ? Array.from({ length: pillCounts[0] ?? 0 }, () => ({ className: "context-pill-image" }))
     : null;
-  const sharedBox = shareBox ? makeBox(sharedPills!) : null;
+  const sharedMentions = shareBox
+    ? Array.from({ length: fileMentions[0] ?? 0 }, () => ({ className: "mention" }))
+    : null;
+  const sharedBox = shareBox ? makeBox(sharedPills!, sharedMentions!) : null;
   const els = texts.map((innerText, i) => {
     const el: {
       innerText: string;
@@ -104,7 +109,8 @@ function mockDoc(texts: string[], pillCounts: number[] = [], shareBox = false) {
       node = wrap;
     }
     const pills = sharedPills ?? Array.from({ length: pillCounts[i] ?? 0 }, () => ({ className: "context-pill-image" }));
-    node.parentElement = sharedBox ?? makeBox(pills);
+    const mentions = sharedMentions ?? Array.from({ length: fileMentions[i] ?? 0 }, () => ({ className: "mention" }));
+    node.parentElement = sharedBox ?? makeBox(pills, mentions);
     return el;
   });
   return {
@@ -122,8 +128,8 @@ function runJs(src: string, texts: string[], prompt: string, imgCounts?: number[
   return { result: String(fn(prompt, reclaim)), els: document.els };
 }
 
-function runJs0(src: string, texts: string[], pillCounts?: number[], shareBox = false): { result: string; els: ReturnType<typeof mockDoc>["els"] } {
-  const document = mockDoc(texts, pillCounts, shareBox);
+function runJs0(src: string, texts: string[], pillCounts?: number[], shareBox = false, fileMentions?: number[]): { result: string; els: ReturnType<typeof mockDoc>["els"] } {
+  const document = mockDoc(texts, pillCounts, shareBox, fileMentions);
   const KeyboardEvent = class {
     constructor(public type: string, public init?: unknown) {}
   };
@@ -256,6 +262,17 @@ describe("composer picker JS", () => {
   test("FOCUS_IMAGE 优先空且无芯片的框", () => {
     const { els } = runJs0(COMPOSER_FOCUS_IMAGE_JS, ["旧对话", ""], [0, 0]);
     expect(els[1].focused).toBe(true);
+  });
+
+  // 2026-09-22：文件药丸占前一框，图已经贴进后一空框。计数若把文件框当空框，CHIP_COUNT 一直是 0。
+  test("文件药丸框不是空框：CHIP_COUNT 与 FOCUS_IMAGE 打在同一框", () => {
+    const texts = ["", ""];
+    const pills = [0, 1];
+    const files = [1, 0];
+    const focus = runJs0(COMPOSER_FOCUS_IMAGE_JS, texts, pills, false, files);
+    expect(focus.els[0].focused).toBe(false);
+    expect(focus.els[1].focused).toBe(true);
+    expect(runJs0(COMPOSER_CHIP_COUNT_JS, texts, pills, false, files).result).toBe("1");
   });
 });
 
