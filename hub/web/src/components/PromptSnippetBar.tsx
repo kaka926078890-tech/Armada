@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { snippetOperatorMessage } from "../promptSnippets";
 import type { PromptSnippet } from "../uiPrefs";
 import { Button } from "./ui/button";
@@ -26,16 +27,16 @@ export function AddSnippetDialog({
   heading?: string;
   lead?: string;
 }) {
-  return (
+  const dialog = (
     <Dialog open onOpenChange={(open) => { if (!open) onCancel(); }}>
       <DialogContent
-        className="sm:max-w-md gap-4"
+        className="sm:max-w-md gap-4 pt-6"
         showCloseButton={false}
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => { if (e.key === "Escape") onCancel(); }}
       >
         <DialogHeader>
-          <DialogTitle id="add-snippet-title" className={`${UI_TYPE} font-sans leading-snug`}>{heading}</DialogTitle>
+          <DialogTitle id="add-snippet-title" className={`${UI_TYPE} font-sans leading-normal`}>{heading}</DialogTitle>
           <p className={`mt-1 ${UI_META} leading-relaxed text-muted-foreground`}>{lead}</p>
         </DialogHeader>
         <label className="flex flex-col gap-1.5">
@@ -71,6 +72,12 @@ export function AddSnippetDialog({
       </DialogContent>
     </Dialog>
   );
+  return placeSnippetDialog(dialog);
+}
+
+function placeSnippetDialog(dialog: ReactNode) {
+  if (typeof document === "undefined") return dialog;
+  return createPortal(dialog, document.body);
 }
 
 export function PromptSnippetBar({

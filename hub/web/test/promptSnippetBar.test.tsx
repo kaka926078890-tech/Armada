@@ -38,7 +38,8 @@ describe("PromptSnippetBar", () => {
     );
     expect(html).toContain('role="dialog"');
     expect(html).toContain("添加快捷提示词");
-    expect(html).toContain("leading-snug");
+    expect(html).toContain("leading-normal");
+    expect(html).toContain("pt-6");
     expect(html).not.toContain("leading-none");
     expect(html).toContain("例如：代码审查");
     expect(html).toContain("点标题后追加到输入框末尾");
