@@ -68,7 +68,7 @@ cp -R "$ROOT/desktop-core/src/." "$DEST/desktop-core/src/"
 # layout is Resources/{hub,extension} so the same relative path must exist.
 echo "==> copy extension modules imported by hub"
 mkdir -p "$DEST/extension/src"
-for f in promptNormalize.ts workspacePath.ts transcriptBind.ts imageMarkers.ts; do
+for f in promptNormalize.ts workspacePath.ts transcriptBind.ts imageMarkers.ts workspaceFile.ts; do
   if [[ ! -f "$ROOT/extension/src/$f" ]]; then
     echo "error: missing $ROOT/extension/src/$f (required by packaged hub)" >&2
     exit 1

@@ -12,6 +12,7 @@ const EXTENSION_FILES = [
   "workspacePath.ts",
   "transcriptBind.ts",
   "imageMarkers.ts",
+  "workspaceFile.ts",
 ] as const;
 
 function materializeSidecar(dest: string, extras: boolean) {
@@ -50,6 +51,7 @@ describe("packaged sidecar hub", () => {
   test("bundle-hub.sh smokes src/index.ts not a subset of hub modules", () => {
     const sh = readFileSync(BUNDLE_HUB, "utf8");
     expect(sh).toContain("import('./src/index.ts')");
+    expect(sh).toContain("workspaceFile.ts");
   });
 
   test("relayClient cannot load from a hub-only dest", async () => {
