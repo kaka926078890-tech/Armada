@@ -69,7 +69,7 @@ describe("SettingsModal", () => {
     expect(html).not.toContain('disabled=""');
   });
 
-  test("edits each snippet with title, body, save, and delete", () => {
+  test("lists saved snippets as chips with a corner delete", () => {
     const html = renderToStaticMarkup(
       <SettingsModal
         theme="dark"
@@ -83,8 +83,13 @@ describe("SettingsModal", () => {
     );
     expect(html).toContain("快捷提示词");
     expect(html).toContain("规范");
-    expect(html).toContain("先写测试");
-    expect(html).toContain("保存");
-    expect(html).toContain("删除");
+    expect(html).toContain("rounded-full");
+    expect(html).toContain('aria-label="删除 规范"');
+    expect(html).toContain("×");
+    expect(html).not.toContain("先写测试");
+    expect(html).not.toContain("编辑快捷提示词");
+    const src = readFileSync(join(root, "src/components/SettingsModal.tsx"), "utf8");
+    expect(src).toContain('heading="编辑快捷提示词"');
+    expect(src).toContain("AddSnippetDialog");
   });
 });

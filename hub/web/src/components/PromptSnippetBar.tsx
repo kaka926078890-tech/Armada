@@ -12,6 +12,8 @@ const BODY_MAX = 8000;
 
 export function AddSnippetDialog({
   title, body, error, saving, onTitle, onBody, onCancel, onSave,
+  heading = "添加快捷提示词",
+  lead = "标题会出现在输入框上方，点它会把提示词追加到末尾。",
 }: {
   title: string;
   body: string;
@@ -21,6 +23,8 @@ export function AddSnippetDialog({
   onBody: (value: string) => void;
   onCancel: () => void;
   onSave: () => void;
+  heading?: string;
+  lead?: string;
 }) {
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onCancel(); }}>
@@ -31,8 +35,8 @@ export function AddSnippetDialog({
         onKeyDown={(e) => { if (e.key === "Escape") onCancel(); }}
       >
         <DialogHeader>
-          <DialogTitle id="add-snippet-title" className="text-[15px]">添加快捷提示词</DialogTitle>
-          <p className={`mt-1 ${UI_META} leading-relaxed text-muted-foreground`}>标题会出现在输入框上方，点它会把提示词追加到末尾。</p>
+          <DialogTitle id="add-snippet-title" className="text-[15px]">{heading}</DialogTitle>
+          <p className={`mt-1 ${UI_META} leading-relaxed text-muted-foreground`}>{lead}</p>
         </DialogHeader>
         <label className="flex flex-col gap-1.5">
           <span className={UI_LABEL}>标题</span>

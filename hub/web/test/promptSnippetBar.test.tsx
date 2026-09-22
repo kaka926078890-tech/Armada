@@ -45,6 +45,28 @@ describe("PromptSnippetBar", () => {
     expect(html).toContain("fixed inset-0");
   });
 
+  test("dialog heading and lead can name an edit", () => {
+    const html = renderToStaticMarkup(
+      <AddSnippetDialog
+        heading="编辑快捷提示词"
+        lead="保存后，输入框上方的标签和追加正文会一起更新。"
+        title="规范"
+        body="先写测试"
+        error=""
+        saving={false}
+        onTitle={() => {}}
+        onBody={() => {}}
+        onCancel={() => {}}
+        onSave={() => {}}
+      />,
+    );
+    expect(html).toContain("编辑快捷提示词");
+    expect(html).toContain("保存后，输入框上方的标签和追加正文会一起更新。");
+    expect(html).toContain("规范");
+    expect(html).toContain("先写测试");
+    expect(html).toContain("保存");
+  });
+
   test("disables add at 30 snippets", () => {
     const snippets = Array.from({ length: 30 }, (_, i) => ({
       id: `ok-id-${String(i).padStart(2, "0")}`,

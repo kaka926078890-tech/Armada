@@ -2,70 +2,12 @@ import { useEffect, useState } from "react";
 import type { FontScale, ThemeName } from "../theme";
 import { snippetOperatorMessage } from "../promptSnippets";
 import type { PromptSnippet } from "../uiPrefs";
+import { AddSnippetDialog } from "./PromptSnippetBar";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
-import { Input } from "./ui/input";
-import { Textarea } from "./ui/textarea";
 import { UI_LABEL, UI_META, UI_TYPE } from "../ui";
 
-function SnippetRow({
-  snippet, onSave, onDelete,
-}: {
-  snippet: PromptSnippet;
-  onSave: (next: PromptSnippet) => Promise<void>;
-  onDelete: () => Promise<void>;
-}) {
-  const [title, setTitle] = useState(snippet.title);
-  const [body, setBody] = useState(snippet.body);
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    setTitle(snippet.title);
-    setBody(snippet.body);
-  }, [snippet.id, snippet.title, snippet.body]);
-
-  const run = async (fn: () => Promise<void>) => {
-    if (busy) return;
-    setBusy(true);
-    setError("");
-    try {
-      await fn();
-    } catch (e) {
-      setError(snippetOperatorMessage(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="flex flex-col gap-2 rounded-lg border border-border bg-card/60 p-3">
-      <label className="flex flex-col gap-1">
-        <span className={UI_LABEL}>标题</span>
-        <Input
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          aria-label="标题"
-        />
-      </label>
-      <label className="flex flex-col gap-1">
-        <span className={UI_LABEL}>提示词</span>
-        <Textarea
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          rows={3}
-          className="resize-y"
-          aria-label="提示词"
-        />
-      </label>
-      {error && <div className={`${UI_TYPE} text-destructive`}>{error}</div>}
-      <div className="flex justify-end gap-2">
-        <Button type="button" disabled={busy} variant="destructive" onClick={() => void run(onDelete)}>删除</Button>
-        <Button type="button" disabled={busy} onClick={() => void run(() => onSave({ ...snippet, title, body }))}>保存</Button>
-      </div>
-    </div>
-  );
-}
+const EDIT_LEAD = "保存后，输入框上方的标签和追加正文会一起更新。";
 
 export default function SettingsModal({
   theme, fontScale, onTheme, onFontScale, onClose,
@@ -86,6 +28,13 @@ export default function SettingsModal({
   canMarkAllRead?: boolean;
   onMarkAllRead?: () => void;
 }) {
+  const [editing, setEditing] = useState<PromptSnippet | null>(null);
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [editError, setEditError] = useState("");
+  const [actionError, setActionError] = useState("");
+  const [busy, setBusy] = useState(false);
+
   useEffect(() => { reloadSnippets?.(); }, [reloadSnippets]);
 
   const persist = async (next: PromptSnippet[]) => {
@@ -93,9 +42,51 @@ export default function SettingsModal({
     await saveSnippets(next);
   };
 
+  const openEdit = (snippet: PromptSnippet) => {
+    if (busy) return;
+    setEditing(snippet);
+    setTitle(snippet.title);
+    setBody(snippet.body);
+    setEditError("");
+  };
+
+  const remove = async (id: string) => {
+    if (busy) return;
+    setBusy(true);
+    setActionError("");
+    try {
+      await persist(snippets.filter((row) => row.id !== id));
+    } catch (e) {
+      setActionError(snippetOperatorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveEdit = async () => {
+    if (!editing || busy) return;
+    setBusy(true);
+    setEditError("");
+    try {
+      await persist(snippets.map((row) => row.id === editing.id ? { ...row, title, body } : row));
+      setEditing(null);
+    } catch (e) {
+      setEditError(snippetOperatorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="sm:max-w-[28rem] max-h-[80vh] overflow-y-auto gap-4" showCloseButton={false} onClick={(e) => e.stopPropagation()}>
+    <Dialog open onOpenChange={(open) => { if (!open && !editing) onClose(); }}>
+      <DialogContent
+        className="sm:max-w-[28rem] max-h-[80vh] overflow-y-auto gap-4"
+        showCloseButton={false}
+        onClick={(e) => e.stopPropagation()}
+        onPointerDownOutside={(e) => { if (editing) e.preventDefault(); }}
+        onInteractOutside={(e) => { if (editing) e.preventDefault(); }}
+        onEscapeKeyDown={(e) => { if (editing) e.preventDefault(); }}
+      >
         <DialogHeader className="flex-row items-center justify-between">
           <DialogTitle className={UI_TYPE}>设置</DialogTitle>
           <Button type="button" variant="outline" onClick={onClose}>完成</Button>
@@ -135,19 +126,49 @@ export default function SettingsModal({
         <div>
           <div className={`${UI_LABEL} uppercase tracking-wide mb-1.5`}>快捷提示词</div>
           {snippetError && <div className={`${UI_TYPE} text-destructive mb-1.5`}>{snippetError}</div>}
+          {actionError && <div className={`${UI_TYPE} text-destructive mb-1.5`}>{actionError}</div>}
           {snippets.length === 0 ? (
             <div className={`${UI_META} text-muted-foreground`}>还没有快捷提示词，在输入框上方点添加</div>
           ) : (
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-wrap gap-1.5 items-center pt-1 pr-1">
               {snippets.map((s) => (
-                <SnippetRow
-                  key={s.id}
-                  snippet={s}
-                  onSave={(next) => persist(snippets.map((row) => row.id === next.id ? next : row))}
-                  onDelete={() => persist(snippets.filter((row) => row.id !== s.id))}
-                />
+                <span key={s.id} className="relative inline-flex">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="rounded-full"
+                    onClick={() => openEdit(s)}
+                  >
+                    {s.title}
+                  </Button>
+                  <button
+                    type="button"
+                    aria-label={`删除 ${s.title}`}
+                    title="删除"
+                    disabled={busy}
+                    className="absolute -top-1 -right-1 z-10 flex size-4 items-center justify-center rounded-full border border-border bg-background text-[10px] leading-none text-muted-foreground hover:text-destructive disabled:opacity-50"
+                    onClick={() => { void remove(s.id); }}
+                  >
+                    ×
+                  </button>
+                </span>
               ))}
             </div>
+          )}
+          {editing && (
+            <AddSnippetDialog
+              heading="编辑快捷提示词"
+              lead={EDIT_LEAD}
+              title={title}
+              body={body}
+              error={editError}
+              saving={busy}
+              onTitle={setTitle}
+              onBody={setBody}
+              onCancel={() => { if (!busy) setEditing(null); }}
+              onSave={() => { void saveEdit(); }}
+            />
           )}
         </div>
       </DialogContent>
