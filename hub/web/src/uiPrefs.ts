@@ -12,7 +12,6 @@ export type UiPrefs = {
   readRunsSeeded: boolean;
   detailWidth: number;
   promptSnippets: PromptSnippet[];
-  quietUnread: boolean;
 };
 
 export type UiPrefsGetResponse = UiPrefs & { source: "file" | "defaults" };
@@ -26,13 +25,13 @@ export const UI_PREFS_DEFAULTS: UiPrefs = {
   readRunsSeeded: false,
   detailWidth: 0.4,
   promptSnippets: [],
-  quietUnread: false,
 };
 
 export const WS_KEY = "armada.selectedWorkspace.v1";
 export const READ_KEY = "armada.readRuns.v1";
 export const READ_SEEDED = "armada.readRuns.seeded.v1";
 export const WIDTH_KEY = "armada.detailWidth.v1";
+/** 消息免打扰只留在这块看板的 localStorage，不进 hub ui-prefs。 */
 export const QUIET_UNREAD_KEY = "armada.quietUnread.v1";
 
 export function loadQuietUnread(): boolean {
@@ -67,7 +66,6 @@ export function loadLocalUiPrefsMirror(): UiPrefs {
     readRunsSeeded,
     detailWidth,
     promptSnippets: [],
-    quietUnread: loadQuietUnread(),
   };
 }
 
@@ -87,7 +85,6 @@ export function applyUiPrefsToLocalStorage(p: UiPrefs): void {
     else localStorage.removeItem(READ_SEEDED);
   } catch { /* ignore */ }
   try { localStorage.setItem(WIDTH_KEY, String(p.detailWidth)); } catch { /* ignore */ }
-  saveQuietUnread(p.quietUnread);
 }
 
 export function localDiffersFromDefaults(local: UiPrefs): boolean {
@@ -97,7 +94,6 @@ export function localDiffersFromDefaults(local: UiPrefs): boolean {
   if (local.readRunsSeeded !== UI_PREFS_DEFAULTS.readRunsSeeded) return true;
   if (local.detailWidth !== UI_PREFS_DEFAULTS.detailWidth) return true;
   if (Object.keys(local.readRuns).length > 0) return true;
-  if (local.quietUnread !== UI_PREFS_DEFAULTS.quietUnread) return true;
   return false;
 }
 

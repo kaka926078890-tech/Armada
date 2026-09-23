@@ -269,7 +269,6 @@ export default function App() {
         setSelectedWs(prefs.selectedWorkspace);
         setReadMap(prefs.readRuns);
         setReadRunsSeeded(prefs.readRunsSeeded);
-        setQuietUnread(prefs.quietUnread === true);
         if (shouldMigrateLocal(source, local)) {
           try {
             const migrated = await api.putUiPrefs({
@@ -279,7 +278,6 @@ export default function App() {
               readRuns: local.readRuns,
               readRunsSeeded: local.readRunsSeeded,
               detailWidth: local.detailWidth,
-              quietUnread: local.quietUnread,
             }) as UiPrefs;
             if (cancelled) return;
             applyUiPrefsToLocalStorage(migrated);
@@ -288,7 +286,6 @@ export default function App() {
             setSelectedWs(migrated.selectedWorkspace);
             setReadMap(migrated.readRuns);
             setReadRunsSeeded(migrated.readRunsSeeded);
-            setQuietUnread(migrated.quietUnread === true);
           } catch { /* keep hub defaults already applied */ }
         }
       } catch {
@@ -614,7 +611,6 @@ export default function App() {
           onQuietUnread={(next) => {
             saveQuietUnread(next);
             setQuietUnread(next);
-            void api.putUiPrefs({ quietUnread: next }).catch(() => {});
           }}
           canMarkAllRead={canMarkAllRead}
           onMarkAllRead={markAllRead}

@@ -517,7 +517,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\armada-cursor.ps1 C:
 | `RELAY_APNS_TEAM_ID` | 环境变量 | `LW2A4J4KKG` |
 | `RELAY_APNS_BUNDLE_ID` | 环境变量 | 默认 `app.armada.remote` |
 
-看板主题、选中工作区、已读、详情宽度存在 hub 的 UI prefs，同一令牌下多端会同步。
+看板主题、选中工作区、已读、详情宽度存在 hub 的 UI prefs，同一令牌下多端会同步。消息免打扰只留在本机看板，不进这份 prefs，主控和受控互不影响。
 
 ## 协议摘要
 
