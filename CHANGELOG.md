@@ -12,6 +12,7 @@ Armada 按 **面** 发版：扩展、桌面、iOS、Android 可以不同号。RE
 
 ### 修复
 
+- Cursor 因 resume 空转把一轮打成异常后，同一条对话里的自动追问会立刻把卡片拉回运行中。只有时间戳的空用户行不会拉回；其它错误原因保持异常。只更新中台，扩展和手机不用升号。
 - macOS / Linux 安装扩展时直接解包到 `~/.cursor/extensions`，并改写 `extensions.json`。不再调用 `cursor --install-extension`（8 秒超时，失败被丢掉，空闲 Reload 一直看到旧目录）。
 - 注册和心跳对 9222 的探口与注入前一样重试三次。一次闪断不再把 `cdpReady` 打成 false，手机详情不再误贴「Cursor 在线但无法注入」。需新的扩展号。
 

@@ -20,10 +20,10 @@ import { workspacePathIn } from "../../extension/src/workspacePath";
 import { BIND_TIMEOUT_MS, WINDOWS_BIND_TIMEOUT_MS } from "../../extension/src/transcriptBind";
 import { collisionKey, hasImageMarkers, stripImageMarkers } from "../../extension/src/imageMarkers";
 import { BlobStore, parseAttachmentIds, type BlobMeta } from "./blobs";
-import { appendRetired, decideArm, decideStop, parseRetiredIds, isWindowsMachineOs, genOf, stopFromCursorSessionEnd } from "./generationOwnership";
+import { appendRetired, decideArm, decideStop, parseRetiredIds, isWindowsMachineOs, genOf, stopFromCursorSessionEnd, isResumeStallError } from "./generationOwnership";
 import { parsePendingAsk, continueAllowed, optionInAsk, isPlanAsk, mergePendingAskRecord, ASK_TEXT_MAX } from "./pendingAsk";
 import {
-  OUTBOUND_LIMIT, QUEUE_DRAIN_MS, queueModeOf,
+  OUTBOUND_LIMIT, QUEUE_DRAIN_MS, queueModeOf, transcriptUserPrompt,
 } from "./outboundClaim";
 
 const DISPATCH_TIMEOUT_MS = 30_000;
@@ -725,6 +725,18 @@ export class RunService {
 
   private hasOutstandingBackground(runId: string, live: string | null): boolean {
     return this.hasOpenSubagentTranscript(runId) || this.backgroundDrainHold(runId, live);
+  }
+
+  /**
+   * resume 空转把本卡打成 error 之后，Cursor 会在同一条对话里自动追问并继续跑。
+   * 有正文的新用户句一到就回到 running；只有时间戳的空行不算追问。
+   */
+  reopenAfterResumeStall(runId: string, payload: unknown): boolean {
+    if (!transcriptUserPrompt(payload)) return false;
+    const run = this.get(runId);
+    if (!run || run.status !== "error" || !isResumeStallError(run.end_reason)) return false;
+    this.setStatus(runId, "running", { ended_at: null, end_reason: null }, "extension");
+    return true;
   }
 
   onStopEvent(runId: string, payload: any, opts?: { replayDeferred?: boolean }) {

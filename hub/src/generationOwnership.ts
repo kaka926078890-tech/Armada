@@ -158,6 +158,13 @@ export function stopFromCursorSessionEnd(payload: unknown): {
   return null;
 }
 
+/** Cursor 自己续轮空转后停掉当前 turn，随即会在同一条 jsonl 里追问。 */
+export const RESUME_STALL_ERROR = "Agent turn stopped after repeated resume attempts made no progress";
+
+export function isResumeStallError(reason: unknown): boolean {
+  return reason === RESUME_STALL_ERROR;
+}
+
 /** Owner jsonl `turn_ended` is the durable idle signal. Hooks and synth stop can miss it. */
 export function stopFromJsonlTurnEnded(payload: unknown): { status: string; error?: string } | null {
   if (!payload || typeof payload !== "object") return null;

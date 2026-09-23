@@ -333,6 +333,74 @@ describe("event ingest", () => {
     ws.close();
   });
 
+  test("resume-stall error reopens to running when the follow-up user prompt arrives", async () => {
+    const { ws, api, runId } = await startBoundRun();
+    const snap = async () => (await (await api(`/api/runs/${runId}`)).json()) as any;
+    const stall = "Agent turn stopped after repeated resume attempts made no progress";
+    ws.send(JSON.stringify({
+      type: "run.event", runId, source: "transcript", seq: 1, ts: Date.now(),
+      payload: { type: "turn_ended", status: "error", error: stall },
+    }));
+    await new Promise((r) => setTimeout(r, 80));
+    expect((await snap()).status).toBe("error");
+    expect((await snap()).end_reason).toBe(stall);
+
+    ws.send(JSON.stringify({
+      type: "run.event", runId, source: "transcript", seq: 2, ts: Date.now(),
+      payload: {
+        role: "user",
+        message: { content: [{ type: "text", text: "<timestamp>Wednesday, Sep 23, 2026, 10:37 AM (UTC+8)</timestamp>" }] },
+      },
+    }));
+    await new Promise((r) => setTimeout(r, 80));
+    expect((await snap()).status).toBe("error");
+
+    ws.send(JSON.stringify({
+      type: "run.event", runId, source: "transcript", seq: 3, ts: Date.now(),
+      payload: {
+        role: "user",
+        message: { content: [{ type: "text", text: "<user_query>Briefly inform the user about the task result.</user_query>" }] },
+      },
+    }));
+    await new Promise((r) => setTimeout(r, 120));
+    const reopened = await snap();
+    expect(reopened.status).toBe("running");
+    expect(reopened.end_reason).toBeNull();
+    expect(reopened.ended_at).toBeNull();
+    const events = (await (await api(`/api/runs/${runId}/events`)).json()) as any[];
+    const followup = events.find((e) => e.ext_seq === 3);
+    expect(followup.post_terminal).toBe(0);
+
+    ws.send(JSON.stringify({
+      type: "run.event", runId, source: "transcript", seq: 4, ts: Date.now(),
+      payload: { type: "turn_ended", status: "success" },
+    }));
+    await new Promise((r) => setTimeout(r, 120));
+    expect((await snap()).status).toBe("completed");
+    ws.close();
+  });
+
+  test("a different error stays error when a later user prompt arrives", async () => {
+    const { ws, api, runId } = await startBoundRun();
+    ws.send(JSON.stringify({
+      type: "run.event", runId, source: "transcript", seq: 1, ts: Date.now(),
+      payload: { type: "turn_ended", status: "error", error: "boom" },
+    }));
+    await new Promise((r) => setTimeout(r, 80));
+    ws.send(JSON.stringify({
+      type: "run.event", runId, source: "transcript", seq: 2, ts: Date.now(),
+      payload: {
+        role: "user",
+        message: { content: [{ type: "text", text: "<user_query>continue</user_query>" }] },
+      },
+    }));
+    await new Promise((r) => setTimeout(r, 120));
+    const after = (await (await api(`/api/runs/${runId}`)).json()) as any;
+    expect(after.status).toBe("error");
+    expect(after.end_reason).toBe("boom");
+    ws.close();
+  });
+
   test("BG_DRAIN timeout replays completed even if child jsonl never turn_ended", async () => {
     const live = "ba7ae966-02ab-44c4-b411-90bfa9f91a0e";
     const child = "e4e91cbf-1b8f-4f92-9595-d1ce30665502";
