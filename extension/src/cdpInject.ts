@@ -957,8 +957,15 @@ export function createFileMentionPaster(deps: CdpSubmitterDeps) {
       // Inbox files just landed; Windows typeahead lags (hub: FILE_MENTION_FAILED then retry ok).
       await sleep(800);
 
-      for (let i = 0; i < needles.length; i++) {
-        const needle = needles[i]!;
+      const press = async (key: string, code: string, vk: number) => {
+        await session.call("Input.dispatchKeyEvent", {
+          type: "keyDown", key, code, windowsVirtualKeyCode: vk,
+        });
+        await session.call("Input.dispatchKeyEvent", {
+          type: "keyUp", key, code, windowsVirtualKeyCode: vk,
+        });
+      };
+      const typeAndClick = async (needle: string) => {
         await session.call("Input.insertText", { text: "@" });
         await sleep(400);
         await session.call("Input.insertText", { text: needle });
@@ -969,6 +976,24 @@ export function createFileMentionPaster(deps: CdpSubmitterDeps) {
             expression: `(${COMPOSER_CLICK_FILE_MENTION_JS})(${JSON.stringify(needle)})`, returnByValue: true,
           }).then((x) => x?.result?.value));
           if (clicked !== "OK") await sleep(400);
+        }
+        return clicked;
+      };
+      // One retype for the whole paste. A just-written inbox file often has no
+      // .mentions-menu until the workspace index catches up (~15s). A second
+      // full dispatch then succeeds; do that wait here so the run is not rejected.
+      let retypesLeft = 1;
+
+      for (let i = 0; i < needles.length; i++) {
+        const needle = needles[i]!;
+        let clicked = await typeAndClick(needle);
+        if (clicked !== "OK" && retypesLeft > 0) {
+          retypesLeft -= 1;
+          log(`file mention menu not ready, retyping needle=${needle}`);
+          await press("Escape", "Escape", 27);
+          for (let n = 0; n < 1 + needle.length; n++) await press("Backspace", "Backspace", 8);
+          await sleep(10_000);
+          clicked = await typeAndClick(needle);
         }
         if (clicked !== "OK") return { ok: false, reason: `MENTION_CLICK:${clicked}` };
         let okChip = false;

@@ -742,6 +742,17 @@ describe("createFileMentionPaster", () => {
     expect(r.ok).toBe(false);
     expect(r.reason).toBe("MENTION_CLICK:NO_MENU");
   });
+
+  test("NO_MENU for a full poll then OK on retype still mentions", async () => {
+    const log: CallLog[] = [];
+    const paste = createFileMentionPaster(deps({
+      connect: async () => mockSession(["OK", ...Array(8).fill("NO_MENU"), "OK", 1], log),
+    }));
+    const r = await paste("/Users/x/armada-test-ws", ["notes.txt"]);
+    expect(r).toEqual({ ok: true });
+    const inserted = log.filter((c) => c.method === "Input.insertText").map((c) => c.params?.text);
+    expect(inserted).toEqual(["@", "notes.txt", "@", "notes.txt"]);
+  });
 });
 
 const FIXTURE_TEXT = "Questions 1 of 1 1. 这是本机验证用的 Questions 框。请任选一项并点 Continue；后台正在用 CDP 抓 DOM。 A 选项 A（验证单选） B 选项 B C Skip 也行，只要框出现过 D Skip Esc Continue ⏎";
