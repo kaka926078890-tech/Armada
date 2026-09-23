@@ -19,8 +19,15 @@ const DENY_IFACE: &[&str] = &[
 #[derive(Default)]
 pub struct HubState {
     owned: Mutex<Option<Child>>,
+    /// One `caffeinate -w <hub pid>`. Watchdog reuse must not spawn another.
+    awake: Mutex<Option<AwakeHold>>,
     pub discovery: Mutex<crate::discovery::DiscoveryState>,
     joining: AtomicBool,
+}
+
+struct AwakeHold {
+    hub_pid: u32,
+    child: Child,
 }
 
 impl HubState {
@@ -611,16 +618,63 @@ pub fn keep_awake_args(pid: u32) -> Vec<String> {
     vec!["-i".into(), "-s".into(), "-w".into(), pid.to_string()]
 }
 
-fn keep_awake(pid: u32) {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeepAwakePlan {
+    Hold,
+    Spawn,
+}
+
+/// Watchdog calls this every 10s. A live caffeinate for the same hub pid stays; anything else is one replacement.
+pub fn plan_keep_awake(held_pid: Option<u32>, held_alive: bool, hub_pid: u32) -> KeepAwakePlan {
+    if held_alive && held_pid == Some(hub_pid) {
+        KeepAwakePlan::Hold
+    } else {
+        KeepAwakePlan::Spawn
+    }
+}
+
+fn awake_alive(slot: &mut Option<AwakeHold>) -> bool {
+    match slot {
+        Some(hold) => match hold.child.try_wait() {
+            Ok(None) => true,
+            Ok(Some(_)) => {
+                *slot = None;
+                false
+            }
+            Err(_) => false,
+        },
+        None => false,
+    }
+}
+
+fn keep_awake(state: &HubState, pid: u32) {
+    let Ok(mut slot) = state.awake.lock() else {
+        return;
+    };
+    let held_pid = slot.as_ref().map(|h| h.hub_pid);
+    let held_alive = awake_alive(&mut slot);
+    if plan_keep_awake(held_pid, held_alive, pid) == KeepAwakePlan::Hold {
+        return;
+    }
+    if slot.is_some() {
+        let mut child = slot.take().map(|h| h.child);
+        quit_child(&mut child);
+    }
     #[cfg(target_os = "macos")]
     {
         let args = keep_awake_args(pid);
-        let _ = Command::new("caffeinate")
+        if let Ok(child) = Command::new("caffeinate")
             .args(args)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
-            .spawn();
+            .spawn()
+        {
+            *slot = Some(AwakeHold {
+                hub_pid: pid,
+                child,
+            });
+        }
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -747,9 +801,6 @@ fn finish_create(
     if require_share {
         require_share_candidates(&share_candidates).map_err(|e| e.to_string())?;
     }
-    if let Some(pid) = pid {
-        keep_awake(pid);
-    }
     Ok(CreateFleetResult {
         decision: decision_label(kind),
         token,
@@ -811,6 +862,9 @@ fn apply_owned(
         }
     };
     drop(owned);
+    if let Some(pid) = result.owned_hub_pid {
+        keep_awake(state, pid);
+    }
     maybe_advertise(result, discoverable, state)
 }
 
@@ -1034,6 +1088,23 @@ mod tests {
         assert_eq!(
             keep_awake_args(39523),
             vec!["-i", "-s", "-w", "39523"]
+        );
+    }
+
+    #[test]
+    fn watchdog_reuse_holds_one_caffeinate_per_hub_pid() {
+        assert_eq!(plan_keep_awake(None, false, 1111), KeepAwakePlan::Spawn);
+        assert_eq!(
+            plan_keep_awake(Some(1111), true, 1111),
+            KeepAwakePlan::Hold
+        );
+        assert_eq!(
+            plan_keep_awake(Some(1111), false, 1111),
+            KeepAwakePlan::Spawn
+        );
+        assert_eq!(
+            plan_keep_awake(Some(1111), true, 2222),
+            KeepAwakePlan::Spawn
         );
     }
 
