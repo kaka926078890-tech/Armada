@@ -6,6 +6,7 @@ import {
   createCdpSubmitter,
   createImagePaster,
   createFileMentionPaster,
+  createComposerFinisher,
   createAskQuestionDriver,
   probeCdpReady,
   probeCdpReadyForInject,
@@ -231,6 +232,10 @@ describe("composer picker JS", () => {
     expect(runJs(COMPOSER_VERIFY_JS, ["当前长对话", "你好世界"], "你好世界").result).toBe("OK");
   });
 
+  test("VERIFY 把 CR 折成 LF 后认多行草稿", () => {
+    expect(runJs(COMPOSER_VERIFY_JS, ["第一行\n第二行"], "第一行\r\n第二行").result).toBe("OK");
+  });
+
   test("ENTER 打在匹配草稿的框而不是 els[0]", () => {
     const { result, els } = runJs(COMPOSER_ENTER_JS, ["当前长对话", "你好"], "你好");
     expect(result).toBe("OK");
@@ -365,6 +370,19 @@ describe("createCdpSubmitter", () => {
     const insert = log.find((c) => c.method === "Input.insertText");
     expect(insert?.params?.text).toBe("你好");
     expect(log.map((c) => c.method)).toEqual(["Runtime.evaluate", "Input.insertText", "Runtime.evaluate", "Runtime.evaluate"]);
+  });
+
+  test("多行提示词按行 insertText，行间 Shift+Enter，不把换行交给 insertText", async () => {
+    const log: CallLog[] = [];
+    const submit = createCdpSubmitter(deps({ connect: async () => mockSession(["OK", "OK", "OK"], log) }));
+    const r = await submit("/Users/x/armada-test-ws", "帮我开一个Worktree来创建一个插件，根据这个文档来生成一个插件\n约束：");
+    expect(r.ok).toBe(true);
+    const inserts = log.filter((c) => c.method === "Input.insertText").map((c) => c.params?.text);
+    expect(inserts).toEqual(["帮我开一个Worktree来创建一个插件，根据这个文档来生成一个插件", "约束："]);
+    const breaks = log.filter((c) => c.method === "Input.dispatchKeyEvent" && c.params?.key === "Enter");
+    expect(breaks).toHaveLength(2);
+    expect(breaks.every((c) => c.params?.modifiers === 8)).toBe(true);
+    expect(log.some((c) => c.method === "Input.insertText" && String(c.params?.text).includes("\n"))).toBe(false);
   });
 
   test("NO_INPUT 重试后成功", async () => {
@@ -722,6 +740,28 @@ describe("createImagePaster", () => {
     expect(log.filter((c) => c.method === "Input.dispatchKeyEvent")).toHaveLength(2);
     const insert = log.find((c) => c.method === "Input.insertText");
     expect(insert?.params?.text).toBe("看图");
+  });
+
+  test("附图后的多行提示词同样按行写入", async () => {
+    const log: CallLog[] = [];
+    const paste = createImagePaster(deps({
+      connect: async () => mockSession(["OK", "1", "OK", "OK"], log),
+    }));
+    const r = await paste("/Users/x/armada-test-ws", "第一行\n第二行", [{ bytes: Buffer.from("x"), mime: "image/png" }], () => {}, false);
+    expect(r.ok).toBe(true);
+    expect(log.filter((c) => c.method === "Input.insertText").map((c) => c.params?.text)).toEqual(["第一行", "第二行"]);
+    expect(log.filter((c) => c.method === "Input.dispatchKeyEvent" && c.params?.key === "Enter" && c.params?.modifiers === 8)).toHaveLength(2);
+  });
+});
+
+describe("createComposerFinisher", () => {
+  test("文件芯片之后的多行提示词按行写入再校验", async () => {
+    const log: CallLog[] = [];
+    const finish = createComposerFinisher(deps({ connect: async () => mockSession(["OK", "OK", "OK"], log) }));
+    const r = await finish("/Users/x/armada-test-ws", "生成一个插件\n约束：", true);
+    expect(r.ok).toBe(true);
+    expect(log.filter((c) => c.method === "Input.insertText").map((c) => c.params?.text)).toEqual(["生成一个插件", "约束："]);
+    expect(log.filter((c) => c.method === "Input.dispatchKeyEvent" && c.params?.modifiers === 8)).toHaveLength(2);
   });
 });
 

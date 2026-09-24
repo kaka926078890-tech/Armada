@@ -60,7 +60,9 @@ const VISIBLE_ELS = `Array.prototype.slice.call(document.querySelectorAll(${JSON
 
 const DRAFT_HELPERS = `function armadaDraftHit(t, promptT) {
   if (!promptT) return false;
-  return t === promptT || t.endsWith(promptT);
+  var a = String(t || "").replace(/\\r\\n/g, "\\n").replace(/\\r/g, "\\n");
+  var b = String(promptT || "").replace(/\\r\\n/g, "\\n").replace(/\\r/g, "\\n");
+  return a === b || a.endsWith(b);
 }
 function armadaNorm(s) {
   return String(s || "").replace(/\\s+/g, " ").trim();
@@ -766,6 +768,31 @@ function reclaimHit(existing: string, reclaim?: string[]): boolean {
   });
 }
 
+/**
+ * Input.insertText 遇到换行即停，后文不会进入 composer。
+ * 这个框里换行是 Shift+Enter，裸 Enter 是发送。按行写入，不改提示词、不改 DOM。
+ */
+async function insertComposerText(session: CdpSession, text: string): Promise<void> {
+  const lines = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    if (i > 0) await shiftEnter(session);
+    const line = lines[i] ?? "";
+    if (line) await session.call("Input.insertText", { text: line });
+  }
+}
+
+async function shiftEnter(session: CdpSession): Promise<void> {
+  const key = {
+    modifiers: 8,
+    key: "Enter",
+    code: "Enter",
+    windowsVirtualKeyCode: 13,
+    nativeVirtualKeyCode: 13,
+  };
+  await session.call("Input.dispatchKeyEvent", { type: "keyDown", ...key });
+  await session.call("Input.dispatchKeyEvent", { type: "keyUp", ...key });
+}
+
 /** 真机 2026-09-18：Cmd/Ctrl+A + Input.insertText 整框替换，不翻倍。禁止 selectAllChildren+delete。 */
 async function selectAllComposer(session: CdpSession): Promise<void> {
   const meta = process.platform === "win32" ? 2 : 4;
@@ -826,7 +853,7 @@ export function createCdpSubmitter(deps: CdpSubmitterDeps) {
 
       if (owned || focused) {
         if (owned) await selectAllComposer(session);
-        await session.call("Input.insertText", { text: prompt });
+        await insertComposerText(session, prompt);
         const v = String(await session.call("Runtime.evaluate", {
           expression: `(${COMPOSER_VERIFY_JS})(${JSON.stringify(prompt)})`, returnByValue: true,
         }).then((x) => x?.result?.value));
@@ -906,7 +933,7 @@ export function createImagePaster(deps: CdpSubmitterDeps) {
       }
 
       if (prompt.trim()) {
-        await session.call("Input.insertText", { text: prompt });
+        await insertComposerText(session, prompt);
         const v = String(await session.call("Runtime.evaluate", {
           expression: `(${COMPOSER_VERIFY_JS})(${JSON.stringify(prompt)})`, returnByValue: true,
         }).then((x) => x?.result?.value));
@@ -1032,7 +1059,7 @@ export function createComposerFinisher(deps: CdpSubmitterDeps) {
         expression: `(${COMPOSER_FOCUS_IMAGE_JS})()`, returnByValue: true,
       });
       if (prompt.trim()) {
-        await session.call("Input.insertText", { text: prompt });
+        await insertComposerText(session, prompt);
         await sleep(200);
         const v = String(await session.call("Runtime.evaluate", {
           expression: `(${COMPOSER_VERIFY_JS})(${JSON.stringify(prompt)})`, returnByValue: true,
