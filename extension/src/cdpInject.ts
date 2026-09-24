@@ -158,16 +158,29 @@ export const COMPOSER_CLICK_FILE_MENTION_JS = `function (needle) {
   var menu = document.querySelector(".mentions-menu");
   if (!menu) return "NO_MENU";
   var items = Array.prototype.slice.call(menu.querySelectorAll("[class*='menu-item'], [role='option']"));
+  if (!items.length) return "NO_ITEM";
   var want = String(needle || "");
+  if (!want) return "NO_MATCH";
+  function lineHits(line) {
+    var t = String(line || "").trim();
+    if (!t || t === want) return t === want;
+    var slash = Math.max(t.lastIndexOf("/"), t.lastIndexOf("\\\\"));
+    return slash >= 0 && t.slice(slash + 1) === want;
+  }
+  var hits = [];
   for (var i = 0; i < items.length; i++) {
-    if (String(items[i].innerText || "").indexOf(want) >= 0) {
-      items[i].dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-      items[i].dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
-      items[i].click();
-      return "OK";
+    var lines = String(items[i].innerText || "").split(/\\r?\\n/);
+    for (var j = 0; j < lines.length; j++) {
+      if (lineHits(lines[j])) { hits.push(items[i]); break; }
     }
   }
-  return items.length ? "NO_MATCH" : "NO_ITEM";
+  if (hits.length > 1) return "AMBIGUOUS";
+  if (hits.length !== 1) return "NO_MATCH";
+  var item = hits[0];
+  item.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+  item.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+  item.click();
+  return "OK";
 }`;
 
 export const COMPOSER_FOCUS_IMAGE_JS = `function () {
@@ -998,13 +1011,17 @@ export function createFileMentionPaster(deps: CdpSubmitterDeps) {
         await session.call("Input.insertText", { text: needle });
         await sleep(700);
         let clicked = "NO_MENU";
-        for (let attempt = 0; attempt < 8 && clicked !== "OK"; attempt++) {
+        for (let attempt = 0; attempt < 8 && clicked !== "OK" && clicked !== "AMBIGUOUS"; attempt++) {
           clicked = String(await session.call("Runtime.evaluate", {
             expression: `(${COMPOSER_CLICK_FILE_MENTION_JS})(${JSON.stringify(needle)})`, returnByValue: true,
           }).then((x) => x?.result?.value));
-          if (clicked !== "OK") await sleep(400);
+          if (clicked !== "OK" && clicked !== "AMBIGUOUS") await sleep(400);
         }
         return clicked;
+      };
+      const clearTyped = async (needle: string) => {
+        await press("Escape", "Escape", 27);
+        for (let n = 0; n < 1 + needle.length; n++) await press("Backspace", "Backspace", 8);
       };
       // One retype for the whole paste. A just-written inbox file often has no
       // .mentions-menu until the workspace index catches up (~15s). A second
@@ -1014,13 +1031,21 @@ export function createFileMentionPaster(deps: CdpSubmitterDeps) {
       for (let i = 0; i < needles.length; i++) {
         const needle = needles[i]!;
         let clicked = await typeAndClick(needle);
+        if (clicked === "AMBIGUOUS") {
+          log(`file mention ambiguous needle=${needle}`);
+          await clearTyped(needle);
+          return { ok: false, reason: "MENTION_CLICK:AMBIGUOUS" };
+        }
         if (clicked !== "OK" && retypesLeft > 0) {
           retypesLeft -= 1;
           log(`file mention menu not ready, retyping needle=${needle}`);
-          await press("Escape", "Escape", 27);
-          for (let n = 0; n < 1 + needle.length; n++) await press("Backspace", "Backspace", 8);
+          await clearTyped(needle);
           await sleep(10_000);
           clicked = await typeAndClick(needle);
+        }
+        if (clicked === "AMBIGUOUS") {
+          await clearTyped(needle);
+          return { ok: false, reason: "MENTION_CLICK:AMBIGUOUS" };
         }
         if (clicked !== "OK") return { ok: false, reason: `MENTION_CLICK:${clicked}` };
         let okChip = false;

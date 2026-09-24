@@ -15,6 +15,7 @@ import {
   COMPOSER_CHIP_COUNT_JS,
   COMPOSER_VERIFY_JS,
   COMPOSER_ENTER_JS,
+  COMPOSER_CLICK_FILE_MENTION_JS,
   ASK_INSPECT_JS,
   ASK_CLICK_LETTER_JS,
   ASK_CLICK_SKIP_JS,
@@ -806,6 +807,73 @@ describe("createFileMentionPaster", () => {
     const r = await paste("/Users/x/armada-test-ws", ["notes.txt"]);
     expect(r).toEqual({ ok: true });
     expect(sleeps.filter((ms) => ms === 10_000)).toHaveLength(1);
+  });
+
+  test("two menu rows for one filename fail closed and do not retype", async () => {
+    const log: CallLog[] = [];
+    const sleeps: number[] = [];
+    const paste = createFileMentionPaster(deps({
+      connect: async () => mockSession(["OK", "AMBIGUOUS"], log),
+      sleep: async (ms: number) => { sleeps.push(ms); },
+    }));
+    const r = await paste("/Users/x/armada-test-ws", ["notes.txt"]);
+    expect(r).toEqual({ ok: false, reason: "MENTION_CLICK:AMBIGUOUS" });
+    expect(log.filter((c) => c.method === "Input.insertText").map((c) => c.params?.text)).toEqual(["@", "notes.txt"]);
+    expect(sleeps.filter((ms) => ms === 10_000)).toHaveLength(0);
+    const backs = log.filter((c) => c.method === "Input.dispatchKeyEvent" && c.params?.key === "Backspace");
+    expect(backs).toHaveLength(2 * (1 + "notes.txt".length));
+  });
+});
+
+function mentionMenu(rows: string[]) {
+  const items = rows.map((text) => ({
+    innerText: text,
+    clicked: false,
+    click() { this.clicked = true; },
+    dispatchEvent() { return true; },
+  }));
+  const menu = {
+    querySelectorAll(sel: string) {
+      if (sel === "[class*='menu-item'], [role='option']") return items;
+      return [];
+    },
+  };
+  return {
+    items,
+    querySelector(sel: string) {
+      if (sel === ".mentions-menu") return menu;
+      return null;
+    },
+  };
+}
+
+function clickMention(rows: string[], needle: string) {
+  const document = mentionMenu(rows);
+  const MouseEvent = class {
+    constructor(public type: string, public init?: unknown) {}
+  };
+  const fn = new Function("document", "MouseEvent", `return (${COMPOSER_CLICK_FILE_MENTION_JS});`)(document, MouseEvent);
+  return { result: String(fn(needle)), items: document.items };
+}
+
+describe("file mention menu click", () => {
+  test("path basename matches and a longer name that only contains the needle does not", () => {
+    const { result, items } = clickMention(
+      ["other-notes.txt", ".armada/inbox/run/notes.txt"],
+      "notes.txt",
+    );
+    expect(result).toBe("OK");
+    expect(items[0].clicked).toBe(false);
+    expect(items[1].clicked).toBe(true);
+  });
+
+  test("two rows with the same filename do not click", () => {
+    const { result, items } = clickMention(
+      ["notes.txt", "docs/notes.txt"],
+      "notes.txt",
+    );
+    expect(result).toBe("AMBIGUOUS");
+    expect(items.every((item) => item.clicked === false)).toBe(true);
   });
 });
 
