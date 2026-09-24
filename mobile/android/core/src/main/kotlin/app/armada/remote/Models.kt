@@ -165,8 +165,19 @@ fun parseFollowupAck(run: RunDto, outcome: String?): FollowupAck =
 
 fun isPlanAsk(ask: PendingAskDto): Boolean = ask.kind == "plan"
 
+fun optionIdsCollide(options: List<PendingAskOption>): Boolean {
+    val seen = HashSet<String>()
+    for (o in options) {
+        val id = o.id.trim()
+        if (id.isEmpty()) continue
+        if (!seen.add(id)) return true
+    }
+    return false
+}
+
 fun continueAllowed(ask: PendingAskDto): Boolean {
-    return ask.questions.size == 1 && ask.questions.first().allowMultiple != true
+    if (ask.questions.isEmpty()) return false
+    return ask.questions.all { q -> q.allowMultiple != true && !optionIdsCollide(q.options) }
 }
 
 fun askOptionBody(label: String, text: String): String {

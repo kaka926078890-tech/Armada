@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { choiceOptions, mergePendingAskRecord, parsePendingAsk } from "../src/pendingAsk";
+import { choiceOptions, continueAllowed, mergePendingAskRecord, parsePendingAsk } from "../src/pendingAsk";
 
 const short = parsePendingAsk({
   request_id: "ask-plan-1",
@@ -80,5 +80,25 @@ describe("choiceOptions", () => {
     expect(ask!.questions[0].options.map((o) => o.id)).toEqual(["a", "b", "d"]);
     expect(ask!.questions[0].options[2]?.freeform).toBe(true);
     expect(choiceOptions(ask!).map((o) => o.id)).toEqual(["a", "b"]);
+  });
+});
+
+describe("continueAllowed", () => {
+  test("repeated letter ids are not a single choice", () => {
+    const ask = parsePendingAsk({
+      request_id: "ask-multi",
+      questions: [{
+        id: "q0",
+        prompt: "Questions",
+        options: [
+          { id: "a", label: "A", text: "第一题甲" },
+          { id: "b", label: "B", text: "第一题乙" },
+          { id: "a", label: "A", text: "第二题甲" },
+        ],
+      }],
+      detected_at: 1,
+      detect_via: "cdp",
+    })!;
+    expect(continueAllowed(ask)).toBe(false);
   });
 });

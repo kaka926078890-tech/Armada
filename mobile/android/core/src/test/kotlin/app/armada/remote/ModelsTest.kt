@@ -121,7 +121,7 @@ class ModelsTest {
                 PendingAskQuestion("q2", "two", options = listOf(PendingAskOption("b", "B", "b"))),
             ),
         )
-        assertFalse(continueAllowed(two))
+        assertTrue(continueAllowed(two))
         val multi = PendingAskDto(
             "rid",
             listOf(
@@ -134,6 +134,20 @@ class ModelsTest {
             ),
         )
         assertFalse(continueAllowed(multi))
+        val collided = PendingAskDto(
+            "rid",
+            listOf(
+                PendingAskQuestion(
+                    "q",
+                    "Questions",
+                    options = listOf(
+                        PendingAskOption("a", "A", "第一题"),
+                        PendingAskOption("a", "A", "第二题"),
+                    ),
+                ),
+            ),
+        )
+        assertFalse(continueAllowed(collided))
     }
 
     @Test

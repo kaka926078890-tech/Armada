@@ -2,6 +2,8 @@ import { latestRunIdForConversation } from "./binding";
 
 export type AskInspectOption = { id: string; label: string; text: string; freeform?: boolean };
 
+export type AskInspectQuestion = { id: string; prompt: string; options: AskInspectOption[] };
+
 export type AskInspect =
   | { present: false }
   | { unknown: true; reason: string }
@@ -10,6 +12,7 @@ export type AskInspect =
     prompt: string;
     conversation_id: string;
     options: AskInspectOption[];
+    questions?: AskInspectQuestion[];
     kind?: "plan";
     filename?: string;
     skip_unidentified?: boolean;
@@ -41,7 +44,7 @@ export type PlanInspect =
 
 export type PendingAskPayload = {
   request_id: string;
-  questions: [{ id: "q0"; prompt: string; options: AskInspectOption[] }];
+  questions: { id: string; prompt: string; options: AskInspectOption[] }[];
   detected_at: number;
   detect_via: "cdp";
   conversation_id: string;
@@ -75,11 +78,36 @@ export function parseAskInspect(raw: unknown): AskInspect {
     if (r.freeform === true) opt.freeform = true;
     options.push(opt);
   }
+  const questions: AskInspectQuestion[] = [];
+  const qsRaw = Array.isArray(o.questions) ? o.questions : [];
+  for (let i = 0; i < qsRaw.length; i++) {
+    const item = qsRaw[i];
+    if (!item || typeof item !== "object") continue;
+    const q = item as Record<string, unknown>;
+    const qPrompt = typeof q.prompt === "string" && q.prompt.trim() ? q.prompt.trim() : prompt;
+    const qOptsRaw = Array.isArray(q.options) ? q.options : [];
+    const qOpts: AskInspectOption[] = [];
+    for (const optItem of qOptsRaw) {
+      if (!optItem || typeof optItem !== "object") continue;
+      const r = optItem as Record<string, unknown>;
+      const id = typeof r.id === "string" ? r.id.trim().toLowerCase() : "";
+      const label = typeof r.label === "string" && r.label.trim() ? r.label.trim() : id.toUpperCase();
+      const text = typeof r.text === "string" && r.text.trim() ? r.text.trim() : label;
+      if (!id) continue;
+      const opt: AskInspectOption = { id, label, text };
+      if (r.freeform === true) opt.freeform = true;
+      qOpts.push(opt);
+    }
+    if (!qOpts.length) continue;
+    const id = typeof q.id === "string" && q.id.trim() ? q.id.trim() : `q${i}`;
+    questions.push({ id, prompt: qPrompt, options: qOpts });
+  }
   return {
     present: true,
     prompt,
     conversation_id,
     options,
+    ...(questions.length ? { questions } : {}),
     ...(o.kind === "plan" ? { kind: "plan" as const } : {}),
     ...(typeof o.filename === "string" && o.filename.trim() ? { filename: o.filename.trim() } : {}),
     ...(o.skip_unidentified === true ? { skip_unidentified: true } : {}),
@@ -124,7 +152,9 @@ export function nextAskAction(
   if (inspect.options.length === 0) return null;
   const payload = (request_id: string): PendingAskPayload => ({
     request_id,
-    questions: [{ id: "q0", prompt: inspect.prompt, options: inspect.options }],
+    questions: inspect.questions?.length
+      ? inspect.questions
+      : [{ id: "q0", prompt: inspect.prompt, options: inspect.options }],
     detected_at: now,
     detect_via: "cdp",
     conversation_id: inspect.conversation_id,

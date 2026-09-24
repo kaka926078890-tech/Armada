@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
-import { askOptionDisplayText, isFreeformAskOption, visibleAskOptions } from "../askOptions";
+import { askOptionDisplayText, isFreeformAskOption, optionIdsCollide, visibleAskOptions } from "../askOptions";
 import { segmentChat, processFoldLabel, userMessageCaption, type ChatBlock } from "../chatView";
 import { HubImageRow } from "./ImageThumb";
 import { workspaceFilePathFromHref } from "../../../../extension/src/workspaceFile";
@@ -265,6 +265,7 @@ function AskCard({ block, onAnswerAsk }: {
   onAnswerAsk?: (body: AnswerAskBody) => Promise<boolean | void> | boolean | void;
 }) {
   const [picked, setPicked] = useState("");
+  const [pickedByQuestion, setPickedByQuestion] = useState<Record<string, string>>({});
   const [freeform, setFreeform] = useState("");
   const [busyAction, setBusyAction] = useState<"continue" | "skip" | "freeform" | null>(null);
   const pending = block.action === "pending" || block.action === "submit_failed" || block.action === "submitting";
@@ -273,12 +274,19 @@ function AskCard({ block, onAnswerAsk }: {
   const skipBusy = busyAction === "skip";
   const interactive = pending && !!onAnswerAsk;
   const plan = isPlanAsk(block);
-  const showContinue = continueAllowed(block);
+  const groups = block.questions?.length
+    ? block.questions
+    : [{ id: "q0", prompt: block.prompt, options: block.options }];
+  const multi = groups.length > 1;
+  const collided = !plan && groups.some((q) => optionIdsCollide(q.options));
+  const showContinue = continueAllowed(block) && !collided;
   const overview = plan ? planOverviewOf(block) : "";
   const chips = visibleAskOptions(block.options);
   const typed = freeform.trim();
-  const pickedFreeform = isFreeformAskOption(chips, picked);
-  const canSubmit = plan || (pickedFreeform ? !!typed : !!picked);
+  const pickedFreeform = !multi && isFreeformAskOption(chips, picked);
+  const canSubmit = plan || (multi
+    ? groups.every((q) => !!pickedByQuestion[q.id])
+    : (pickedFreeform ? !!typed : !!picked));
   useEffect(() => {
     if (!busyAction) return;
     const t = window.setTimeout(() => setBusyAction(null), 8000);
@@ -291,7 +299,11 @@ function AskCard({ block, onAnswerAsk }: {
       const ok = await onAnswerAsk({
         request_id: block.request_id,
         action,
-        answers: action === "continue" ? askContinueAnswers(block, picked) : [],
+        answers: action === "continue"
+          ? (multi
+            ? groups.map((q) => ({ question_id: q.id, option_ids: [pickedByQuestion[q.id] || ""] })).filter((a) => a.option_ids[0])
+            : askContinueAnswers(block, picked))
+          : [],
         ...(action === "freeform" ? { text: typed } : {}),
       });
       if (ok === false) setBusyAction(null);
@@ -310,14 +322,42 @@ function AskCard({ block, onAnswerAsk }: {
     >
       <div className={`${UI_META} uppercase tracking-wide text-muted-foreground mb-1`}>{plan ? "Created Plan" : "Questions"}</div>
       <div className={`${UI_TYPE} text-foreground leading-relaxed`}>
-        <AssistantMarkdown text={block.prompt} />
+        {multi ? null : <AssistantMarkdown text={block.prompt} />}
       </div>
       {overview ? (
         <div className={`mt-2 max-h-80 overflow-y-auto ${UI_TYPE} text-muted-foreground leading-relaxed pr-1`}>
           <AssistantMarkdown text={overview} />
         </div>
       ) : null}
-      {plan ? null : (
+      {plan ? null : showContinue && multi ? (
+      <div className="mt-2.5 flex flex-col gap-3">
+        {groups.map((q) => (
+          <div key={q.id} className="flex flex-col gap-2">
+            <div className={`${UI_TYPE} text-foreground`}>{q.prompt}</div>
+            {q.options.filter((o) => o.freeform !== true).map((o) => {
+              const on = pickedByQuestion[q.id] === o.id;
+              const body = askOptionDisplayText(o.label, o.text);
+              return (
+                <button
+                  key={`${q.id}:${o.id}`}
+                  type="button"
+                  disabled={!interactive || wait}
+                  aria-pressed={on}
+                  onClick={(e) => {
+                    stopCard(e);
+                    setPickedByQuestion((prev) => ({ ...prev, [q.id]: o.id }));
+                  }}
+                  className={on ? UI_OPTION_ON : UI_OPTION_OFF}
+                >
+                  <span className="text-muted-foreground font-mono mr-1.5">{o.label}</span>
+                  {body}
+                </button>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+      ) : plan ? null : showContinue ? (
       <div className="mt-2.5 flex flex-col gap-2">
         {chips.map((o) => {
           const on = picked === o.id;
@@ -352,7 +392,9 @@ function AskCard({ block, onAnswerAsk }: {
           );
         })}
       </div>
-      )}
+      ) : pending ? (
+        <div className="mt-2 text-[12px] text-muted-foreground">多题请到 Cursor 里逐题作答。这里的选项会串在一起，不能代为选择。</div>
+      ) : null}
       {block.action === "resolved" ? (
         <div className="mt-2 text-[12px] text-muted-foreground">已处理</div>
       ) : null}

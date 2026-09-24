@@ -78,8 +78,21 @@ export function parsePendingAsk(raw: unknown): PendingAsk | null {
   return next;
 }
 
+/** 多题被收成一题时，字母 id 会重复（每题都有 a）。这种列表不能当单选。 */
+export function optionIdsCollide(options: { id: string }[]): boolean {
+  const seen = new Set<string>();
+  for (const o of options) {
+    const id = o.id.trim();
+    if (!id) continue;
+    if (seen.has(id)) return true;
+    seen.add(id);
+  }
+  return false;
+}
+
 export function continueAllowed(ask: PendingAsk): boolean {
-  return ask.questions.length === 1 && ask.questions[0].allow_multiple !== true;
+  if (!ask.questions.length) return false;
+  return ask.questions.every((q) => q.allow_multiple !== true && !optionIdsCollide(q.options));
 }
 
 /** Chips the operator can pick. Other/freeform is a textarea, not a letter row. */

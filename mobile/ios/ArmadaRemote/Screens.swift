@@ -1343,6 +1343,7 @@ struct AskView: View {
     var onDone: () async -> Void
     @EnvironmentObject var session: Session
     @State private var optionId: String?
+    @State private var pickedByQuestion: [String: String] = [:]
     @State private var freeformText = ""
     @State private var err: String?
     @State private var busyAction: String?
@@ -1392,10 +1393,15 @@ struct AskView: View {
                         .font(.body)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                    if canContinue {
                     ForEach(visibleAskOptions(q.options)) { o in
                         Button {
-                            optionId = o.id
-                            if o.freeform != true { freeformText = "" }
+                            if ask.questions.count > 1 {
+                                pickedByQuestion[q.id] = o.id
+                            } else {
+                                optionId = o.id
+                                if o.freeform != true { freeformText = "" }
+                            }
                         } label: {
                             HStack(alignment: .top, spacing: 8) {
                                 Text(o.label.isEmpty ? o.id.uppercased() : o.label)
@@ -1417,11 +1423,11 @@ struct AskView: View {
                         .frame(minHeight: 36)
                         .background(
                             RoundedRectangle(cornerRadius: 10)
-                                .fill(optionId == o.id ? Self.accentBlue.opacity(0.12) : Color.clear)
+                                .fill((ask.questions.count > 1 ? pickedByQuestion[q.id] == o.id : optionId == o.id) ? Self.accentBlue.opacity(0.12) : Color.clear)
                         )
                         .overlay(
                             RoundedRectangle(cornerRadius: 10)
-                                .stroke(optionId == o.id ? Self.accentBlue : Color.secondary.opacity(0.35), lineWidth: optionId == o.id ? 2 : 1)
+                                .stroke((ask.questions.count > 1 ? pickedByQuestion[q.id] == o.id : optionId == o.id) ? Self.accentBlue : Color.secondary.opacity(0.35), lineWidth: (ask.questions.count > 1 ? pickedByQuestion[q.id] == o.id : optionId == o.id) ? 2 : 1)
                         )
                         if optionId == o.id && o.freeform == true {
                             TextField("Other...", text: $freeformText, axis: .vertical)
@@ -1429,6 +1435,13 @@ struct AskView: View {
                                 .disabled(busyAction != nil)
                         }
                     }
+                    }
+                }
+                if !canContinue {
+                    Text("多题请到 Cursor 里逐题作答。这里的选项会串在一起，不能代为选择。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 if let err { Text(err).foregroundStyle(.red) }
                 HStack(spacing: 8) {
@@ -1485,7 +1498,12 @@ struct AskView: View {
     private var typed: String { freeformText.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var askRows: [PendingAskOption] { visibleAskOptions(ask.questions.first?.options ?? []) }
     private var pickedFreeform: Bool { isFreeformAskOption(askRows, picked: optionId) }
-    private var canSubmitChoice: Bool { pickedFreeform ? !typed.isEmpty : optionId != nil }
+    private var canSubmitChoice: Bool {
+        if ask.questions.count > 1 {
+            return ask.questions.allSatisfy { pickedByQuestion[$0.id]?.isEmpty == false }
+        }
+        return pickedFreeform ? !typed.isEmpty : optionId != nil
+    }
 
     private func submitBuild() async {
         guard busyAction == nil, let q = ask.questions.first, let opt = q.options.first else { return }
@@ -1515,7 +1533,11 @@ struct AskView: View {
         if action == "freeform" {
             body["text"] = typed
             body["answers"] = [] as [[String: Any]]
-        } else         if action == "continue", let q = ask.questions.first, let optionId {
+        } else if action == "continue", ask.questions.count > 1 {
+            body["answers"] = ask.questions.map { q in
+                ["question_id": q.id, "option_ids": [pickedByQuestion[q.id] ?? ""]]
+            }
+        } else if action == "continue", let q = ask.questions.first, let optionId {
             body["answers"] = [["question_id": q.id, "option_ids": [optionId]]]
         }
         do {

@@ -1,5 +1,17 @@
 export type AskOptionRow = { id: string; label: string; text: string; freeform?: boolean };
 
+/** 同一列表里字母 id 重复，说明多题被摊进了一题。 */
+export function optionIdsCollide(options: { id: string }[]): boolean {
+  const seen = new Set<string>();
+  for (const o of options) {
+    const id = o.id.trim();
+    if (!id) continue;
+    if (seen.has(id)) return true;
+    seen.add(id);
+  }
+  return false;
+}
+
 /** Letter is shown once; strip "A：" / "A " prefixes so the row is not "A A…". */
 export function askOptionDisplayText(label: string, text: string): string {
   const L = label.trim();

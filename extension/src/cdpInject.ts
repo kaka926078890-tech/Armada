@@ -362,6 +362,23 @@ function armadaIsFreeformLetter(b) {
     n = n.parentElement;
   }
   return false;
+}
+function armadaQuestionGroups(real) {
+  var groups = [];
+  var seen = {};
+  var cur = [];
+  for (var i = 0; i < real.length; i++) {
+    var L = String(real[i].innerText || "").trim().toUpperCase();
+    if (L && seen[L]) {
+      groups.push(cur);
+      cur = [];
+      seen = {};
+    }
+    if (L) seen[L] = true;
+    cur.push(real[i]);
+  }
+  if (cur.length) groups.push(cur);
+  return groups;
 }`;
 
 /** Questions 探测。cid：toolbar 祖先 → 包含 toolbar 的 [data-composer-id] → 唯一可见输入框祖先（Windows 控件常不在 composer 树上）。 */
@@ -407,46 +424,82 @@ export const ASK_INSPECT_JS = `function () {
   var real = classified.real;
   var skip = classified.skip;
   var letters = real.map(function (b) { return String(b.innerText || "").trim(); });
-  function esc(s) { return String(s || "").replace(${ASK_ESC}, "\\\\$&"); }
   var raw = String(bar.innerText || "").replace(/\\s+/g, " ").trim();
-  var prompt = raw.replace(/^Questions\\s+\\d+\\s+of\\s+\\d+\\s+/i, "").replace(/^\\d+\\.\\s*/, "");
-  if (letters[0]) {
-    var cut = prompt.search(new RegExp("\\\\s+" + esc(letters[0]) + "\\\\s"));
-    if (cut > 0) prompt = prompt.slice(0, cut);
-  }
-  prompt = prompt.replace(/\\s+Skip\\s+Esc\\s+Continue[\\s\\S]*$/i, "").trim();
-  var options = [];
-  for (var i = 0; i < letters.length; i++) {
-    var L = letters[i];
-    var next = i + 1 < letters.length ? letters[i + 1] : (skip ? String(skip.innerText || "").trim() : "");
-    var text = L;
-    if (L && next) {
-      var m = raw.match(new RegExp("(?:^|\\\\s)" + esc(L) + "\\\\s+([\\\\s\\\\S]*?)(?=\\\\s+" + esc(next) + "(?:\\\\s|$)|$)"));
-      if (m && m[1]) text = m[1].replace(/\\s+Skip\\s+Esc\\s+Continue[\\s\\S]*$/i, "").trim() || L;
+  var upper = raw.toUpperCase();
+  var skipText = skip ? String(skip.innerText || "").trim() : "";
+  var texts = [];
+  var starts = [];
+  var ends = [];
+  var from = 0;
+  for (var ti = 0; ti < letters.length; ti++) {
+    var L = letters[ti];
+    var token = " " + String(L || "").toUpperCase() + " ";
+    var start = L ? upper.indexOf(token, from) : -1;
+    var contentStart = start >= 0 ? start + token.length : from;
+    var next = ti + 1 < letters.length ? letters[ti + 1] : skipText;
+    var end = raw.length;
+    if (next) {
+      var ntok = " " + String(next).toUpperCase() + " ";
+      var npos = upper.indexOf(ntok, contentStart);
+      if (npos < 0) npos = upper.indexOf(" " + String(next).toUpperCase(), contentStart);
+      if (npos > contentStart) end = npos;
     }
-    var opt = { id: L.toLowerCase(), label: L, text: text };
-    if (armadaIsFreeformLetter(real[i])) {
-      opt.freeform = true;
-      if (!text || text === L) opt.text = "Other...";
-    }
-    options.push(opt);
+    var numbered = raw.slice(contentStart, end).search(/\\s\\d+\\.\\s/);
+    if (numbered >= 0 && contentStart + numbered < end) end = contentStart + numbered;
+    var text = raw.slice(contentStart, end).replace(/\\s+Skip\\s+Esc\\s+Continue[\\s\\S]*$/i, "").trim() || L;
+    texts.push(text);
+    starts.push(start >= 0 ? start : contentStart);
+    ends.push(end);
+    from = end > contentStart ? end : contentStart;
   }
-  var out = { present: true, prompt: prompt || "Questions", options: options, conversation_id: conversation_id };
+  var groups = armadaQuestionGroups(real);
+  var cursor = 0;
+  var built = [];
+  var promptFrom = 0;
+  for (var gi = 0; gi < groups.length; gi++) {
+    var opts = [];
+    var letterAt = starts[cursor] != null ? starts[cursor] : promptFrom;
+    var qPrompt = letterAt > promptFrom ? raw.slice(promptFrom, letterAt) : "";
+    qPrompt = qPrompt.replace(/^Questions\\s+\\d+\\s+of\\s+\\d+\\s+/i, "").replace(/^\\d+\\.\\s*/, "").replace(/\\s+\\d+\\.\\s*$/, "").trim();
+    qPrompt = qPrompt.replace(/\\s+Skip\\s+Esc\\s+Continue[\\s\\S]*$/i, "").trim();
+    for (var bi = 0; bi < groups[gi].length; bi++) {
+      var btn = groups[gi][bi];
+      var lab = String(btn.innerText || "").trim();
+      var body = texts[cursor] || lab;
+      cursor++;
+      var opt = { id: lab.toLowerCase(), label: lab, text: body };
+      if (armadaIsFreeformLetter(btn)) {
+        opt.freeform = true;
+        if (!body || body === lab) opt.text = "Other...";
+      }
+      opts.push(opt);
+    }
+    promptFrom = ends[cursor - 1] != null ? ends[cursor - 1] : promptFrom;
+    if (!qPrompt) qPrompt = gi === 0 ? "Questions" : ("Question " + (gi + 1));
+    built.push({ id: "q" + gi, prompt: qPrompt, options: opts });
+  }
+  var prompt = (built[0] && built[0].prompt) || "Questions";
+  var options = (built[0] && built[0].options) || [];
+  var out = { present: true, prompt: prompt, options: options, questions: built, conversation_id: conversation_id };
   if (classified.skip_unidentified) out.skip_unidentified = true;
   return out;
 }`;
 
 /** 点目标字母；禁止点 Skip 控件。 */
-export const ASK_CLICK_LETTER_JS = `function (letter) {
+export const ASK_CLICK_LETTER_JS = `function (letter, questionIndex) {
   ${ASK_LETTER_BUTTONS_JS}
   var bar = document.querySelector(".composer-questionnaire-toolbar");
   if (!bar) return "GONE";
   var btns = Array.prototype.slice.call(bar.querySelectorAll("button.composer-questionnaire-toolbar-option-letter"));
   var real = armadaLetterButtons(btns, bar).real;
+  var groups = armadaQuestionGroups(real);
+  var gi = typeof questionIndex === "number" ? questionIndex : parseInt(questionIndex, 10);
+  if (!(gi >= 0)) gi = 0;
+  var pool = groups[gi] || groups[0] || [];
   var want = String(letter || "").trim().toUpperCase();
   var btn = null;
-  for (var i = 0; i < real.length; i++) {
-    if (String(real[i].innerText || "").trim().toUpperCase() === want) { btn = real[i]; break; }
+  for (var i = 0; i < pool.length; i++) {
+    if (String(pool[i].innerText || "").trim().toUpperCase() === want) { btn = pool[i]; break; }
   }
   if (!btn) return "NO_LETTER";
   if (typeof bar.scrollIntoView === "function") bar.scrollIntoView({ block: "center" });
@@ -706,6 +759,7 @@ export function createAskQuestionDriver(deps: CdpSubmitterDeps) {
     letter?: string,
     kind?: "plan",
     text?: string,
+    picks?: { index: number; letter: string }[],
   ): Promise<CdpSubmitResult> {
     const hit = await connectWorkspacePage(deps, workspaceRoot);
     if (!hit.ok) return { ok: false, reason: hit.reason };
@@ -734,11 +788,14 @@ export function createAskQuestionDriver(deps: CdpSubmitterDeps) {
         await hit.session.call("Input.insertText", { text: String(text || "") });
         await dispatchKey(hit.session, "Enter");
       } else if (action === "continue") {
-        const clicked = String(await hit.session.call("Runtime.evaluate", {
-          expression: `(${ASK_CLICK_LETTER_JS})(${JSON.stringify(String(letter || "").toUpperCase())})`,
-          returnByValue: true,
-        }).then((x) => x?.result?.value));
-        if (clicked !== "OK") return { ok: false, reason: clicked === "GONE" ? "ASK_WIDGET_NOT_FOUND" : "ASK_INVALID_OPTION" };
+        const list = picks?.length ? picks : [{ index: 0, letter: String(letter || "") }];
+        for (const pick of list) {
+          const clicked = String(await hit.session.call("Runtime.evaluate", {
+            expression: `(${ASK_CLICK_LETTER_JS})(${JSON.stringify(String(pick.letter || "").toUpperCase())}, ${JSON.stringify(pick.index)})`,
+            returnByValue: true,
+          }).then((x) => x?.result?.value));
+          if (clicked !== "OK") return { ok: false, reason: clicked === "GONE" ? "ASK_WIDGET_NOT_FOUND" : "ASK_INVALID_OPTION" };
+        }
         await dispatchKey(hit.session, "Enter");
       } else {
         const clicked = String(await hit.session.call("Runtime.evaluate", {

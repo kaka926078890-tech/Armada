@@ -1,5 +1,6 @@
 import type { RunEvent } from "./types";
 import { displayUserText } from "../../../extension/src/imageMarkers";
+import { optionIdsCollide } from "./askOptions";
 
 export type ChatBlock =
   | { kind: "user"; text: string; seq: number; imageIds?: string[] }
@@ -14,6 +15,7 @@ export type ChatBlock =
     request_id: string;
     prompt: string;
     options: { id: string; label: string; text: string; freeform?: boolean }[];
+    questions?: { id: string; prompt: string; options: { id: string; label: string; text: string; freeform?: boolean }[] }[];
     action: "pending" | "submitting" | "submit_failed" | "resolved";
     error?: string;
     askKind?: "plan";
@@ -100,6 +102,21 @@ function askOptionsFromInput(input: Record<string, unknown> | undefined): { id: 
   return out;
 }
 
+function askQuestionsFrom(raw: unknown): { id: string; prompt: string; options: { id: string; label: string; text: string; freeform?: boolean }[] }[] {
+  if (!Array.isArray(raw)) return [];
+  const out: { id: string; prompt: string; options: { id: string; label: string; text: string; freeform?: boolean }[] }[] = [];
+  raw.forEach((item, i) => {
+    if (!item || typeof item !== "object") return;
+    const q = item as Record<string, unknown>;
+    const prompt = typeof q.prompt === "string" && q.prompt.trim() ? q.prompt.trim() : "Questions";
+    const options = askOptionsFromInput({ questions: [q] });
+    if (!options.length) return;
+    const id = typeof q.id === "string" && q.id.trim() ? q.id.trim() : `q${i}`;
+    out.push({ id, prompt, options });
+  });
+  return out;
+}
+
 function askPromptFromInput(input: Record<string, unknown> | undefined): string {
   const questions = Array.isArray(input?.questions) ? input.questions : [];
   const q = questions[0] as Record<string, unknown> | undefined;
@@ -107,8 +124,15 @@ function askPromptFromInput(input: Record<string, unknown> | undefined): string 
   return prompt || "Questions";
 }
 
-function askContinueAllowed(questions: { allow_multiple?: boolean }[]): boolean {
-  return questions.length === 1 && questions[0]?.allow_multiple !== true;
+function askContinueAllowed(questions: { allow_multiple?: boolean; options?: { id?: string }[] }[]): boolean {
+  if (!questions.length) return false;
+  return questions.every((q) => {
+    if (q?.allow_multiple === true) return false;
+    const ids = (q?.options ?? [])
+      .map((o) => (typeof o?.id === "string" ? o.id.trim() : ""))
+      .filter(Boolean);
+    return !optionIdsCollide(ids.map((id) => ({ id })));
+  });
 }
 
 function askKindOf(raw: unknown): "plan" | undefined {
@@ -131,6 +155,7 @@ function askBlockFromPayload(p: any, seq: number, action: "pending" | "resolved"
     request_id,
     prompt,
     options,
+    questions: askQuestionsFrom(questions),
     action,
     askKind: askKindOf(p.kind),
     continueAllowed: askContinueAllowed(questions),
@@ -273,6 +298,7 @@ function transcriptBlocks(ev: RunEvent, p: any): ChatBlock[] {
             request_id: typeof c.id === "string" && c.id.trim() ? c.id.trim() : `ask-jsonl-${ev.seq}`,
             prompt: askPromptFromInput(input),
             options,
+            questions: askQuestionsFrom(input.questions),
             action: "resolved",
             askKind: askKindOf(input.kind),
             continueAllowed: askContinueAllowed(questions),
@@ -587,6 +613,11 @@ export function mergePendingAsk(blocks: ChatBlock[], pending: PendingAskView | n
     request_id: pending.request_id,
     prompt: q.prompt,
     options: q.options ?? [],
+    questions: pending.questions.map((item, i) => ({
+      id: `q${i}`,
+      prompt: item.prompt,
+      options: item.options ?? [],
+    })),
     action: "pending",
     askKind: askKindOf(pending.kind),
     continueAllowed: askContinueAllowed(pending.questions),

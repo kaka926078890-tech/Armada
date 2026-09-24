@@ -136,6 +136,7 @@ export interface ExecutorDeps {
     letter?: string;
     kind?: "plan";
     text?: string;
+    picks?: { index: number; letter: string }[];
   }) => Promise<{ ok: boolean; reason?: string }>;
 }
 
@@ -563,7 +564,11 @@ export class Executor {
         return;
       }
       await vscode.commands.executeCommand("composer.openComposer", msg.conversationId);
-      const letter = msg.action === "continue" ? msg.answers?.[0]?.option_ids?.[0] : undefined;
+      const picks = (msg.answers ?? []).map((a, i) => {
+        const m = /^q(\d+)$/.exec(a.question_id);
+        return { index: m ? Number(m[1]) : i, letter: a.option_ids?.[0] ?? "" };
+      }).filter((p) => p.letter);
+      const letter = msg.action === "continue" ? picks[0]?.letter : undefined;
       if (msg.action === "continue" && !letter) {
         this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: "ASK_INVALID_OPTION" });
         return;
@@ -581,6 +586,7 @@ export class Executor {
         action: msg.action,
         letter,
         text: msg.text,
+        picks: msg.action === "continue" ? picks : undefined,
         ...(msg.kind === "plan" ? { kind: "plan" as const } : {}),
       });
       if (!r.ok) {

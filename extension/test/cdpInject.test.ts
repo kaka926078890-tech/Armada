@@ -1022,6 +1022,25 @@ function runAskClickOnDoc(document: ReturnType<typeof currentCursorAskDoc>, lett
 }
 
 describe("AskQuestion toolbar JS", () => {
+  test("repeated letters split into one question each and the second A is clickable", () => {
+    const text = "Questions 1. 第一题 A 甲 B 乙 2. 第二题 A 丙 B 丁 Skip Esc Continue";
+    const document = mockAskDoc(["A", "B", "A", "B", "Skip"], undefined, text);
+    const inspect = (new Function("document", `return (${ASK_INSPECT_JS});`)(document) as () => {
+      questions: { id: string; prompt: string; options: { id: string; text: string }[] }[];
+    })();
+    expect(inspect.questions).toHaveLength(2);
+    expect(inspect.questions[0]?.options.map((o) => o.id)).toEqual(["a", "b"]);
+    expect(inspect.questions[0]?.options[0]?.text).toBe("甲");
+    expect(inspect.questions[0]?.options[1]?.text).toBe("乙");
+    expect(inspect.questions[1]?.options.map((o) => o.text)).toEqual(["丙", "丁"]);
+    expect(inspect.questions[0]?.prompt).toContain("第一题");
+    expect(inspect.questions[1]?.prompt).toContain("第二题");
+    const click = new Function("document", `return (${ASK_CLICK_LETTER_JS});`)(document) as (letter: string, index: number) => string;
+    expect(click("A", 1)).toBe("OK");
+    expect(document.btns[0]?.clicked).toBe(false);
+    expect(document.btns[2]?.clicked).toBe(true);
+  });
+
   test("inspect drops the Skip letter and keeps A/B/C from the CDP fixture", () => {
     const { result } = runAskInspect(["A", "B", "C", "Skip"]);
     expect(result.present).toBe(true);

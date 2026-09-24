@@ -1068,6 +1068,7 @@ fun DetailReplyBlock(text: String?, isLive: Boolean, onOpenFile: (String) -> Uni
 fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend () -> Unit) {
     val scope = rememberCoroutineScope()
     var optionId by remember { mutableStateOf<String?>(null) }
+    var pickedByQuestion by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var freeformText by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf<String?>(null) }
     var err by remember { mutableStateOf<String?>(null) }
@@ -1120,9 +1121,10 @@ fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend (
                 Text("需要选择", style = MaterialTheme.typography.titleMedium)
                 ask.questions.forEach { q ->
                     Text(q.prompt)
-                    val rows = visibleAskOptions(q.options)
+                    if (!canContinue) return@forEach
+                    val rows = if (ask.questions.size > 1) q.options.filter { it.freeform != true } else visibleAskOptions(q.options)
                     rows.forEach { o ->
-                        val selected = optionId == o.id
+                        val selected = if (ask.questions.size > 1) pickedByQuestion[q.id] == o.id else optionId == o.id
                         Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
                             Row(
                                 Modifier.fillMaxWidth()
@@ -1130,8 +1132,12 @@ fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend (
                                     .background(if (selected) AccentBlue.copy(alpha = 0.12f) else Color.Transparent)
                                     .border(if (selected) 2.dp else 1.dp, if (selected) AccentBlue else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
                                     .clickable(enabled = busy == null) {
-                                        optionId = o.id
-                                        if (o.freeform != true) freeformText = ""
+                                        if (ask.questions.size > 1) {
+                                            pickedByQuestion = pickedByQuestion + (q.id to o.id)
+                                        } else {
+                                            optionId = o.id
+                                            if (o.freeform != true) freeformText = ""
+                                        }
                                     }
                                     .padding(horizontal = 10.dp, vertical = 8.dp)
                                     .heightIn(min = 36.dp),
@@ -1154,6 +1160,13 @@ fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend (
                         }
                     }
                 }
+                if (!canContinue) {
+                    Text(
+                        "多题请到 Cursor 里逐题作答。这里的选项会串在一起，不能代为选择。",
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
                 err?.let { Text(it, color = StatusRed) }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
                     BarButton(if (busy == "skip") "Skipping..." else "Skip", compact = true, enabled = busy == null, onClick = {
@@ -1171,9 +1184,10 @@ fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend (
                     if (canContinue) {
                     val rows = visibleAskOptions(ask.questions.firstOrNull()?.options.orEmpty())
                     val pickedFreeform = isFreeformAskOption(rows, optionId)
-                    BarButton(if (busy == "continue" || busy == "freeform") "Continuing..." else "Continue", filled = true, compact = true, enabled = (if (pickedFreeform) typed.isNotEmpty() else optionId != null) && busy == null, onClick = click@{
+                    val multiReady = ask.questions.size > 1 && ask.questions.all { !pickedByQuestion[it.id].isNullOrEmpty() }
+                    BarButton(if (busy == "continue" || busy == "freeform") "Continuing..." else "Continue", filled = true, compact = true, enabled = (if (ask.questions.size > 1) multiReady else if (pickedFreeform) typed.isNotEmpty() else optionId != null) && busy == null, onClick = click@{
                         val q = ask.questions.firstOrNull() ?: return@click
-                        val sendFreeform = pickedFreeform
+                        val sendFreeform = ask.questions.size == 1 && pickedFreeform
                         if (sendFreeform && typed.isEmpty()) return@click
                         busy = if (sendFreeform) "freeform" else "continue"
                         scope.launch {
@@ -1181,6 +1195,12 @@ fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend (
                                 val body = JSONObject().put("request_id", ask.requestId)
                                 if (sendFreeform) {
                                     body.put("action", "freeform").put("text", typed).put("answers", JSONArray())
+                                } else if (ask.questions.size > 1) {
+                                    val answers = JSONArray()
+                                    ask.questions.forEach { question ->
+                                        answers.put(JSONObject().put("question_id", question.id).put("option_ids", JSONArray().put(pickedByQuestion[question.id])))
+                                    }
+                                    body.put("action", "continue").put("answers", answers)
                                 } else {
                                     val oid = optionId ?: return@launch
                                     body.put("action", "continue")

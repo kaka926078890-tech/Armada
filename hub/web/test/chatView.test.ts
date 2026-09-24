@@ -953,12 +953,23 @@ describe("mergePendingAsk kind + continueAllowed", () => {
         { prompt: "q2", options: [{ id: "b", label: "B", text: "b" }] },
       ],
     });
-    expect(two[0]).toMatchObject({ continueAllowed: false });
+    expect(two[0]).toMatchObject({ continueAllowed: true });
     const multi = mergePendingAsk([], {
       request_id: "a2",
       questions: [{ prompt: "q", allow_multiple: true, options: [{ id: "a", label: "A", text: "a" }] }],
     });
     expect(multi[0]).toMatchObject({ continueAllowed: false });
+    const collided = mergePendingAsk([], {
+      request_id: "a4",
+      questions: [{
+        prompt: "Questions",
+        options: [
+          { id: "a", label: "A", text: "第一题" },
+          { id: "a", label: "A", text: "第二题" },
+        ],
+      }],
+    });
+    expect(collided[0]).toMatchObject({ continueAllowed: false });
     const buildNoKind = mergePendingAsk([], {
       request_id: "a3",
       questions: [{ prompt: "q", options: [{ id: "build", label: "Build", text: "Build" }] }],

@@ -972,18 +972,20 @@ export class RunService {
     if (action === "continue") {
       if (!continueAllowed(ask)) return { error: "ASK_INVALID_OPTION" };
       const raw = Array.isArray(body?.answers) ? body.answers : [];
-      const first = raw[0] as Record<string, unknown> | undefined;
-      const qid = typeof first?.question_id === "string" && first.question_id.trim()
-        ? first.question_id.trim()
-        : ask.questions[0].id;
-      const option_ids = Array.isArray(first?.option_ids)
-        ? first.option_ids.filter((x): x is string => typeof x === "string" && x.trim() !== "")
-        : [];
-      if (option_ids.length !== 1) return { error: "ASK_INVALID_OPTION" };
-      if (!optionInAsk(ask, qid, option_ids[0])) return { error: "ASK_INVALID_OPTION" };
-      answers = [{ question_id: qid, option_ids }];
+      const picked: { question_id: string; option_ids: string[] }[] = [];
+      for (const q of ask.questions) {
+        const hit = raw.find((item) => item && typeof item === "object" && (item as Record<string, unknown>).question_id === q.id) as Record<string, unknown> | undefined
+          ?? (ask.questions.length === 1 ? raw[0] as Record<string, unknown> | undefined : undefined);
+        const option_ids = Array.isArray(hit?.option_ids)
+          ? hit.option_ids.filter((x): x is string => typeof x === "string" && x.trim() !== "")
+          : [];
+        if (option_ids.length !== 1) return { error: "ASK_INVALID_OPTION" };
+        if (!optionInAsk(ask, q.id, option_ids[0])) return { error: "ASK_INVALID_OPTION" };
+        picked.push({ question_id: q.id, option_ids });
+      }
+      answers = picked;
     } else if (action === "freeform") {
-      if (!continueAllowed(ask)) return { error: "ASK_INVALID_OPTION" };
+      if (!continueAllowed(ask) || ask.questions.length !== 1) return { error: "ASK_INVALID_OPTION" };
       const rawText = typeof body?.text === "string" ? body.text.trim() : "";
       if (!rawText) return { error: "ASK_TEXT_EMPTY" };
       if (rawText.length > ASK_TEXT_MAX) return { error: "ASK_TEXT_TOO_LONG" };

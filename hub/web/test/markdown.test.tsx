@@ -215,6 +215,30 @@ describe("ask / plan action buttons", () => {
     expect(html).not.toContain("Continue");
   });
 
+  test("repeated letter ids hide the shared picker", () => {
+    const html = renderToStaticMarkup(
+      <ChatThread
+        blocks={[{
+          kind: "ask",
+          seq: 1,
+          request_id: "ask-collide",
+          prompt: "上传成功后，用户在哪里问这个知识库？",
+          options: [
+            { id: "a", label: "A", text: "第一题甲" },
+            { id: "b", label: "B", text: "第一题乙" },
+            { id: "a", label: "A", text: "第二题甲" },
+          ],
+          action: "pending",
+        }]}
+        onAnswerAsk={async () => true}
+      />,
+    );
+    expect(html).toContain("逐题作答");
+    expect(html).toContain("Skip");
+    expect(html).not.toContain("Continue");
+    expect(html).not.toContain("第一题甲");
+  });
+
   test("Ask card shows A/B/C and D Other like Cursor, without duplicating the letter", () => {
     const html = renderToStaticMarkup(
       <ChatThread

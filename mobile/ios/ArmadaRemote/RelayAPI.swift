@@ -185,9 +185,22 @@ func isPlanAsk(_ ask: PendingAskDTO) -> Bool {
     ask.kind == "plan"
 }
 
-/// 与 hub `pendingAsk.continueAllowed` 对齐：恰好一问且非 `allow_multiple`。
+func optionIdsCollide(_ options: [PendingAskOption]) -> Bool {
+    var seen = Set<String>()
+    for o in options {
+        let id = o.id.trimmingCharacters(in: .whitespacesAndNewlines)
+        if id.isEmpty { continue }
+        if seen.contains(id) { return true }
+        seen.insert(id)
+    }
+    return false
+}
+
+/// 与 hub 对齐：每题单选且题内选项 id 不重复。多题可以继续。
 func continueAllowed(_ ask: PendingAskDTO) -> Bool {
-    ask.questions.count == 1 && ask.questions.first?.allow_multiple != true
+    !ask.questions.isEmpty && ask.questions.allSatisfy { q in
+        q.allow_multiple != true && !optionIdsCollide(q.options)
+    }
 }
 
 /// 仓页必须跟 SSE 列表走；导航快照的 `cdpReady` 会过期。与 Android `liveWorkspace` 对齐。
