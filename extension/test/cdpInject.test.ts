@@ -792,6 +792,20 @@ describe("createFileMentionPaster", () => {
     expect(r).toEqual({ ok: true });
     const inserted = log.filter((c) => c.method === "Input.insertText").map((c) => c.params?.text);
     expect(inserted).toEqual(["@", "notes.txt", "@", "notes.txt"]);
+    const backs = log.filter((c) => c.method === "Input.dispatchKeyEvent" && c.params?.key === "Backspace");
+    expect(backs).toHaveLength(2 * (1 + "notes.txt".length));
+    expect(backs.every((c) => c.params?.nativeVirtualKeyCode === 8)).toBe(true);
+  });
+
+  test("chip count stays 0 for one poll then 1 after the single wait", async () => {
+    const sleeps: number[] = [];
+    const paste = createFileMentionPaster(deps({
+      connect: async () => mockSession(["OK", "OK", 0, 0, 0, 0, 0, 1]),
+      sleep: async (ms: number) => { sleeps.push(ms); },
+    }));
+    const r = await paste("/Users/x/armada-test-ws", ["notes.txt"]);
+    expect(r).toEqual({ ok: true });
+    expect(sleeps.filter((ms) => ms === 10_000)).toHaveLength(1);
   });
 });
 

@@ -199,7 +199,12 @@ function isCdpDown(reason?: string): boolean {
 
 function isPasteDetail(reason?: string): boolean {
   return reason === "CLIPBOARD_TIMEOUT"
-    || (typeof reason === "string" && reason.startsWith("CHIP_COUNT"));
+    || (typeof reason === "string" && (
+      reason.startsWith("CHIP_COUNT")
+      || reason.startsWith("VERIFY_FAIL")
+      || reason.startsWith("MENTION_CLICK")
+      || reason.startsWith("FILE_MENTION_COUNT")
+    ));
 }
 
 /** 自动提交时这些失败不能降级成剪贴板 accepted。 */

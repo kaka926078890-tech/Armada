@@ -86,6 +86,34 @@ describe("Executor image path", () => {
     expect(acks[acks.length - 1]).toEqual({ type: "run.ack", runId: "r1", status: "rejected", reason: "FILE_MENTION_FAILED" });
   });
 
+  test("file mention VERIFY_FAIL is not rewritten to FILE_MENTION_FAILED", async () => {
+    const { ex, acks } = makeExec({
+      imagePaste: true,
+      fetchBlob: async () => ({ bytes: Buffer.from("hi"), mime: "text/plain" }),
+      autoSubmitFileMentions: async () => true,
+      finishComposer: async () => ({ ok: false, reason: "VERIFY_FAIL:MISMATCH:第一行" }),
+      materializeFile: () => ({ needle: "def-notes.txt" }),
+    });
+    await ex.startRun({ runId: "r1", workspaceRoot: "/ws/a", prompt: "第一行\n约束：", attachments: txtAtt });
+    expect(acks[acks.length - 1]).toEqual({
+      type: "run.ack", runId: "r1", status: "rejected", reason: "VERIFY_FAIL:MISMATCH:第一行",
+    });
+  });
+
+  test("file mention FILE_MENTION_COUNT is not rewritten to FILE_MENTION_FAILED", async () => {
+    const { ex, acks } = makeExec({
+      imagePaste: true,
+      fetchBlob: async () => ({ bytes: Buffer.from("hi"), mime: "text/plain" }),
+      autoSubmitFileMentions: async () => ({ ok: false, reason: "FILE_MENTION_COUNT:1" }),
+      finishComposer: async () => true,
+      materializeFile: () => ({ needle: "def-notes.txt" }),
+    });
+    await ex.startRun({ runId: "r1", workspaceRoot: "/ws/a", prompt: "see", attachments: txtAtt });
+    expect(acks[acks.length - 1]).toEqual({
+      type: "run.ack", runId: "r1", status: "rejected", reason: "FILE_MENTION_COUNT:1",
+    });
+  });
+
   test("image paste uses autoSubmitImages without a separate writeClipboard", async () => {
     const { ex, acks } = makeExec({
       imagePaste: true,

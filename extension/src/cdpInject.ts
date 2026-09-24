@@ -986,10 +986,10 @@ export function createFileMentionPaster(deps: CdpSubmitterDeps) {
 
       const press = async (key: string, code: string, vk: number) => {
         await session.call("Input.dispatchKeyEvent", {
-          type: "keyDown", key, code, windowsVirtualKeyCode: vk,
+          type: "keyDown", key, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk,
         });
         await session.call("Input.dispatchKeyEvent", {
-          type: "keyUp", key, code, windowsVirtualKeyCode: vk,
+          type: "keyUp", key, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk,
         });
       };
       const typeAndClick = async (needle: string) => {
@@ -1024,12 +1024,23 @@ export function createFileMentionPaster(deps: CdpSubmitterDeps) {
         }
         if (clicked !== "OK") return { ok: false, reason: `MENTION_CLICK:${clicked}` };
         let okChip = false;
-        for (let retry = 0; retry < 5 && !okChip; retry++) {
-          const n = Number(await session.call("Runtime.evaluate", {
-            expression: `(${COMPOSER_FILE_MENTION_COUNT_JS})()`, returnByValue: true,
-          }).then((x) => x?.result?.value));
-          if (n >= i + 1) { okChip = true; break; }
-          await sleep(300);
+        const countChip = async () => {
+          for (let retry = 0; retry < 5 && !okChip; retry++) {
+            const n = Number(await session.call("Runtime.evaluate", {
+              expression: `(${COMPOSER_FILE_MENTION_COUNT_JS})()`, returnByValue: true,
+            }).then((x) => x?.result?.value));
+            if (n >= i + 1) { okChip = true; break; }
+            await sleep(300);
+          }
+        };
+        await countChip();
+        // Click can return OK while the chip node is still missing. Same one-shot
+        // wait as the menu retype; do not backspace — the query text is already gone.
+        if (!okChip && retypesLeft > 0) {
+          retypesLeft -= 1;
+          log(`file mention chip not ready, waiting needle=${needle}`);
+          await sleep(10_000);
+          await countChip();
         }
         if (!okChip) return { ok: false, reason: `FILE_MENTION_COUNT:${i + 1}` };
       }
