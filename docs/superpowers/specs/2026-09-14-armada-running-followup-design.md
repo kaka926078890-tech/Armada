@@ -16,7 +16,7 @@
 | --- | --- |
 | 问题 | 同 cid 占用中 `POST /api/runs/:id/followup` → `409 CONVERSATION_BUSY`。详情只能等停。Cursor 已能在生成中 Enter：配置 `queue` 进托盘，`steer` 进当前轮用户句。 |
 | 核心方案 | **方案 1：全程打进 Cursor。** `running` 续发不改 `status`；占注入槽后 `openComposer(cid)` + 现网 `COMPOSER_ENTER_JS`（普通 Enter）。心跳上报 `cursor.composer.queueMessageDefaultBehavior`；详情按该值立刻画托盘或当前轮用户句。存在 `state=queued` 时 matching completed → `QUEUE_DRAIN`（记下 `deferred_stop`，清零后重放）。 |
-| 关键约束 | ① 详情无 Send/Queue 开关，不改被控机配置。② 同 cid 仍一条 live 生成。③ `running` 续发 **Mac/Win 都不得** `retireLiveGeneration` / 在注入当下 `attachHubGeneration`。④ 注入槽 = `dispatched`/`binding` **加上** `outbound.state=injecting`。⑤ `openComposer(cid)` 硬前置；v1 沿用 `COMPOSER_FOCUS_JS` 空框优先（**只保证焦点卡**）。⑥ `hasOutstandingOutbound` **只计 `queued`**。⑦ running 注入禁止 `addPending` / `bindKnown` / `FollowupStopGuard.arm`。 |
+| 关键约束 | ① 详情无 Send/Queue 开关，不改被控机配置。② 同 cid 仍一条 live 生成。③ `running` 续发 **Mac/Win 都不得** `retireLiveGeneration` / 在注入当下 `attachHubGeneration`。④ 注入槽 = `dispatched`/`binding` **加上** `outbound.state=injecting`。⑤ `openComposer(cid)` 硬前置；v1 沿用 `COMPOSER_FOCUS_JS` 空框优先（**只保证焦点卡**）。⑥ `hasOutstandingOutbound` 计未落成用户句的 `queued` 与 `steered`。⑦ running 注入禁止 `addPending` / `bindKnown` / `FollowupStopGuard.arm`。 |
 | 明确不做 | 中台 FIFO 代替 Cursor 队列；解析 `settings.json`；Cmd/Alt+Enter 按配置切换；复刻 Keep Queuing 提示；`pending_ask` / `dispatched` / `binding` 续发；v1 运行中带图；v1 CDP 读队列 DOM 纠偏；v1 改 FOCUS 拒绝第一空框。 |
 
 **可行性（写生产前）：**
@@ -72,7 +72,7 @@
 | `hub/src/runs.ts` `followup` | occupying → 409；成功则 `dispatched` | `running` 保持 status；插 outbound `injecting` |
 | 同文件 `onRunAck` | `status !== dispatched` return | running + injecting：只改 outbound，**禁止** `setStatus(binding/error)` |
 | 同文件 Win 签发 | `isWindows \|\| !live` 总签发 | **仅终态续聊**；running 注入不签发；认领后 Win 签发 **并** `run.generation` |
-| `hub/src/generationOwnership.ts` `decideStop` | 无队列闸 | `hasOutstandingOutbound` 仅 `queued`；`QUEUE_DRAIN` + deferred 重放 |
+| `hub/src/generationOwnership.ts` `decideStop` | 无队列闸 | `hasOutstandingOutbound` 计 `queued` 与未落成的 `steered`；`QUEUE_DRAIN` + deferred 重放 |
 | `extension/src/executor.ts` `followup` | 成功后 `addPending`+`bindKnown` | running：只 openComposer+Enter+ack；**不** bindKnown |
 | `extension/src/extension.ts` | `noteHubGeneration` 只吃 start/followup | 增加 `run.generation` → `noteHubGeneration` |
 | 心跳 | `openWorkspaces` / `activeRunIds` | `queueMessageDefaultBehavior` |
@@ -183,7 +183,7 @@ run.generation { runId, generation_id }
 
 禁止在 `onStopEvent` 旁路。必须改 `generationOwnership.ts` 决策表 + 规格 + 真形状测试。
 
-新输入：`hasOutstandingOutbound` = 该 run 存在 **`state=queued`**（不含 injecting / steered / unknown）。
+新输入：`hasOutstandingOutbound` = 该 run 存在 **`state=queued` 或 `state=steered`**（不含 injecting / unknown）。用户句认领 steered 后清掉 deferred stop，避免上一轮完成盖住新轮。
 
 | 条件 | action | audit |
 | --- | --- | --- |
@@ -197,7 +197,7 @@ run.generation { runId, generation_id }
 1. ignore 时把本次 stop payload + 当时 `live_generation_id` 写入 `deferred_stop`（覆盖同 gen 的旧快照；BG_DRAIN 带 `reason`）。
 2. outstanding `queued` 清零后：若 `deferred_stop` 非空且 live 仍是该 gen 且期间未 rearm / 未 `attachHubGeneration` 新 gen → **同步重放** `onStopEvent(deferred_stop)`，然后清空。
 3. 认领导致 Mac BSP rearm、主人 UUID `preToolUse` rearm 或 Win `attachHubGeneration` 新 gen → **立刻作废** `deferred_stop`（旧轮 stop 不得盖新 gen）。
-4. 120s 超时 **从第一次 drain 写入 `deferred_stop` 起算**，不得从 inject/`created_at` 起算。QUEUE_DRAIN 超时：仍 `queued` 的条 → `failed`，然后走 2。BG_DRAIN 同一时钟：`hasOpenSubagentTranscript` **只计本轮**（`ts >= COALESCE(started_at, created_at)`，续发会重置 `started_at`）。未到 120s 且本轮 child 仍开着 → `maybeReplay` return。120s 到点且 live 未换 → 重放 completed，即使 child 从未 `turn_ended`（`r-b770619c` 孤儿 jsonl 不得永久挂 loading）。重放时 `onStopEvent(..., { replayDeferred: true })`，避免清掉 `deferred_stop` 后又被同一条开着的 child 再次 `BG_DRAIN`。不在子代理 `turn_ended` 当下同步重放——协议续轮的 UUID `preToolUse` 可能晚于最后一条 child jsonl（`r-43b92cc0`）。不新开 `decideStop` 出口码。
+4. 120s 超时 **从第一次 drain 写入 `deferred_stop` 起算**，不得从 inject/`created_at` 起算。QUEUE_DRAIN 超时：仍 `queued` 或 `steered` 的条 → `failed`，然后走 2。BG_DRAIN 同一时钟：`hasOpenSubagentTranscript` **只计本轮**（`ts >= COALESCE(started_at, created_at)`，续发会重置 `started_at`）。未到 120s 且本轮 child 仍开着 → `maybeReplay` return。120s 到点且 live 未换 → 重放 completed，即使 child 从未 `turn_ended`（`r-b770619c` 孤儿 jsonl 不得永久挂 loading）。重放时 `onStopEvent(..., { replayDeferred: true })`，避免清掉 `deferred_stop` 后又被同一条开着的 child 再次 `BG_DRAIN`。不在子代理 `turn_ended` 当下同步重放——协议续轮的 UUID `preToolUse` 可能晚于最后一条 child jsonl（`r-43b92cc0`）。不新开 `decideStop` 出口码。
 
 **备选：** 超时直接 `setStatus(completed)`。不选：没有 matching stop 重放会与 `generation_id` 合同脱节；Win synth 依赖 stamp。
 
@@ -381,3 +381,4 @@ turn_ended(G1) + queued → ignore QUEUE_DRAIN
 | 2026-09-18 | BG_DRAIN 与 QUEUE_DRAIN 共用 120s 重放。子代理 jsonl 收口且 live 未换才 apply；不在 child `turn_ended` 当下重放（`r-43b92cc0` 协议续轮）。 |
 | 2026-09-20 | Windows 续聊注入记过（`r-922b4664` / cid `4f64e60e`）。同页双框仍 blocked。 |
 | 2026-09-21 | BG_DRAIN 闩只计本轮 child。120s 超时即使孤儿 jsonl 未 `turn_ended` 也重放；`replayDeferred` 防止二次 BG_DRAIN。不新开 decideStop 码（`r-b770619c`）。 |
+| 2026-09-24 | 未落成用户句的 `steered` 与 `queued` 一样挡住上一轮 completed。认领后清 deferred；120s 仍未认领则失败并重放。不新开 decideStop 码。 |

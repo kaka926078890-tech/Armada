@@ -80,7 +80,7 @@ export type StopInput = {
   retired: string[];
   /** Live composer already has afterAgentResponse; Cursor may then stop a sidecar gen. */
   liveTurnSettled?: boolean;
-  /** Cursor queue still has unconsumed follow-ups (`run_outbound.state=queued`). */
+  /** Unconsumed follow-up (`run_outbound.state` queued or steered) has not become a user turn. */
   hasOutstandingOutbound?: boolean;
   /** Child jsonl still open (`subagent-transcript` without `turn_ended`). */
   hasOutstandingBackground?: boolean;

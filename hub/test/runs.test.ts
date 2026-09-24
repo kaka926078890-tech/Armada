@@ -1174,7 +1174,7 @@ describe("running followup outbound", () => {
     ws.close();
   });
 
-  test("A8 steer ack does not count as outstanding: matching completed applies", async () => {
+  test("A8 unconsumed steer holds the previous completed until the user line lands", async () => {
     const { ws, inbound, api, run } = await bindRunning({ os: "win32-x64", mode: "steer" });
     const g1 = inbound.find((m) => m.type === "run.start")?.generation_id as string;
     await api(`/api/runs/${run.id}/followup`, { method: "POST", body: JSON.stringify({ prompt: "直发句" }) });
@@ -1187,7 +1187,20 @@ describe("running followup outbound", () => {
       ts: Date.now(), seq: 21,
     }));
     await new Promise((x) => setTimeout(x, 50));
-    expect(((await (await api(`/api/runs/${run.id}`)).json()) as any).status).toBe("completed");
+    const held = (await (await api(`/api/runs/${run.id}`)).json()) as any;
+    expect(held.status).toBe("running");
+    expect(held.outbound[0].state).toBe("steered");
+    const created = (hub!.db.query("SELECT created_at FROM run_outbound WHERE run_id=?1").get(run.id) as { created_at: number }).created_at;
+    ws.send(JSON.stringify({
+      type: "run.event", runId: run.id, source: "transcript", seq: 31, ts: created + 10,
+      payload: { role: "user", conversation_id: "cid-1", message: { content: [{ type: "text", text: "<user_query>\n直发句\n</user_query>" }] } },
+    }));
+    await new Promise((x) => setTimeout(x, 50));
+    const after = (await (await api(`/api/runs/${run.id}`)).json()) as any;
+    expect(after.status).toBe("running");
+    expect(after.outbound).toEqual([]);
+    const deferred = hub!.db.query("SELECT deferred_stop FROM runs WHERE id=?1").get(run.id) as { deferred_stop: string | null };
+    expect(deferred.deferred_stop).toBeNull();
     ws.close();
   });
 
@@ -1273,6 +1286,27 @@ describe("running followup outbound", () => {
     }));
     await new Promise((x) => setTimeout(x, 60));
     expect(((await (await api(`/api/runs/${run.id}`)).json()) as any).status).toBe("completed");
+    ws.close();
+  });
+
+  test("A8 drain timeout fails an unclaimed steer and replays completed", async () => {
+    const { ws, inbound, api, run } = await bindRunning({ os: "win32-x64", mode: "steer" });
+    const g1 = inbound.find((m) => m.type === "run.start")?.generation_id as string;
+    await api(`/api/runs/${run.id}/followup`, { method: "POST", body: JSON.stringify({ prompt: "直发句" }) });
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    await new Promise((x) => setTimeout(x, 50));
+    ws.send(JSON.stringify({
+      type: "run.event", runId: run.id, source: "hook", hookEventName: "stop",
+      payload: { status: "completed", conversation_id: "cid-1", generation_id: g1 },
+      ts: Date.now(), seq: 21,
+    }));
+    await new Promise((x) => setTimeout(x, 50));
+    expect(((await (await api(`/api/runs/${run.id}`)).json()) as any).status).toBe("running");
+    hub!.runs.sweepTimeouts(Date.now() + 121_000);
+    await new Promise((x) => setTimeout(x, 40));
+    const after = (await (await api(`/api/runs/${run.id}`)).json()) as any;
+    expect(after.status).toBe("completed");
+    expect(after.outbound).toEqual([]);
     ws.close();
   });
 

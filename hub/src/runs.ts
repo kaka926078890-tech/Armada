@@ -110,7 +110,7 @@ export class RunService {
 
   private hasOutstandingOutbound(runId: string): boolean {
     return !!(this.db.query(
-      `SELECT 1 AS n FROM run_outbound WHERE run_id=?1 AND state='queued' LIMIT 1`,
+      `SELECT 1 AS n FROM run_outbound WHERE run_id=?1 AND state IN ('queued','steered') LIMIT 1`,
     ).get(runId) as { n: number } | null);
   }
 
@@ -170,7 +170,7 @@ export class RunService {
 
   private failQueuedOutbound(runId: string): void {
     const rows = this.db.query(
-      `SELECT id FROM run_outbound WHERE run_id=?1 AND state='queued'`,
+      `SELECT id FROM run_outbound WHERE run_id=?1 AND state IN ('queued','steered')`,
     ).all(runId) as { id: string }[];
     for (const r of rows) this.setOutboundState(r.id, "failed");
   }
@@ -245,7 +245,7 @@ export class RunService {
       }
     }
     this.setOutboundState(hit.id, "consumed");
-    if (queueTurn) this.clearDeferredStop(runId);
+    if (queueTurn || hit.state === "steered") this.clearDeferredStop(runId);
   }
 
   private hasPromptCollision(machineId: string, workspaceRoot: string, prompt: string, attachmentIds: string[], exceptId?: string): boolean {
