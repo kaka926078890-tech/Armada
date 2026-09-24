@@ -7,6 +7,8 @@ export interface PendingRun {
   prompt: string;
   dispatchedAt: number; // epoch ms
   attachmentIds?: string[];
+  /** Non-image inbox names from `uniqueInboxFilename`. Screenshots stay on attachmentIds. */
+  inboxFilenames?: string[];
 }
 
 export interface HookEventView {

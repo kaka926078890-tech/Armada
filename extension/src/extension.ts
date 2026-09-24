@@ -248,7 +248,8 @@ export function activate(context: vscode.ExtensionContext): void {
       const dir = transcriptsDirForWorkspace(homedir(), run.workspaceRoot);
       if (!dir || seen.has(dir)) continue;
       seen.add(dir);
-      files.push(...collectTranscriptViews(dir));
+      const inboxFilenames = [...new Set(pendingRuns.flatMap((r) => r.inboxFilenames ?? []))];
+      files.push(...collectTranscriptViews(dir, { inboxFilenames }));
     }
     const match = matchTranscriptToPending(pendingRuns, files, { boundCids });
     if (isAmbiguousMatch(match)) {

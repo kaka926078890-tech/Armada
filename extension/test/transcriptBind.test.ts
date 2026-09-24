@@ -4,6 +4,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { isAmbiguousMatch, type PendingRun } from "../src/binding";
 import {
+  collectTranscriptViews,
   collectTranscriptTails,
   conversationIdFromTranscriptPath,
   cursorProjectSlug,
@@ -272,5 +273,87 @@ describe("decideLateTranscriptAttach", () => {
   test("skips when jsonl still missing", () => {
     expect(decideLateTranscriptAttach({ alreadyAttachedPath: undefined, candidatePath: null }))
       .toEqual({ action: "skip" });
+  });
+});
+
+// 2026-09-22 5bfe36b9 first user record (282 bytes): <user_query> @ 123,
+// inbox filename @ 191, </user_query> @ 264. Tag order is timestamp, user_query,
+// @.armada/inbox/.../<sha8>-name, 继续执行, </user_query>. Both short strings sit
+// inside the first 256KB, so the bind scan may widen past the 16KB slice.
+const INBOX_FILE = "64335bf7-2026-09-22-codex-cli-rt-final-development-gate.md";
+const CID_B = "bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb";
+
+function inboxJsonl(place: "within256" | "after256"): string {
+  // Same wrapper and tag order as the live jsonl. Padding pushes the tags past
+  // 16KB (or past 256KB) without inserting a newline, so slice(0, 16384) is
+  // not a JSON line. The literal <user_query>继续执行</user_query> stays in the
+  // head next to the observed @inbox mention.
+  const tags =
+    "<timestamp>Tuesday, Sep 22, 2026, 4:51 PM (UTC+8)</timestamp>\\n" +
+    "<user_query>\\n" +
+    `@.armada/inbox/r-0273dcd8-47eb-47b5-a86e-072dfd859d1b/${INBOX_FILE} 继续执行\\n` +
+    "</user_query>" +
+    "<user_query>继续执行</user_query>";
+  const open = `{"role":"user","message":{"content":[{"type":"text","text":"`;
+  const pad = "Q".repeat(place === "after256" ? 256 * 1024 + 128 : 20 * 1024);
+  const tail = "Z".repeat(80 * 1024);
+  return `${open}${pad}${tags}${tail}"}]}}\n`;
+}
+
+function writeLeaf(root: string, cid: string, body: string): void {
+  mkdirSync(join(root, cid), { recursive: true });
+  writeFileSync(join(root, cid, `${cid}.jsonl`), body);
+}
+
+describe("inbox filename bind head", () => {
+  const pending = {
+    ...P,
+    prompt: "继续执行",
+    dispatchedAt: Date.now() - 1_000,
+    inboxFilenames: [INBOX_FILE],
+  };
+
+  test("16KB slice cannot parse, but filename and user_query within 256KB bind", () => {
+    const body = inboxJsonl("within256");
+    const line = body.split("\n")[0] ?? "";
+    expect(line.length).toBeGreaterThan(16_384);
+    expect(() => JSON.parse(line.slice(0, 16_384))).toThrow();
+    const head = Buffer.from(body).subarray(0, 256 * 1024).toString("utf8");
+    const uq = head.indexOf("<user_query>");
+    const nameAt = head.indexOf(INBOX_FILE);
+    const close = head.indexOf("</user_query>");
+    expect(uq).toBeGreaterThan(16_384);
+    expect(nameAt).toBeGreaterThan(uq);
+    expect(head.indexOf("继续执行")).toBeGreaterThan(nameAt);
+    expect(close).toBeGreaterThan(nameAt);
+    expect(close).toBeLessThan(256 * 1024);
+    expect(head.includes("<user_query>继续执行</user_query>")).toBe(true);
+
+    const root = mkdtempSync(join(tmpdir(), "armada-inbox-"));
+    const transcripts = join(root, "agent-transcripts");
+    writeLeaf(transcripts, CID, body);
+    const files = collectTranscriptViews(transcripts, { inboxFilenames: [INBOX_FILE] });
+    const m = matchTranscriptToPending([pending], files);
+    expect(m && "run" in m ? m.run.runId : null).toBe("r-1");
+    expect(m && "conversationId" in m ? m.conversationId : null).toBe(CID);
+  });
+
+  test("prompt and inbox filename past 256KB still do not bind", () => {
+    const root = mkdtempSync(join(tmpdir(), "armada-inbox-late-"));
+    const transcripts = join(root, "agent-transcripts");
+    writeLeaf(transcripts, CID, inboxJsonl("after256"));
+    const files = collectTranscriptViews(transcripts, { inboxFilenames: [INBOX_FILE] });
+    expect(matchTranscriptToPending([pending], files)).toBeNull();
+  });
+
+  test("two leaves in one transcripts dir are still BIND_AMBIGUOUS", () => {
+    const root = mkdtempSync(join(tmpdir(), "armada-inbox-amb-"));
+    const transcripts = join(root, "agent-transcripts");
+    const body = inboxJsonl("within256");
+    writeLeaf(transcripts, CID, body);
+    writeLeaf(transcripts, CID_B, body);
+    const files = collectTranscriptViews(transcripts, { inboxFilenames: [INBOX_FILE] });
+    const m = matchTranscriptToPending([pending], files);
+    expect(isAmbiguousMatch(m)).toBe(true);
   });
 });

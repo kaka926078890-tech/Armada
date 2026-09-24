@@ -1,4 +1,4 @@
-import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, statSync } from "fs";
+import { closeSync, existsSync, openSync, readSync, readdirSync, statSync } from "fs";
 import { dirname, join } from "path";
 import { hasImageMarkers, stripImageMarkers } from "./imageMarkers";
 import { normalizePrompt } from "./promptNormalize";
@@ -17,7 +17,15 @@ export interface TranscriptFileView {
   mtimeMs: number;
   firstPrompt: string;
   conversationId: string;
+  /** False when the 16KB slice did not parse a prompt. Plain and image match ignore these. */
+  promptParsed?: boolean;
+  /** Chunked bind head. Inbox filename checks read this, not a full-file readFileSync. */
+  head?: string;
 }
+
+const BIND_CHUNK = 64 * 1024;
+const BIND_HEAD_CAP = 256 * 1024;
+const PLAIN_HEAD = 16 * 1024;
 
 /** Cursor `~/.cursor/projects/<slug>` for a workspace fsPath. */
 export function cursorProjectSlug(workspaceRoot: string): string {
@@ -149,7 +157,67 @@ function pushTail(out: TranscriptTail[], path: string): void {
   out.push({ path, lastLine: readLastNonEmptyLine(path), mtimeMs });
 }
 
-export function collectTranscriptViews(transcriptsRoot: string): TranscriptFileView[] {
+/** 64KB chunks. With inbox names, stop once those names and `</user_query>` are in hand, cap 256KB. */
+function readBindHead(path: string, inboxFilenames: string[]): string {
+  const cap = inboxFilenames.length > 0 ? BIND_HEAD_CAP : PLAIN_HEAD;
+  const fd = openSync(path, "r");
+  const parts: Buffer[] = [];
+  let total = 0;
+  try {
+    while (total < cap) {
+      const n = Math.min(BIND_CHUNK, cap - total);
+      const buf = Buffer.alloc(n);
+      const got = readSync(fd, buf, 0, n, total);
+      if (got <= 0) break;
+      parts.push(got === n ? buf : buf.subarray(0, got));
+      total += got;
+      if (inboxFilenames.length > 0) {
+        const acc = Buffer.concat(parts);
+        const seenClose = acc.includes("</user_query>");
+        const seenNames = inboxFilenames.every((name) => acc.includes(name));
+        if (seenClose && seenNames) return acc.toString("utf8");
+      }
+      if (got < n) break;
+    }
+  } finally {
+    closeSync(fd);
+  }
+  return Buffer.concat(parts).toString("utf8");
+}
+
+function decodeJsonStringFragment(fragment: string): string {
+  try { return JSON.parse(`"${fragment}"`) as string; } catch { return fragment; }
+}
+
+/** user_query body from a possibly truncated jsonl head. Null when the tags are absent. */
+function userQueryBodyFromHead(head: string): string | null {
+  const parsed = extractFirstUserPrompt(head);
+  if (parsed !== null) return parsed;
+  const q = QUERY_RE.exec(head);
+  if (!q) return null;
+  const inner = decodeJsonStringFragment(q[1] ?? "");
+  const stripped = stripImageMarkers(inner);
+  if (stripped) return stripped;
+  if (hasImageMarkers(inner)) return "";
+  return normalizePrompt(inner);
+}
+
+/** Drop @mentions that carry this run's inbox filename so the body can equal the dispatch prompt. */
+function stripInboxMentions(text: string, filenames: string[]): string {
+  let s = text;
+  for (const name of filenames) {
+    if (!name) continue;
+    const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    s = s.replace(new RegExp(`@\\S*${esc}`, "g"), " ");
+  }
+  return normalizePrompt(s);
+}
+
+export function collectTranscriptViews(
+  transcriptsRoot: string,
+  opts?: { inboxFilenames?: string[] },
+): TranscriptFileView[] {
+  const inboxFilenames = (opts?.inboxFilenames ?? []).filter((n) => n.length > 0);
   const views: TranscriptFileView[] = [];
   for (const path of listLeafTranscripts(transcriptsRoot)) {
     const conversationId = conversationIdFromTranscriptPath(path);
@@ -158,11 +226,21 @@ export function collectTranscriptViews(transcriptsRoot: string): TranscriptFileV
     let head = "";
     try {
       mtimeMs = statSync(path).mtimeMs;
-      head = readFileSync(path, { encoding: "utf8" }).slice(0, 16_384);
+      head = readBindHead(path, inboxFilenames);
     } catch { continue; }
-    const firstPrompt = extractFirstUserPrompt(head);
-    if (firstPrompt === null) continue;
-    views.push({ path, mtimeMs, firstPrompt, conversationId });
+    const firstPrompt = extractFirstUserPrompt(head.slice(0, PLAIN_HEAD));
+    const inboxCandidate = inboxFilenames.length > 0
+      && head.includes("</user_query>")
+      && inboxFilenames.some((n) => head.includes(n));
+    if (firstPrompt === null && !inboxCandidate) continue;
+    views.push({
+      path,
+      mtimeMs,
+      firstPrompt: firstPrompt ?? "",
+      conversationId,
+      promptParsed: firstPrompt !== null,
+      head,
+    });
   }
   return views;
 }
@@ -178,6 +256,15 @@ export function matchTranscriptToPending(
   for (const f of usable) {
     const runs = pending.filter((p) => {
       if (f.mtimeMs < p.dispatchedAt - TOLERANCE_MS) return false;
+      const names = p.inboxFilenames ?? [];
+      if (names.length > 0) {
+        const head = f.head ?? "";
+        if (!head.includes("</user_query>") || !names.every((n) => head.includes(n))) return false;
+        const want = stripImageMarkers(p.prompt);
+        const got = stripInboxMentions(userQueryBodyFromHead(head) ?? "", names);
+        return !!want && got === want;
+      }
+      if (f.promptParsed === false) return false;
       const want = stripImageMarkers(p.prompt);
       if (want && want === f.firstPrompt) return true;
       if (!want && !f.firstPrompt && (p.attachmentIds?.length ?? 0) > 0) return true;

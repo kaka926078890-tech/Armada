@@ -331,6 +331,7 @@ export class Executor {
         prompt: msg.prompt,
         dispatchedAt: Date.now(),
         attachmentIds: attachments.map((a) => a.sha256 || a.id).filter((x): x is string => !!x),
+        inboxFilenames: inboxFilenamesOf(attachments),
       });
       pendingAdded = true;
       this.deps.onInjected?.(msg.runId);
@@ -467,7 +468,7 @@ export class Executor {
     conversationId: string;
     prompt: string;
     workspaceRoot: string;
-    attachments?: { id?: string; sha256?: string; mime?: string }[];
+    attachments?: { id?: string; sha256?: string; mime?: string; name?: string }[];
     live?: boolean;
   }): Promise<void> {
     const vscode = vs();
@@ -515,6 +516,7 @@ export class Executor {
           prompt: msg.prompt,
           dispatchedAt: Date.now(),
           attachmentIds: attachments.map((a) => a.sha256 || a.id).filter((x): x is string => !!x),
+          inboxFilenames: inboxFilenamesOf(attachments),
         });
         this.deps.bindKnown?.({
           runId: msg.runId,
@@ -593,4 +595,17 @@ export class Executor {
 
 function isImageAtt(a: { mime?: string }): boolean {
   return a.mime === "image/png" || a.mime === "image/jpeg";
+}
+
+function inboxFilenamesOf(
+  attachments: { id?: string; sha256?: string; mime?: string; name?: string }[],
+): string[] | undefined {
+  const names: string[] = [];
+  for (const a of attachments) {
+    if (isImageAtt(a)) continue;
+    const id = a.sha256 || a.id;
+    if (!id) continue;
+    names.push(uniqueInboxFilename(id, a.name || "file"));
+  }
+  return names.length > 0 ? names : undefined;
 }
