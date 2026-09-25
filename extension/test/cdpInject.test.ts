@@ -130,6 +130,30 @@ function runJs(src: string, texts: string[], prompt: string, imgCounts?: number[
   return { result: String(fn(prompt, reclaim)), els: document.els };
 }
 
+/** Lexical 段落。parentText 是整框 innerText（会撒谎）；核对必须走 children。 */
+function paraBox(paras: string[], parentText: string) {
+  return {
+    innerText: parentText,
+    offsetWidth: 100,
+    offsetHeight: 24,
+    className: "aislash-editor-input",
+    focused: false,
+    children: paras.map((innerText) => ({ tagName: "P", innerText })),
+    focus() { this.focused = true; },
+    dispatchEvent() { return true; },
+    querySelectorAll() { return []; },
+  };
+}
+
+function runPara(src: string, els: ReturnType<typeof paraBox>[], prompt: string) {
+  const document = { querySelectorAll() { return els; } };
+  const KeyboardEvent = class {
+    constructor(public type: string, public init?: unknown) {}
+  };
+  const fn = new Function("document", "KeyboardEvent", `return (${src});`)(document, KeyboardEvent);
+  return { result: String(fn(prompt)), els };
+}
+
 function runJs0(src: string, texts: string[], pillCounts?: number[], shareBox = false, fileMentions?: number[]): { result: string; els: ReturnType<typeof mockDoc>["els"] } {
   const document = mockDoc(texts, pillCounts, shareBox, fileMentions);
   const KeyboardEvent = class {
@@ -254,6 +278,40 @@ describe("composer picker JS", () => {
   test("Mac 原文空行仍按空行核对，不被折成单换行", () => {
     expect(runJs(COMPOSER_VERIFY_JS, ["第一行\n\n第二行"], "第一行\n\n第二行").result).toBe("OK");
     expect(runJs(COMPOSER_VERIFY_JS, ["第一行\n第二行"], "第一行\n\n第二行").result).toContain("MISMATCH");
+  });
+
+  // 2026-09-26 Mac Intel：故意空行是 <p><br></p>，父 innerText 读成 5 个 \n，折一对后仍对不上。
+  const macBlank = "那接下来应该做什么？\n\nv1版本属于已完成了么？";
+  test("Mac 故意空行按段落拼回后 VERIFY 通过", () => {
+    const box = paraBox(["那接下来应该做什么？", "\n", "v1版本属于已完成了么？"], "那接下来应该做什么？\n\n\n\n\nv1版本属于已完成了么？");
+    expect(runPara(COMPOSER_VERIFY_JS, [box], macBlank).result).toBe("OK");
+  });
+
+  test("Mac 单换行按段落拼回，不把父 innerText 的空行当成原文空行", () => {
+    const box = paraBox(["第一行", "第二行"], "第一行\n\n第二行");
+    expect(runPara(COMPOSER_VERIFY_JS, [box], "第一行\n第二行").result).toBe("OK");
+    expect(runPara(COMPOSER_VERIFY_JS, [box], "第一行\n\n第二行").result).toContain("MISMATCH");
+  });
+
+  test("Mac 连续两个空段仍按两行空行核对", () => {
+    const box = paraBox(["第一行", "\n", "\n", "第二行"], "第一行\n\n\n\n\n\n\n\n第二行");
+    expect(runPara(COMPOSER_VERIFY_JS, [box], "第一行\n\n\n第二行").result).toBe("OK");
+  });
+
+  test("按段读回时后文被截断仍然 MISMATCH", () => {
+    const box = paraBox(["列一下剩下的pr，然后", "假如你"], "列一下剩下的pr，然后\n\n假如你");
+    expect(runPara(COMPOSER_VERIFY_JS, [box], winReview).result).toContain("MISMATCH");
+  });
+
+  test("Mac 故意空行的框被认成 DRAFT，回车打在这一框", () => {
+    const old = paraBox(["当前长对话"], "当前长对话");
+    const box = paraBox(["第一行", "\n", "第二行"], "第一行\n\n\n\n\n第二行");
+    const focused = runPara(COMPOSER_FOCUS_JS, [old, box], "第一行\n\n第二行");
+    expect(focused.result).toBe("DRAFT");
+    expect(focused.els[1].focused).toBe(true);
+    const entered = runPara(COMPOSER_ENTER_JS, [old, box], "第一行\n\n第二行");
+    expect(entered.result).toBe("OK");
+    expect(entered.els[1].focused).toBe(true);
   });
 
   test("Windows 故意空行（每个换行都变成空行）仍核对通过", () => {
