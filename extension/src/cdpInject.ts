@@ -16,6 +16,7 @@
  * - 提交: 派发 keydown/keyup Enter(bubbles+composed),实证可触发 beforeSubmitPrompt。
  * - 同窗多个 composer 时优先空框(当前对话非空时 els[0] 是旧框,会误跳过回车)。
  * - 草稿匹配认完整 prompt 后缀(剪贴板追加后 prompt 在末尾);禁止 16 字任意位置子串。
+ *   Windows 段落 innerText 的空行折回一次，与源换行对齐；Mac 原文空行仍按空行核对。
  */
 
 import { parseAskInspect, parsePlanInspect, planInspectToAsk, type AskInspect } from "./askDetect";
@@ -58,11 +59,21 @@ const SEL = 'div.aislash-editor-input[contenteditable="true"], div.tiptap[conten
  */
 const VISIBLE_ELS = `Array.prototype.slice.call(document.querySelectorAll(${JSON.stringify(SEL)})).filter(function (e) { return e.offsetWidth > 0 && e.offsetHeight > 0; })`;
 
-const DRAFT_HELPERS = `function armadaDraftHit(t, promptT) {
+/**
+ * 草稿比对。CR 折成 LF。
+ * 2026-09-26 Windows：Shift+Enter 进段落后，innerText 把每个换行读成空行（`\n` → `\n\n`）。
+ * 只把读回里的成对空行折回一次，Mac 上本来就是单个 `\n` 或故意空行的原文仍走全等。
+ */
+const DRAFT_HELPERS = `function armadaBreaks(s) {
+  return String(s || "").replace(/\\r\\n/g, "\\n").replace(/\\r/g, "\\n");
+}
+function armadaDraftHit(t, promptT) {
   if (!promptT) return false;
-  var a = String(t || "").replace(/\\r\\n/g, "\\n").replace(/\\r/g, "\\n");
-  var b = String(promptT || "").replace(/\\r\\n/g, "\\n").replace(/\\r/g, "\\n");
-  return a === b || a.endsWith(b);
+  var a = armadaBreaks(t);
+  var b = armadaBreaks(promptT);
+  if (a === b || a.endsWith(b)) return true;
+  var folded = a.replace(/\\n\\n/g, "\\n");
+  return folded === b || folded.endsWith(b);
 }
 function armadaNorm(s) {
   return String(s || "").replace(/\\s+/g, " ").trim();

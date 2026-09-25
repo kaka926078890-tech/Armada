@@ -237,6 +237,46 @@ describe("composer picker JS", () => {
     expect(runJs(COMPOSER_VERIFY_JS, ["第一行\n第二行"], "第一行\r\n第二行").result).toBe("OK");
   });
 
+  // 2026-09-26 00:38 PF39WTSM：Shift+Enter 后 innerText 把每个 \n 读成空行，校验拒了预制词。
+  const winReview = "列一下剩下的pr，然后\n假如你作为另一个独立视角的 reviewer，请重新仔";
+  const winReviewBox = "列一下剩下的pr，然后\n\n假如你作为另一个独立视角的 reviewer，请重新仔";
+  const winClaw = "#开发测试环境\nssh ubuntu@192.168.0.210\n0x000";
+  const winClawBox = "#开发测试环境\n\nssh ubuntu@192.168.0.210\n\n0x000";
+
+  test("Windows 段落空行仍 VERIFY 通过（review 预制词读回）", () => {
+    expect(runJs(COMPOSER_VERIFY_JS, [winReviewBox], winReview).result).toBe("OK");
+  });
+
+  test("Windows 段落空行仍 VERIFY 通过（clawtest 预制词读回）", () => {
+    expect(runJs(COMPOSER_VERIFY_JS, [winClawBox], winClaw).result).toBe("OK");
+  });
+
+  test("Mac 原文空行仍按空行核对，不被折成单换行", () => {
+    expect(runJs(COMPOSER_VERIFY_JS, ["第一行\n\n第二行"], "第一行\n\n第二行").result).toBe("OK");
+    expect(runJs(COMPOSER_VERIFY_JS, ["第一行\n第二行"], "第一行\n\n第二行").result).toContain("MISMATCH");
+  });
+
+  test("Windows 故意空行（每个换行都变成空行）仍核对通过", () => {
+    expect(runJs(COMPOSER_VERIFY_JS, ["第一行\n\n\n\n第二行"], "第一行\n\n第二行").result).toBe("OK");
+  });
+
+  test("多出来的空行不是段落读回，仍然 MISMATCH", () => {
+    expect(runJs(COMPOSER_VERIFY_JS, ["第一行\n\n\n\n第二行"], "第一行\n第二行").result).toContain("MISMATCH");
+  });
+
+  test("后文被截断时，段落空行也不能 VERIFY 通过", () => {
+    expect(runJs(COMPOSER_VERIFY_JS, ["列一下剩下的pr，然后\n\n假如你"], winReview).result).toContain("MISMATCH");
+  });
+
+  test("Windows 段落空行的框被认成 DRAFT，回车打在这一框", () => {
+    const { result, els } = runJs(COMPOSER_FOCUS_JS, ["当前长对话", winClawBox], winClaw);
+    expect(result).toBe("DRAFT");
+    expect(els[1].focused).toBe(true);
+    const entered = runJs(COMPOSER_ENTER_JS, ["当前长对话", winReviewBox], winReview);
+    expect(entered.result).toBe("OK");
+    expect(entered.els[1].focused).toBe(true);
+  });
+
   test("ENTER 打在匹配草稿的框而不是 els[0]", () => {
     const { result, els } = runJs(COMPOSER_ENTER_JS, ["当前长对话", "你好"], "你好");
     expect(result).toBe("OK");
