@@ -6,12 +6,12 @@
 
 发送默认 **CDP 全自动**。桌面「打开工作区」会用启动器带调试口拉起 Cursor；若窗口不是这样开的，派发会降级为剪贴板预填 + 本机回车。
 
-### 当前版本（2026-09-22）
+### 当前版本（2026-09-26）
 
 | 面 | 当前发版 | 权威文件 |
 | --- | --- | --- |
 | 桌面 Armada.app | **0.1.0** | `desktop/src-tauri/tauri.conf.json` |
-| 扩展 armada-agent | **0.4.44** | `extension/package.json` |
+| 扩展 armada-agent | **0.4.45** | `extension/package.json` |
 | iOS ArmadaRemote | **0.1.0** · TestFlight **31** | `mobile/ios` `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` |
 | Android | **0.1.14**（versionCode 15） | `mobile/android/app/build.gradle.kts` |
 
@@ -78,7 +78,7 @@
 
 被控侧看到的就是普通 Cursor 窗口：文件树、Agent 对话、该机自己的账号与模型选择。派发沿用该窗口当前选中的模型。
 
-同一机器可并行多条任务（默认每机 8、每工作区 4）；整机同时只有 1 条处于派发/绑定（CDP 注入串行）。同工作区再派新任务时，已打开的窗走 `composer.createNew`，**不再**再开一扇 Untitled 工作区。注入槽空了就可以并发；未答 Ask 仍占窗。超出限额 → `429 RUN_LIMIT`。同工作区相同 prompt → `409 PROMPT_COLLISION`。关着的工作区不能派（`400 WORKSPACE_NOT_OPEN`）。收口与续聊请用 **armada-agent ≥ 0.4.19**；**文件附件请用 ≥ 0.4.22**（Windows `@` 菜单会等 typeahead）。**当前请装 0.4.44**（桌面在 macOS / Linux / Windows 创建或恢复舰队时，把包内 vsix 解包到 `~/.cursor/extensions`。空闲 Reload 只在这个目录里已经有目标版本时才执行；没有新包不会因为窗口空闲就 Reload。有包时还要等未收口 composer jsonl，且收口后再等 2 分钟）。
+同一机器可并行多条任务（默认每机 8、每工作区 4）；整机同时只有 1 条处于派发/绑定（CDP 注入串行）。同工作区再派新任务时，已打开的窗走 `composer.createNew`，**不再**再开一扇 Untitled 工作区。注入槽空了就可以并发；未答 Ask 仍占窗。超出限额 → `429 RUN_LIMIT`。同工作区相同 prompt → `409 PROMPT_COLLISION`。关着的工作区不能派（`400 WORKSPACE_NOT_OPEN`）。收口与续聊请用 **armada-agent ≥ 0.4.19**；**文件附件请用 ≥ 0.4.22**（Windows `@` 菜单会等 typeahead）。**当前请装 0.4.45**（桌面在 macOS / Linux / Windows 创建或恢复舰队时，把包内 vsix 解包到 `~/.cursor/extensions`。空闲 Reload 只在这个目录里已经有目标版本时才执行；没有新包不会因为窗口空闲就 Reload。有包时还要等未收口 composer jsonl，且收口后再等 2 分钟）。
 
 完成、失败、需要处理选择题时，桌面会弹系统通知，浏览器会闪标题；点通知可回到那张卡。
 
@@ -325,7 +325,7 @@ npx tsup
 npx vsce package --no-dependencies    # 没有 vsce：npm i -g @vscode/vsce
 ```
 
-受控端也可 clone 后自己打包。当前包名 `armada-agent-0.4.44.vsix`。
+受控端也可 clone 后自己打包。当前包名 `armada-agent-0.4.45.vsix`。
 
 6. **日常：打开控制台**（任意电脑浏览器均可，同一令牌）
 
@@ -359,7 +359,7 @@ curl -sS http://192.168.1.10:7380/api/health
 sh hooks/install.sh
 ```
 
-4. **安装扩展** `armada-agent` **0.4.44**（能力下限 ≥ 0.4.19）  
+4. **安装扩展** `armada-agent` **0.4.45**（能力下限 ≥ 0.4.19）  
    Cursor → 扩展 → **Install from VSIX** → `extension/armada-agent-*.vsix`  
    （没有现成 vsix 且这台有 Node 时：`cd extension && npx tsup && npx vsce package --no-dependencies`）
 
@@ -389,7 +389,7 @@ chmod +x scripts/armada-cursor.sh
 | 要带上 Windows 的 | 从哪来 | 说明 |
 | --- | --- | --- |
 | 本仓库 | `git clone` 本仓，或把整个 `Armada` 文件夹拷过去 | 用来跑 `hooks\install.ps1` 和启动器 |
-| `armada-agent-0.4.44.vsix` | 中台 `extension\armada-agent-0.4.44.vsix`，或 Windows 自己 `npm install && npx tsup && npx --yes @vscode/vsce package --no-dependencies`（当前 **0.4.44**，能力下限 ≥ 0.4.19） | 0.4.11 Reload 会把 `ext_seq` 重数到已占用号段，hub 丢掉 `stop`。0.4.16 续聊 fromEnd 会清掉 hub 签发的 `generation_id`。**0.4.17 只在 Windows 合成 stop**；**0.4.18 起全平台合成**。请不要用更旧的 vsix。 |
+| `armada-agent-0.4.45.vsix` | 中台 `extension\armada-agent-0.4.45.vsix`，或 Windows 自己 `npm install && npx tsup && npx --yes @vscode/vsce package --no-dependencies`（当前 **0.4.45**，能力下限 ≥ 0.4.19） | 0.4.11 Reload 会把 `ext_seq` 重数到已占用号段，hub 丢掉 `stop`。0.4.16 续聊 fromEnd 会清掉 hub 签发的 `generation_id`。**0.4.17 只在 Windows 合成 stop**；**0.4.18 起全平台合成**。请不要用更旧的 vsix。 |
 | 中台 IP + token | 中台 `ipconfig getifaddr en0` 和 `~/.armada/token` | token 不要换行；不要在 Windows 上新生成 |
 
 下面把 `192.168.1.10` 换成你的中台局域网 IP。所有命令都在 **PowerShell** 里执行，先 `cd` 到仓库根目录（里面能看到 `hooks` 和 `scripts` 文件夹）。
@@ -418,7 +418,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File hooks\install.ps1
 **4. 安装扩展**
 
 1. 先用图标正常打开一次 Cursor（这次还不用启动器）。
-2. 左侧扩展 → `...` → **Install from VSIX** → 选中 `armada-agent-0.4.44.vsix`。
+2. 左侧扩展 → `...` → **Install from VSIX** → 选中 `armada-agent-0.4.45.vsix`。
 3. 装完先不要关。
 
 **5. 指向中台**（`Ctrl+Shift+P` → 输入 **Armada: Configure Hub Connection**）
@@ -471,7 +471,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\armada-cursor.ps1 C:
 | `OUTBOUND_LIMIT` | **中台**：该卡待消化续发已达 8 条 |
 | `OUTBOUND_TEXT_ONLY` | **中台**：运行中续发暂只支持纯文本 |
 | `WINDOW_BUSY` | **中台**：关了 `ARMADA_MULTI_RUN_PER_WINDOW` 时，该窗口已有占用项则 409。默认会开新窗再注入。同卡 running 续聊仍走 followup |
-| 一直「待本机回车」但黄字是「绑定中」，超时后进异常 | **受控**：须装 **armada-agent ≥ 0.4.19**（当前 **0.4.44**）并 Reload。0.4.10 扫描窗 20s 会 BIND_TIMEOUT。Windows 无 hook，绑定等 jsonl，约 **3 分钟**；macOS 约 **1 分钟** |
+| 一直「待本机回车」但黄字是「绑定中」，超时后进异常 | **受控**：须装 **armada-agent ≥ 0.4.19**（当前 **0.4.45**）并 Reload。0.4.10 扫描窗 20s 会 BIND_TIMEOUT。Windows 无 hook，绑定等 jsonl，约 **3 分钟**；macOS 约 **1 分钟** |
 | 本机对话已结束，看板仍「运行中」 | **受控**：须 ≥ 0.4.18。日志：`stop synthesized` / `adopt r-…`。Hub 须把 `status: success` 收成 completed |
 | 一直「待本机回车」且蓝字是「已预填,待本机回车」 | **受控**：Cursor 不是启动器/桌面打开的（Windows：托盘未退干净就又点了图标） |
 | 详情串了别的对话 | **受控**：扩展 ≥ 0.4.3，不要用旧 vsix |
