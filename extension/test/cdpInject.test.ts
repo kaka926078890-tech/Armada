@@ -873,15 +873,15 @@ describe("createFileMentionPaster", () => {
   test("NO_MENU for a full poll then OK on retype still mentions", async () => {
     const log: CallLog[] = [];
     const paste = createFileMentionPaster(deps({
-      connect: async () => mockSession(["OK", ...Array(8).fill("NO_MENU"), "OK", 1], log),
+      connect: async () => mockSession(["OK", ...Array(8).fill("NO_MENU"), "OK", "OK", 1], log),
     }));
     const r = await paste("/Users/x/armada-test-ws", ["notes.txt"]);
     expect(r).toEqual({ ok: true });
     const inserted = log.filter((c) => c.method === "Input.insertText").map((c) => c.params?.text);
     expect(inserted).toEqual(["@", "notes.txt", "@", "notes.txt"]);
     const backs = log.filter((c) => c.method === "Input.dispatchKeyEvent" && c.params?.key === "Backspace");
-    expect(backs).toHaveLength(2 * (1 + "notes.txt".length));
-    expect(backs.every((c) => c.params?.nativeVirtualKeyCode === 8)).toBe(true);
+    expect(backs).toHaveLength(0);
+    expect(log.some((c) => c.method === "Input.dispatchKeyEvent" && c.params?.key === "a")).toBe(false);
   });
 
   test("chip count stays 0 for one poll then 1 after the single wait", async () => {
@@ -895,6 +895,24 @@ describe("createFileMentionPaster", () => {
     expect(sleeps.filter((ms) => ms === 10_000)).toHaveLength(1);
   });
 
+  test("retype clears with Ctrl+A after bare backspace leaves the query", async () => {
+    // 2026-09-28 PF39WTSM：Escape 后焦点在 xterm-helper-textarea。
+    // 即使焦点回到 composer，25 次裸 Backspace 仍留下 "@armada-idx-1790575201525"。
+    // Ctrl+A（modifiers 2）加一次 Backspace 才清空。选择器返回 NO_QUERY 时走这条。
+    const log: CallLog[] = [];
+    const paste = createFileMentionPaster(deps({
+      connect: async () => mockSession(["OK", ...Array(8).fill("NO_MENU"), "NO_QUERY", "OK", 1], log),
+    }));
+    const r = await paste("/Users/x/armada-test-ws", ["notes.txt"]);
+    expect(r).toEqual({ ok: true });
+    const meta = process.platform === "win32" ? 2 : 4;
+    const selectAll = log.filter((c) => c.method === "Input.dispatchKeyEvent" && c.params?.key === "a" && c.params?.modifiers === meta);
+    expect(selectAll).toHaveLength(2);
+    const backs = log.filter((c) => c.method === "Input.dispatchKeyEvent" && c.params?.key === "Backspace");
+    expect(backs).toHaveLength(2);
+    expect(log.filter((c) => c.method === "Input.insertText").map((c) => c.params?.text)).toEqual(["@", "notes.txt", "@", "notes.txt"]);
+  });
+
   test("two menu rows for one filename fail closed and do not retype", async () => {
     const log: CallLog[] = [];
     const sleeps: number[] = [];
@@ -906,8 +924,11 @@ describe("createFileMentionPaster", () => {
     expect(r).toEqual({ ok: false, reason: "MENTION_CLICK:AMBIGUOUS" });
     expect(log.filter((c) => c.method === "Input.insertText").map((c) => c.params?.text)).toEqual(["@", "notes.txt"]);
     expect(sleeps.filter((ms) => ms === 10_000)).toHaveLength(0);
+    const meta = process.platform === "win32" ? 2 : 4;
+    const selectAll = log.filter((c) => c.method === "Input.dispatchKeyEvent" && c.params?.key === "a" && c.params?.modifiers === meta);
+    expect(selectAll).toHaveLength(2);
     const backs = log.filter((c) => c.method === "Input.dispatchKeyEvent" && c.params?.key === "Backspace");
-    expect(backs).toHaveLength(2 * (1 + "notes.txt".length));
+    expect(backs).toHaveLength(2);
   });
 });
 
@@ -960,6 +981,56 @@ describe("file mention menu click", () => {
     );
     expect(result).toBe("AMBIGUOUS");
     expect(items.every((item) => item.clicked === false)).toBe(true);
+  });
+
+  test("Windows typeahead-item is the click target and the side preview is not", () => {
+    // 2026-09-28 PF39WTSM 菜单开着时的 DOM。点 #typeahead-item-0 后出现
+    // span.mention[data-typeahead-type=file]。侧栏 .clickable 是反斜杠路径，不能当第二项。
+    const needle = "dc3baa26-2026-09-21.aioncore.log";
+    const item = {
+      id: "typeahead-item-0",
+      innerText: `${needle}\n.armada/inbox/r-92c93860-4fba-4ca3-acb3-06d54f5142f0`,
+      clicked: false,
+      click() { this.clicked = true; },
+      dispatchEvent() { return true; },
+    };
+    const preview = {
+      className: "clickable",
+      innerText: `.armada\\inbox\\r-92c93860-4fba-4ca3-acb3-06d54f5142f0\\${needle}`,
+      clicked: false,
+      click() { this.clicked = true; },
+      dispatchEvent() { return true; },
+    };
+    const menu = {
+      className: " typeahead-popover mentions-menu",
+      querySelectorAll(sel: string) {
+        if (sel === "[id^='typeahead-item']") return [item];
+        if (sel === "[class*='menu-item'], [role='option']") return [];
+        return [];
+      },
+    };
+    const anchor = {
+      id: "typeahead-menu",
+      className: "lookahead-anchor-element",
+      querySelectorAll(sel: string) {
+        if (sel === "[id^='typeahead-item']") return [item];
+        return [];
+      },
+    };
+    const document = {
+      querySelector(sel: string) {
+        if (sel === ".mentions-menu") return menu;
+        if (sel === "#typeahead-menu") return anchor;
+        return null;
+      },
+    };
+    const MouseEvent = class {
+      constructor(public type: string, public init?: unknown) {}
+    };
+    const fn = new Function("document", "MouseEvent", `return (${COMPOSER_CLICK_FILE_MENTION_JS});`)(document, MouseEvent);
+    expect(String(fn(needle))).toBe("OK");
+    expect(item.clicked).toBe(true);
+    expect(preview.clicked).toBe(false);
   });
 });
 

@@ -216,11 +216,18 @@ export const COMPOSER_FILE_MENTION_COUNT_JS = `function () {
   return armadaFileMentionCount(armadaImageTarget(els));
 }`;
 
+/**
+ * 2026-09-28 PF39WTSM：菜单开着时根是 `.typeahead-popover.mentions-menu`，
+ * 行是 `#typeahead-item-0`（里面还有 `.composer-unified-context-menu-item`）。
+ * 点 `#typeahead-item-0` 才出现 `span.mention[data-typeahead-type=file]`。
+ * 侧栏 `.clickable` 是反斜杠路径，不是选项。
+ * 文件还没进索引时 `.mentions-menu` 卸掉，只剩空的 `#typeahead-menu`，这时仍是 NO_MENU。
+ */
 export const COMPOSER_CLICK_FILE_MENTION_JS = `function (needle) {
   var menu = document.querySelector(".mentions-menu");
-  if (!menu) return "NO_MENU";
-  var items = Array.prototype.slice.call(menu.querySelectorAll("[class*='menu-item'], [role='option']"));
-  if (!items.length) return "NO_ITEM";
+  var anchor = document.querySelector("#typeahead-menu");
+  var root = menu || anchor;
+  if (!root) return "NO_MENU";
   var want = String(needle || "");
   if (!want) return "NO_MATCH";
   function lineHits(line) {
@@ -229,19 +236,46 @@ export const COMPOSER_CLICK_FILE_MENTION_JS = `function (needle) {
     var slash = Math.max(t.lastIndexOf("/"), t.lastIndexOf("\\\\"));
     return slash >= 0 && t.slice(slash + 1) === want;
   }
-  var hits = [];
-  for (var i = 0; i < items.length; i++) {
-    var lines = String(items[i].innerText || "").split(/\\r?\\n/);
-    for (var j = 0; j < lines.length; j++) {
-      if (lineHits(lines[j])) { hits.push(items[i]); break; }
-    }
+  function rowHits(el) {
+    var lines = String(el.innerText || "").split(/\\r?\\n/);
+    for (var j = 0; j < lines.length; j++) if (lineHits(lines[j])) return true;
+    return false;
   }
+  var items = Array.prototype.slice.call(root.querySelectorAll("[id^='typeahead-item']"));
+  if (!items.length) items = Array.prototype.slice.call(root.querySelectorAll("[class*='menu-item'], [role='option']"));
+  if (!items.length) return menu ? "NO_ITEM" : "NO_MENU";
+  var hits = [];
+  for (var i = 0; i < items.length; i++) if (rowHits(items[i])) hits.push(items[i]);
   if (hits.length > 1) return "AMBIGUOUS";
   if (hits.length !== 1) return "NO_MATCH";
   var item = hits[0];
   item.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
   item.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
   item.click();
+  return "OK";
+}`;
+
+/** 重打前选中失败的 `@文件名` 文本节点，不动已经挂上的 mention。选不中返回 NO_QUERY。 */
+export const COMPOSER_SELECT_QUERY_JS = `function (needle) {
+  ${CHIP_HELPERS}
+  var els = ${VISIBLE_ELS};
+  if (!els.length) return "NO_INPUT";
+  var el = armadaImageTarget(els);
+  el.focus();
+  var q = "@" + String(needle || "");
+  if (!document.createTreeWalker || !window.getSelection || !document.createRange) return "NO_QUERY";
+  var walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  var node = null;
+  var cur;
+  while ((cur = walker.nextNode())) {
+    if (String(cur.textContent || "").indexOf(q) >= 0) node = cur;
+  }
+  if (!node) return "NO_QUERY";
+  var range = document.createRange();
+  range.selectNodeContents(node);
+  var sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
   return "OK";
 }`;
 
@@ -1140,9 +1174,26 @@ export function createFileMentionPaster(deps: CdpSubmitterDeps) {
         }
         return clicked;
       };
-      const clearTyped = async (needle: string) => {
+      const meta = process.platform === "win32" ? 2 : 4;
+      // 2026-09-28 PF39WTSM：Escape 把焦点丢到 xterm-helper-textarea。
+      // 裸 Backspace 即使焦点回到 composer 也不删字（25 次后查询还在）。
+      // 选中 `@文件名` 后下一次 insertText 会替换它；选不中再 Ctrl/Cmd+A 加一次 Backspace。
+      // 图片芯片在编辑器外面，全选不会拆芯片。已挂上的 mention 只在选不中查询时才会被全选清掉。
+      const clearTyped = async (needle: string): Promise<boolean> => {
         await press("Escape", "Escape", 27);
-        for (let n = 0; n < 1 + needle.length; n++) await press("Backspace", "Backspace", 8);
+        const selected = String(await session.call("Runtime.evaluate", {
+          expression: `(${COMPOSER_SELECT_QUERY_JS})(${JSON.stringify(needle)})`,
+          returnByValue: true,
+        }).then((x) => x?.result?.value));
+        if (selected === "OK") return true;
+        await session.call("Input.dispatchKeyEvent", {
+          type: "keyDown", modifiers: meta, key: "a", code: "KeyA", windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65,
+        });
+        await session.call("Input.dispatchKeyEvent", {
+          type: "keyUp", modifiers: meta, key: "a", code: "KeyA", windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65,
+        });
+        await press("Backspace", "Backspace", 8);
+        return false;
       };
       // One retype for the whole paste. A just-written inbox file often has no
       // .mentions-menu until the workspace index catches up (~15s). A second
@@ -1160,8 +1211,9 @@ export function createFileMentionPaster(deps: CdpSubmitterDeps) {
         if (clicked !== "OK" && retypesLeft > 0) {
           retypesLeft -= 1;
           log(`file mention menu not ready, retyping needle=${needle}`);
-          await clearTyped(needle);
+          // 先等索引。选区撑不过这 10 秒，所以清空放在等待之后、insertText 之前。
           await sleep(10_000);
+          await clearTyped(needle);
           clicked = await typeAndClick(needle);
         }
         if (clicked === "AMBIGUOUS") {
