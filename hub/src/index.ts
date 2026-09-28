@@ -17,6 +17,8 @@ import { cursorReloadView, findVsixPack, readPendingReload, vsixPackSearchDirs, 
 import { REQUIRED_EXTENSION_VERSION } from "../web/src/boardState";
 import { cmpSemver } from "../../desktop-core/src/cursorReload";
 import { fileHttpStatus, WorkspaceFileBroker } from "./workspaceFileBroker";
+import { operatorChatTurns } from "../web/src/chatView";
+import type { RunEvent } from "../web/src/types";
 import { pruneHubLogs } from "./pruneLogs";
 
 export interface HubServer {
@@ -191,6 +193,12 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
     });
     if (!result.ok) return c.json({ error: result.error }, fileHttpStatus(result.error));
     return c.json({ path: result.path, name: result.name, mime: result.mime, text: result.text });
+  });
+  app.get("/api/runs/:id/chat", (c) => {
+    const id = c.req.param("id");
+    if (!runs.get(id)) return c.json({ error: "NOT_FOUND" }, 404);
+    const events = db.query("SELECT * FROM run_events WHERE run_id=?1 ORDER BY seq").all(id) as RunEvent[];
+    return c.json({ turns: operatorChatTurns(events) });
   });
   app.patch("/api/runs/:id", async (c) => {
     const body = await c.req.json().catch(() => ({}));

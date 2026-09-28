@@ -79,6 +79,19 @@ class RelayClient(base: String, private val token: String) {
         )
     }
 
+    suspend fun chat(runId: String): List<ChatTurnDto> {
+        val o = JSONObject(get("/mobile/runs/$runId/chat"))
+        val arr = o.optJSONArray("turns") ?: JSONArray()
+        return buildList {
+            for (i in 0 until arr.length()) {
+                val item = arr.optJSONObject(i) ?: continue
+                val role = item.optString("role")
+                val text = item.optString("text")
+                if ((role == "user" || role == "assistant") && text.isNotBlank()) add(ChatTurnDto(role, text))
+            }
+        }
+    }
+
     suspend fun dispatch(workspaceId: String, prompt: String, attachmentIds: List<String> = emptyList()): RunDto {
         val body = JSONObject().put("workspaceId", workspaceId).put("prompt", prompt)
         if (attachmentIds.isNotEmpty()) body.put("attachmentIds", JSONArray(attachmentIds))

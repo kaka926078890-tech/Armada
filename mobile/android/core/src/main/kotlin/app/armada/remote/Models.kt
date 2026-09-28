@@ -73,6 +73,8 @@ data class WorkspaceFileDto(
     val text: String,
 )
 
+data class ChatTurnDto(val role: String, val text: String)
+
 const val MAX_RUN_ATTACHMENTS = 4
 const val MAX_BLOB_BYTES = 8 * 1024 * 1024
 

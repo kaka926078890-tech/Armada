@@ -178,6 +178,14 @@ export function createRelayCommandHandler(deps: RelayCommandDeps): (msg: any) =>
         if (run) deps.send({ type: "snap.run", run });
         return;
       }
+      if (msg.type === "cmd.chatGet") {
+        if (typeof msg.runId !== "string" || !msg.runId) return fail("INVALID");
+        const r = await deps.hubFetch(`/api/runs/${encodeURIComponent(msg.runId)}/chat`);
+        const body = await r.json().catch(() => ({})) as any;
+        if (!r.ok) return fail(body.error ?? "HUB_ERROR");
+        deps.send({ type: "cmd.result", requestId, ok: true, turns: Array.isArray(body.turns) ? body.turns : [] });
+        return;
+      }
       if (msg.type === "cmd.workspaceFileGet") {
         if (typeof msg.runId !== "string" || !msg.runId) return fail("INVALID");
         const path = typeof msg.path === "string" ? msg.path : "";

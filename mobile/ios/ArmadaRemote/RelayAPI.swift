@@ -109,6 +109,11 @@ struct WorkspaceFileDTO: Decodable {
     var text: String
 }
 
+struct ChatTurnDTO: Decodable {
+    var role: String
+    var text: String
+}
+
 struct RunDTO: Decodable, Identifiable, Hashable {
     var runId: String
     var machineId: String
@@ -482,6 +487,12 @@ actor RelayAPI {
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
         let q = path.addingPercentEncoding(withAllowedCharacters: allowed) ?? path
         return try await get("/mobile/runs/\(runId)/file?path=\(q)")
+    }
+
+    func chat(runId: String) async throws -> [ChatTurnDTO] {
+        struct Wrap: Decodable { var turns: [ChatTurnDTO] }
+        let w: Wrap = try await get("/mobile/runs/\(runId)/chat")
+        return w.turns.filter { ($0.role == "user" || $0.role == "assistant") && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     }
 
     func dispatch(workspaceId: String, prompt: String, attachmentIds: [String] = []) async throws -> RunDTO {

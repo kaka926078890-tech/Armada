@@ -97,9 +97,24 @@ export type RunSnap = {
 type PromptSnippet = { id: string; title: string; body: string };
 type BlobSnap = { id: string; sha256: string; mime: string; name: string; size: number };
 
+type ChatTurnSnap = { role: "user" | "assistant"; text: string };
+
 type Pending = {
-  resolve: (v: { ok: boolean; error?: string; run?: RunSnap; snippets?: PromptSnippet[]; cursorReload?: unknown; blob?: BlobSnap; file?: { path: string; name: string; mime: string; text: string } }) => void;
+  resolve: (v: { ok: boolean; error?: string; run?: RunSnap; snippets?: PromptSnippet[]; cursorReload?: unknown; blob?: BlobSnap; file?: { path: string; name: string; mime: string; text: string }; turns?: ChatTurnSnap[] }) => void;
 };
+
+export function chatTurnsOf(raw: unknown): ChatTurnSnap[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ChatTurnSnap[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const role = (item as { role?: unknown }).role;
+    const text = (item as { text?: unknown }).text;
+    if ((role !== "user" && role !== "assistant") || typeof text !== "string" || !text.trim()) continue;
+    out.push({ role, text });
+  }
+  return out;
+}
 
 function hex64(): string {
   return randomBytes(32).toString("hex");
@@ -504,7 +519,7 @@ export function createRelayServer(opts: {
     return true;
   }
 
-  function waitHub(requestId: string): Promise<{ ok: boolean; error?: string; run?: RunSnap; snippets?: PromptSnippet[]; cursorReload?: unknown; blob?: BlobSnap; file?: { path: string; name: string; mime: string; text: string } }> {
+  function waitHub(requestId: string): Promise<{ ok: boolean; error?: string; run?: RunSnap; snippets?: PromptSnippet[]; cursorReload?: unknown; blob?: BlobSnap; file?: { path: string; name: string; mime: string; text: string }; turns?: ChatTurnSnap[] }> {
     return new Promise((resolve) => {
       const t = setTimeout(() => {
         pending.delete(requestId);
@@ -901,6 +916,26 @@ export function createRelayServer(opts: {
     return c.json(result.file ?? { path: "", name: "", mime: "text/plain", text: "" });
   });
 
+  app.get("/mobile/runs/:id/chat", async (c) => {
+    const tok = (c as any).get("opToken") as string;
+    const fleet = (c as any).get("fleet") as { id: string; hub_online: number };
+    if (!checkRate(tok)) return c.json({ error: "RATE_LIMIT" }, 429);
+    if (fleet.hub_online !== 1) return c.json({ error: "HUB_OFFLINE" }, 503);
+    const runId = c.req.param("id");
+    const row = db.query("SELECT id FROM runs WHERE id=?1 AND fleet_id=?2").get(runId, fleet.id);
+    if (!row) return c.json({ error: "NOT_FOUND" }, 404);
+    const requestId = `r${++reqSeq}`;
+    if (!sendHub(fleet.id, { type: "cmd.chatGet", requestId, runId })) {
+      return c.json({ error: "HUB_OFFLINE" }, 503);
+    }
+    const result = await waitHub(requestId);
+    if (!result.ok) {
+      const err = result.error ?? "HUB_TIMEOUT";
+      return c.json({ error: err }, hubCmdStatus(err) as 400);
+    }
+    return c.json({ turns: result.turns ?? [] });
+  });
+
   app.get("/mobile/runs/:id", (c) => {
     const fleet = (c as any).get("fleet") as { id: string };
     const row = db.query("SELECT * FROM runs WHERE id=?1 AND fleet_id=?2").get(c.req.param("id"), fleet.id);
@@ -1103,7 +1138,7 @@ export function createRelayServer(opts: {
           const p = pending.get(msg.requestId);
           if (p) {
             pending.delete(msg.requestId);
-            p.resolve({ ok: !!msg.ok, error: msg.error, run: msg.run, snippets: msg.snippets, cursorReload: msg.cursorReload, blob: msg.blob, file: msg.file });
+            p.resolve({ ok: !!msg.ok, error: msg.error, run: msg.run, snippets: msg.snippets, cursorReload: msg.cursorReload, blob: msg.blob, file: msg.file, turns: chatTurnsOf(msg.turns) });
           }
         }
       },

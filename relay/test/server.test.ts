@@ -317,6 +317,52 @@ describe("relay serve", () => {
     ws.close();
   });
 
+  test("GET /mobile/runs/:id/chat keeps user and assistant lines only", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    expect((await fetch(url(s, "/mobile/runs/r-1/chat"), {
+      headers: { authorization: `Bearer ${fleet.operatorToken}` },
+    })).status).toBe(503);
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    autoHub(ws);
+    ws.addEventListener("message", (e) => {
+      const msg = JSON.parse(String(e.data));
+      if (msg.type === "cmd.chatGet") {
+        ws.send(JSON.stringify({
+          type: "cmd.result",
+          requestId: msg.requestId,
+          ok: true,
+          turns: [
+            { role: "thought", text: "想一下" },
+            { role: "user", text: "第一问" },
+            { role: "assistant", text: "第一答" },
+            { role: "user", text: "  " },
+          ],
+        }));
+      }
+    });
+    await Bun.sleep(50);
+    const headers = { authorization: `Bearer ${fleet.operatorToken}` };
+    const d = await fetch(url(s, "/mobile/runs"), {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({ workspaceId: "m-1|/Users/me/proj", prompt: "hi" }),
+    });
+    expect(d.status).toBe(201);
+    const got = await fetch(url(s, "/mobile/runs/r-1/chat"), { headers });
+    expect(got.status).toBe(200);
+    expect(await got.json()).toEqual({
+      turns: [
+        { role: "user", text: "第一问" },
+        { role: "assistant", text: "第一答" },
+      ],
+    });
+    const detail = await (await fetch(url(s, "/mobile/runs/r-1"), { headers })).json() as Record<string, unknown>;
+    expect(detail.turns).toBeUndefined();
+    expect((await fetch(url(s, "/mobile/runs/nope/chat"), { headers })).status).toBe(404);
+    ws.close();
+  });
+
   test("cursor-reload hub offline → 503", async () => {
     const s = start();
     const fleet = s.createFleet();

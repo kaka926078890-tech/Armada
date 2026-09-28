@@ -651,6 +651,21 @@ export function lastTurnAssistantBody(blocks: ChatBlock[]): string {
   return assistantBodyText(splitChatTurns(blocks).at(-1) ?? blocks);
 }
 
+export type OperatorChatTurn = { role: "user" | "assistant"; text: string };
+
+/** App 对话记录：每一折只留用户原话和该折助手最终正文，不含思考、工具、Ask。 */
+export function operatorChatTurns(events: RunEvent[]): OperatorChatTurn[] {
+  const out: OperatorChatTurn[] = [];
+  for (const turn of splitChatTurns(eventsToChat(events))) {
+    const user = turn.find((b): b is Extract<ChatBlock, { kind: "user" }> => b.kind === "user");
+    const userText = user?.text.trim() ?? "";
+    if (userText) out.push({ role: "user", text: userText });
+    const body = assistantBodyText(turn);
+    if (body) out.push({ role: "assistant", text: body });
+  }
+  return out;
+}
+
 function normPrompt(s: string): string {
   return s.replace(/\s+/g, " ").trim();
 }

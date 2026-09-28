@@ -23,3 +23,5 @@ fun runNavRoute(id: String): String = "run?id=${encodeNavArg(id)}"
 
 fun fileNavRoute(runId: String, path: String): String =
     "file?runId=${encodeNavArg(runId)}&path=${encodeNavArg(path)}"
+
+fun chatNavRoute(runId: String): String = "chat?runId=${encodeNavArg(runId)}"

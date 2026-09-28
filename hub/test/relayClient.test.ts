@@ -634,7 +634,7 @@ describe("hub outbound to relay", () => {
     for (const cmd of [
       "cmd.dispatch", "cmd.followup", "cmd.retry", "cmd.answer", "cmd.cancel",
       "cmd.archive", "cmd.unarchive", "cmd.promptSnippetsGet", "cmd.promptSnippetsPut",
-      "cmd.cursorReloadGet", "cmd.cursorReloadPost", "cmd.blobPut", "cmd.workspaceFileGet", "UNKNOWN_CMD",
+      "cmd.cursorReloadGet", "cmd.cursorReloadPost", "cmd.blobPut", "cmd.chatGet", "cmd.workspaceFileGet", "UNKNOWN_CMD",
     ]) {
       expect(handler).toContain(cmd);
     }
@@ -650,6 +650,27 @@ describe("hub outbound to relay", () => {
     });
     await handle({ type: "cmd.notARealCommand", requestId: "req-1" });
     expect(sent).toEqual([{ type: "cmd.result", requestId: "req-1", ok: false, error: "UNKNOWN_CMD" }]);
+  });
+
+  test("cmd.chatGet fetches /api/runs/:id/chat", async () => {
+    const { createRelayCommandHandler } = await import("../src/relayCommandHandler");
+    const turns = [
+      { role: "user", text: "第一问" },
+      { role: "assistant", text: "第一答" },
+    ];
+    const calls: string[] = [];
+    const sent: object[] = [];
+    const handle = createRelayCommandHandler({
+      hubFetch: async (path) => {
+        calls.push(path);
+        return new Response(JSON.stringify({ turns }), { status: 200 });
+      },
+      snapOf: async () => null,
+      send: (msg) => sent.push(msg),
+    });
+    await handle({ type: "cmd.chatGet", requestId: "c1", runId: "r/1" });
+    expect(calls[0]).toBe("/api/runs/r%2F1/chat");
+    expect(sent).toEqual([{ type: "cmd.result", requestId: "c1", ok: true, turns }]);
   });
 
   test("cmd.workspaceFileGet fetches /api/runs/:id/file", async () => {

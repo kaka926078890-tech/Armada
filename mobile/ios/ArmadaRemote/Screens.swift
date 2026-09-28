@@ -1036,6 +1036,7 @@ struct RunDetailView: View {
     @State private var showDispatch = false
     @State private var copied = false
     @State private var filePath: String?
+    @State private var showChat = false
     @Environment(\.dismiss) private var dismiss
 
     private var slot: WorkspaceDTO? {
@@ -1065,6 +1066,8 @@ struct RunDetailView: View {
                     }
                     DetailPromptCard(text: run.prompt, contentHeight: $promptHeight)
                     DetailReplyBlock(text: run.finalText, isLive: run.isLive, height: $mdHeight, onWorkspaceFile: { filePath = $0 })
+                    Button("查看对话记录") { showChat = true }
+                        .font(.subheadline)
                     if let ask = run.pendingAsk {
                         AskView(runId: runId, ask: ask) { await reload() }
                     }
@@ -1144,6 +1147,11 @@ struct RunDetailView: View {
                         await session.refresh()
                     }
                 }
+            }
+        }
+        .sheet(isPresented: $showChat) {
+            NavigationStack {
+                ChatHistoryView(runId: runId)
             }
         }
         .task(id: runId) {
@@ -1271,6 +1279,76 @@ struct RunDetailView: View {
             err = nil
         } catch {
             err = error.localizedDescription
+        }
+    }
+}
+
+struct ChatTurnBubble: View {
+    let turn: ChatTurnDTO
+    private var isUser: Bool { turn.role == "user" }
+
+    var body: some View {
+        HStack {
+            if isUser { Spacer(minLength: 0) }
+            Text(turn.text)
+                .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
+                .padding(12)
+                .background(
+                    isUser ? Color.accentColor.opacity(0.18) : Color.primary.opacity(0.06),
+                    in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+                )
+                .containerRelativeFrame(.horizontal) { width, _ in width * 0.78 }
+            if !isUser { Spacer(minLength: 0) }
+        }
+    }
+}
+
+struct ChatHistoryView: View {
+    @EnvironmentObject var session: Session
+    @Environment(\.dismiss) private var dismiss
+    let runId: String
+    @State private var turns: [ChatTurnDTO] = []
+    @State private var err: String?
+    @State private var loaded = false
+
+    var body: some View {
+        Group {
+            if let err {
+                Text(err).foregroundStyle(.red).padding()
+            } else if !loaded {
+                ProgressView()
+            } else if turns.isEmpty {
+                Text("还没有对话").foregroundStyle(.secondary)
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 10) {
+                        ForEach(Array(turns.enumerated()), id: \.offset) { _, turn in
+                            ChatTurnBubble(turn: turn)
+                        }
+                    }
+                    .padding()
+                }
+            }
+        }
+        .navigationTitle("对话记录")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("关闭") { dismiss() }
+            }
+        }
+        .task { await reload() }
+        .refreshable { await reload() }
+    }
+
+    private func reload() async {
+        do {
+            turns = try await session.api().chat(runId: runId)
+            err = nil
+            loaded = true
+        } catch {
+            err = error.localizedDescription
+            loaded = true
         }
     }
 }

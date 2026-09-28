@@ -70,7 +70,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
@@ -261,6 +261,17 @@ fun FleetNav(vm: SessionVm, state: UiState) {
                 entry.arguments?.getString("id").orEmpty(),
                 onBack = { nav.popBackStack() },
                 onOpenFile = { nav.navigate(fileNavRoute(entry.arguments?.getString("id").orEmpty(), it)) },
+                onOpenChat = { nav.navigate(chatNavRoute(entry.arguments?.getString("id").orEmpty())) },
+            )
+        }
+        composable(
+            "chat?runId={runId}",
+            arguments = listOf(navArgument("runId") { type = NavType.StringType }),
+        ) { entry ->
+            ChatHistoryScreen(
+                vm,
+                entry.arguments?.getString("runId").orEmpty(),
+                onBack = { nav.popBackStack() },
             )
         }
         composable(
@@ -866,7 +877,7 @@ fun DispatchSheet(vm: SessionVm, workspace: WorkspaceDto, followupRunId: String?
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String, onBack: () -> Unit, onOpenFile: (String) -> Unit = {}) {
+fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String, onBack: () -> Unit, onOpenFile: (String) -> Unit = {}, onOpenChat: () -> Unit = {}) {
     var run by remember { mutableStateOf(state.board.runs.find { it.runId == runId } ?: state.board.hidden.find { it.runId == runId }) }
     var err by remember { mutableStateOf<String?>(null) }
     var showFollow by remember { mutableStateOf(false) }
@@ -997,6 +1008,12 @@ fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String, onBack: () -> 
                 if (slot?.canInject == false && r.displayError != "CDP_NOT_READY") Text(operatorMessage("CDP_NOT_READY"), color = StatusRed)
                 DetailPromptCard(r.prompt)
                 DetailReplyBlock(r.finalText, r.isLive, onOpenFile)
+                Text(
+                    "查看对话记录",
+                    color = AccentBlue,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.clickable { onOpenChat() },
+                )
                 r.pendingAsk?.let { AskBlock(vm, runId, it) { runCatching { adopt(vm.api().run(runId)) } } }
                 if (r.queuedOutbound.isNotEmpty()) {
                     Text("${r.queuedOutbound.size} 条排队消息", style = MaterialTheme.typography.bodySmall)
@@ -1287,6 +1304,62 @@ fun MarkdownFrame(text: String, heightDp: Float? = null, onHeight: ((Float) -> U
         },
         modifier = Modifier.fillMaxWidth().height(shown.dp),
     )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ChatHistoryScreen(vm: SessionVm, runId: String, onBack: () -> Unit) {
+    var turns by remember(runId) { mutableStateOf<List<ChatTurnDto>?>(null) }
+    var err by remember(runId) { mutableStateOf<String?>(null) }
+    LaunchedEffect(runId) {
+        err = null
+        turns = null
+        try {
+            turns = vm.api().chat(runId)
+        } catch (e: Exception) {
+            err = e.message
+            turns = emptyList()
+        }
+    }
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            Column(Modifier.statusBarsPadding()) {
+                IosNavBar(title = "对话记录", leading = NavAction("返回") { onBack() })
+                HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+            }
+        },
+    ) { pad ->
+        Column(
+            Modifier.padding(pad).padding(16.dp).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            err?.let { Text(it, color = StatusRed) }
+            val rows = turns
+            if (rows == null && err == null) CircularProgressIndicator()
+            else if (rows.isNullOrEmpty() && err == null) {
+                Text("还没有对话", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+            } else {
+                rows.orEmpty().forEach { ChatTurnBubble(it) }
+            }
+        }
+    }
+}
+
+@Composable
+fun ChatTurnBubble(turn: ChatTurnDto) {
+    val user = turn.role == "user"
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = if (user) Arrangement.End else Arrangement.Start) {
+        Text(
+            turn.text,
+            modifier = Modifier
+                .fillMaxWidth(0.78f)
+                .clip(RoundedCornerShape(18.dp))
+                .background(if (user) AccentBlue.copy(alpha = 0.18f) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f))
+                .padding(12.dp),
+            textAlign = if (user) TextAlign.End else TextAlign.Start,
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

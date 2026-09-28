@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { assistantBodyForPrompt, assistantBodyText, lastTurnAssistantBody, eventsToChat, extractUserText, segmentChat, INITIAL_VISIBLE_TURNS, initialHiddenPrefixTurns, recentTurnsWindow, mergeOutboundChat, mergePendingAsk, queuedOutbound, collapseRepeatedTools, processFoldLabel, CURSOR_PROTOCOL_USER_PREFIXES, userMessageCaption, stampFallbackImageIds } from "../src/chatView";
+import { assistantBodyForPrompt, assistantBodyText, lastTurnAssistantBody, operatorChatTurns, eventsToChat, extractUserText, segmentChat, INITIAL_VISIBLE_TURNS, initialHiddenPrefixTurns, recentTurnsWindow, mergeOutboundChat, mergePendingAsk, queuedOutbound, collapseRepeatedTools, processFoldLabel, CURSOR_PROTOCOL_USER_PREFIXES, userMessageCaption, stampFallbackImageIds } from "../src/chatView";
 import type { ChatBlock } from "../src/chatView";
 import type { RunEvent } from "../src/types";
 
@@ -1111,5 +1111,52 @@ describe("stampFallbackImageIds", () => {
       ["other"],
     );
     expect(blocks[0]).toEqual({ kind: "user", text: "[图片]", seq: 1, imageIds: ["keep"] });
+  });
+});
+
+describe("operatorChatTurns", () => {
+  test("keeps each user line and that turn's assistant body", () => {
+    const turns = operatorChatTurns([
+      ev({ seq: 1, hook_event_name: "beforeSubmitPrompt", payload: JSON.stringify({ prompt: "第一问" }) }),
+      ev({ seq: 2, hook_event_name: "afterAgentThought", payload: JSON.stringify({ text: "想一下" }) }),
+      ev({ seq: 3, hook_event_name: "afterAgentResponse", payload: JSON.stringify({ text: "第一答" }) }),
+      ev({ seq: 4, hook_event_name: "beforeSubmitPrompt", payload: JSON.stringify({ prompt: "第二问" }) }),
+      ev({ seq: 5, hook_event_name: "afterAgentResponse", payload: JSON.stringify({ text: "第二答" }) }),
+    ]);
+    expect(turns).toEqual([
+      { role: "user", text: "第一问" },
+      { role: "assistant", text: "第一答" },
+      { role: "user", text: "第二问" },
+      { role: "assistant", text: "第二答" },
+    ]);
+  });
+
+  test("drops tool narration and keeps the final assistant line", () => {
+    const turns = operatorChatTurns([
+      ev({ seq: 1, source: "transcript", payload: JSON.stringify({
+        role: "user", message: { content: [{ type: "text", text: "<user_query>\n改 hello.txt\n</user_query>" }] },
+      }) }),
+      ev({ seq: 2, source: "transcript", payload: JSON.stringify({
+        role: "assistant", message: { content: [
+          { type: "text", text: "先改文件。" },
+          { type: "tool_use", name: "StrReplace", input: { path: "/ws/hello.txt" } },
+        ] },
+      }) }),
+      ev({ seq: 3, source: "transcript", payload: JSON.stringify({
+        role: "assistant", message: { content: [{ type: "text", text: "ok" }] },
+      }) }),
+    ]);
+    expect(turns).toEqual([
+      { role: "user", text: "改 hello.txt" },
+      { role: "assistant", text: "ok" },
+    ]);
+  });
+
+  test("in-progress turn keeps the user line without an assistant body", () => {
+    const turns = operatorChatTurns([
+      ev({ seq: 1, hook_event_name: "beforeSubmitPrompt", payload: JSON.stringify({ prompt: "在跑" }) }),
+      ev({ seq: 2, hook_event_name: "afterAgentThought", payload: JSON.stringify({ text: "还在想" }) }),
+    ]);
+    expect(turns).toEqual([{ role: "user", text: "在跑" }]);
   });
 });
