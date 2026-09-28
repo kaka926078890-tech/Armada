@@ -10,10 +10,18 @@ Armada 按 **面** 发版：扩展、桌面、iOS、Android 可以不同号。RE
 
 ## Unreleased
 
+---
+
+## 2026-09-28 — 扩展 0.4.46 · iOS TF 31 · Android 0.1.14 · 桌面 0.1.0
+
 ### 修复
 
 - 派发核对改读编辑器文档。桌面框读 Lexical，Agents 框读 TipTap `getText`（块分隔符 `\n`）。`innerText` 会把一个空行画成五个换行，带空行的提示词不再因此被 `VERIFY_FAIL:MISMATCH` 拒绝。对不上时原因带行号。
 - 中台启动时删掉已结束任务里超过 7 天的 `run_events`，以及超过 7 天的 `audit`。进行中的任务保留。删掉很多行时再 `VACUUM`。
+
+### 操作员注意
+
+Mac 和 Windows 都装扩展 **0.4.46**。中台须 overlay 到含 `REQUIRED_EXTENSION_VERSION=0.4.46` 的包装 hub。目录里没有这个包时，空闲 Reload 不会升级。桌面仍是 **0.1.0**；iOS TestFlight **31**；Android **0.1.14**。
 
 ---
 
