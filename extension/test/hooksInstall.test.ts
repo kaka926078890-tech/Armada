@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { mergeHooks, hooksDriftHash, HOOK_EVENTS, spoolScriptName, hookCommand, shouldInstallArmadaHooks } from "../src/hooksInstall";
+import { chmodSync, mkdtempSync, statSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
+import { mergeHooks, hooksDriftHash, HOOK_EVENTS, spoolScriptName, hookCommand, shouldInstallArmadaHooks, installBundledSpoolScript } from "../src/hooksInstall";
 
 describe("mergeHooks", () => {
   test("creates hooks object from scratch with all 13 events", () => {
@@ -104,6 +107,16 @@ describe("mergeHooks", () => {
       );
       expect(ours).toHaveLength(0);
     }
+  });
+
+  test("installs the spool script executable even when the vsix copy is 0644", () => {
+    const dir = mkdtempSync(join(tmpdir(), "armada-spool-"));
+    const bundled = join(dir, "bundled.sh");
+    const dest = join(dir, "armada-spool.sh");
+    writeFileSync(bundled, "#!/bin/sh\nexit 0\n");
+    chmodSync(bundled, 0o644);
+    installBundledSpoolScript(bundled, dest);
+    expect(statSync(dest).mode & 0o111).toBe(0o111);
   });
 
   test("does not install the Cursor Get-Content|$input wrap as a bind path", () => {

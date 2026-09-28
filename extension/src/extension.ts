@@ -12,7 +12,7 @@ import { TranscriptTailer } from "./transcript";
 import { Executor, CancelWatcher } from "./executor";
 import { createCdpSubmitter, createImagePaster, createFileMentionPaster, createComposerFinisher, createAskQuestionDriver, probeCdpReadyForInject, type AskCdpInspect } from "./cdpInject";
 import { createOsClipboardWriter } from "./osClipboard";
-import { mergeHooks, hooksDriftHash, spoolScriptName, shouldInstallArmadaHooks } from "./hooksInstall";
+import { mergeHooks, hooksDriftHash, spoolScriptName, shouldInstallArmadaHooks, installBundledSpoolScript } from "./hooksInstall";
 import { collectTranscriptViews, collectTranscriptTails, matchTranscriptToPending, stopPayloadFromTranscriptLine, stopFromTranscriptFileContent, transcriptsDirForWorkspace, isWithinTranscriptBindWindow, FollowupStopGuard, listSubagentTranscripts, childCidFromSubagentPath, decideLateTranscriptAttach, transcriptJsonlPath } from "./transcriptBind";
 import { TranscriptDirWatcher, debounceLeading, watchTranscriptDir, watchFileSize, TRANSCRIPT_WATCHDOG_MS, TRANSCRIPT_WATCH_DEBOUNCE_MS } from "./transcriptWatch";
 import { createExtSeq } from "./extSeq";
@@ -412,8 +412,8 @@ export function activate(context: vscode.ExtensionContext): void {
     try {
       mkdirSync(hooksDir, { recursive: true });
       if (shouldInstallArmadaHooks(scriptPath)) {
-        if (existsSync(bundled)) copyFileSync(bundled, scriptPath);
-        else if (existsSync(bundledSh)) copyFileSync(bundledSh, scriptPath);
+        if (existsSync(bundled)) installBundledSpoolScript(bundled, scriptPath);
+        else if (existsSync(bundledSh)) installBundledSpoolScript(bundledSh, scriptPath);
       }
       const existing = existsSync(hooksJsonPath) ? JSON.parse(readFileSync(hooksJsonPath, "utf8")) : null;
       const { merged, changed } = mergeHooks(existing, scriptPath);

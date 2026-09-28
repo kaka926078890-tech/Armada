@@ -380,6 +380,17 @@ pub fn unpack_vsix_to_dir(vsix: &Path, dest: &Path) -> Result<(), String> {
         let mut out = fs::File::create(&out_path).map_err(|e| e.to_string())?;
         std::io::copy(&mut entry, &mut out).map_err(|e| e.to_string())?;
     }
+    // Zip extract creates 0644. Mac beforeSubmitPrompt runs this script; exit 126 drops bind onto the transcript.
+    #[cfg(unix)]
+    {
+        let spool = dest.join("hooks").join("armada-spool.sh");
+        if spool.is_file() {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(&spool).map_err(|e| e.to_string())?.permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&spool, perms).map_err(|e| e.to_string())?;
+        }
+    }
     if !dest.join("package.json").is_file() {
         return Err("vsix-missing-package".into());
     }
@@ -1097,6 +1108,35 @@ mod tests {
             v[1]["location"]["external"],
             "file:///c%3A/Users/PC/.cursor/extensions/armada.armada-agent-0.4.23"
         );
+    }
+
+    #[test]
+    fn unpack_vsix_marks_spool_script_executable() {
+        let dir = scratch("unpack-spool");
+        let vsix = dir.join("armada-agent-0.4.46.vsix");
+        let file = fs::File::create(&vsix).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let opts = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        zip.start_file("extension/package.json", opts).unwrap();
+        zip.write_all(br#"{"name":"armada-agent","version":"0.4.46"}"#).unwrap();
+        zip.start_file("extension.vsixmanifest", opts).unwrap();
+        zip.write_all(b"<PackageManifest/>").unwrap();
+        zip.start_file("extension/hooks/armada-spool.sh", opts).unwrap();
+        zip.write_all(b"#!/bin/sh\nexit 0\n").unwrap();
+        zip.finish().unwrap();
+        let dest = dir.join("out");
+        unpack_vsix_to_dir(&vsix, &dest).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(dest.join("hooks/armada-spool.sh"))
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o111, 0o111, "mode {mode:o}");
+        }
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

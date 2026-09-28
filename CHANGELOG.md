@@ -10,6 +10,10 @@ Armada 按 **面** 发版：扩展、桌面、iOS、Android 可以不同号。RE
 
 ## Unreleased
 
+### 修复
+
+- Mac 安装扩展后仍用 `beforeSubmitPrompt` 绑定。vsix 解包把 `armada-spool.sh` 写成不可执行时，hook 以 126 失败，任务要等 jsonl 落盘才开始。解包和复制到 `~/.cursor/hooks` 都会补上执行位。
+
 ---
 
 ## 2026-09-28 — 扩展 0.4.46 · iOS TF 31 · Android 0.1.14 · 桌面 0.1.0

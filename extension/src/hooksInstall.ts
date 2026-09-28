@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import { existsSync } from "fs";
+import { chmodSync, copyFileSync, existsSync } from "fs";
 import { join } from "path";
 import { spawnSync } from "child_process";
 
@@ -68,6 +68,15 @@ export function hookCommand(scriptPath: string, event: string): string {
     return `sh "${toBashHookPath(scriptPath)}" ${event}`;
   }
   return `${scriptPath} ${event}`;
+}
+
+/**
+ * Copy the bundled spool script into `~/.cursor/hooks`.
+ * vsix unzip creates the file as 0644. Mac bind is `beforeSubmitPrompt`; a non-executable script exits 126 and the run waits on the transcript.
+ */
+export function installBundledSpoolScript(bundledPath: string, destPath: string): void {
+  copyFileSync(bundledPath, destPath);
+  if (shouldInstallArmadaHooks(destPath)) chmodSync(destPath, 0o755);
 }
 
 /** Windows Cursor wraps every hook in a new PowerShell that cannot reliably finish in 5s. */
