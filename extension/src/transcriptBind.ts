@@ -7,16 +7,77 @@ import { stopFromJsonlTurnEnded } from "../../hub/src/generationOwnership";
 import type { HookMatch, PendingRun } from "./binding";
 
 const TOLERANCE_MS = 5_000;
+
+export function bindScanMinMtime(dispatchedAt: number): number {
+  return dispatchedAt - TOLERANCE_MS;
+}
+/** Cursor `<timestamp>` is minute resolution, so a line written just after dispatch can read up to a minute earlier. */
+export const USER_LINE_CLOCK_SKEW_MS = 90_000;
+
+const TS_RE = /<timestamp>([^<]+)<\/timestamp>/;
+
+/** Cursor user-line clock, e.g. `Monday, Sep 28, 2026, 12:04 PM (UTC+8)`. */
+export function userTurnTimestampMs(rawLine: string): number | null {
+  const m = TS_RE.exec(rawLine);
+  if (!m) return null;
+  const raw = m[1]!.trim();
+  const zm = /\(UTC([+-])(\d{1,2})(?::(\d{2}))?\)\s*$/i.exec(raw);
+  const body = raw.replace(/^[A-Za-z]+,\s*/, "").replace(/\s*\(UTC[^)]*\)\s*$/i, "").trim();
+  const clock = Date.parse(`${body} UTC`);
+  if (Number.isNaN(clock)) return null;
+  if (!zm) return clock;
+  const sign = zm[1] === "-" ? -1 : 1;
+  const off = sign * ((Number(zm[2]) * 60) + Number(zm[3] ?? 0)) * 60_000;
+  return clock - off;
+}
+
+export function extractUserTurns(jsonl: string, baseOffset = 0): UserTurn[] {
+  const turns: UserTurn[] = [];
+  let offset = baseOffset;
+  const parts = jsonl.split("\n");
+  for (let i = 0; i < parts.length; i++) {
+    const line = parts[i] ?? "";
+    const raw = i < parts.length - 1 ? `${line}\n` : line;
+    const trimmed = line.trim();
+    if (trimmed) {
+      let role: unknown;
+      try { role = (JSON.parse(trimmed) as { role?: unknown }).role; } catch { role = undefined; }
+      if (role === "user") {
+        const prompt = extractFirstUserPrompt(trimmed);
+        if (prompt !== null) {
+          turns.push({
+            prompt,
+            atMs: userTurnTimestampMs(trimmed),
+            offset,
+            first: turns.length === 0 && baseOffset === 0,
+          });
+        }
+      }
+    }
+    offset += Buffer.byteLength(raw);
+  }
+  return turns;
+}
+
 const CID_RE = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const LEAF_RE = new RegExp(`/agent-transcripts/(${CID_RE})/\\1\\.jsonl$`, "i");
 const SUB_RE = new RegExp(`/subagents/(${CID_RE})\\.jsonl$`, "i");
 const QUERY_RE = /<user_query>\s*([\s\S]*?)\s*<\/user_query>/;
+
+export interface UserTurn {
+  prompt: string;
+  atMs: number | null;
+  offset: number;
+  /** True only for the first user line of the file. Later lines need a fresh timestamp. */
+  first: boolean;
+}
 
 export interface TranscriptFileView {
   path: string;
   mtimeMs: number;
   firstPrompt: string;
   conversationId: string;
+  turns?: UserTurn[];
 }
 
 /** Cursor `~/.cursor/projects/<slug>` for a workspace fsPath. */
@@ -149,22 +210,86 @@ function pushTail(out: TranscriptTail[], path: string): void {
   out.push({ path, lastLine: readLastNonEmptyLine(path), mtimeMs });
 }
 
-export function collectTranscriptViews(transcriptsRoot: string): TranscriptFileView[] {
+const BIND_READ_MAX = 8 * 1024 * 1024;
+
+function readBindBody(path: string, size: number): { text: string; base: number } {
+  if (size <= BIND_READ_MAX) return { text: readFileSync(path, "utf8"), base: 0 };
+  const tailLen = Math.min(size, 2 * 1024 * 1024);
+  const fd = openSync(path, "r");
+  try {
+    const buf = Buffer.alloc(tailLen);
+    readSync(fd, buf, 0, tailLen, size - tailLen);
+    const raw = buf.toString("utf8");
+    const nl = raw.indexOf("\n");
+    if (nl < 0) return { text: "", base: size };
+    const skipped = raw.slice(0, nl + 1);
+    return { text: raw.slice(nl + 1), base: size - tailLen + Buffer.byteLength(skipped) };
+  } finally {
+    closeSync(fd);
+  }
+}
+
+export function collectTranscriptViews(
+  transcriptsRoot: string,
+  opts?: { minMtimeMs?: number },
+): TranscriptFileView[] {
   const views: TranscriptFileView[] = [];
+  const min = opts?.minMtimeMs ?? 0;
   for (const path of listLeafTranscripts(transcriptsRoot)) {
     const conversationId = conversationIdFromTranscriptPath(path);
     if (!conversationId) continue;
     let mtimeMs = 0;
-    let head = "";
+    let size = 0;
     try {
-      mtimeMs = statSync(path).mtimeMs;
-      head = readFileSync(path, { encoding: "utf8" }).slice(0, 16_384);
+      const st = statSync(path);
+      mtimeMs = st.mtimeMs;
+      size = st.size;
     } catch { continue; }
-    const firstPrompt = extractFirstUserPrompt(head);
-    if (firstPrompt === null) continue;
-    views.push({ path, mtimeMs, firstPrompt, conversationId });
+    if (mtimeMs < min) continue;
+    let text = "";
+    let base = 0;
+    try {
+      const body = readBindBody(path, size);
+      text = body.text;
+      base = body.base;
+    } catch { continue; }
+    const turns = extractUserTurns(text, base);
+    if (turns.length === 0) continue;
+    const first = turns.find((t) => t.first);
+    views.push({
+      path,
+      mtimeMs,
+      firstPrompt: first ? first.prompt : "",
+      conversationId,
+      turns,
+    });
   }
   return views;
+}
+
+function promptEquals(run: PendingRun, got: string): boolean {
+  const want = stripImageMarkers(run.prompt);
+  const text = stripImageMarkers(got);
+  if (want && want === text) return true;
+  if (!want && !text && (run.attachmentIds?.length ?? 0) > 0) return true;
+  return false;
+}
+
+function turnsOf(file: TranscriptFileView): UserTurn[] {
+  if (file.turns && file.turns.length > 0) return file.turns;
+  return [{ prompt: file.firstPrompt, atMs: null, offset: 0, first: true }];
+}
+
+function chosenTurn(run: PendingRun, file: TranscriptFileView): UserTurn | null {
+  if (file.mtimeMs < run.dispatchedAt - TOLERANCE_MS) return null;
+  let later: UserTurn | null = null;
+  for (const turn of turnsOf(file)) {
+    if (!promptEquals(run, turn.prompt)) continue;
+    if (turn.first) return turn;
+    if (turn.atMs == null || turn.atMs < run.dispatchedAt - USER_LINE_CLOCK_SKEW_MS) continue;
+    if (!later || (turn.atMs ?? 0) >= (later.atMs ?? 0)) later = turn;
+  }
+  return later;
 }
 
 export function matchTranscriptToPending(
@@ -174,43 +299,44 @@ export function matchTranscriptToPending(
 ): HookMatch | null {
   const bound = opts?.boundCids;
   const usable = files.filter((f) => !bound?.has(f.conversationId));
-  const fileHits: { file: TranscriptFileView; runs: PendingRun[] }[] = [];
+  const fileHits: { file: TranscriptFileView; runs: { run: PendingRun; offset: number }[] }[] = [];
   for (const f of usable) {
-    const runs = pending.filter((p) => {
-      if (f.mtimeMs < p.dispatchedAt - TOLERANCE_MS) return false;
-      const want = stripImageMarkers(p.prompt);
-      if (want && want === f.firstPrompt) return true;
-      if (!want && !f.firstPrompt && (p.attachmentIds?.length ?? 0) > 0) return true;
-      return false;
-    });
+    const runs: { run: PendingRun; offset: number }[] = [];
+    for (const p of pending) {
+      const turn = chosenTurn(p, f);
+      if (!turn) continue;
+      runs.push({ run: p, offset: turn.first ? 0 : turn.offset });
+    }
     if (runs.length > 0) fileHits.push({ file: f, runs });
   }
   const ambiguous = fileHits.filter((h) => h.runs.length > 1);
   if (ambiguous.length > 0) {
     const runs = new Map<string, PendingRun>();
-    for (const h of ambiguous) for (const r of h.runs) runs.set(r.runId, r);
+    for (const h of ambiguous) for (const r of h.runs) runs.set(r.run.runId, r.run);
     return { ambiguous: true, runs: [...runs.values()] };
   }
   const unique = fileHits.filter((h) => h.runs.length === 1);
   if (unique.length === 0) return null;
   const byRun = new Map<string, TranscriptFileView[]>();
   for (const h of unique) {
-    const id = h.runs[0]!.runId;
+    const id = h.runs[0]!.run.runId;
     const lst = byRun.get(id) ?? [];
     lst.push(h.file);
     byRun.set(id, lst);
   }
   for (const matched of byRun.values()) {
     if (matched.length > 1) {
-      return { ambiguous: true, runs: unique.map((h) => h.runs[0]!) };
+      return { ambiguous: true, runs: unique.map((h) => h.runs[0]!.run) };
     }
   }
   const first = unique[0]!;
+  const hit = first.runs[0]!;
   return {
-    run: first.runs[0]!,
+    run: hit.run,
     conversationId: first.file.conversationId,
     transcriptPath: first.file.path,
     promptMatch: true,
+    ...(hit.offset > 0 ? { attachOffset: hit.offset } : {}),
   };
 }
 

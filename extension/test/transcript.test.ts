@@ -58,6 +58,16 @@ describe("TranscriptTailer", () => {
     expect(lines).toEqual(["old", "new"]);
   });
 
+  test("attach fromOffset skips the previous turn so its turn_ended cannot finish the new run", () => {
+    const fs = fakeFs('{"role":"user","text":"old"}\n{"type":"turn_ended","status":"success"}\n{"role":"user","text":"new"}\n');
+    const lines: string[] = [];
+    const t = new TranscriptTailer({ readFile: fs.readFile, onLine: (_r, l) => lines.push(l) });
+    const offset = fs.readFile("/p", 0).content.indexOf('{"role":"user","text":"new"}');
+    t.attach("r1", "/p", { fromOffset: offset });
+    t.poll("r1");
+    expect(lines).toEqual(['{"role":"user","text":"new"}']);
+  });
+
   test("attach fromEnd skips existing lines (new window followup must not replay turn_ended)", () => {
     const fs = fakeFs('{"type":"turn_ended","status":"success"}\n');
     const lines: string[] = [];

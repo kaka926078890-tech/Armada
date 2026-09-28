@@ -9,6 +9,7 @@ import {
   cursorProjectSlug,
   extractFirstUserPrompt,
   listLeafTranscripts,
+  collectTranscriptViews,
   listSubagentTranscripts,
   childCidFromSubagentPath,
   matchTranscriptToPending,
@@ -21,7 +22,20 @@ import {
   userPromptFromEventPayload,
   decideLateTranscriptAttach,
   transcriptJsonlPath,
+  extractUserTurns,
 } from "../src/transcriptBind";
+
+function userLine(query: string, stamp: string): string {
+  return JSON.stringify({
+    role: "user",
+    message: {
+      content: [{
+        type: "text",
+        text: `<timestamp>${stamp}</timestamp>\n<user_query>\n${query}\n</user_query>`,
+      }],
+    },
+  });
+}
 
 const CID = "c9597541-e291-40c9-9041-772c292acc24";
 const P: PendingRun = {
@@ -122,6 +136,38 @@ describe("matchTranscriptToPending", () => {
     expect(matchTranscriptToPending([P], [file], { boundCids: new Set([CID]) })).toBeNull();
   });
 
+  test("later user_query in an already-running jsonl binds when its timestamp is this dispatch", () => {
+    const pending = { ...P, prompt: "帮我定位一下这个问题，以及原因；", dispatchedAt: Date.UTC(2026, 8, 28, 4, 4, 50) };
+    const first = userLine("帮我定位一下问题的原因", "Monday, Sep 28, 2026, 11:53 AM (UTC+8)");
+    const later = userLine("帮我定位一下这个问题，以及原因；", "Monday, Sep 28, 2026, 12:04 PM (UTC+8)");
+    const jsonl = `${first}\n${later}\n`;
+    const turns = extractUserTurns(jsonl);
+    expect(turns.map((t) => t.prompt)).toEqual(["帮我定位一下问题的原因", "帮我定位一下这个问题，以及原因；"]);
+    expect(turns[1]!.atMs).toBe(Date.UTC(2026, 8, 28, 4, 4, 0));
+    const m = matchTranscriptToPending([pending], [{
+      ...file,
+      mtimeMs: pending.dispatchedAt + 1000,
+      firstPrompt: "帮我定位一下问题的原因",
+      turns,
+    }]);
+    expect(m && "run" in m ? m.run.runId : null).toBe("r-1");
+    expect(m && "attachOffset" in m ? m.attachOffset : null).toBe(turns[1]!.offset);
+  });
+
+  test("an older later user_query does not bind just because the file mtime is fresh", () => {
+    const pending = { ...P, prompt: "帮我定位一下这个问题，以及原因；", dispatchedAt: Date.UTC(2026, 8, 28, 4, 4, 50) };
+    const turns = extractUserTurns([
+      userLine("帮我定位一下问题的原因", "Monday, Sep 28, 2026, 11:53 AM (UTC+8)"),
+      userLine("帮我定位一下这个问题，以及原因；", "Monday, Sep 28, 2026, 11:53 AM (UTC+8)"),
+    ].join("\n") + "\n");
+    expect(matchTranscriptToPending([pending], [{
+      ...file,
+      mtimeMs: pending.dispatchedAt + 1000,
+      firstPrompt: "帮我定位一下问题的原因",
+      turns,
+    }])).toBeNull();
+  });
+
   test("two pending with different prompts are not ambiguous", () => {
     const a = { ...P, runId: "r-a", prompt: "alpha", dispatchedAt: 1_000_000 };
     const b = { ...P, runId: "r-b", prompt: "beta", dispatchedAt: 1_000_000 };
@@ -132,6 +178,28 @@ describe("matchTranscriptToPending", () => {
     const m = matchTranscriptToPending([a, b], files);
     expect(isAmbiguousMatch(m)).toBe(false);
     expect(m && "run" in m ? m.run.runId : null).toBe("r-a");
+  });
+});
+
+describe("collectTranscriptViews", () => {
+  test("a fresh file keeps the later user line, not only the first prompt", () => {
+    const root = mkdtempSync(join(tmpdir(), "armada-views-"));
+    const transcripts = join(root, "agent-transcripts");
+    const leafDir = join(transcripts, CID);
+    mkdirSync(leafDir, { recursive: true });
+    const jsonl = [
+      userLine("帮我定位一下问题的原因", "Monday, Sep 28, 2026, 11:53 AM (UTC+8)"),
+      userLine("帮我定位一下这个问题，以及原因；", "Monday, Sep 28, 2026, 12:04 PM (UTC+8)"),
+    ].join("\n") + "\n";
+    writeFileSync(join(leafDir, `${CID}.jsonl`), jsonl);
+    const views = collectTranscriptViews(transcripts);
+    expect(views).toHaveLength(1);
+    expect(views[0]!.firstPrompt).toBe("帮我定位一下问题的原因");
+    expect(views[0]!.turns?.map((t) => t.prompt)).toEqual([
+      "帮我定位一下问题的原因",
+      "帮我定位一下这个问题，以及原因；",
+    ]);
+    expect(views[0]!.turns?.[1]?.first).toBe(false);
   });
 });
 

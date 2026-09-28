@@ -18,7 +18,7 @@ export class TranscriptTailer {
     return `${runId}\0${path}`;
   }
 
-  attach(runId: string, path: string, opts?: { fromEnd?: boolean }): void {
+  attach(runId: string, path: string, opts?: { fromEnd?: boolean; fromOffset?: number }): void {
     const k = this.key(runId, path);
     const existing = this.tails.get(k);
     // 续聊会再次 bind 同一 run+path:不得把 offset 打回 0,否则整份 transcript 会重复灌进详情
@@ -26,6 +26,8 @@ export class TranscriptTailer {
     let offset = 0;
     if (opts?.fromEnd) {
       offset = this.opts.readFile(path, Number.MAX_SAFE_INTEGER).size;
+    } else if (typeof opts?.fromOffset === "number" && opts.fromOffset > 0) {
+      offset = opts.fromOffset;
     }
     this.tails.set(k, { runId, path, offset, buf: "" });
   }

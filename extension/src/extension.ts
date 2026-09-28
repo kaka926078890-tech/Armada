@@ -13,7 +13,7 @@ import { Executor, CancelWatcher } from "./executor";
 import { createCdpSubmitter, createImagePaster, createFileMentionPaster, createComposerFinisher, createAskQuestionDriver, probeCdpReadyForInject, type AskCdpInspect } from "./cdpInject";
 import { createOsClipboardWriter } from "./osClipboard";
 import { mergeHooks, hooksDriftHash, spoolScriptName, shouldInstallArmadaHooks, installBundledSpoolScript } from "./hooksInstall";
-import { collectTranscriptViews, collectTranscriptTails, matchTranscriptToPending, stopPayloadFromTranscriptLine, stopFromTranscriptFileContent, transcriptsDirForWorkspace, isWithinTranscriptBindWindow, FollowupStopGuard, listSubagentTranscripts, childCidFromSubagentPath, decideLateTranscriptAttach, transcriptJsonlPath } from "./transcriptBind";
+import { collectTranscriptViews, collectTranscriptTails, matchTranscriptToPending, stopPayloadFromTranscriptLine, stopFromTranscriptFileContent, transcriptsDirForWorkspace, isWithinTranscriptBindWindow, bindScanMinMtime, FollowupStopGuard, listSubagentTranscripts, childCidFromSubagentPath, decideLateTranscriptAttach, transcriptJsonlPath } from "./transcriptBind";
 import { TranscriptDirWatcher, debounceLeading, watchTranscriptDir, watchFileSize, TRANSCRIPT_WATCHDOG_MS, TRANSCRIPT_WATCH_DEBOUNCE_MS } from "./transcriptWatch";
 import { createExtSeq } from "./extSeq";
 import { hubRunsNeedingTranscriptFollow, shouldArmFollowupStopOnAdopt } from "./adoptRuns";
@@ -229,7 +229,10 @@ export function activate(context: vscode.ExtensionContext): void {
     watchWorkspaceTranscripts(match.run.workspaceRoot);
     if (path) {
       boundPaths.set(match.run.runId, path);
-      tailer.attach(match.run.runId, path, { fromEnd });
+      tailer.attach(match.run.runId, path, {
+        fromEnd,
+        fromOffset: fromEnd ? undefined : match.attachOffset,
+      });
       ensureSizeWatch(match.run.runId, path);
       followBoundTranscripts(match.run.runId);
       maybeCompleteFromDisk(match.run.runId);
@@ -243,12 +246,17 @@ export function activate(context: vscode.ExtensionContext): void {
     const boundCids = new Set([...boundRuns.values()].map((v) => v.conversationId));
     const files = [];
     const seen = new Set<string>();
+    let earliest = Number.POSITIVE_INFINITY;
+    for (const run of pendingRuns) {
+      if (!isWithinTranscriptBindWindow(run.dispatchedAt)) continue;
+      if (run.dispatchedAt < earliest) earliest = run.dispatchedAt;
+    }
     for (const run of pendingRuns) {
       if (!isWithinTranscriptBindWindow(run.dispatchedAt)) continue;
       const dir = transcriptsDirForWorkspace(homedir(), run.workspaceRoot);
       if (!dir || seen.has(dir)) continue;
       seen.add(dir);
-      files.push(...collectTranscriptViews(dir));
+      files.push(...collectTranscriptViews(dir, { minMtimeMs: bindScanMinMtime(earliest) }));
     }
     const match = matchTranscriptToPending(pendingRuns, files, { boundCids });
     if (isAmbiguousMatch(match)) {

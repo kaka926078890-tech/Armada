@@ -20,6 +20,8 @@ export interface BindingMatch {
   conversationId: string;
   transcriptPath: string | null;
   promptMatch: true | false | "edited";
+  /** Byte offset of a later user line. Omit to tail from the start of the file. */
+  attachOffset?: number;
 }
 
 export interface AmbiguousBinding {
