@@ -63,6 +63,15 @@ describe("extractFirstUserPrompt", () => {
     const jsonl = `{"role":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}\n{"role":"user","message":{"content":[{"type":"text","text":"task"}]}}\n`;
     expect(extractFirstUserPrompt(jsonl)).toBe("task");
   });
+
+  test("PF39WTSM file chip prefix is not part of the prompt", () => {
+    const query = "@.armada/inbox/r-8fa4dae9-8590-4d10-b8f5-83c720aacf1e/254c4033-armada-probe.txt ARMADA_WIN_PNG_TXT_1408 Reply ACK_PNG_TXT then stop. Do not edit files.";
+    const line = JSON.stringify({
+      role: "user",
+      message: { content: [{ type: "text", text: `<user_query>\n${query}\n</user_query>` }] },
+    });
+    expect(extractFirstUserPrompt(line)).toBe("ARMADA_WIN_PNG_TXT_1408 Reply ACK_PNG_TXT then stop. Do not edit files.");
+  });
 });
 
 describe("conversationIdFromTranscriptPath", () => {
@@ -113,6 +122,17 @@ describe("matchTranscriptToPending", () => {
     expect(m && "run" in m ? m.run.runId : null).toBe("r-1");
     expect(m && "conversationId" in m ? m.conversationId : null).toBe(CID);
     expect(m && "transcriptPath" in m ? m.transcriptPath : null).toBe(file.path);
+  });
+
+  test("PF39WTSM inbox file chips before the prompt still bind that prompt", () => {
+    const prompt = "ARMADA_WIN_PNG_TXT_1408 Reply ACK_PNG_TXT then stop. Do not edit files.";
+    const prefixed = "@.armada/inbox/r-8fa4dae9-8590-4d10-b8f5-83c720aacf1e/15585008-2026-09-21.log @.armada/inbox/r-8fa4dae9-8590-4d10-b8f5-83c720aacf1e/254c4033-armada-probe.txt " + prompt;
+    const pending = { ...P, runId: "r-8fa4dae9", prompt, attachmentIds: ["png", "txt"] };
+    const hit = { ...file, firstPrompt: prefixed, conversationId: "dd92b638-d086-4f28-9b5b-07fb42641519" };
+    const m = matchTranscriptToPending([pending], [hit]);
+    expect(m && "run" in m ? m.run.runId : null).toBe("r-8fa4dae9");
+    const other = { ...hit, firstPrompt: "@README.md " + prompt };
+    expect(matchTranscriptToPending([pending], [other])).toBeNull();
   });
 
   test("jsonl written 22s after dispatch still matches (mtime has no upper bound)", () => {

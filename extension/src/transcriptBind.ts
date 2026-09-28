@@ -63,6 +63,17 @@ const CID_RE = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const LEAF_RE = new RegExp(`/agent-transcripts/(${CID_RE})/\\1\\.jsonl$`, "i");
 const SUB_RE = new RegExp(`/subagents/(${CID_RE})\\.jsonl$`, "i");
 const QUERY_RE = /<user_query>\s*([\s\S]*?)\s*<\/user_query>/;
+/** Cursor 把工作区文件芯片写成 `@.armada/inbox/<run>/<file>`，接在提示词前面。2026-09-28 PF39WTSM jsonl。 */
+const INBOX_MENTION_RE = /^@\.armada[/\\]inbox[/\\]\S+(?:\s+|$)/;
+
+export function stripLeadingInboxMentions(s: string): string {
+  let rest = s;
+  for (;;) {
+    const next = rest.replace(INBOX_MENTION_RE, "");
+    if (next === rest) return rest;
+    rest = next;
+  }
+}
 
 export interface UserTurn {
   prompt: string;
@@ -153,9 +164,10 @@ export function extractFirstUserPrompt(jsonl: string): string | null {
     if (!text) continue;
     const q = QUERY_RE.exec(text);
     const inner = q ? q[1]! : text;
-    const stripped = stripImageMarkers(inner);
+    const decorated = stripImageMarkers(inner);
+    const stripped = normalizePrompt(stripLeadingInboxMentions(decorated));
     if (stripped) return stripped;
-    if (hasImageMarkers(inner)) return "";
+    if (hasImageMarkers(inner) || stripped !== decorated) return "";
     return normalizePrompt(inner);
   }
   return null;
@@ -269,7 +281,7 @@ export function collectTranscriptViews(
 
 function promptEquals(run: PendingRun, got: string): boolean {
   const want = stripImageMarkers(run.prompt);
-  const text = stripImageMarkers(got);
+  const text = normalizePrompt(stripLeadingInboxMentions(stripImageMarkers(got)));
   if (want && want === text) return true;
   if (!want && !text && (run.attachmentIds?.length ?? 0) > 0) return true;
   return false;
