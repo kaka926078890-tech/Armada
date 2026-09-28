@@ -55,6 +55,20 @@ function deps(over: Partial<Parameters<typeof createCdpSubmitter>[0]> = {}) {
 }
 
 /** P1 真机：芯片在 .ai-input-full-input-box 内、输入框 8 层祖先之外；composer-bar 上另有 transcript 药丸不得计入。 */
+/** 2026-09-28 真机：Lexical 根下每段一个 paragraph，空段就是空行。 */
+function lexicalEditor(text: string) {
+  const lines = text.split("\n");
+  const children = lines.map((line) => ({
+    type: "paragraph",
+    children: line ? [{ type: "text", text: line }] : [],
+  }));
+  return {
+    getEditorState() {
+      return { toJSON: () => ({ root: { type: "root", children } }) };
+    },
+  };
+}
+
 const FILE_MENTION_SEL = 'span.mention[data-typeahead-type="file"]';
 function mockDoc(texts: string[], pillCounts: number[] = [], shareBox = false, fileMentions: number[] = []) {
   const strayTranscriptPills = [{}, {}, {}];
@@ -93,6 +107,7 @@ function mockDoc(texts: string[], pillCounts: number[] = [], shareBox = false, f
       focus: () => void;
       dispatchEvent: () => boolean;
       querySelectorAll: (sel: string) => object[];
+      __lexicalEditor: ReturnType<typeof lexicalEditor>;
     } = {
       innerText,
       offsetWidth: 100,
@@ -100,6 +115,7 @@ function mockDoc(texts: string[], pillCounts: number[] = [], shareBox = false, f
       className: "aislash-editor-input",
       focused: false,
       parentElement: undefined,
+      __lexicalEditor: lexicalEditor(innerText),
       focus() { this.focused = true; },
       dispatchEvent() { return true; },
       querySelectorAll() { return []; },
@@ -121,37 +137,25 @@ function mockDoc(texts: string[], pillCounts: number[] = [], shareBox = false, f
   };
 }
 
-function runJs(src: string, texts: string[], prompt: string, imgCounts?: number[], reclaim?: string[]): { result: string; els: ReturnType<typeof mockDoc>["els"] } {
+function runJs(
+  src: string,
+  texts: string[],
+  prompt: string,
+  imgCounts?: number[],
+  reclaim?: string[],
+  layouts?: string[],
+): { result: string; els: ReturnType<typeof mockDoc>["els"] } {
   const document = mockDoc(texts, imgCounts);
+  if (layouts) {
+    for (let i = 0; i < layouts.length; i++) {
+      if (layouts[i] != null && document.els[i]) document.els[i].innerText = layouts[i]!;
+    }
+  }
   const KeyboardEvent = class {
     constructor(public type: string, public init?: unknown) {}
   };
   const fn = new Function("document", "KeyboardEvent", `return (${src});`)(document, KeyboardEvent);
   return { result: String(fn(prompt, reclaim)), els: document.els };
-}
-
-/** Lexical 段落。parentText 是整框 innerText（会撒谎）；核对必须走 children。 */
-function paraBox(paras: string[], parentText: string) {
-  return {
-    innerText: parentText,
-    offsetWidth: 100,
-    offsetHeight: 24,
-    className: "aislash-editor-input",
-    focused: false,
-    children: paras.map((innerText) => ({ tagName: "P", innerText })),
-    focus() { this.focused = true; },
-    dispatchEvent() { return true; },
-    querySelectorAll() { return []; },
-  };
-}
-
-function runPara(src: string, els: ReturnType<typeof paraBox>[], prompt: string) {
-  const document = { querySelectorAll() { return els; } };
-  const KeyboardEvent = class {
-    constructor(public type: string, public init?: unknown) {}
-  };
-  const fn = new Function("document", "KeyboardEvent", `return (${src});`)(document, KeyboardEvent);
-  return { result: String(fn(prompt)), els };
 }
 
 function runJs0(src: string, texts: string[], pillCounts?: number[], shareBox = false, fileMentions?: number[]): { result: string; els: ReturnType<typeof mockDoc>["els"] } {
@@ -261,64 +265,48 @@ describe("composer picker JS", () => {
     expect(runJs(COMPOSER_VERIFY_JS, ["第一行\n第二行"], "第一行\r\n第二行").result).toBe("OK");
   });
 
-  // 2026-09-26 00:38 PF39WTSM：Shift+Enter 后 innerText 把每个 \n 读成空行，校验拒了预制词。
+  // 2026-09-28 真机：文档是一行空行，innerText 画成五个换行。核对认文档。
+  const livePrompt = "已经有了。分支 `feat` 的提交\n\n第二行";
+  const liveLayout = "已经有了。分支 `feat` 的提交\n\n\n\n\n第二行";
   const winReview = "列一下剩下的pr，然后\n假如你作为另一个独立视角的 reviewer，请重新仔";
-  const winReviewBox = "列一下剩下的pr，然后\n\n假如你作为另一个独立视角的 reviewer，请重新仔";
   const winClaw = "#开发测试环境\nssh ubuntu@192.168.0.210\n0x000";
-  const winClawBox = "#开发测试环境\n\nssh ubuntu@192.168.0.210\n\n0x000";
+  const winClawLayout = "#开发测试环境\n\nssh ubuntu@192.168.0.210\n\n0x000";
 
-  test("Windows 段落空行仍 VERIFY 通过（review 预制词读回）", () => {
-    expect(runJs(COMPOSER_VERIFY_JS, [winReviewBox], winReview).result).toBe("OK");
+  test("innerText 把空行画长时，Lexical 文档仍 VERIFY 通过", () => {
+    expect(runJs(COMPOSER_VERIFY_JS, [livePrompt], livePrompt, undefined, undefined, [liveLayout]).result).toBe("OK");
   });
 
-  test("Windows 段落空行仍 VERIFY 通过（clawtest 预制词读回）", () => {
-    expect(runJs(COMPOSER_VERIFY_JS, [winClawBox], winClaw).result).toBe("OK");
+  test("没有 Lexical 时 TipTap getText 同样核对通过", () => {
+    const document = mockDoc([livePrompt]);
+    const el = document.els[0] as { __lexicalEditor?: unknown; editor?: { getText: () => string }; innerText: string };
+    el.__lexicalEditor = undefined;
+    el.editor = { getText: () => livePrompt };
+    el.innerText = liveLayout;
+    const KeyboardEvent = class { constructor(public type: string, public init?: unknown) {} };
+    const fn = new Function("document", "KeyboardEvent", `return (${COMPOSER_VERIFY_JS});`)(document, KeyboardEvent);
+    expect(String(fn(livePrompt))).toBe("OK");
   });
 
-  test("Mac 原文空行仍按空行核对，不被折成单换行", () => {
+  test("文档少一段时 MISMATCH 带行号，不看 innerText", () => {
+    const got = "已经有了。分支 `feat` 的提交\n第二行";
+    const reason = runJs(COMPOSER_VERIFY_JS, [got], livePrompt, undefined, undefined, [liveLayout]).result;
+    expect(reason).toContain("MISMATCH:L2");
+  });
+
+  test("没有编辑器实例时 VERIFY 返回 NO_EDITOR", () => {
+    const document = mockDoc([livePrompt]);
+    (document.els[0] as { __lexicalEditor?: unknown }).__lexicalEditor = undefined;
+    const KeyboardEvent = class { constructor(public type: string, public init?: unknown) {} };
+    const fn = new Function("document", "KeyboardEvent", `return (${COMPOSER_VERIFY_JS});`)(document, KeyboardEvent);
+    expect(String(fn(livePrompt))).toBe("NO_EDITOR");
+  });
+
+  test("文档里的空行按空行核对", () => {
     expect(runJs(COMPOSER_VERIFY_JS, ["第一行\n\n第二行"], "第一行\n\n第二行").result).toBe("OK");
     expect(runJs(COMPOSER_VERIFY_JS, ["第一行\n第二行"], "第一行\n\n第二行").result).toContain("MISMATCH");
   });
 
-  // 2026-09-26 Mac Intel：故意空行是 <p><br></p>，父 innerText 读成 5 个 \n，折一对后仍对不上。
-  const macBlank = "那接下来应该做什么？\n\nv1版本属于已完成了么？";
-  test("Mac 故意空行按段落拼回后 VERIFY 通过", () => {
-    const box = paraBox(["那接下来应该做什么？", "\n", "v1版本属于已完成了么？"], "那接下来应该做什么？\n\n\n\n\nv1版本属于已完成了么？");
-    expect(runPara(COMPOSER_VERIFY_JS, [box], macBlank).result).toBe("OK");
-  });
-
-  test("Mac 单换行按段落拼回，不把父 innerText 的空行当成原文空行", () => {
-    const box = paraBox(["第一行", "第二行"], "第一行\n\n第二行");
-    expect(runPara(COMPOSER_VERIFY_JS, [box], "第一行\n第二行").result).toBe("OK");
-    expect(runPara(COMPOSER_VERIFY_JS, [box], "第一行\n\n第二行").result).toContain("MISMATCH");
-  });
-
-  test("Mac 连续两个空段仍按两行空行核对", () => {
-    const box = paraBox(["第一行", "\n", "\n", "第二行"], "第一行\n\n\n\n\n\n\n\n第二行");
-    expect(runPara(COMPOSER_VERIFY_JS, [box], "第一行\n\n\n第二行").result).toBe("OK");
-  });
-
-  test("按段读回时后文被截断仍然 MISMATCH", () => {
-    const box = paraBox(["列一下剩下的pr，然后", "假如你"], "列一下剩下的pr，然后\n\n假如你");
-    expect(runPara(COMPOSER_VERIFY_JS, [box], winReview).result).toContain("MISMATCH");
-  });
-
-  test("Mac 故意空行的框被认成 DRAFT，回车打在这一框", () => {
-    const old = paraBox(["当前长对话"], "当前长对话");
-    const box = paraBox(["第一行", "\n", "第二行"], "第一行\n\n\n\n\n第二行");
-    const focused = runPara(COMPOSER_FOCUS_JS, [old, box], "第一行\n\n第二行");
-    expect(focused.result).toBe("DRAFT");
-    expect(focused.els[1].focused).toBe(true);
-    const entered = runPara(COMPOSER_ENTER_JS, [old, box], "第一行\n\n第二行");
-    expect(entered.result).toBe("OK");
-    expect(entered.els[1].focused).toBe(true);
-  });
-
-  test("Windows 故意空行（每个换行都变成空行）仍核对通过", () => {
-    expect(runJs(COMPOSER_VERIFY_JS, ["第一行\n\n\n\n第二行"], "第一行\n\n第二行").result).toBe("OK");
-  });
-
-  test("多出来的空行不是段落读回，仍然 MISMATCH", () => {
+  test("文档里多出来的空段仍然 MISMATCH", () => {
     expect(runJs(COMPOSER_VERIFY_JS, ["第一行\n\n\n\n第二行"], "第一行\n第二行").result).toContain("MISMATCH");
   });
 
@@ -326,11 +314,11 @@ describe("composer picker JS", () => {
     expect(runJs(COMPOSER_VERIFY_JS, ["列一下剩下的pr，然后\n\n假如你"], winReview).result).toContain("MISMATCH");
   });
 
-  test("Windows 段落空行的框被认成 DRAFT，回车打在这一框", () => {
-    const { result, els } = runJs(COMPOSER_FOCUS_JS, ["当前长对话", winClawBox], winClaw);
+  test("innerText 被画长的框仍按文档认成 DRAFT，回车打在这一框", () => {
+    const { result, els } = runJs(COMPOSER_FOCUS_JS, ["当前长对话", winClaw], winClaw, undefined, undefined, ["当前长对话", winClawLayout]);
     expect(result).toBe("DRAFT");
     expect(els[1].focused).toBe(true);
-    const entered = runJs(COMPOSER_ENTER_JS, ["当前长对话", winReviewBox], winReview);
+    const entered = runJs(COMPOSER_ENTER_JS, ["当前长对话", winReview], winReview, undefined, undefined, ["当前长对话", liveLayout]);
     expect(entered.result).toBe("OK");
     expect(entered.els[1].focused).toBe(true);
   });

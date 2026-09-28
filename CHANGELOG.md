@@ -12,7 +12,8 @@ Armada 按 **面** 发版：扩展、桌面、iOS、Android 可以不同号。RE
 
 ### 修复
 
-- Mac 上带故意空行的提示词已经写进输入框，但 Lexical 把空段 `<p><br></p>` 的 `innerText` 读成一串换行，派发在回车前被 `VERIFY_FAIL:MISMATCH` 拒绝。核对改为按段落拼回原文；没有段落节点时仍按原来的成对空行折回。
+- 派发核对改读编辑器文档。桌面框读 Lexical，Agents 框读 TipTap `getText`（块分隔符 `\n`）。`innerText` 会把一个空行画成五个换行，带空行的提示词不再因此被 `VERIFY_FAIL:MISMATCH` 拒绝。对不上时原因带行号。
+- 中台启动时删掉已结束任务里超过 7 天的 `run_events`，以及超过 7 天的 `audit`。进行中的任务保留。删掉很多行时再 `VACUUM`。
 
 ---
 

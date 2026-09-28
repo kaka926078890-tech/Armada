@@ -16,8 +16,9 @@
  * - 提交: 派发 keydown/keyup Enter(bubbles+composed),实证可触发 beforeSubmitPrompt。
  * - 同窗多个 composer 时优先空框(当前对话非空时 els[0] 是旧框,会误跳过回车)。
  * - 草稿匹配认完整 prompt 后缀(剪贴板追加后 prompt 在末尾);禁止 16 字任意位置子串。
- *   有 <p> 时按段拼回原文（Mac 故意空行的空段会被 innerText 读成一串换行）。
- *   没有段落节点时，把成对空行折回一次，对齐 Windows 的 innerText。
+ * - 核对读编辑器文档，不读 innerText。桌面框是 Lexical（`__lexicalEditor`），
+ *   Agents 框是 TipTap（`editor.getText({ blockSeparator: "\\n" })`）。
+ *   2026-09-28 真机：文档是「行\\n\\n行」，innerText 把这一处空行画成五个换行。
  */
 
 import { parseAskInspect, parsePlanInspect, planInspectToAsk, type AskInspect } from "./askDetect";
@@ -62,34 +63,56 @@ const VISIBLE_ELS = `Array.prototype.slice.call(document.querySelectorAll(${JSON
 
 /**
  * 草稿比对。CR 折成 LF。
- * Lexical 每个换行是一个 <p>，故意空行是 <p><br></p>（该段 innerText 为 "\\n"）。
- * 父节点 innerText 会把单换行读成空行；Mac 上一次故意空行会读成 5 个 \\n，折一对回不去。
- * 有直接子 <p> 时按段拼回原文。没有段落时仍把成对空行折回一次（Windows innerText）。
+ * 文本来自编辑器文档：Lexical 根下每个块用 \\n 连接；TipTap 用 blockSeparator \\n。
+ * 没有编辑器实例时不回退 innerText。
  */
 const DRAFT_HELPERS = `function armadaBreaks(s) {
   return String(s || "").replace(/\\r\\n/g, "\\n").replace(/\\r/g, "\\n");
 }
-function armadaRead(el) {
-  var kids = el.children;
-  if (!kids || !kids.length) return String(el.innerText || "");
+function armadaNodeText(node) {
+  if (!node) return "";
+  if (typeof node.text === "string") return node.text;
+  if (node.type === "linebreak") return "\\n";
+  var kids = node.children || [];
   var parts = [];
-  var saw = false;
-  for (var i = 0; i < kids.length; i++) {
-    if (String(kids[i].tagName || "").toUpperCase() !== "P") continue;
-    saw = true;
-    var raw = String(kids[i].innerText || "").replace(/\\u00a0/g, " ");
-    parts.push(raw.replace(/^\\n+|\\n+$/g, ""));
-  }
-  if (!saw) return String(el.innerText || "");
-  return parts.join("\\n");
+  for (var i = 0; i < kids.length; i++) parts.push(armadaNodeText(kids[i]));
+  if (node.type === "root") return parts.join("\\n");
+  return parts.join("");
 }
-function armadaDraftHit(t, promptT) {
+function armadaComposerText(el) {
+  var lex = el.__lexicalEditor;
+  if (lex && typeof lex.getEditorState === "function") {
+    try {
+      var json = lex.getEditorState().toJSON();
+      if (json && json.root) return armadaNodeText(json.root);
+    } catch (e) {}
+  }
+  var tip = el.editor;
+  if (tip && typeof tip.getText === "function") {
+    try { return String(tip.getText({ blockSeparator: "\\n" })); } catch (e) {}
+  }
+  return null;
+}
+function armadaDraftHit(el, promptT) {
   if (!promptT) return false;
-  var a = armadaBreaks(t);
+  var raw = armadaComposerText(el);
+  if (raw == null) return false;
+  var a = armadaBreaks(raw).trim();
   var b = armadaBreaks(promptT);
-  if (a === b || a.endsWith(b)) return true;
-  var folded = a.replace(/\\n\\n/g, "\\n");
-  return folded === b || folded.endsWith(b);
+  return a === b || a.endsWith(b);
+}
+function armadaMismatch(el, promptT) {
+  var raw = armadaComposerText(el);
+  if (raw == null) return "NO_EDITOR";
+  var a = armadaBreaks(raw).trim().split("\\n");
+  var b = armadaBreaks(promptT).split("\\n");
+  var n = a.length > b.length ? a.length : b.length;
+  for (var i = 0; i < n; i++) {
+    var got = a[i] || "";
+    var want = b[i] || "";
+    if (got !== want) return "L" + (i + 1) + " lines " + a.length + "/" + b.length + ":" + got.slice(0, 40);
+  }
+  return "lines " + a.length + "/" + b.length;
 }
 function armadaNorm(s) {
   return String(s || "").replace(/\\s+/g, " ").trim();
@@ -142,29 +165,41 @@ export const COMPOSER_FOCUS_JS = `function (prompt, reclaim) {
   var els = ${VISIBLE_ELS};
   if (!els.length) return "NO_INPUT";
   var promptT = String(prompt || "").trim();
-  var empty = null, matched = null, matchedLen = -1, owned = null;
+  var empty = null, matched = null, matchedLen = -1, owned = null, sawEditor = false;
   for (var i = 0; i < els.length; i++) {
-    var t = armadaRead(els[i]).trim();
+    var raw = armadaComposerText(els[i]);
+    if (raw == null) continue;
+    sawEditor = true;
+    var t = armadaBreaks(raw).trim();
     if (!t) { if (!empty) empty = els[i]; }
-    else if (armadaDraftHit(t, promptT) && t.length > matchedLen) { matched = els[i]; matchedLen = t.length; }
+    else if (armadaDraftHit(els[i], promptT) && t.length > matchedLen) { matched = els[i]; matchedLen = t.length; }
     else if (!owned && armadaReclaimHit(t, reclaim)) { owned = els[i]; }
   }
   if (empty) { empty.focus(); return "OK"; }
   if (matched) { matched.focus(); return "DRAFT"; }
   if (owned) { owned.focus(); return "OWNED"; }
-  return "NON_EMPTY:" + armadaRead(els[0]).trim();
+  if (!sawEditor) return "NO_EDITOR";
+  var shown = "";
+  for (var j = 0; j < els.length; j++) {
+    var head = armadaComposerText(els[j]);
+    if (head != null) { shown = armadaBreaks(head).trim(); break; }
+  }
+  return "NON_EMPTY:" + shown;
 }`;
 
 export const COMPOSER_VERIFY_JS = `function (prompt) {
   ${DRAFT_HELPERS}
   var els = ${VISIBLE_ELS};
   var promptT = String(prompt || "").trim();
+  var sample = null;
   for (var i = 0; i < els.length; i++) {
-    var t = armadaRead(els[i]).trim();
-    if (armadaDraftHit(t, promptT)) return "OK";
+    if (armadaComposerText(els[i]) == null) continue;
+    if (!sample) sample = els[i];
+    if (armadaDraftHit(els[i], promptT)) return "OK";
   }
   if (!els.length) return "NO_INPUT";
-  return "MISMATCH:" + armadaRead(els[0]).slice(0, 40);
+  if (!sample) return "NO_EDITOR";
+  return "MISMATCH:" + armadaMismatch(sample, promptT);
 }`;
 
 export const COMPOSER_CHIP_COUNT_JS = `function () {
@@ -226,8 +261,10 @@ export const COMPOSER_ENTER_JS = `function (prompt) {
   var promptT = String(prompt || "").trim();
   var el = null, matchedLen = -1;
   for (var i = 0; i < els.length; i++) {
-    var t = armadaRead(els[i]).trim();
-    if (armadaDraftHit(t, promptT) && t.length > matchedLen) { el = els[i]; matchedLen = t.length; }
+    var raw = armadaComposerText(els[i]);
+    if (raw == null) continue;
+    var t = armadaBreaks(raw).trim();
+    if (armadaDraftHit(els[i], promptT) && t.length > matchedLen) { el = els[i]; matchedLen = t.length; }
   }
   if (!el) el = armadaImageTarget(els);
   if (!el) return "NO_TARGET";

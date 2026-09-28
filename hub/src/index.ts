@@ -17,6 +17,7 @@ import { cursorReloadView, findVsixPack, readPendingReload, vsixPackSearchDirs, 
 import { REQUIRED_EXTENSION_VERSION } from "../web/src/boardState";
 import { cmpSemver } from "../../desktop-core/src/cursorReload";
 import { fileHttpStatus, WorkspaceFileBroker } from "./workspaceFileBroker";
+import { pruneHubLogs } from "./pruneLogs";
 
 export interface HubServer {
   server: ReturnType<typeof Bun.serve>;
@@ -32,6 +33,8 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
   const home = ARMADA_HOME(opts.home);
   const token = loadToken(home);
   const db = openDb(home);
+  const pruned = pruneHubLogs(db);
+  if (pruned.events >= 10_000) db.exec("VACUUM");
   const registry = new Registry(db);
   const sse = new SseHub();
   const limits = opts.concurrency ?? limitsFromEnv();
@@ -398,6 +401,10 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
     runs.sweepTimeouts();
     blobs.sweep();
   }, 15_000);
+  const logTimer = setInterval(() => {
+    const dropped = pruneHubLogs(db);
+    if (dropped.events >= 10_000) db.exec("VACUUM");
+  }, 60 * 60 * 1000);
   const port = server.port!;
   const relay = startRelayClient({ home, hubPort: port, token, registry, runs, db, sse });
   return {
@@ -407,6 +414,7 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
       fileBroker.dispose();
       relay?.stop();
       clearInterval(sweepTimer);
+      clearInterval(logTimer);
       sse.closeAll();
       server.stop(true);
       db.close();
