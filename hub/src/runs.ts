@@ -9,6 +9,7 @@ import {
   OCCUPYING_STATUSES,
   ACTIVE_STATUSES,
   ENDED_STATUSES,
+  TERMINAL_STATUSES,
   INJECTING_STATUSES,
   PROGRESSING_STATUSES,
   sqlStatusIn,
@@ -736,6 +737,28 @@ export class RunService {
     const run = this.get(runId);
     if (!run || run.status !== "error" || !isResumeStallError(run.end_reason)) return false;
     this.setStatus(runId, "running", { ended_at: null, end_reason: null }, "extension");
+    return true;
+  }
+
+  /**
+   * 终态之后，Cursor 输入框又开了一轮 owner generation（不是中台 followup）。
+   * 不把卡拉回 running 的话，这一轮的 stop 会在 onStopEvent 入口被丢掉。
+   * 操作员关闭的卡不复活。卡片标题仍是上次中台写入的 prompt。
+   */
+  reopenForOwnerGeneration(runId: string, hookEventName: string | null, payload: any, eventCid: unknown): boolean {
+    const run = this.get(runId);
+    if (!run || run.end_reason === "OPERATOR_CLOSED") return false;
+    if (!isStatus(run.status, TERMINAL_STATUSES)) return false;
+    const d = decideArm({
+      hookEventName,
+      generationId: payload?.generation_id,
+      eventCid,
+      runConversationId: run.conversation_id,
+      liveGenerationId: run.live_generation_id ?? null,
+      retired: this.retiredState(run),
+    });
+    if (d.action !== "arm" && d.action !== "rearm") return false;
+    this.setStatus(runId, "running", { ended_at: null, end_reason: null, started_at: Date.now() }, "extension");
     return true;
   }
 

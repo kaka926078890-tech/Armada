@@ -117,6 +117,104 @@ describe("event ingest", () => {
     ws.close();
   });
 
+  test("r-fc35e97f: IDE beforeSubmitPrompt after completed reopens; its stop completes again", async () => {
+    // 10:46 stop of f2fd16b2 left the card completed. 10:48 the same cid got a new
+    // owner BSP (976677b1, typed in Cursor, not hub followup). Card stayed completed
+    // and the later stop was ignored.
+    const G1 = "f2fd16b2-08c8-4d64-bd40-6be3e637159e";
+    const G2 = "976677b1-cd08-4819-9c2a-0ef944d4eaae";
+    const { ws, api, runId } = await startBoundRun();
+    const snap = async () => (await (await api(`/api/runs/${runId}`)).json()) as any;
+    ws.send(JSON.stringify(ev(runId, 1, "beforeSubmitPrompt", {
+      conversation_id: "cid-1", generation_id: G1, prompt: "好像有些问题，看看是什么情况",
+    })));
+    ws.send(JSON.stringify(ev(runId, 2, "stop", {
+      status: "completed", conversation_id: "cid-1", generation_id: G1,
+    })));
+    await new Promise((r) => setTimeout(r, 100));
+    const done = await snap();
+    expect(done.status).toBe("completed");
+    expect(done.live_generation_id).toBeNull();
+    const started = done.started_at as number;
+
+    ws.send(JSON.stringify(ev(runId, 3, "beforeSubmitPrompt", {
+      conversation_id: "cid-1",
+      generation_id: G2,
+      composer_mode: "agent",
+      prompt: "finloretest的网站地址是什么来着？",
+      session_id: "cid-1",
+      hook_event_name: "beforeSubmitPrompt",
+    })));
+    await new Promise((r) => setTimeout(r, 100));
+    const again = await snap();
+    expect(again.status).toBe("running");
+    expect(again.end_reason).toBeNull();
+    expect(again.ended_at).toBeNull();
+    expect(again.live_generation_id).toBe(G2);
+    expect(again.started_at).toBeGreaterThan(started);
+    expect(again.prompt).toBe("hi");
+    const events = (await (await api(`/api/runs/${runId}/events`)).json()) as any[];
+    expect(events.find((e) => e.ext_seq === 3).post_terminal).toBe(0);
+
+    ws.send(JSON.stringify(ev(runId, 4, "preToolUse", {
+      conversation_id: "cid-1", generation_id: G1, tool_name: "Shell",
+    })));
+    await new Promise((r) => setTimeout(r, 80));
+    expect((await snap()).status).toBe("running");
+    expect((await snap()).live_generation_id).toBe(G2);
+
+    ws.send(JSON.stringify(ev(runId, 5, "stop", {
+      status: "completed", conversation_id: "cid-1", generation_id: G2,
+    })));
+    await new Promise((r) => setTimeout(r, 100));
+    expect((await snap()).status).toBe("completed");
+    expect((await snap()).live_generation_id).toBeNull();
+    ws.close();
+  });
+
+  test("r-fc35e97f: retired preToolUse after completed does not reopen", async () => {
+    const G1 = "f2fd16b2-08c8-4d64-bd40-6be3e637159e";
+    const { ws, api, runId } = await startBoundRun();
+    const snap = async () => (await (await api(`/api/runs/${runId}`)).json()) as any;
+    ws.send(JSON.stringify(ev(runId, 1, "beforeSubmitPrompt", {
+      conversation_id: "cid-1", generation_id: G1, prompt: "好像有些问题，看看是什么情况",
+    })));
+    ws.send(JSON.stringify(ev(runId, 2, "stop", {
+      status: "completed", conversation_id: "cid-1", generation_id: G1,
+    })));
+    await new Promise((r) => setTimeout(r, 80));
+    ws.send(JSON.stringify(ev(runId, 3, "preToolUse", {
+      conversation_id: "cid-1", generation_id: G1, tool_name: "Shell",
+    })));
+    await new Promise((r) => setTimeout(r, 80));
+    const after = await snap();
+    expect(after.status).toBe("completed");
+    expect(after.live_generation_id).toBeNull();
+    ws.close();
+  });
+
+  test("r-fc35e97f: operator-closed card stays closed when a new owner BSP arrives", async () => {
+    const G2 = "976677b1-cd08-4819-9c2a-0ef944d4eaae";
+    const { ws, api, runId } = await startBoundRun();
+    const snap = async () => (await (await api(`/api/runs/${runId}`)).json()) as any;
+    ws.send(JSON.stringify({
+      type: "run.event", runId, source: "transcript", seq: 1, ts: Date.now(),
+      payload: { type: "turn_ended", status: "error", error: "boom" },
+    }));
+    await new Promise((r) => setTimeout(r, 80));
+    const closed = await api(`/api/runs/${runId}/close`, { method: "POST" });
+    expect(closed.status).toBe(200);
+    expect((await snap()).end_reason).toBe("OPERATOR_CLOSED");
+    ws.send(JSON.stringify(ev(runId, 2, "beforeSubmitPrompt", {
+      conversation_id: "cid-1", generation_id: G2, prompt: "finloretest的网站地址是什么来着？",
+    })));
+    await new Promise((r) => setTimeout(r, 100));
+    const after = await snap();
+    expect(after.status).toBe("cancelled");
+    expect(after.end_reason).toBe("OPERATOR_CLOSED");
+    ws.close();
+  });
+
   test("after completed stop, subagent-transcript still stores (child jsonl follow)", async () => {
     const { ws, api, runId } = await startBoundRun();
     ws.send(JSON.stringify(ev(runId, 1, "stop", { status: "completed", conversation_id: "cid-1" })));

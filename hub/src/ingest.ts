@@ -152,6 +152,9 @@ export function ingestEvent(db: Database, runs: RunService, sse: SseHub, machine
   if (source === "transcript" && runs.reopenAfterResumeStall(runId, msg.payload)) {
     run = runs.get(runId) ?? run;
   }
+  if (runs.reopenForOwnerGeneration(runId, msg.hookEventName ?? null, msg.payload, cid)) {
+    run = runs.get(runId) ?? run;
+  }
 
   const maxSeq = (db.query("SELECT COALESCE(MAX(seq),0) AS m FROM run_events WHERE run_id=?1").get(runId) as any).m as number;
   const terminal = !(ACTIVE_STATUSES as readonly string[]).includes(run.status);
