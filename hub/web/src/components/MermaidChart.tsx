@@ -46,6 +46,16 @@ export function mermaidSource(children: ReactNode): string | null {
 
 let mermaidSeq = 0;
 
+/** Off-screen measuring box. mermaid.render otherwise appends a full diagram to document.body. */
+export const MERMAID_RENDER_HOST_STYLE = "position:fixed;left:-10000px;top:0;width:640px;pointer-events:none;";
+
+function mermaidRenderHost(): HTMLDivElement {
+  const host = document.createElement("div");
+  host.setAttribute("data-armada-mermaid-host", "");
+  host.style.cssText = MERMAID_RENDER_HOST_STYLE;
+  return host;
+}
+
 function acceptSvg(svg: string): string {
   const trimmed = svg.trim();
   if (!trimmed.includes("<svg")) throw new Error("mermaid svg");
@@ -53,7 +63,7 @@ function acceptSvg(svg: string): string {
   return trimmed;
 }
 
-async function renderMermaid(source: string, theme: ThemeName): Promise<string> {
+async function renderMermaid(source: string, theme: ThemeName, host: HTMLElement): Promise<string> {
   const { default: mermaid } = await import("mermaid");
   mermaid.initialize({
     startOnLoad: false,
@@ -67,7 +77,7 @@ async function renderMermaid(source: string, theme: ThemeName): Promise<string> 
     },
   });
   const id = `armadaMermaid${mermaidSeq++}`;
-  const { svg } = await mermaid.render(id, source);
+  const { svg } = await mermaid.render(id, source, host);
   return acceptSvg(svg);
 }
 
@@ -77,12 +87,13 @@ export function MermaidChart({ source }: { source: string }) {
   const [failed, setFailed] = useState(false);
   useEffect(() => {
     let cancelled = false;
-    setSvg(null);
     setFailed(false);
-    void renderMermaid(source, theme).then(
+    const host = mermaidRenderHost();
+    document.body.appendChild(host);
+    void renderMermaid(source, theme, host).then(
       (next) => { if (!cancelled) setSvg(next); },
       () => { if (!cancelled) setFailed(true); },
-    );
+    ).finally(() => host.remove());
     return () => { cancelled = true; };
   }, [source, theme]);
   if (failed) {

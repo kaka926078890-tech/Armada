@@ -1,6 +1,9 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import ChatThread, { AssistantMarkdown, askContinueAnswers, askContinueLabel, askSkipLabel, continueAllowed, isPlanAsk, planOverviewOf } from "../src/components/ChatThread";
+import ChatThread, { AssistantMarkdown, markdownComponentsFor, askContinueAnswers, askContinueLabel, askSkipLabel, continueAllowed, isPlanAsk, planOverviewOf } from "../src/components/ChatThread";
+import { MERMAID_RENDER_HOST_STYLE } from "../src/components/MermaidChart";
 import type { ChatBlock } from "../src/chatView";
 
 describe("AssistantMarkdown", () => {
@@ -27,6 +30,24 @@ describe("AssistantMarkdown", () => {
     expect(html).toContain("流程图");
     expect(html).not.toContain("flowchart TD");
     expect(html).not.toContain("<pre");
+  });
+
+  test("the same detail view reuses the mermaid host instead of remounting it", () => {
+    const slot = {};
+    const openFile = { current: undefined as ((path: string) => void) | undefined };
+    const first = markdownComponentsFor(slot, openFile);
+    const second = markdownComponentsFor(slot, openFile);
+    expect(second.pre).toBe(first.pre);
+    expect(markdownComponentsFor({}, openFile).pre).not.toBe(first.pre);
+  });
+
+  test("mermaid redraws off-screen and keeps the previous svg until the next one is ready", () => {
+    const src = readFileSync(join(import.meta.dir, "../src/components/MermaidChart.tsx"), "utf8");
+    const effect = src.slice(src.indexOf("useEffect(() => {"), src.indexOf("if (failed)"));
+    expect(effect).not.toContain("setSvg(null)");
+    expect(MERMAID_RENDER_HOST_STYLE).toContain("position:fixed");
+    expect(MERMAID_RENDER_HOST_STYLE).toContain("left:-10000px");
+    expect(src).toContain("mermaid.render(id, source, host)");
   });
 
   test("non-mermaid fence stays a code block", () => {

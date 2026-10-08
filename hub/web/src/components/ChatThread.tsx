@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
@@ -96,7 +96,10 @@ function ProcessFold({ steps, onOpenFile }: { steps: ChatBlock[]; onOpenFile?: (
   );
 }
 
-function mdComponents(onOpenFile?: (path: string) => void) {
+type OpenFileRef = { current?: (path: string) => void };
+
+function buildMarkdownComponents(openFileRef: OpenFileRef) {
+  const onOpenFile = (path: string) => openFileRef.current?.(path);
   return {
     h1: ({ children }: { children?: ReactNode }) => <h1 className="text-[16px] font-semibold text-foreground mt-3 mb-1">{children}</h1>,
     h2: ({ children }: { children?: ReactNode }) => <h2 className="text-[15px] font-semibold text-foreground mt-3 mb-1">{children}</h2>,
@@ -113,7 +116,7 @@ function mdComponents(onOpenFile?: (path: string) => void) {
     ),
     a: ({ href, children }: { href?: string; children?: ReactNode }) => {
       const path = workspaceFilePathFromHref(href);
-      if (path && onOpenFile) {
+      if (path && openFileRef.current) {
         return (
           <a
             href={href}
@@ -148,18 +151,39 @@ function mdComponents(onOpenFile?: (path: string) => void) {
   };
 }
 
+const markdownComponentCache = new WeakMap<object, ReturnType<typeof buildMarkdownComponents>>();
+
+/** One component map per view. A new `pre` each render remounts MermaidChart and collapses the diagram. */
+export function markdownComponentsFor(slot: object, openFileRef: OpenFileRef) {
+  const hit = markdownComponentCache.get(slot);
+  if (hit) return hit;
+  const built = buildMarkdownComponents(openFileRef);
+  markdownComponentCache.set(slot, built);
+  return built;
+}
+
+function useMarkdownComponents(onOpenFile?: (path: string) => void) {
+  const slot = useRef<object | null>(null);
+  if (slot.current == null) slot.current = {};
+  const openFileRef = useRef(onOpenFile);
+  openFileRef.current = onOpenFile;
+  return markdownComponentsFor(slot.current, openFileRef);
+}
+
 export function AssistantMarkdown({ text, onOpenFile }: { text: string; onOpenFile?: (path: string) => void }) {
+  const components = useMarkdownComponents(onOpenFile);
   return (
     <div className={`break-words leading-[1.65] ${UI_BODY} text-foreground`}>
-      <Markdown remarkPlugins={[remarkGfm, remarkBreaks]} components={mdComponents(onOpenFile)}>{text}</Markdown>
+      <Markdown remarkPlugins={[remarkGfm, remarkBreaks]} components={components}>{text}</Markdown>
     </div>
   );
 }
 
 function UserMarkdown({ text }: { text: string }) {
+  const components = useMarkdownComponents();
   return (
     <div className={`break-words leading-[1.65] ${UI_BODY} text-foreground`}>
-      <Markdown remarkPlugins={[remarkGfm, remarkBreaks]} components={mdComponents()}>{text}</Markdown>
+      <Markdown remarkPlugins={[remarkGfm, remarkBreaks]} components={components}>{text}</Markdown>
     </div>
   );
 }

@@ -165,5 +165,6 @@ html[data-theme="light"] {
   }
 }
 
-.mermaid-block svg { max-width: 100%; height: auto; }
+.mermaid-block { max-width: 100%; min-width: 0; }
+.mermaid-block svg { display: block; max-width: 100%; height: auto; }
 .mermaid-block .background { fill: transparent !important; }
