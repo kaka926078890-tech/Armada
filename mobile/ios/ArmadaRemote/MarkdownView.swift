@@ -6,6 +6,10 @@ enum MarkdownHTML {
     static func from(_ source: String, fontScale: String = "normal", theme: String = "dark") -> String {
         let blocks = splitFences(source)
         let inner = blocks.map(renderBlock).joined()
+        let mermaid = blocks.contains { block in
+            if case .fence(let lang, _) = block { return lang == "mermaid" }
+            return false
+        }
         let scale: String
         switch fontScale {
         case "large": scale = "1.25"
@@ -22,7 +26,7 @@ enum MarkdownHTML {
         let link = dark ? "#38bdf8" : "#0284c7"
         let quote = dark ? "#52525b" : "#d4d4d8"
         return """
-        <!doctype html><html><head><meta charset="utf-8">
+        <!doctype html><html data-theme="\(dark ? "dark" : "light")"><head><meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
         <style>
         :root { color-scheme: \(dark ? "dark" : "light"); --md-scale: \(scale); }
@@ -58,13 +62,27 @@ enum MarkdownHTML {
         th, td { border: 1px solid \(border); padding: 4px 8px; text-align: left; vertical-align: top; }
         th { font-weight: 600; }
         .wrap { overflow-x: auto; margin: 0 0 8px; }
-        </style></head><body>\(inner)</body></html>
+        .mermaid { margin: 0 0 8px; overflow-x: auto; background: transparent; }
+        .mermaid svg { max-width: 100%; height: auto; }
+        .mermaid .background { fill: transparent !important; }
+        </style></head><body>\(inner)\(mermaid ? Self.mermaidScripts : "")</body></html>
         """
     }
 
+    /// Offline diagram runtime. Keep the script URLs in sync with Android `MarkdownHtml`.
+    private static let mermaidScripts = """
+    <script src="armada-asset://local/mermaid.min.js"></script>
+    <script src="armada-asset://local/mermaid-boot.js"></script>
+    """
+
     private enum Block {
         case html(String)
-        case fence(String)
+        case fence(lang: String, code: String)
+    }
+
+    private static func fenceLang(_ info: String) -> String {
+        let token = info.trimmingCharacters(in: .whitespaces).split(whereSeparator: { $0 == " " || $0 == "\t" }).first.map(String.init) ?? ""
+        return token.lowercased()
     }
 
     private static func splitFences(_ source: String) -> [Block] {
@@ -77,13 +95,14 @@ enum MarkdownHTML {
             }
             rest = String(rest[start.upperBound...])
             let nl = rest.firstIndex(of: "\n") ?? rest.endIndex
+            let lang = fenceLang(String(rest[..<nl]))
             rest = nl == rest.endIndex ? "" : String(rest[rest.index(after: nl)...])
             if let end = rest.range(of: "```") {
-                out.append(.fence(String(rest[..<end.lowerBound]).trimmingCharacters(in: .newlines)))
+                out.append(.fence(lang: lang, code: String(rest[..<end.lowerBound]).trimmingCharacters(in: .newlines)))
                 rest = String(rest[end.upperBound...])
                 if rest.hasPrefix("\n") { rest.removeFirst() }
             } else {
-                out.append(.fence(rest))
+                out.append(.fence(lang: lang, code: rest))
                 rest = ""
             }
         }
@@ -95,7 +114,10 @@ enum MarkdownHTML {
 
     private static func renderBlock(_ b: Block) -> String {
         switch b {
-        case .fence(let code):
+        case .fence(let lang, let code):
+            if lang == "mermaid" {
+                return "<div class=\"mermaid\">\(escape(code))</div>"
+            }
             return "<pre><code>\(escape(code))</code></pre>"
         case .html(let h):
             return h
@@ -348,6 +370,54 @@ final class MarkdownMeasuringWebView: WKWebView {
     }
 }
 
+/// Serves the offline mermaid bundle. `loadHTMLString` cannot load `file:` scripts.
+final class MermaidAssetHandler: NSObject, WKURLSchemeHandler {
+    private let lock = NSLock()
+    private var stopped = Set<ObjectIdentifier>()
+
+    func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {
+        let id = ObjectIdentifier(urlSchemeTask)
+        let name = urlSchemeTask.request.url?.lastPathComponent
+        let resource: String?
+        switch name {
+        case "mermaid.min.js": resource = "mermaid.min"
+        case "mermaid-boot.js": resource = "mermaid-boot"
+        default: resource = nil
+        }
+        guard let resource,
+              let file = Bundle.main.url(forResource: resource, withExtension: "js"),
+              let data = try? Data(contentsOf: file),
+              let url = urlSchemeTask.request.url else {
+            if !isStopped(id) { urlSchemeTask.didFailWithError(URLError(.fileDoesNotExist)) }
+            return
+        }
+        if isStopped(id) { return }
+        let headers = ["Content-Type": "application/javascript", "Content-Length": "\(data.count)"]
+        guard let resp = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: headers) else {
+            if !isStopped(id) { urlSchemeTask.didFailWithError(URLError(.badServerResponse)) }
+            return
+        }
+        if isStopped(id) { return }
+        urlSchemeTask.didReceive(resp)
+        if isStopped(id) { return }
+        urlSchemeTask.didReceive(data)
+        if isStopped(id) { return }
+        urlSchemeTask.didFinish()
+    }
+
+    func webView(_ webView: WKWebView, stop urlSchemeTask: WKURLSchemeTask) {
+        lock.lock()
+        stopped.insert(ObjectIdentifier(urlSchemeTask))
+        lock.unlock()
+    }
+
+    private func isStopped(_ id: ObjectIdentifier) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return stopped.contains(id)
+    }
+}
+
 struct MarkdownWebView: UIViewRepresentable {
     let text: String
     @Binding var height: CGFloat
@@ -359,6 +429,8 @@ struct MarkdownWebView: UIViewRepresentable {
     func makeUIView(context: Context) -> MarkdownMeasuringWebView {
         let cfg = WKWebViewConfiguration()
         cfg.defaultWebpagePreferences.preferredContentMode = .mobile
+        cfg.setURLSchemeHandler(MermaidAssetHandler(), forURLScheme: "armada-asset")
+        cfg.userContentController.add(context.coordinator, name: "mermaidDone")
         let w = MarkdownMeasuringWebView(frame: .zero, configuration: cfg)
         w.navigationDelegate = context.coordinator
         w.scrollView.isScrollEnabled = false
@@ -373,6 +445,10 @@ struct MarkdownWebView: UIViewRepresentable {
         return w
     }
 
+    static func dismantleUIView(_ webView: MarkdownMeasuringWebView, coordinator: Coord) {
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: "mermaidDone")
+    }
+
     func updateUIView(_ webView: MarkdownMeasuringWebView, context: Context) {
         context.coordinator.height = $height
         context.coordinator.onWorkspaceFile = onWorkspaceFile
@@ -384,7 +460,7 @@ struct MarkdownWebView: UIViewRepresentable {
         }
     }
 
-    final class Coord: NSObject, WKNavigationDelegate {
+    final class Coord: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         var lastKey = ""
         var pageReady = false
         var height: Binding<CGFloat> = .constant(120)
@@ -403,6 +479,11 @@ struct MarkdownWebView: UIViewRepresentable {
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             pageReady = true
             measureIfReady(webView)
+        }
+
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            guard message.name == "mermaidDone", let web = message.webView else { return }
+            measureIfReady(web)
         }
         func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
             if navigationAction.navigationType == .linkActivated, let url = navigationAction.request.url {

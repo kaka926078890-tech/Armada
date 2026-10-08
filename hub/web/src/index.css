@@ -164,3 +164,6 @@ html[data-theme="light"] {
     @apply font-sans;
   }
 }
+
+.mermaid-block svg { max-width: 100%; height: auto; }
+.mermaid-block .background { fill: transparent !important; }

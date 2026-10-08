@@ -18,6 +18,23 @@ describe("AssistantMarkdown", () => {
     const html = renderToStaticMarkup(<AssistantMarkdown text={"第一行\n第二行"} />);
     expect(html).toContain("<br");
   });
+
+  test("mermaid fence is a diagram slot, not the flowchart source", () => {
+    const html = renderToStaticMarkup(
+      <AssistantMarkdown text={"说明\n\n```mermaid\nflowchart TD\n  A[开始] --> B[结束]\n```\n"} />,
+    );
+    expect(html).toContain("mermaid-block");
+    expect(html).toContain("流程图");
+    expect(html).not.toContain("flowchart TD");
+    expect(html).not.toContain("<pre");
+  });
+
+  test("non-mermaid fence stays a code block", () => {
+    const html = renderToStaticMarkup(<AssistantMarkdown text={"```ts\nconst a = 1\n```\n"} />);
+    expect(html).toContain("<pre");
+    expect(html).toContain("const a = 1");
+    expect(html).not.toContain("mermaid-block");
+  });
 });
 
 describe("user bubble markdown", () => {

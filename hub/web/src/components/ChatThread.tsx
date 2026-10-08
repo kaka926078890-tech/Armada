@@ -4,6 +4,7 @@ import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import { askOptionDisplayText, isFreeformAskOption, optionIdsCollide, visibleAskOptions } from "../askOptions";
 import { segmentChat, processFoldLabel, userMessageCaption, type ChatBlock } from "../chatView";
+import { MermaidChart, mermaidSource } from "./MermaidChart";
 import { HubImageRow } from "./ImageThumb";
 import { workspaceFilePathFromHref } from "../../../../extension/src/workspaceFile";
 import { Button } from "./ui/button";
@@ -135,9 +136,11 @@ function mdComponents(onOpenFile?: (path: string) => void) {
     ),
     th: ({ children }: { children?: ReactNode }) => <th className="border border-border px-2 py-1 text-left text-foreground">{children}</th>,
     td: ({ children }: { children?: ReactNode }) => <td className="border border-border px-2 py-1 text-foreground">{children}</td>,
-    pre: ({ children }: { children?: ReactNode }) => (
-      <pre className="mb-2 p-2.5 rounded-md bg-muted overflow-x-auto text-[12px]">{children}</pre>
-    ),
+    pre: ({ children }: { children?: ReactNode }) => {
+      const chart = mermaidSource(children);
+      if (chart != null) return <MermaidChart source={chart} />;
+      return <pre className="mb-2 p-2.5 rounded-md bg-muted overflow-x-auto text-[12px]">{children}</pre>;
+    },
     code: ({ className, children }: { className?: string; children?: ReactNode }) => {
       if (className) return <code className={className}>{children}</code>;
       return <code className="px-1 py-px rounded bg-muted text-foreground text-[12px]">{children}</code>;

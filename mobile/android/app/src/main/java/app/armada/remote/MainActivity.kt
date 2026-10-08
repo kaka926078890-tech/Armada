@@ -9,7 +9,9 @@ import android.os.Build
 import android.os.Bundle
 import android.view.MotionEvent
 import android.view.View
+import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
@@ -1238,6 +1240,18 @@ fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend (
     }
 }
 
+private class MermaidBridge(private val web: WebView, private val holder: MarkdownHolder) {
+    @JavascriptInterface
+    fun done() {
+        web.post {
+            web.evaluateJavascript(MarkdownHtml.MEASURE_JS) { raw ->
+                val h = raw?.trim('"')?.toFloatOrNull() ?: return@evaluateJavascript
+                holder.onHeight(maxOf(h, 1f))
+            }
+        }
+    }
+}
+
 private class MarkdownHolder {
     var lastKey = ""
     var onHeight: (Float) -> Unit = {}
@@ -1265,6 +1279,7 @@ fun MarkdownFrame(text: String, heightDp: Float? = null, onHeight: ((Float) -> U
                 isNestedScrollingEnabled = false
                 overScrollMode = View.OVER_SCROLL_NEVER
                 setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                addJavascriptInterface(MermaidBridge(this, holder), "ArmadaMermaid")
                 setOnTouchListener { v, event ->
                     if (event.actionMasked == MotionEvent.ACTION_MOVE) {
                         v.parent?.requestDisallowInterceptTouchEvent(false)
@@ -1276,6 +1291,17 @@ fun MarkdownFrame(text: String, heightDp: Float? = null, onHeight: ((Float) -> U
                         view.evaluateJavascript(MarkdownHtml.MEASURE_JS) { raw ->
                             val h = raw?.trim('"')?.toFloatOrNull() ?: return@evaluateJavascript
                             holder.onHeight(maxOf(h, 1f))
+                        }
+                    }
+                    override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+                        val uri = request.url
+                        if (uri.host != "armada.local") return null
+                        val name = uri.lastPathSegment ?: return null
+                        if (name != "mermaid.min.js" && name != "mermaid-boot.js") return null
+                        return try {
+                            WebResourceResponse("application/javascript", "UTF-8", view.context.assets.open(name))
+                        } catch (_: Exception) {
+                            null
                         }
                     }
                     override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
@@ -1299,7 +1325,9 @@ fun MarkdownFrame(text: String, heightDp: Float? = null, onHeight: ((Float) -> U
             val key = "$text|$fontScale|$theme"
             if (holder.lastKey != key) {
                 holder.lastKey = key
-                web.loadDataWithBaseURL(null, MarkdownHtml.from(text, fontScale, theme), "text/html", "utf-8", null)
+                val html = MarkdownHtml.from(text, fontScale, theme)
+                val base = if (html.contains("mermaid-boot.js")) "https://armada.local/" else null
+                web.loadDataWithBaseURL(base, html, "text/html", "utf-8", null)
             }
         },
         modifier = Modifier.fillMaxWidth().height(shown.dp),

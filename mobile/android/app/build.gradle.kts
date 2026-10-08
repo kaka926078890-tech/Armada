@@ -25,6 +25,9 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
+    sourceSets.named("main") {
+        assets.srcDir("../../vendor")
+    }
 }
 
 dependencies {

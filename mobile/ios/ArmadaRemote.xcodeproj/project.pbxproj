@@ -16,6 +16,8 @@
 		A10000000000000000000008 /* Dictation.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000001A /* Dictation.swift */; };
 		A10000000000000000000009 /* ComposerField.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000001B /* ComposerField.swift */; };
 		A10000000000000000000006 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000017 /* Assets.xcassets */; };
+		A1000000000000000000000A /* mermaid.min.js in Resources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000001C /* mermaid.min.js */; };
+		A1000000000000000000000B /* mermaid-boot.js in Resources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000001D /* mermaid-boot.js */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -31,6 +33,8 @@
 		A10000000000000000000019 /* Keychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Keychain.swift; sourceTree = "<group>"; };
 		A1000000000000000000001A /* Dictation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Dictation.swift; sourceTree = "<group>"; };
 		A1000000000000000000001B /* ComposerField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerField.swift; sourceTree = "<group>"; };
+		A1000000000000000000001C /* mermaid.min.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; name = mermaid.min.js; path = "../../vendor/mermaid.min.js"; sourceTree = "<group>"; };
+		A1000000000000000000001D /* mermaid-boot.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; name = mermaid-boot.js; path = "../../vendor/mermaid-boot.js"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -49,6 +53,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				A10000000000000000000006 /* Assets.xcassets in Resources */,
+				A1000000000000000000000A /* mermaid.min.js in Resources */,
+				A1000000000000000000000B /* mermaid-boot.js in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -74,6 +80,8 @@
 				A10000000000000000000019 /* Keychain.swift */,
 				A1000000000000000000001A /* Dictation.swift */,
 				A1000000000000000000001B /* ComposerField.swift */,
+				A1000000000000000000001C /* mermaid.min.js */,
+				A1000000000000000000001D /* mermaid-boot.js */,
 				A10000000000000000000015 /* Info.plist */,
 				A10000000000000000000017 /* Assets.xcassets */,
 				A10000000000000000000018 /* ArmadaRemote.entitlements */,

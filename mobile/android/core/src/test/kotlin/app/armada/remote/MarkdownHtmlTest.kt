@@ -5,6 +5,22 @@ import kotlin.test.assertTrue
 
 class MarkdownHtmlTest {
     @Test
+    fun mermaidFenceIsDiagramNotCode() {
+        val html = MarkdownHtml.from("见下图\n\n```Mermaid\nflowchart TD\n  A[\"<b>\"] --> B\n```\n")
+        assertTrue(html.contains("class=\"mermaid\""), html)
+        assertTrue(html.contains("flowchart TD"), html)
+        assertTrue(html.contains("&lt;b&gt;"), html)
+        assertTrue(!html.contains("<pre><code>flowchart"), html)
+        assertTrue(html.contains("mermaid-boot.js"), html)
+        assertTrue(html.contains("data-theme=\"dark\""), html)
+        val light = MarkdownHtml.from("```mermaid\nflowchart TD\nA-->B\n```", theme = "light")
+        assertTrue(light.contains("data-theme=\"light\""), light)
+        val plain = MarkdownHtml.from("```\nconst a = 1\n```\n")
+        assertTrue(plain.contains("<pre><code>const a = 1</code></pre>"), plain)
+        assertTrue(!plain.contains("mermaid-boot.js"), plain)
+    }
+
+    @Test
     fun fenceIsEscapedPre() {
         val html = MarkdownHtml.from("hello\n```\n<script>x</script>\n```\n")
         assertTrue(html.contains("<pre><code>"))

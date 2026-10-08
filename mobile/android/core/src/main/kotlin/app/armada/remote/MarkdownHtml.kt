@@ -6,7 +6,9 @@ object MarkdownHtml {
         "(function(){var b=document.body;if(!b||!b.lastElementChild)return 1;var last=b.lastElementChild;var mb=parseFloat(getComputedStyle(last).marginBottom)||0;return Math.ceil(Math.max(last.getBoundingClientRect().bottom+mb-b.getBoundingClientRect().top,1));})()"
 
     fun from(source: String, fontScale: String = "normal", theme: String = "dark"): String {
-        val inner = splitFences(source.replace("\r\n", "\n")).joinToString("") { renderBlock(it) }
+        val blocks = splitFences(source.replace("\r\n", "\n"))
+        val inner = blocks.joinToString("") { renderBlock(it) }
+        val mermaid = blocks.any { it is Block.Fence && it.lang == "mermaid" }
         val scale = when (fontScale) {
             "large" -> "1.25"
             "xlarge" -> "1.5"
@@ -21,7 +23,8 @@ object MarkdownHtml {
         val border = if (dark) "#3f3f46" else "#d4d4d8"
         val link = if (dark) "#38bdf8" else "#0284c7"
         val quote = if (dark) "#52525b" else "#d4d4d8"
-        return """<!doctype html><html><head><meta charset="utf-8">
+        val scripts = if (mermaid) """<script src="mermaid.min.js"></script><script src="mermaid-boot.js"></script>""" else ""
+        return """<!doctype html><html data-theme="${if (dark) "dark" else "light"}"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <style>
 :root { color-scheme: ${if (dark) "dark" else "light"}; --md-scale: $scale; }
@@ -57,12 +60,20 @@ table { border-collapse: collapse; font-size: calc(12px * var(--md-scale)); marg
 th, td { border: 1px solid $border; padding: 4px 8px; text-align: left; vertical-align: top; }
 th { font-weight: 600; }
 .wrap { overflow-x: auto; margin: 0 0 8px; }
-</style></head><body>$inner</body></html>"""
+.mermaid { margin: 0 0 8px; overflow-x: auto; background: transparent; }
+.mermaid svg { max-width: 100%; height: auto; }
+.mermaid .background { fill: transparent !important; }
+</style></head><body>$inner$scripts</body></html>"""
     }
 
     private sealed class Block {
         data class Html(val html: String) : Block()
-        data class Fence(val code: String) : Block()
+        data class Fence(val lang: String, val code: String) : Block()
+    }
+
+    private fun fenceLang(info: String): String {
+        val token = info.trim().split(Regex("\\s+")).firstOrNull() ?: ""
+        return token.lowercase()
     }
 
     private fun splitFences(source: String): List<Block> {
@@ -78,13 +89,14 @@ th { font-weight: 600; }
             if (before.trim().isNotEmpty()) out += parseFlow(before).map { Block.Html(it) }
             rest = rest.substring(start + 3)
             val nl = rest.indexOf('\n')
+            val lang = fenceLang(if (nl < 0) rest else rest.substring(0, nl))
             rest = if (nl < 0) "" else rest.substring(nl + 1)
             val end = rest.indexOf("```")
             if (end >= 0) {
-                out += Block.Fence(rest.substring(0, end).trim('\n'))
+                out += Block.Fence(lang, rest.substring(0, end).trim('\n'))
                 rest = rest.substring(end + 3).removePrefix("\n")
             } else {
-                out += Block.Fence(rest)
+                out += Block.Fence(lang, rest)
                 rest = ""
             }
         }
@@ -92,7 +104,11 @@ th { font-weight: 600; }
     }
 
     private fun renderBlock(b: Block): String = when (b) {
-        is Block.Fence -> "<pre><code>${escape(b.code)}</code></pre>"
+        is Block.Fence -> if (b.lang == "mermaid") {
+            "<div class=\"mermaid\">${escape(b.code)}</div>"
+        } else {
+            "<pre><code>${escape(b.code)}</code></pre>"
+        }
         is Block.Html -> b.html
     }
 
