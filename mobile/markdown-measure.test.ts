@@ -6,19 +6,40 @@ import { MEASURE_JS } from "./markdown-measure";
 
 const root = join(dirname(fileURLToPath(import.meta.url)));
 
+type MeasureEl = {
+  tagName: string;
+  previousElementSibling: MeasureEl | null;
+  marginBottom: number;
+  getBoundingClientRect: () => { top: number; bottom: number };
+};
+
 type MeasureEnv = {
   offsetHeight: number;
   bodyTop?: number;
   bodyBottom?: number;
   lastBottom: number;
   lastMarginBottom?: number;
+  /** Tag of the real content block. Old cases stay a box, never SCRIPT. */
+  lastTagName?: string;
   htmlScrollHeight?: number;
+  /** Empty-box nodes appended after the content block. The last one is lastElementChild. */
+  tail?: Array<{ tagName: "SCRIPT" | "STYLE"; bottom?: number; marginBottom?: number }>;
 };
 
-function runMeasure(js: string, opts: MeasureEnv): number {
-  const last = {
-    getBoundingClientRect: () => ({ top: 0, bottom: opts.lastBottom }),
+function box(tagName: string, bottom: number, marginBottom: number, previous: MeasureEl | null): MeasureEl {
+  return {
+    tagName,
+    previousElementSibling: previous,
+    marginBottom,
+    getBoundingClientRect: () => ({ top: 0, bottom }),
   };
+}
+
+function runMeasure(js: string, opts: MeasureEnv): number {
+  let last = box(opts.lastTagName ?? "P", opts.lastBottom, opts.lastMarginBottom ?? 0, null);
+  for (const node of opts.tail ?? []) {
+    last = box(node.tagName, node.bottom ?? 0, node.marginBottom ?? 0, last);
+  }
   const body = {
     offsetHeight: opts.offsetHeight,
     lastElementChild: last,
@@ -31,7 +52,7 @@ function runMeasure(js: string, opts: MeasureEnv): number {
     body,
     documentElement: { scrollHeight: opts.htmlScrollHeight ?? opts.offsetHeight },
   };
-  const getComputedStyle = () => ({ marginBottom: String(opts.lastMarginBottom ?? 0) });
+  const getComputedStyle = (el: { marginBottom?: number }) => ({ marginBottom: String(el?.marginBottom ?? 0) });
   return Number(new Function("document", "getComputedStyle", `"use strict"; return (${js});`)(document, getComputedStyle));
 }
 
@@ -58,6 +79,27 @@ describe("markdown content height", () => {
 
   test("ceils fractional line boxes so the last line is not clipped", () => {
     expect(runMeasure(MEASURE_JS, { offsetHeight: 100.2, lastBottom: 100.2 })).toBe(101);
+  });
+
+  test("uses the content block before a trailing script or style with an empty box", () => {
+    const page = {
+      offsetHeight: 80,
+      bodyBottom: 80,
+      lastBottom: 400,
+      lastMarginBottom: 8,
+      htmlScrollHeight: 2000,
+    };
+    expect(runMeasure(MEASURE_JS, { ...page, tail: [{ tagName: "SCRIPT", bottom: 0 }] })).toBe(408);
+    expect(runMeasure(MEASURE_JS, { ...page, tail: [{ tagName: "STYLE", bottom: 0 }] })).toBe(408);
+    expect(
+      runMeasure(MEASURE_JS, {
+        ...page,
+        tail: [
+          { tagName: "SCRIPT", bottom: 0 },
+          { tagName: "SCRIPT", bottom: 0 },
+        ],
+      }),
+    ).toBe(408);
   });
 
   test("ios and android embed the same measure script", () => {

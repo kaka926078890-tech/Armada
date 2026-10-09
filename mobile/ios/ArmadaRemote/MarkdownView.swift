@@ -349,12 +349,13 @@ enum WorkspaceFileLink {
 }
 
 enum MarkdownHeight {
-    /// Last-block box, not the WKWebView frame. `documentElement.scrollHeight`
+    /// Last content box, not the WKWebView frame. `documentElement.scrollHeight`
     /// tracks the viewport so a later short reply keeps the previous page.
     /// `body.offsetHeight` drops collapsed trailing margin and late reflow.
+    /// Trailing script/style (mermaid) have no box, so walk back to the last content block.
     /// Keep in sync with Android `MarkdownHtml.MEASURE_JS` and `mobile/markdown-measure.ts`.
     static let measureJavaScript =
-        "(function(){var b=document.body;if(!b||!b.lastElementChild)return 1;var last=b.lastElementChild;var mb=parseFloat(getComputedStyle(last).marginBottom)||0;return Math.ceil(Math.max(last.getBoundingClientRect().bottom+mb-b.getBoundingClientRect().top,1));})()"
+        "(function(){var b=document.body;if(!b||!b.lastElementChild)return 1;var last=b.lastElementChild;while(last&&(last.tagName==='SCRIPT'||last.tagName==='STYLE'))last=last.previousElementSibling;if(!last)return 1;var mb=parseFloat(getComputedStyle(last).marginBottom)||0;return Math.ceil(Math.max(last.getBoundingClientRect().bottom+mb-b.getBoundingClientRect().top,1));})()"
 }
 
 final class MarkdownMeasuringWebView: WKWebView {
