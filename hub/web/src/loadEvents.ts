@@ -1,5 +1,7 @@
 export const EVENT_PAGE_SIZE = 500;
 export const LOAD_OLDER_TOP_PX = 72;
+/** Reader is still at the end when the gap is under this many pixels. */
+export const STICK_BOTTOM_PX = 72;
 
 export async function collectEventPages<T extends { seq: number }>(
   fetchPage: (afterSeq: number) => Promise<T[]>,
@@ -45,4 +47,30 @@ export function shouldLoadOlder(opts: { scrollTop: number; hasOlder: boolean; lo
 
 export function prependPreserveScroll(prev: { scrollTop: number; scrollHeight: number }, nextHeight: number): number {
   return prev.scrollTop + (nextHeight - prev.scrollHeight);
+}
+
+export function isStuckToBottom(scrollHeight: number, scrollTop: number, clientHeight: number): boolean {
+  return scrollHeight - scrollTop - clientHeight < STICK_BOTTOM_PX;
+}
+
+/**
+ * A late diagram (or any content that finishes layout after the first pin)
+ * grows the thread. That growth is not the reader leaving the end.
+ * Stay in follow mode when the new gap is explained by the growth.
+ * `prevScrollHeight <= 0` means the scroller has not been measured yet:
+ * the whole thread must not count as growth, or the first scroll-up cannot leave the end.
+ */
+export function stickAfterContentResize(opts: {
+  wasStuck: boolean;
+  prevScrollHeight: number;
+  scrollHeight: number;
+  scrollTop: number;
+  clientHeight: number;
+}): boolean {
+  if (isStuckToBottom(opts.scrollHeight, opts.scrollTop, opts.clientHeight)) return true;
+  if (!opts.wasStuck || opts.prevScrollHeight <= 0) return false;
+  const growth = opts.scrollHeight - opts.prevScrollHeight;
+  if (growth <= 0) return false;
+  const distance = opts.scrollHeight - opts.scrollTop - opts.clientHeight;
+  return distance <= growth + STICK_BOTTOM_PX;
 }

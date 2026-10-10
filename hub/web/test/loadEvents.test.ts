@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   collectEventPages, mergeEvents, EVENT_PAGE_SIZE,
   hasOlderEvents, olderEventsQuery, shouldLoadOlder, prependPreserveScroll,
+  isStuckToBottom, stickAfterContentResize,
 } from "../src/loadEvents";
 
 describe("collectEventPages", () => {
@@ -68,5 +69,68 @@ describe("detail tail window", () => {
 
   test("prepending older events keeps the same row on screen", () => {
     expect(prependPreserveScroll({ scrollTop: 40, scrollHeight: 200 }, 800)).toBe(640);
+  });
+});
+
+describe("follow the end when a diagram finishes layout", () => {
+  test("a diagram growing under the last screen stays followed", () => {
+    expect(isStuckToBottom(1000, 700, 300)).toBe(true);
+    expect(stickAfterContentResize({
+      wasStuck: true,
+      prevScrollHeight: 1000,
+      scrollHeight: 1600,
+      scrollTop: 700,
+      clientHeight: 300,
+    })).toBe(true);
+  });
+
+  test("a reader who left the end stays there while a diagram grows", () => {
+    expect(stickAfterContentResize({
+      wasStuck: false,
+      prevScrollHeight: 1000,
+      scrollHeight: 1600,
+      scrollTop: 100,
+      clientHeight: 300,
+    })).toBe(false);
+  });
+
+  test("scrolling up with no growth leaves the end", () => {
+    expect(stickAfterContentResize({
+      wasStuck: true,
+      prevScrollHeight: 1000,
+      scrollHeight: 1000,
+      scrollTop: 400,
+      clientHeight: 300,
+    })).toBe(false);
+  });
+
+  test("scrolling past the diagram growth leaves the end", () => {
+    expect(stickAfterContentResize({
+      wasStuck: true,
+      prevScrollHeight: 1000,
+      scrollHeight: 1400,
+      scrollTop: 100,
+      clientHeight: 300,
+    })).toBe(false);
+  });
+
+  test("returning to the end follows again", () => {
+    expect(stickAfterContentResize({
+      wasStuck: false,
+      prevScrollHeight: 1000,
+      scrollHeight: 1000,
+      scrollTop: 690,
+      clientHeight: 300,
+    })).toBe(true);
+  });
+
+  test("an unmeasured thread does not count its whole height as diagram growth", () => {
+    expect(stickAfterContentResize({
+      wasStuck: true,
+      prevScrollHeight: 0,
+      scrollHeight: 1600,
+      scrollTop: 100,
+      clientHeight: 300,
+    })).toBe(false);
   });
 });

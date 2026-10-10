@@ -5,7 +5,7 @@ import { workspaceFolderName, runDisplayName, canRetryRun, CDP_NOT_READY_COPY, r
 import ChatThread from "./ChatThread";
 import FilePreview from "./FilePreview";
 import { eventsToChat, mergePendingAsk, mergeOutboundChat, queuedOutbound, INITIAL_VISIBLE_TURNS, initialHiddenPrefixTurns, recentTurnsWindow, stampFallbackImageIds } from "../chatView";
-import { collectEventPages, mergeEvents, EVENT_PAGE_SIZE, hasOlderEvents, olderEventsQuery, shouldLoadOlder, prependPreserveScroll } from "../loadEvents";
+import { collectEventPages, mergeEvents, EVENT_PAGE_SIZE, hasOlderEvents, olderEventsQuery, shouldLoadOlder, prependPreserveScroll, stickAfterContentResize } from "../loadEvents";
 import { mergeAttachmentFiles, isConsoleAttachment, parseRunAttachmentIds } from "../attachments";
 import { ConsoleFilePicker } from "./ConsoleFilePicker";
 import { endFollowupSend, isFollowupSendEnter, tryBeginFollowupSend } from "../followupSend";
@@ -115,7 +115,9 @@ export default function RunDetail({
   const [hiddenPrefixTurns, setHiddenPrefixTurns] = useState(0);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
+  const heightRef = useRef(0);
   const jumpedRef = useRef<string | null>(null);
   const sendingRef = useRef(false);
   const [sending, setSending] = useState(false);
@@ -255,22 +257,54 @@ export default function RunDetail({
       });
   }, [runId]);
 
+  const pinToEnd = useCallback((el: HTMLDivElement) => {
+    const max = el.scrollHeight - el.clientHeight;
+    if (max - el.scrollTop > 1) el.scrollTop = el.scrollHeight;
+    heightRef.current = el.scrollHeight;
+  }, []);
+
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     if (preserveRef.current) {
       el.scrollTop = prependPreserveScroll(preserveRef.current, el.scrollHeight);
       preserveRef.current = null;
+      heightRef.current = el.scrollHeight;
       return;
     }
-    if (events.length === 0) return;
+    if (events.length === 0) {
+      heightRef.current = el.scrollHeight;
+      return;
+    }
     if (jumpedRef.current !== runId) {
       jumpedRef.current = runId;
-      el.scrollTop = el.scrollHeight;
+      pinToEnd(el);
       return;
     }
-    if (stickRef.current) el.scrollTop = el.scrollHeight;
-  }, [events, runId, hiddenPrefixTurns]);
+    if (stickRef.current) pinToEnd(el);
+    else heightRef.current = el.scrollHeight;
+  }, [events, runId, hiddenPrefixTurns, pinToEnd]);
+
+  useEffect(() => {
+    const content = contentRef.current;
+    const el = scrollRef.current;
+    if (!content || !el) return;
+    const ro = new ResizeObserver(() => {
+      if (preserveRef.current) return;
+      const stuck = stickAfterContentResize({
+        wasStuck: stickRef.current,
+        prevScrollHeight: heightRef.current,
+        scrollHeight: el.scrollHeight,
+        scrollTop: el.scrollTop,
+        clientHeight: el.clientHeight,
+      });
+      stickRef.current = stuck;
+      if (stuck) pinToEnd(el);
+      else heightRef.current = el.scrollHeight;
+    });
+    ro.observe(content);
+    return () => ro.disconnect();
+  }, [run?.id, filePath, pinToEnd]);
 
   const injectReady = run ? machines.find((m) => m.id === run.machine_id)?.cdp_ready === true : false;
 
@@ -481,7 +515,13 @@ export default function RunDetail({
         onScroll={() => {
           const el = scrollRef.current;
           if (!el) return;
-          stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 72;
+          stickRef.current = stickAfterContentResize({
+            wasStuck: stickRef.current,
+            prevScrollHeight: heightRef.current,
+            scrollHeight: el.scrollHeight,
+            scrollTop: el.scrollTop,
+            clientHeight: el.clientHeight,
+          });
           if (shouldLoadOlder({
             scrollTop: el.scrollTop,
             hasOlder: hiddenPrefixRef.current > 0 || hasOlderEvents(eventsRef.current),
@@ -490,6 +530,7 @@ export default function RunDetail({
         }}
         className="flex-1 min-w-0 overflow-y-auto px-4 py-4 [scrollbar-gutter:stable]"
       >
+        <div ref={contentRef}>
         {hasOlder && (
           <button
             type="button"
@@ -531,6 +572,7 @@ export default function RunDetail({
             </div>
           </div>
         )}
+        </div>
       </div>
       )}
       {run.conversation_id && (
