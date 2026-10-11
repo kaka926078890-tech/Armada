@@ -622,6 +622,50 @@ struct WorkspaceHome: View {
     }
 }
 
+/// Form/List 按内容理想宽度布局横向 ScrollView，多出来的胶囊被裁掉且滑不到。
+/// 按行宽换行，和中台 flex-wrap 一样把每条都留在屏内。
+struct ChipFlowLayout: Layout {
+    var spacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        arrange(proposal: proposal, subviews: subviews).size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let frames = arrange(proposal: ProposedViewSize(width: bounds.width, height: bounds.height), subviews: subviews).frames
+        for (index, frame) in frames.enumerated() {
+            subviews[index].place(
+                at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY),
+                anchor: .topLeading,
+                proposal: ProposedViewSize(width: frame.width, height: frame.height)
+            )
+        }
+    }
+
+    private func arrange(proposal: ProposedViewSize, subviews: Subviews) -> (size: CGSize, frames: [CGRect]) {
+        let maxWidth = proposal.width ?? .infinity
+        var frames: [CGRect] = []
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        var rowHeight: CGFloat = 0
+        var usedWidth: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > 0, x + size.width > maxWidth {
+                x = 0
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            frames.append(CGRect(origin: CGPoint(x: x, y: y), size: size))
+            rowHeight = max(rowHeight, size.height)
+            x += size.width + spacing
+            usedWidth = max(usedWidth, x - spacing)
+        }
+        let width = proposal.width ?? usedWidth
+        return (CGSize(width: width, height: y + rowHeight), frames)
+    }
+}
+
 struct PromptSnippetChips: View {
     let snippets: [PromptSnippet]
     let onAppend: (String) -> Void
@@ -629,16 +673,16 @@ struct PromptSnippetChips: View {
     var body: some View {
         Group {
             if !snippets.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ForEach(snippets) { snippet in
-                            Button(snippet.title) { onAppend(snippet.body) }
-                                .buttonStyle(.bordered)
-                                .controlSize(.small)
-                                .clipShape(Capsule())
-                        }
+                ChipFlowLayout(spacing: 6) {
+                    ForEach(snippets) { snippet in
+                        Button(snippet.title) { onAppend(snippet.body) }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .clipShape(Capsule())
+                            .fixedSize()
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
@@ -1769,23 +1813,22 @@ struct SettingsView: View {
                     Text("还没有快捷提示词，请在中台添加")
                         .foregroundStyle(.secondary)
                 } else {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 6) {
-                            ForEach(session.snippets) { snippet in
-                                SnippetSettingChip(
-                                    snippet: snippet,
-                                    onEdit: { editingSnippet = snippet },
-                                    onDelete: {
-                                        Task {
-                                            try? await session.saveSnippets(
-                                                session.snippets.filter { $0.id != snippet.id }
-                                            )
-                                        }
+                    ChipFlowLayout(spacing: 6) {
+                        ForEach(session.snippets) { snippet in
+                            SnippetSettingChip(
+                                snippet: snippet,
+                                onEdit: { editingSnippet = snippet },
+                                onDelete: {
+                                    Task {
+                                        try? await session.saveSnippets(
+                                            session.snippets.filter { $0.id != snippet.id }
+                                        )
                                     }
-                                )
-                            }
+                                }
+                            )
                         }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                 }
             }
