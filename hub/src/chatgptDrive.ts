@@ -3,14 +3,19 @@ import {
   parseChatgptRoot, planCodexMode, planSend, sendButtonName, type ChatgptControl,
 } from "./chatgptDesktop";
 
+export type ChatgptPoint = { x: number; y: number };
+
 export type ChatgptPage = {
   controls(): Promise<ChatgptControl[]>;
   pointer(x: number, y: number): Promise<void>;
+  move(x: number, y: number): Promise<void>;
   clickName(name: string): Promise<void>;
   insertText(text: string): Promise<void>;
   composerText(): Promise<string>;
   visibleConversation(): Promise<string>;
   clickThread(sidebarThreadId: string): Promise<void>;
+  projectCreateHover(): Promise<ChatgptPoint | null>;
+  projectCreateClick(): Promise<ChatgptPoint | null>;
   close(): void;
 };
 
@@ -76,6 +81,16 @@ export async function prepareFollowup(page: ChatgptPage, sessionId: string, side
   controls = await page.controls();
   planSend(controls, text);
   await page.clickName(sendButtonName(controls));
+}
+
+/** 「添加新项目」平时收在「项目」标题里。先移到标题上，再点开「创建项目」。 */
+export async function openCreateProject(page: ChatgptPage): Promise<void> {
+  const hover = await page.projectCreateHover();
+  if (!hover) throw new Error("CHATGPT_PROJECT_CREATE_MISSING");
+  await page.move(hover.x, hover.y);
+  const click = await page.projectCreateClick();
+  if (!click) throw new Error("CHATGPT_PROJECT_CREATE_MISSING");
+  await page.pointer(click.x, click.y);
 }
 
 export function targetRoots(controls: ChatgptControl[]): string[] {

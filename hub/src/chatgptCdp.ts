@@ -58,6 +58,23 @@ function clickJs(name: string): string {
   })()`;
 }
 
+const PROJECT_CREATE_HOVER_JS = `(() => {
+  const btn = document.querySelector("[data-app-action-sidebar-project-create]");
+  const row = btn && btn.closest("[class~=\\"group/nav-section-title\\"]");
+  if (!row) return null;
+  const r = row.getBoundingClientRect();
+  if (r.width <= 0 || r.height <= 0) return null;
+  return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+})()`;
+
+const PROJECT_CREATE_CLICK_JS = `(() => {
+  const btn = document.querySelector("[data-app-action-sidebar-project-create]");
+  if (!btn) return null;
+  const r = btn.getBoundingClientRect();
+  if (r.width <= 0 || r.height <= 0 || getComputedStyle(btn).pointerEvents === "none") return null;
+  return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+})()`;
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -114,6 +131,12 @@ export async function connectChatgptPage(): Promise<ChatgptPage> {
       await send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1 });
       await sleep(350);
     },
+    async move(x, y) {
+      await send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
+      await sleep(250);
+    },
+    projectCreateHover: async () => (await evalJs(PROJECT_CREATE_HOVER_JS)) ?? null,
+    projectCreateClick: async () => (await evalJs(PROJECT_CREATE_CLICK_JS)) ?? null,
     async clickName(name) {
       const ok = await evalJs(clickJs(name));
       if (ok !== "clicked") throw new Error("CHATGPT_CLICK_MISSING");

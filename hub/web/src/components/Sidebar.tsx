@@ -212,8 +212,8 @@ export default function Sidebar({
               const title = s.label || workspaceFolderName(s.root);
               return (
                 <div key={key}>
-                  {showCursor ? <div className={`pl-7 pr-3 pt-1 ${UI_META} text-muted-foreground`}>Cursor</div> : null}
-                  {showGpt ? <div className={`pl-7 pr-3 pt-1 ${UI_META} text-muted-foreground`}>ChatGPT</div> : null}
+                  {showCursor ? <div className="pl-7 pr-3 pt-3 pb-0.5 text-[12px] font-medium tracking-wide text-sidebar-foreground">Cursor</div> : null}
+                  {showGpt ? <div className="pl-7 pr-3 pt-3 pb-0.5 text-[12px] font-medium tracking-wide text-sidebar-foreground">ChatGPT</div> : null}
                   {s.root === "chatgpt:monitor" ? (
                     <div className="pl-7 pr-3 py-1">
                       <div className={`${UI_TYPE} text-amber-400`}>需要用监控启动</div>

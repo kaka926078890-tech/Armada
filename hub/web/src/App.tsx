@@ -503,7 +503,7 @@ export default function App() {
           onOpenWorkspace={() => {
             const root = preset?.workspaceRoot ?? "";
             if (root.startsWith("chatgpt:") && root !== "chatgpt:monitor") {
-              void api.openChatgpt(root);
+              void api.createChatgptProject();
               return;
             }
             requestDesktop("open-workspace");

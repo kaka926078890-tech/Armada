@@ -5,7 +5,7 @@ import {
   attachChatgpt, CHATGPT_LOCAL_MACHINE, sameHost, type ChatgptMachineView,
 } from "./chatgptAttach";
 import { boardTargets, inNormalArea, openWorkspace, parseChatgptRoot, sidebarThreadId } from "./chatgptDesktop";
-import { prepareAndSend, prepareFollowup } from "./chatgptDrive";
+import { openCreateProject, prepareAndSend, prepareFollowup } from "./chatgptDrive";
 import { readFileSync } from "fs";
 import {
   chatgptAppRunning, chatgptPortUp, connectChatgptPage, readRolloutFile, recentRolloutFiles, relaunchChatgptWithPort,
@@ -136,6 +136,21 @@ export class ChatgptBridge {
       const jsonl = readRolloutFile(file);
       if (!jsonl) continue;
       for (const run of active) this.runs.noteChatgptRollout(run.id, jsonl);
+    }
+  }
+
+  async createProject(): Promise<{ ok: true } | { error: string }> {
+    if (this.viewState.port !== "ready") return { error: "CHATGPT_PORT_DOWN" };
+    let page;
+    try {
+      page = await connectChatgptPage();
+      await openCreateProject(page);
+      return { ok: true };
+    } catch (err) {
+      const code = err instanceof Error && err.message.startsWith("CHATGPT_") ? err.message : "CHATGPT_PROJECT_CREATE_MISSING";
+      return { error: code };
+    } finally {
+      page?.close();
     }
   }
 

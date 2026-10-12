@@ -115,7 +115,12 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
     return c.json(result);
   });
   app.post("/api/chatgpt/open", async (c) => {
-    const body = await c.req.json().catch(() => ({}));
+    const body = await c.req.json().catch(() => ({})) as { root?: string; action?: string };
+    if (body.action === "create") {
+      const created = await chatgpt.createProject();
+      if ("error" in created) return c.json(created, 409);
+      return c.json(created);
+    }
     const root = typeof body.root === "string" ? body.root : "";
     const result = await chatgpt.focusWorkspace(root);
     if ("error" in result) return c.json(result, 409);

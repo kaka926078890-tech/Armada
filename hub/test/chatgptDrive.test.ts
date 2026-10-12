@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { prepareAndSend, prepareFollowup, type ChatgptPage } from "../src/chatgptDrive";
+import { openCreateProject, prepareAndSend, prepareFollowup, type ChatgptPage } from "../src/chatgptDrive";
 import type { ChatgptControl } from "../src/chatgptDesktop";
 
 function pageOf(
@@ -18,11 +18,14 @@ function pageOf(
       return shots[Math.min(n++, shots.length - 1)];
     },
     async pointer(x, y) { calls.push(`pointer:${x},${y}`); },
+    async move(x, y) { calls.push(`move:${x},${y}`); },
     async clickName(name) { calls.push(`click:${name}`); },
     async insertText(text) { calls.push(`text:${text}`); },
     async composerText() { return textAfterSend; },
     async visibleConversation() { return conversation; },
     async clickThread(id: string) { calls.push(`thread:${id}`); conversation = sessionAfterClick; },
+    async projectCreateHover() { return null; },
+    async projectCreateClick() { return null; },
     close() { calls.push("close"); },
   };
 }
@@ -101,5 +104,28 @@ describe("prepareAndSend", () => {
     await prepareFollowup(page, "session-1", null, "下一句");
     expect(page.calls.some((call) => call.startsWith("thread:"))).toBe(false);
     expect(page.calls).toContain("click:发送");
+  });
+});
+
+describe("openCreateProject", () => {
+  test("a new project hovers the section title, then clicks create", async () => {
+    const page = pageOf([[]]);
+    page.projectCreateHover = async () => {
+      page.calls.push("hover");
+      return { x: 10, y: 20 };
+    };
+    page.projectCreateClick = async () => {
+      page.calls.push("click-target");
+      return { x: 30, y: 40 };
+    };
+    await openCreateProject(page);
+    expect(page.calls).toEqual(["hover", "move:10,20", "click-target", "pointer:30,40"]);
+  });
+
+  test("a hidden create button does not click", async () => {
+    const page = pageOf([[]]);
+    page.projectCreateHover = async () => ({ x: 10, y: 20 });
+    await expect(openCreateProject(page)).rejects.toThrow("CHATGPT_PROJECT_CREATE_MISSING");
+    expect(page.calls).toEqual(["move:10,20"]);
   });
 });

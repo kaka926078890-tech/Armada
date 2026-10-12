@@ -521,6 +521,33 @@ describe("relay serve", () => {
     ws.close();
   });
 
+  test("snap.workspaces keeps ChatGPT projects beside Cursor folders", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    ws.send(JSON.stringify({
+      type: "snap.workspaces",
+      machines: [{
+        id: "m-1", name: "Mac", display_name: "Mac Arm", os: "darwin", status: "online",
+        open_workspaces: JSON.stringify(["/ws/a"]),
+        cdp_ready: true,
+        chatgpt_workspaces: [
+          { root: "chatgpt:", label: "普通区", ready: true },
+          { root: "chatgpt:desk", label: "desk", ready: true },
+          { root: "chatgpt:monitor", label: "需要用监控启动", ready: false },
+        ],
+      }],
+    }));
+    await Bun.sleep(50);
+    const list = await (await fetch(url(s, "/mobile/workspaces"), {
+      headers: { authorization: `Bearer ${fleet.operatorToken}` },
+    })).json() as { workspaces: Array<{ label: string; workspaceRoot: string; cdpReady: boolean }> };
+    expect(list.workspaces.map((item) => item.label)).toEqual(["a", "普通区", "desk"]);
+    expect(list.workspaces.map((item) => item.workspaceRoot)).toEqual(["/ws/a", "chatgpt:", "chatgpt:desk"]);
+    expect(list.workspaces.map((item) => item.cdpReady)).toEqual([true, true, true]);
+    ws.close();
+  });
+
   test("snap.workspaces cursorReload is on the operator list and SSE", async () => {
     const s = start();
     const fleet = s.createFleet();
