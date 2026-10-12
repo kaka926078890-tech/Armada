@@ -1,7 +1,7 @@
 # 跨网络受控机：经中转加入
 
 - 日期：2026-10-12
-- 状态：**待评审**。本文不是实施基准。评审门禁未过之前不改生产代码，不部署 210。
+- 状态：**待评审**。`cc617c1` 的评审结论是不通过。本文仍不是实施基准。再次评审通过之前不改生产代码，不部署 210。
 - 父文档：[2026-09-12-armada-relay-mobile-design.md](./2026-09-12-armada-relay-mobile-design.md)（中转；手机走 `/mobile/*`；不把 `:7380` 映射到公网）
 - 核对台账：[2026-10-11-armada-cross-lan-fleet-probe.md](./2026-10-11-armada-cross-lan-fleet-probe.md)
 - 凭证：不要把 `~/.armada/token`、`relay.json` 的 `secret`、操作者 token、桌面 token 写进仓库、评审评论或截图。
@@ -14,7 +14,7 @@
 | --- | --- |
 | 问题 | 另一网段的电脑要成为和局域网受控机一样的成员，并且它的 Armada 打开这支中台的完整看板。私网 `:7380` 不通。现有中转读接口不能登记机器 |
 | 核心方案 | 中台继续出站连接中转。桌面用新的 `armada-relay://desktop` 凭证把看板 HTTP 和扩展 `/ws` 经这条出站连接转回中台。机器仍只由 `Registry.onRegister` 写入 |
-| 关键约束 | ① 不把 `:7380` 映射到公网。② 公网 URL 不带 `token` 查询参数。③ 局域网 `armada://join` 与手机 `/mobile/*` 行为不变。④ 同一 `fleet` 仍只有一条中台连接。⑤ 凭证三者不互通：`hub_secret`、操作者 token、桌面 token |
+| 关键约束 | ① 不把 `:7380` 映射到公网。② hub token 只在中台访问 `127.0.0.1` 时贴上，不抄到 Intel，不进入中转。③ 局域网 `armada://join` 与手机 `/mobile/*` 行为不变。④ 同一 `fleet` 仍只有一条中台连接。⑤ 短 JSON 与看板 SSE、扩展 WebSocket 分开计时 |
 | 明确不做 | 第二份中台；手机改看完整看板；在 Intel 上对着现有安装包继续试加入；未评审就改 `relay/src/server.ts` |
 
 ```mermaid
@@ -46,11 +46,12 @@ flowchart LR
 
 | 类别 | 内容 |
 | --- | --- |
-| 可复用 | 中台出站：`hub/src/relayClient.ts` 连接 `wss://{relay}/hub`。中转单连接：`relay/src/server.ts` 的 `hubSockets`，`fleets.hub_online`。登记：`extension/src/extension.ts` 发送 `type: "register"`，`Registry.onRegister` 写入 `machines`。看板：`desktop-core/src/shellUi.ts` 的 `boardUrl` 打开 `http://{origin}/?token=…&desktop=1`。手机：`/mobile/*` + `Authorization: Bearer` |
-| 需新建 | 桌面凭证与 `armada-relay://desktop`。中转上的桌面入口，把看板 HTTP 和扩展 WebSocket 转回已连接的中台。桌面壳在加入后把 Cursor 的 `armada.hubUrl` 指到本机转发口，而不是私网 `7380` |
-| 已证明不可用 | `join_fleet`（`desktop/src-tauri/src/hub.rs`）直连分享链接里的私网地址。`GET /mobile/workspaces` 只读 `fleets.workspaces`，不调用 `onRegister`。把 `:7380` 映射到公网（父文档明确不做） |
+| 可复用 | 中台出站：`hub/src/relayClient.ts` 连接 `wss://{relay}/hub`。`hubFetch` 已经请求 `http://127.0.0.1:${hubPort}`。登记只在 `Registry.onRegister`（`hub/src/registry.ts`）执行 `INSERT INTO machines`；10 秒不登记关闭码 4001 也在这里。扩展心跳 15 秒、45 秒无入站重连、退避上限 30 秒：`extension/src/wsClient.ts`。看板实时流是 SSE：`/api/events?token=`（`hub/web/src/App.tsx`）和 `/api/runs/:id/stream?token=`（`hub/web/src/api.ts`）。`auth.ts` 的 `allowsQueryToken` 只允许这几条 GET 把 token 放在查询串。手机：`/mobile/*` + Bearer。`GET /health` 正文含 `protocolVersion`（`relay/src/server.ts`） |
+| 需新建 | 桌面凭证与 `armada-relay://desktop`。`/hub` 上的桌面帧（第 4.4 节）。中转把改写后的路径转回中台。壳在 `127.0.0.1` 上剥掉查询串里的占位 token，再只带桌面 Bearer 出门 |
+| 不能沿用 | `ensureColumn` 加 `TEXT NOT NULL UNIQUE`：它只做 `ADD COLUMN`（`relay/src/db.ts`）。SQLite 不接受这样的 `UNIQUE`；已有行时没有默认值的 `NOT NULL` 会失败。`DISPATCH_TIMEOUT_MS`（15 秒）只包住 `waitHub` 的 `cmd.*`，不是通用 HTTP 超时。`fleets.workspaces` 只保存有打开工作区的槽位（`relay/src/server.ts` 解析 `snap.workspaces` 时跳过空列表） |
+| 已证明不可用 | `join_fleet`（`desktop/src-tauri/src/hub.rs`）直连私网。`GET /mobile/workspaces` 不调用 `onRegister`。把 `:7380` 映射到公网。把 `~/.armada/token` 抄到 Intel |
 
-中转命令面今天只有 `cmd.*`（`hub/src/relayCommandHandler.ts`），由中转发往中台，给手机派发用。受控机的 `register` 不在其中。
+今天 `/hub` 只交换 JSON：中台到中转是 `snap.workspaces`、`snap.run`；中转到中台是 `cmd.*`；中台回到中转是 `cmd.result`。中转解析失败就丢掉。中台侧不是 `cmd.` 开头就返回（`createRelayCommandHandler`）。二进制帧和 SSE 块没有载体。`/ws` 升级写在 `Bun.serve` 的 `fetch` 里（中台 `hub/src/index.ts`，中转的 `/hub` 同样）。只注册 Hono 路由完不成升级。
 
 ---
 
@@ -73,6 +74,8 @@ flowchart LR
 | Intel 再 `pair` 成第二台中台 | `relay/src/server.ts` 同一 `fleet` 只保留一条 `role: "hub"` 连接，会顶掉现有中台 |
 | 公网反向代理整个 `:7380` | 父文档禁止。未带舰队凭证的客户端也能碰到中台 |
 | 复用操作者 token 打开完整看板 | 手机会获得桌面壳才该有的中台页面与 `/ws`。和「令牌不互换」冲突 |
+| 把 hub token 经隧道交给 Intel 壳 | 轮换桌面 token 切不断已经写进 Cursor 设置的钥匙。`cc617c1` 评审否决 |
+| 用 `DISPATCH_TIMEOUT_MS` 包住整段看板连接 | `EventSource` 安静超过 15 秒会被 502。15 秒只属于 `waitHub` 的短命令 |
 
 ### 3.2 范围
 
@@ -101,37 +104,89 @@ armada-relay://desktop?relay=https%3A%2F%2F<host>&fleet=<fleetId>&token=<desktop
 
 解析放在 `relay/src/uri.ts`，与 `pair` / `op` 并列。贴错种类时桌面壳拒绝，不拨号。
 
+壳把邀请里的 `fleet` 放进请求头 `x-armada-fleet`。中转用桌面 token 查出的舰队必须与这个头相同。不一致时返回 403 `{ error: "FLEET_MISMATCH" }`，壳不写 Cursor 设置。
+
 **备选不选把桌面 token 放进 `armada://join`：** 和局域网 hub token 混在同一个 scheme。
 
-### 4.2 `fleets` 新列
+### 4.2 `desktop_token` 迁移
 
-| 列 | 约束 |
-| --- | --- |
-| `desktop_token` | `TEXT NOT NULL UNIQUE`，64 hex。已有行在中转进程启动时补空值，不改变 `hub_secret` 与 `operator_token` |
+不使用 `ensureColumn(db, "fleets", "desktop_token", "TEXT NOT NULL UNIQUE")`。`ensureColumn` 只会执行 `ALTER TABLE ... ADD COLUMN`。SQLite 不能在这条语句里加 `UNIQUE`。表里已有舰队时，没有默认值的 `NOT NULL` 会失败。空字符串再补唯一约束，会在第二行冲突。
 
-位置：`relay/src/db.ts` 的 `ensureColumn`。创建舰队时与 `operator_token` 一起生成（`relay/src/server.ts` 的 `createFleet`）。管理接口返回的 JSON 增加 `desktopUri`。不在日志打印 token 全文。
+v1 迁移，单独函数，包在失败可继续启动的路径里：
 
-### 4.3 中转入口
+1. 若无此列：`ADD COLUMN desktop_token TEXT`（可空，无唯一约束）。
+2. 每一行 `desktop_token` 为空时，写入各自的 64 位小写 hex。不写空字符串。
+3. 全部现有行都有值之后，再 `CREATE UNIQUE INDEX`。索引名 `fleets_desktop_token_uq`。
 
-| 入口 | 认证 | 成功 | 失败 |
+任一步失败：记下错误，不让进程退出。`/mobile/*` 与现有 `/hub` 仍按今天的方式服务。新舰队在 `createFleet` 里直接写入非空 `desktop_token`。管理接口在列可用时多返回 `desktopUri`。日志不打印 token 全文。
+
+**备选不选重建整张 `fleets`：** 210 上已有手机通道和未完成的 run。换表失败面比加可空列大。
+
+### 4.3 路径与时限
+
+公网只有 `Authorization: Bearer <desktopToken>`。离开本机回环之前，壳删掉查询串里的 `token`，也删掉看板或扩展带上的 hub `Authorization`。中转日志不记录剩余查询串里的 `token` 键。
+
+| 入口 | 到中台的路径 | 时限 |
+| --- | --- | --- |
+| `GET /desktop/health` | 不转发。留在中转 | 无中台超时 |
+| `/desktop/api/...` | `/api/...` | 普通 JSON：**15 秒**，超时 502 `{ error: "HUB_TIMEOUT" }` |
+| `/desktop/api/events`、`/desktop/api/runs/:id/stream` | `/api/events`、`/api/runs/:id/stream` | 流式转发。空闲不断。中台的 `:ok` 和后续事件原样下送 |
+| `/desktop/ws` | `/ws` | 不按 15 秒切断。扩展侧仍是 45 秒无入站再重连，退避上限 30 秒 |
+
+`/desktop/health` 的正文与现有 `GET /health` 相同：`{ ok: true, name: "armada-relay", protocolVersion: 1 }`（`PROTOCOL_VERSION`）。不要写成只有 `ok` 和 `name`。
+
+`/desktop/ws` 的升级放在 `Bun.serve` 的 `fetch` 里，与现有 `/hub` 相同。不放在只走 Hono 的路由上。
+
+无凭证 401 `{ error: "unauthorized" }`。操作者 token 或 `hub_secret` 为 403 `{ error: "DESKTOP_REQUIRED" }`。`hub_online != 1` 为 503 `{ error: "HUB_OFFLINE" }`。这三档都不把请求送到中台。
+
+中转到中台仍走已经建立的 `/hub` 出站连接，不从公网连回 `:7380`。
+
+### 4.4 `/hub` 帧
+
+短 JSON、SSE 和扩展 WebSocket 都用新的 `desk.*` 帧。`streamId` 与 `cmd.*` 的 `requestId` 分开。桌面流不进入 `waitHub`。手机 `cmd.dispatch` 仍只受自己的 15 秒限制。
+
+| 方向 | `type` | 字段 | 上限 |
 | --- | --- | --- | --- |
-| `GET /desktop/health` | 无 | 200 `{ ok: true, name: "armada-relay" }`，与现有 `/health` 相同，便于对端先确认主机 | 网络错误由客户端记录 |
-| `/desktop/*` HTTP | `Authorization: Bearer <desktopToken>` | 中转把方法、路径、头（去掉该 Bearer）、体转给已连接中台的本机 HTTP，状态码与体原样返回 | 无凭证 401 `{ error: "unauthorized" }`；操作者 token 或 `hub_secret` 403 `{ error: "DESKTOP_REQUIRED" }`；`hub_online != 1` 503 `{ error: "HUB_OFFLINE" }` |
-| `/desktop/ws` WebSocket | 同上，Bearer 放在升级请求头，不放查询串 | 帧双向转发到中台 `/ws`。中台侧仍用现有 hub token 完成升级 | 同上。升级失败 401，不建立套接字 |
+| 中转 → 中台 | `desk.http` | `streamId`、`method`、`path`、`headers`、可选 `bodyBase64` | 单帧正文 64 KiB。更大的请求体拆帧，用同一 `streamId` 跟 `seq` |
+| 中台 → 中转 | `desk.http.result` | `streamId`、`status`、`headers`、可选 `bodyBase64` | 同上 |
+| 中转 → 中台 | `desk.stream.open` | `streamId`、`path`（已改写成 `/api/events` 或 `/api/runs/:id/stream`） | — |
+| 中台 → 中转 | `desk.stream.chunk` | `streamId`、`seq`、`data`（SSE 文本，含 `:ok`） | 单帧 64 KiB |
+| 双向 | `desk.stream.end` | `streamId`、可选 `status` | — |
+| 中转 → 中台 | `desk.ws.open` | `streamId` | 每 fleet 同时最多 8 条 |
+| 双向 | `desk.ws.frame` | `streamId`、`seq`、`data`（扩展现有文本帧） | 单帧 64 KiB。v1 不转发二进制帧；桌面套接字以 1003 关闭这一条，不断开 `/hub` |
+| 双向 | `desk.ws.close` | `streamId`、`code`、`reason` | 至少原样送回 4001（未登记）和 4000（被替换） |
 
-转发超时与现有 `DISPATCH_TIMEOUT_MS` 对齐：**15 秒**，超时 502 `{ error: "HUB_TIMEOUT" }`。WebSocket 不套这 15 秒在每一帧上；空闲断开对齐扩展现有 `WS_STALE_MS`（45 秒无入站则扩展重连，`extension/src/wsClient.ts`）。
+未知 `type`：中转和中台都忽略该帧，不关闭 `/hub`。中转先发布、中台仍是旧进程时，旧的 `createRelayCommandHandler` 会忽略非 `cmd.` 帧，`/mobile/*` 保持今天的行为。桌面短请求在 15 秒后 502，不占用 `waitHub`。
 
-中转到中台的这一跳走已经建立的 `/hub` 出站连接，不新开一条从公网连回 `:7380` 的 TCP。
+验收用例：一条桌面 SSE 保持打开且 15 秒内没有业务包时，手机 `cmd.dispatch` 仍在 15 秒内返回。
 
-### 4.4 中台侧
+### 4.5 hub token 留在中台
 
-中台在本机回环上接受中转转来的 HTTP 与 `/ws`，鉴权仍是现有 hub token（`hub/src/index.ts`：`/ws` 的 `token` 查询参数必须等于 `~/.armada/token`）。该查询参数只出现在中台本机，不出现在中转的公网 URL 上。
+没有「把 hub token 返回给壳」的接口。`POST /join/ticket` 也不能用：它要求已持有中台凭证的人先签发 ticket。
 
-桌面壳在凭证通过后，经这条已认证转发取一次 hub token，写入 Cursor 设置，方式与今天 `join_fleet` 相同。token 不进入 `armada-relay://desktop`。
+v1：
 
-`register` 到达中台后只调用 `Registry.onRegister`。随后 `snap.workspaces` 仍由现有中台出站推送更新 `fleets.workspaces`。
+- Intel 的 `armada.token` 是壳生成的 64 位小写 hex 占位值。扩展仍然发 `ws://${hubUrl}/ws?token=`。协议字段不改。
+- 壳监听的转发只绑 `127.0.0.1`。只有这个 webview 和这条扩展连接会经壳出门。出门前去掉查询串 `token` 和 hub `Authorization`，换上桌面 Bearer。
+- 中台沿用 `hubFetch`。真正的 hub token 只加在 `http://127.0.0.1:${hubPort}` 上。今天的实现先写 `authorization` 再展开 `init.headers`，调用方可以覆盖。v1 必须把 `authorization: Bearer ${opts.token}` 放在展开之后，调用方头不能覆盖它。
+- 中台本机 `/ws` 升级仍对照 `~/.armada/token`（`hub/src/index.ts`）。这个查询参数由中台在回环上补上，不由中转或 Intel 提供。
 
-### 4.5 桌面壳
+```mermaid
+sequenceDiagram
+  participant Ext as Intel 扩展
+  participant Shell as 本机壳
+  participant Relay as 中转
+  participant Hub as 中台
+  Ext->>Shell: ws://127.0.0.1/ws?token=占位
+  Shell->>Relay: /desktop/ws，只有桌面 Bearer
+  Relay->>Hub: 经已有 /hub 连接
+  Hub->>Hub: 本机 /ws 贴上真正的 hub token
+  Hub->>Hub: Registry.onRegister
+```
+
+**备选不选把占位值留空：** `loadConfig` 在 token 为空时不连接（`extension/src/config.ts`）。占位值让现有扩展不用改字段。
+
+### 4.6 桌面壳
 
 局域网加入不变：`webviewOrigin` 为 `ip:7380`，`openBoard` 使用 `boardUrl`。
 
@@ -139,19 +194,22 @@ armada-relay://desktop?relay=https%3A%2F%2F<host>&fleet=<fleetId>&token=<desktop
 
 | 项 | 值 |
 | --- | --- |
-| 看板 iframe | 本机壳的回环地址。壳把请求加上桌面 Bearer 后转到中转 `/desktop/*` |
-| `armada.hubUrl` | 该回环 `host:port`。扩展仍执行 `ws://${hubUrl}/ws?token=`（`extension/src/extension.ts`） |
-| `armada.token` | 中台 hub token，只存在于受控机本机 |
+| 看板 iframe | `http://127.0.0.1:<壳端口>/`。壳把 `/api/...` 转到中转 `/desktop/api/...` |
+| `armada.hubUrl` | `127.0.0.1:<壳端口>` |
+| `armada.token` | 第 4.5 节的占位值 |
+| 再次打开 | 壳把邀请存在本机 `~/.armada/desktop-join.json`（mode `0600`），只含 `relay`、`fleet`、桌面 token。不含 hub token。再次打开不必重贴邀请，回环起来后扩展按原路径登记 |
+| 离开舰队 | 壳停掉回环监听，删除该文件，并清掉指向这个 `127.0.0.1` 端口的 `armada.hubUrl` 与占位 `armada.token`。不清局域网加入留下的其他地址 |
 
-这样扩展代码的登记消息不变。跨网络的差别停在壳的转发，不把私网 IP 写进 Cursor 设置。
+邀请里的 `fleet` 与 token 查出的舰队不一致时，不写上述文件，也不写 Cursor 设置。
 
-### 4.6 兼容
+### 4.7 兼容
 
 | 客户端 | v1 行为 |
 | --- | --- |
 | 已在局域网的受控机 | 不改 `hubUrl`，不经过 `/desktop/*` |
-| 手机 | 仍只接受操作者 token 调 `/mobile/*`。桌面 token 调 `/mobile/*` 返回 403 `OPERATOR_REQUIRED` |
-| 旧中转进程 | 没有 `/desktop/*` 时桌面壳显示连接失败，不改写本机已有的局域网 `hubUrl` |
+| 手机 | 仍只接受操作者 token 调 `/mobile/*`。桌面 token 调 `/mobile/*` 返回 403 `OPERATOR_REQUIRED`。限流仍是现有 `checkRate`：20 次 / 5 分钟，桌面流量不进这个桶 |
+| 中转已升级、中台未升级 | 未知 `desk.*` 被旧中台忽略。操作者 `GET /mobile/workspaces` 仍 200 |
+| 旧中转进程 | 没有 `/desktop/*` 时壳显示连接失败，不改写已有局域网 `hubUrl` |
 
 ---
 
@@ -161,38 +219,37 @@ armada-relay://desktop?relay=https%3A%2F%2F<host>&fleet=<fleetId>&token=<desktop
 
 ```mermaid
 sequenceDiagram
-  participant Desk as Intel Armada
+  participant Ext as Intel 扩展
+  participant Shell as 本机壳
   participant Relay as 中转
   participant Hub as 中台
-  participant Ext as Intel 扩展
-  Desk->>Relay: GET /desktop/health
-  Desk->>Relay: 带桌面 Bearer 打开转发
-  Relay->>Hub: 经已有 /hub 连接转到本机 HTTP
-  Hub-->>Desk: 本机 hub token（仅隧道内）
-  Desk->>Ext: 写入回环 hubUrl 与 hub token
-  Ext->>Desk: ws 回环 /ws
-  Desk->>Relay: /desktop/ws
-  Relay->>Hub: 转到本机 /ws
-  Ext->>Hub: register
+  Ext->>Shell: ws://127.0.0.1/ws?token=占位
+  Shell->>Relay: /desktop/ws，只有桌面 Bearer
+  Relay->>Hub: desk.ws.open，经已有 /hub
+  Hub->>Hub: 本机 /ws 贴上真正的 hub token
+  Ext->>Hub: register（壳不解析正文）
   Hub->>Hub: Registry.onRegister
-  Hub->>Relay: snap.workspaces
+  Hub->>Relay: snap.workspaces（仅含已打开的工作区）
 ```
 
-1. 中台必须已经 `hub_online = 1`。否则 `/desktop/*` 返回 503，壳停留在加入页，不写 Cursor 设置。
-2. 扩展发出与今天相同的 `register`。10 秒内未登记，中台仍按 `Registry.onOpen` 关闭套接字（4001）。
-3. 心跳仍是扩展每 15 秒一次。中转不另设一套心跳来代替它。
-4. 看板 iframe 的文档与 `/api/*` 都走 `/desktop/*`。中转不解析 run 状态，不改 `runs` 表。手机那条 `cmd.dispatch` 路径不动。
+1. 中台必须已经 `hub_online = 1`。否则 `/desktop/api/*` 与 `/desktop/ws` 返回 503。壳停留在加入页，不写 Cursor 设置，不写 `desktop-join.json`。
+2. 扩展发出与今天相同的 `register`。10 秒内未登记，中台仍按 `Registry.onOpen` 以 4001 关闭。`desk.ws.close` 把 4001 送回扩展。中转不解析 `register`。
+3. 心跳仍是扩展每 15 秒一次。中转不另设心跳来代替它。
+4. 看板文档走壳的回环。`/api/events` 与 `/api/runs/:id/stream` 走 `desk.stream.*`，空闲不断。短 JSON 才使用 15 秒。中转不改 `runs` 表。`cmd.dispatch` 仍走 `waitHub`。
 
 ### 5.2 失效与降级
 
 | 情况 | 行为 |
 | --- | --- |
 | 中转不可达 | 壳显示失败。不回退去拨私网 `7380` |
-| 中台出站断开 | 中转将 `hub_online` 置 0（现有 `/hub` 关闭逻辑）。新的 `/desktop/*` 得到 503。已登记机器由中台现有离线逻辑处理，中转不代标 online |
-| 桌面 Bearer 错误 | 401 或 403，壳不写 `hubUrl` |
-| 转发超过 15 秒 | 502 `HUB_TIMEOUT`。扩展按现有重连，上限 30 秒（`ReconnectPolicy`） |
+| 中台出站断开 | 现有逻辑把 `hub_online` 置 0。新的桌面入口得到 503。已登记机器由中台离线逻辑处理。中转不代标 online |
+| 桌面 Bearer 错误，或 `FLEET_MISMATCH` | 401 或 403。壳不写 `hubUrl` |
+| 短 JSON 超过 15 秒 | 502 `HUB_TIMEOUT`。SSE 与 `/desktop/ws` 不因此关闭 |
+| 扩展 45 秒无入站 | 扩展自己重连，退避上限 30 秒 |
 
-回滚：停用中转的 `/desktop/*` 路由并重新部署中转。局域网加入与 `/mobile/*` 不依赖该路由。已写到 Intel Cursor 设置里的回环 `hubUrl` 会连不上本机壳；卸掉这次加入或改回局域网地址即可，不迁移 `machines` 表。
+回滚：中转停止接受 `/desktop/*`，重新部署。局域网加入与 `/mobile/*` 不依赖这些路由。离开舰队时壳停掉 `127.0.0.1` 监听，并清掉指向该回环的 `armada.hubUrl`。不迁移 `machines` 表。
+
+缓存：短 JSON 不在中转缓存。SSE 不缓冲成完整响应再下发。静态文件 v1 不缓存。
 
 ---
 
@@ -202,13 +259,14 @@ sequenceDiagram
 | --- | --- | --- |
 | 公网扫到中台 `:7380` | 不映射该端口。中台只出站 | 中台所在网络自己把 7380 暴露出去时，本文没有新增防护 |
 | 偷到操作者 token 后打开完整看板 | `/desktop/*` 拒绝操作者 token，403 `DESKTOP_REQUIRED` | 桌面 token 本身被盗时，影响等于拿到一份局域网加入链接 |
-| hub token 出现在中转访问日志 | 公网 URL 与查询串不含 hub token。Bearer 只含桌面 token。访问日志延续现有中转代理格式，不记录 `Authorization` | 隧道内的本机 `/ws?token=` 会进入中转进程内存。中转日志禁止打印该查询串 |
-| 桌面 token 与 hub token 混用 | 中转按表列校验。hub token 调 `/desktop/*` 得不到 `fleets` 匹配则为 401 | — |
-| 转发把中转变成第二份权威 | 中转不写 `machines`。验收查询中台 `hub.db` 的 `machines`，不以外表快照单独为准 | 快照滞后时手机列表会晚于侧栏，滞后上限为一个 `snap.workspaces` 推送间隔（中台现有机器变更回调） |
+| hub token 离开中台 | 公网只有桌面 Bearer。壳在回环上删掉查询串 `token`。`hubFetch` 在展开调用方头之后再写 `Bearer ${opts.token}`，且只发给 `127.0.0.1` | 壳若漏删查询串，占位值会到达中转。占位值不是 hub token。单测必须断言出门请求没有查询串 `token` |
+| 桌面 token 与 hub token 混用 | 中转只认 `desktop_token`。对不上则为 401 | — |
+| 转发把中转变成第二份权威 | 中转不写 `machines`，不解析 `register`。加入成功只看中台 `hub.db` | `fleets.workspaces` 不含未打开工作区的在线机器。不能用它单独判定加入 |
+| `desktop_token` 迁移失败 | 失败时中转继续提供 `/mobile/*`。不因新列拒绝启动 | 桌面入口在列不可用时返回 503，并在日志写迁移失败，不写 token |
 
-审计：中转沿用 `audit` 表。桌面加入成功记 `actor=desktop`、`action=join.open`、`target=fleetId`，payload 只有 `machineId`（来自随后的 `register`），不写 token。失败记 `join.denied`，payload 只有状态码。
+审计：沿用 `audit` 表。`actor=desktop`，`action=join.open` 或 `join.denied`，`target` 为 `fleetId`，payload 只有 HTTP 状态码。不记 `machineId`。机器身份以中台 `machines` 为准。
 
-限流：同一桌面 token 的 HTTP 转发 **每 10 秒最多 60 次**，超出 429 `{ error: "RATE_LIMIT" }`。WebSocket 同时每个 fleet **最多 8 条**桌面扩展连接，超出升级失败 429。这是为了挡住泄露凭证后的扫接口，不是看板正常轮询的配额；现有侧栏刷新远低于每秒 6 次。
+限流使用新桶，不调用 `checkRate`。同一桌面 token 的短 HTTP **每 10 秒最多 120 次**，超出 429 `{ error: "RATE_LIMIT" }`。一次 SSE 或一次 `/desktop/ws` 升级只计 1 次，不按后续帧计数。操作者桶保持 20 次 / 5 分钟。每个 fleet 同时最多 8 条桌面 WebSocket，超出升级失败 429。
 
 ---
 
@@ -218,10 +276,10 @@ sequenceDiagram
 
 | 阶段 | 内容 | 验收 | 上线门禁 |
 | --- | --- | --- | --- |
-| 0 | 本文评审 | 第 9 节门禁全过，并有同事结论 | 未过则停止 |
-| 1 | 中转测试先红：无凭证与操作者 token 不能打开 `/desktop/ws`；桌面 token 转发一条 `register` 后，测试里的中台机器列表出现该 `machineId` | `bun test relay/test` 中新用例失败于缺少路由，随后转绿 | 不部署 |
-| 2 | 中台接受隧道内的现有 `/ws` 与 HTTP，仍走 `onRegister` | `bun test hub/test` 覆盖隧道登记；局域网 `/ws?token=` 用例仍绿 | 不部署 |
-| 3 | 桌面壳识别 `armada-relay://desktop`，回环转发，`boardUrl` 的局域网形式不变 | `desktop-core` 单测：中转加入不生成 `http://<私网>:7380/?token=` | 不给 Intel 装 |
+| 0 | 本文再次评审 | 第 10 节门禁全过，并有同事结论 | `cc617c1` 已不通过。未过则停止 |
+| 1 | 中转测试先红：迁移能在已有行上补齐各不相同的 `desktop_token`；无凭证与操作者 token 不能打开 `/desktop/ws`；桌面 SSE 打开时 `cmd.dispatch` 仍在 15 秒内返回 | `bun test relay/test` 新用例先红后绿 | 不部署 |
+| 2 | 中台在回环上为隧道补 hub token，仍走 `onRegister`。调用方头不能覆盖 `hubFetch` 的 Authorization | `bun test hub/test` 覆盖隧道登记；局域网 `/ws?token=` 用例仍绿 | 不部署 |
+| 3 | 桌面壳识别 `armada-relay://desktop`，只听 `127.0.0.1`，出门前去掉查询串 `token` | `desktop-core` 单测：中转加入不生成含 hub token 的公网 URL | 不给 Intel 装 |
 | 4 | 部署顺序：先中转（210），再中台（本机，已有出站会重连），再 Intel 的桌面壳与扩展 | 见 7.1 | 前一步健康检查通过才做下一步 |
 
 部署顺序反过来的后果：Intel 先装新壳会向尚未存在的 `/desktop/*` 请求，加入失败；中台先于中转升级没有 `/desktop/*` 可接，行为与今天相同，允许，但没有跨网络能力。
@@ -230,13 +288,15 @@ sequenceDiagram
 
 | # | 通过标准 |
 | --- | --- |
-| 1 | Intel 只配置 `armada-relay://desktop`，不配置私网 `7380` |
-| 2 | Armada 打开的看板是这支中台的页面（含现有侧栏与派发），不是手机的五屏 |
-| 3 | 本机侧栏与 Intel 看板侧栏都出现在线的 `MacBook-Pro` |
-| 4 | 210 `fleets.workspaces` 含该 `machineId`，且中台 `hub.db` 的 `machines` 有同一行、`status=online` |
-| 5 | `GET /mobile/workspaces` 用操作者 token 仍 200；用桌面 token 为 403 |
+| 加入 | 中台 `hub.db` 的 `machines` 有该行，且 `status=online`。这是加入成功的判定 |
+| 看板 | Intel 的 Armada 打开这支中台的完整看板，实时流在安静超过 15 秒后仍不断开 |
+| 侧栏 | 本机侧栏与 Intel 看板侧栏都出现在线的 `MacBook-Pro` |
+| 快照 | 只有 Intel 打开了工作区，210 的 `fleets.workspaces` 才必须含该 `machineId`。没有打开文件夹时，快照可以没有这一行 |
+| 重启 | 退出并重新打开 Intel 上的 Armada 后，不用再贴邀请，该行能回到 `online` |
+| 离开 | 离开舰队后，壳停掉回环转发，并清掉指向该回环的 `armada.hubUrl` |
+| 手机 | 中转已升级、中台尚未升级时，操作者 token 调 `GET /mobile/workspaces` 仍是 200。桌面 token 调同一路径为 403 |
 
-未达到第 3 和第 4 条时，不发「已加入」结论。按 210 代理日志与中台日志改转发，不让 Intel 改路由或直连 `7380`。
+未达到「加入」这一条时，不发「已加入」结论。按 210 与中台日志改转发，不让 Intel 改路由或直连 `7380`。
 
 ---
 
@@ -244,14 +304,20 @@ sequenceDiagram
 
 | 路径 | 期望 |
 | --- | --- |
-| 桌面 token 转发 `register` | 中台 `machines` 新增或更新该 `machineId`，`status=online` |
+| 已有两行 `fleets` 的库做迁移 | 两行得到不同的 64 hex；唯一索引建成；迁移抛错时 `/mobile/workspaces` 仍 200 |
+| 桌面 token 的 `desk.ws.frame` 送到中台后完成 `register` | `machines` 有该行且 `status=online`。中转审计 payload 无 `machineId` |
 | 无 `Authorization` | 401，中台机器行数不变 |
-| 操作者 token 调 `/desktop/ws` | 403 `DESKTOP_REQUIRED`，中台无新连接 |
-| `hub_secret` 调 `/desktop/*` | 403 `DESKTOP_REQUIRED` |
+| 操作者 token 或 `hub_secret` 调 `/desktop/ws` | 403 `DESKTOP_REQUIRED` |
+| 邀请 `fleet` 与 token 所属舰队不同 | 403 `FLEET_MISMATCH`，测试里的壳不写 `hubUrl` |
 | 桌面 token 调 `/mobile/workspaces` | 403 `OPERATOR_REQUIRED` |
-| `hub_online=0` | 503 `HUB_OFFLINE`，不写 Cursor 设置 |
+| `GET /desktop/health` | 200，正文含 `protocolVersion`，且没有对应的 `desk.http` |
+| 出门前的回环请求带 `?token=` | 到达中转的 URL 没有 `token` 查询参数，也没有 hub Bearer |
+| SSE 打开且 20 秒无业务包 | 连接仍在。其间 `cmd.dispatch` 在 15 秒内返回 |
+| 短 JSON 超过 15 秒 | 502 `HUB_TIMEOUT`。这条 SSE 不被这次超时关掉 |
+| 未知 `type` | `/hub` 保持。`/mobile/*` 行为与今天相同 |
+| `desk.ws.close` 的 `code` 为 4001 或 4000 | 扩展侧套接字收到同一关闭码 |
 | 局域网 `boardUrl("192.168.1.196:7380", token)` | 仍是 `http://192.168.1.196:7380/?token=…&desktop=1` |
-| 转发耗时超过 15 秒 | 502 `HUB_TIMEOUT` |
+| 空工作区的在线机器 | `machines.status=online`。`fleets.workspaces` 不必含该 `machineId` |
 
 真机只在阶段 4。不把 Intel 的探索性操作当作单测替代。
 
@@ -261,26 +327,27 @@ sequenceDiagram
 
 | 风险 | 影响 | 应对 | 状态 |
 | --- | --- | --- | --- |
-| 隧道里仍会在中转进程看到 hub token | 中转主机被攻破时等于局域网加入链接泄露 | 不写日志；桌面 token 与 hub token 分离，便于只轮换桌面 token | 接受，v1 就这样做 |
+| 壳漏删查询串 `token` | 占位值到达中转。它不是 hub token，但会污染日志 | 第 8 节单测断言出门 URL 无 `token` | v1 必须有这条测试 |
 | 完整看板的静态文件全部经中转 | 首屏变慢 | v1 不缓存。超过 3 秒再开 v1.5 | 未发生 |
-| 扩展与壳版本不一致 | 壳已转发但扩展仍指向旧私网 | 阶段 4 同时装壳和扩展。验收第 1 条检查 `hubUrl` 是回环 | 实施时检查 |
-| 评审否决「本机回环壳」 | 扩展必须自己认识中转 URL，改动面从壳扩到 `loadConfig` | 停在阶段 0，不先改扩展 | 待评审 |
+| 扩展与壳版本不一致 | 壳已转发但扩展仍指向旧私网 | 阶段 4 同时装壳和扩展。重启验收检查 `hubUrl` 是 `127.0.0.1` | 实施时检查 |
+| 迁移失败被写成进程退出 | 210 上手机通道起不来 | 第 4.2 节：失败仍服务 `/mobile/*` | v1 必须如此 |
 
-未决只剩评审是否接受第 4.5 节的本机回环。不接受时不要改成公网查询串带 hub token。
+`cc617c1` 里「隧道可看见 hub token」和「15 秒包住全部转发」两条已经撤掉。
 
-本文假定 Intel 安装的是带本次桌面壳的 Armada，且中台出站已经连着 210 上的中转。出站不在时，验收停在 503，不改判定标准。
+本文假定 Intel 安装的是带本次桌面壳的 Armada，且中台出站已经连着 210 上的中转。出站不在时，验收停在 503，不改判定标准。再次评审通过前，本文保持待评审。
 
 ---
 
 ## 10. 评审检查清单
 
-- [ ] 覆盖第 0 节到第 10 节
-- [ ] v1 / v1.5 / 不做 已分开
-- [ ] 含非目标、风险、阻塞项（阶段 0）、验收
-- [ ] 跨组件发布顺序已写明：中转 → 中台 → Intel 壳与扩展
-- [ ] 修订记录说明本次只新增文档
+- [x] 覆盖第 0 节到第 11 节
+- [x] v1 / v1.5 / 不做 已分开
+- [x] 含非目标、风险、阻塞项（阶段 0）、验收
+- [x] 跨组件发布顺序已写明：中转 → 中台 → Intel 壳与扩展
+- [x] 修订记录说明相对 `cc617c1` 改了什么
+- [ ] 同事再次评审通过
 
-全部勾选且评审结论为通过之前，**不得**把本文标成实施基准，**不得**按第 7 节改生产代码。
+骨架四项在 `cc617c1` 已通过。契约五项未通过，本次已按评审改写。最后一项未勾选之前，**不得**把本文标成实施基准，**不得**按第 7 节改生产代码。
 
 ---
 
@@ -289,3 +356,4 @@ sequenceDiagram
 | 日期 | 变更 |
 | --- | --- |
 | 2026-10-12 | 初稿。依据当天私网 TCP 超时、中转只读成功、210 快照无 Intel 机器，写出经中转的桌面加入方案，供主干评审 |
+| 2026-10-12 | 按 `cc617c1` 评审改契约：hub token 留在中台；SSE 与 `/desktop/ws` 不套 15 秒；补 `desk.*` 帧和 `streamId`；`desktop_token` 改为可空列再加唯一索引；加入成功只看 `machines.status=online`。核对台账写回 `192.168.1.196` 与 `192.168.2`。状态仍为待评审 |
