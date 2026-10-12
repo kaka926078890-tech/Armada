@@ -4,7 +4,7 @@ import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import { askOptionDisplayText, isFreeformAskOption, optionIdsCollide, visibleAskOptions } from "../askOptions";
 import { segmentChat, processFoldLabel, userMessageCaption, type ChatBlock } from "../chatView";
-import { MermaidChart, mermaidSource } from "./MermaidChart";
+import { MermaidChart, fenceText, mermaidSource } from "./MermaidChart";
 import { HubImageRow } from "./ImageThumb";
 import { workspaceFilePathFromHref } from "../../../../extension/src/workspaceFile";
 import { Button } from "./ui/button";
@@ -139,11 +139,7 @@ function buildMarkdownComponents(openFileRef: OpenFileRef) {
     ),
     th: ({ children }: { children?: ReactNode }) => <th className="border border-border px-2 py-1 text-left text-foreground">{children}</th>,
     td: ({ children }: { children?: ReactNode }) => <td className="border border-border px-2 py-1 text-foreground">{children}</td>,
-    pre: ({ children }: { children?: ReactNode }) => {
-      const chart = mermaidSource(children);
-      if (chart != null) return <MermaidChart source={chart} />;
-      return <pre className="mb-2 p-2.5 rounded-md bg-muted overflow-x-auto text-[12px]">{children}</pre>;
-    },
+    pre: ({ children }: { children?: ReactNode }) => <CodeFence>{children}</CodeFence>,
     code: ({ className, children }: { className?: string; children?: ReactNode }) => {
       if (className) return <code className={className}>{children}</code>;
       return <code className="px-1 py-px rounded bg-muted text-foreground text-[12px]">{children}</code>;
@@ -218,22 +214,35 @@ function copyText(text: string): void {
   void navigator.clipboard.writeText(text).catch(fallback);
 }
 
-function CopyIconButton({ text }: { text: string }) {
+function CopyIconButton({ text, label = "复制正文", className = "mt-1.5" }: { text: string; label?: string; className?: string }) {
   const [copied, setCopied] = useState(false);
+  const name = copied ? "已复制" : label;
   return (
     <button
       type="button"
-      aria-label={copied ? "已复制" : "复制正文"}
-      title={copied ? "已复制" : "复制正文"}
+      aria-label={name}
+      title={name}
       onClick={() => {
         copyText(text);
         setCopied(true);
         window.setTimeout(() => setCopied(false), 1600);
       }}
-      className="mt-1.5 p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted"
+      className={`p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted ${className}`}
     >
       {copied ? <CheckIcon /> : <CopyIcon />}
     </button>
+  );
+}
+
+function CodeFence({ children }: { children?: ReactNode }) {
+  const chart = mermaidSource(children);
+  if (chart != null) return <MermaidChart source={chart} />;
+  const text = fenceText(children);
+  return (
+    <div className="relative mb-2">
+      <pre className="p-2.5 pr-9 rounded-md bg-muted overflow-x-auto text-[12px]">{children}</pre>
+      {text ? <CopyIconButton text={text} label="复制代码" className="absolute top-1 right-1 bg-muted" /> : null}
+    </div>
   );
 }
 
@@ -504,13 +513,16 @@ export default function ChatThread({ blocks, onAnswerAsk, onOpenFile }: {
           const caption = userMessageCaption(s.text, s.imageIds);
           return (
             <div key={key} className="flex justify-end">
-              <div className="max-w-[78%] rounded-2xl bg-muted px-3.5 py-2 text-foreground leading-relaxed">
-                {s.imageIds?.length ? (
-                  <div className={caption ? "mb-2" : undefined}>
-                    <HubImageRow ids={s.imageIds} />
-                  </div>
-                ) : null}
-                {caption ? <UserMarkdown text={caption} /> : null}
+              <div className="max-w-[78%] flex flex-col items-end">
+                <div className="rounded-2xl bg-muted px-3.5 py-2 text-foreground leading-relaxed">
+                  {s.imageIds?.length ? (
+                    <div className={caption ? "mb-2" : undefined}>
+                      <HubImageRow ids={s.imageIds} />
+                    </div>
+                  ) : null}
+                  {caption ? <UserMarkdown text={caption} /> : null}
+                </div>
+                {caption ? <CopyIconButton text={caption} label="复制消息" /> : null}
               </div>
             </div>
           );

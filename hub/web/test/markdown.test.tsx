@@ -50,10 +50,11 @@ describe("AssistantMarkdown", () => {
     expect(src).toContain("mermaid.render(id, source, host)");
   });
 
-  test("non-mermaid fence stays a code block", () => {
+  test("non-mermaid fence stays a code block with a copy button", () => {
     const html = renderToStaticMarkup(<AssistantMarkdown text={"```ts\nconst a = 1\n```\n"} />);
     expect(html).toContain("<pre");
     expect(html).toContain("const a = 1");
+    expect(html).toContain('aria-label="复制代码"');
     expect(html).not.toContain("mermaid-block");
   });
 });
@@ -71,6 +72,7 @@ describe("user bubble markdown", () => {
     expect(html).toContain("<li");
     expect(html).toContain("<br");
     expect(html).not.toContain("### 标题");
+    expect(html).toContain('aria-label="复制消息"');
   });
 
   test("user bubble with imageIds shows a Cursor-sized thumb and hides [图片]", () => {

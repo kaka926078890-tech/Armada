@@ -31,6 +31,11 @@ function reactNodeText(node: ReactNode): string {
   return "";
 }
 
+/** Fence body for the copy button. One trailing newline is the markdown closer, not content. */
+export function fenceText(children: ReactNode): string {
+  return reactNodeText(children).replace(/\n$/, "");
+}
+
 /** Fenced ```mermaid source, or null when this pre is not a mermaid diagram. */
 export function mermaidSource(children: ReactNode): string | null {
   for (const node of Children.toArray(children)) {
@@ -39,7 +44,7 @@ export function mermaidSource(children: ReactNode): string | null {
     const className = typeof props.className === "string" ? props.className : "";
     const match = /(?:^|\s)language-([\w-]+)/.exec(className);
     if (!match || match[1].toLowerCase() !== "mermaid") continue;
-    return reactNodeText(props.children).replace(/\n$/, "");
+    return fenceText(props.children);
   }
   return null;
 }
