@@ -4,9 +4,12 @@ import {
   listWorkspaces,
   openWorkspace,
   planAttach,
+  matchRolloutTurn,
   planSend,
   planStop,
+  readRollout,
   readTurn,
+  rolloutCardText,
   type ChatgptControl,
 } from "../src/chatgptDesktop";
 
@@ -117,6 +120,75 @@ describe("libraryAddReady", () => {
   test("浏览全部 is the library picker; two selected rows can be added", () => {
     expect(libraryAddReady("从资料库添加 已选择 2 个 取消 添加到聊天")).toBe(2);
     expect(libraryAddReady("从资料库添加 搜索资料库")).toBe(0);
+  });
+});
+
+/** 2026-10-12 切走之后仍写完的那条。全文在 task_complete.last_agent_message，不在可见页面。 */
+const THREAD = "01a12ed8-13e1-7e91-b59b-0f48c0b150f4";
+const TURN = "01a12ed9-cd13-7741-aa09-0d10f417de2c";
+const USER = "请执行 python3 -c \"import time\\nfor i in range(1,20):\\n print(i, flush=True)\\n time.sleep(1)\" 标记 armada-bg-2";
+const FINAL = "已执行完成，标记：`armada-bg-2`。\n\n输出为 `1` 到 `19`，进程退出码为 `0`。";
+
+const userLine = JSON.stringify({
+  type: "event_msg",
+  payload: {
+    type: "item_completed",
+    thread_id: THREAD,
+    turn_id: TURN,
+    item: { type: "UserMessage", content: [{ type: "text", text: USER + "\n" }] },
+  },
+});
+
+const completeLine = JSON.stringify({
+  type: "event_msg",
+  payload: {
+    type: "task_complete",
+    turn_id: TURN,
+    last_agent_message: FINAL,
+  },
+});
+
+describe("readRollout", () => {
+  test("user line without task_complete is bound and not finished", () => {
+    expect(readRollout(userLine)).toEqual([
+      { threadId: THREAD, turnId: TURN, user: USER, assistant: null, completed: false },
+    ]);
+  });
+
+  test("task_complete keeps the full last_agent_message for that turn", () => {
+    expect(readRollout(`${userLine}\n${completeLine}`)).toEqual([
+      { threadId: THREAD, turnId: TURN, user: USER, assistant: FINAL, completed: true },
+    ]);
+  });
+
+  test("the dispatch prompt matches one turn, and two identical prompts match none", () => {
+    const turns = readRollout(`${userLine}\n${completeLine}`);
+    expect(matchRolloutTurn(turns, USER)).toEqual(turns[0]);
+    expect(matchRolloutTurn(turns, USER + "\n")).toEqual(turns[0]);
+    expect(matchRolloutTurn([...turns, { ...turns[0], turnId: "other" }], USER)).toBeNull();
+  });
+});
+
+describe("rolloutCardText", () => {
+  test("a finished background turn is the card's full reply", () => {
+    const [turn] = readRollout(`${userLine}\n${completeLine}`);
+    expect(rolloutCardText(turn)).toBe(FINAL);
+  });
+
+  test("an unfinished turn has no card reply yet", () => {
+    const [turn] = readRollout(userLine);
+    expect(rolloutCardText(turn)).toBeNull();
+  });
+});
+
+describe("planSend while generating", () => {
+  test("clicks 排队, not 发送, while the turn is still running", () => {
+    const controls: ChatgptControl[] = [
+      { name: "与 Codex 协作", kind: "textbox", x: 414, y: 779, w: 712, h: 44 },
+      { name: "停止", kind: "button", x: 1070, y: 827, w: 28, h: 28 },
+      { name: "排队", kind: "button", x: 1102, y: 827, w: 28, h: 28 },
+    ];
+    expect(planSend(controls, "armada-queue-b").send).toEqual({ x: 1116, y: 841 });
   });
 });
 

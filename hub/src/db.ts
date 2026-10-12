@@ -68,6 +68,8 @@ export function openDb(home: string): Database {
   ensureColumn(db, "runs", "title", "title TEXT");
   ensureColumn(db, "runs", "pending_ask", "pending_ask TEXT");
   ensureColumn(db, "runs", "deferred_stop", "deferred_stop TEXT");
+  ensureColumn(db, "runs", "chatgpt_thread_id", "chatgpt_thread_id TEXT");
+  ensureColumn(db, "runs", "chatgpt_turn_id", "chatgpt_turn_id TEXT");
   ensureColumn(db, "machines", "queue_message_default_behavior", "queue_message_default_behavior TEXT");
   db.exec(`CREATE TABLE IF NOT EXISTS run_outbound (
     id TEXT PRIMARY KEY,

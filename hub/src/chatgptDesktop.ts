@@ -86,8 +86,9 @@ export function openWorkspace(controls: ChatgptControl[], project: string | null
 
 export function planSend(controls: ChatgptControl[], text: string): SendPlan {
   const box = visibleComposer(controls);
+  const queued = controls.some((control) => onScreen(control) && control.name === "排队" && !control.disabled);
   const send = controls
-    .filter((control) => onScreen(control) && control.name === "发送" && !control.disabled)
+    .filter((control) => onScreen(control) && control.name === (queued ? "排队" : "发送") && !control.disabled)
     .sort((a, b) => b.y - a.y)[0];
   if (!send) throw new Error("CHATGPT_SEND_MISSING");
   const point = center(send);
@@ -121,6 +122,74 @@ function firstLine(body: string): string | null {
     .map((part) => part.trim())
     .find((part) => part.length > 0 && !/^\d{1,2}:\d{2}$/.test(part));
   return line ?? null;
+}
+
+export type RolloutTurn = {
+  threadId: string;
+  turnId: string;
+  user: string | null;
+  assistant: string | null;
+  completed: boolean;
+};
+
+type TurnAcc = RolloutTurn;
+
+function turnOf(map: Map<string, TurnAcc>, turnId: string): TurnAcc {
+  let turn = map.get(turnId);
+  if (!turn) {
+    turn = { threadId: "", turnId, user: null, assistant: null, completed: false };
+    map.set(turnId, turn);
+  }
+  return turn;
+}
+
+/** 后台完成后的全文来自 rollout，不来自当前可见页面。 */
+export function readRollout(jsonl: string): RolloutTurn[] {
+  const map = new Map<string, TurnAcc>();
+  for (const line of jsonl.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    let row: { type?: string; payload?: Record<string, unknown> };
+    try {
+      row = JSON.parse(trimmed);
+    } catch {
+      continue;
+    }
+    if (row.type !== "event_msg" || !row.payload) continue;
+    const payload = row.payload;
+    const turnId = typeof payload.turn_id === "string" ? payload.turn_id : "";
+    if (!turnId) continue;
+    const turn = turnOf(map, turnId);
+    if (payload.type === "item_completed") {
+      const item = payload.item as { type?: string; content?: { type?: string; text?: string }[] } | undefined;
+      if (item?.type !== "UserMessage") continue;
+      const text = (item.content ?? [])
+        .filter((part) => part?.type === "text" && typeof part.text === "string")
+        .map((part) => part.text as string)
+        .join("\n")
+        .trim();
+      if (text) turn.user = text;
+      if (typeof payload.thread_id === "string") turn.threadId = payload.thread_id;
+    }
+    if (payload.type === "task_complete" && typeof payload.last_agent_message === "string") {
+      turn.assistant = payload.last_agent_message;
+      turn.completed = true;
+    }
+  }
+  return [...map.values()];
+}
+
+/** 派发提示词只在恰好一条回合上全等时挂上。两条相同则不猜。 */
+export function matchRolloutTurn(turns: RolloutTurn[], prompt: string): RolloutTurn | null {
+  const want = prompt.trim();
+  const hits = turns.filter((turn) => (turn.user ?? "").trim() === want);
+  return hits.length === 1 ? hits[0] : null;
+}
+
+/** 卡片上的完成后正文。未完成没有回复。 */
+export function rolloutCardText(turn: RolloutTurn): string | null {
+  if (!turn.completed || turn.assistant == null) return null;
+  return turn.assistant;
 }
 
 export function readTurn(text: string): TurnRead {

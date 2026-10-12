@@ -26,6 +26,7 @@ import { parsePendingAsk, continueAllowed, optionInAsk, isPlanAsk, mergePendingA
 import {
   OUTBOUND_LIMIT, QUEUE_DRAIN_MS, queueModeOf, transcriptUserPrompt,
 } from "./outboundClaim";
+import { matchRolloutTurn, readRollout, rolloutCardText, type RolloutTurn } from "./chatgptDesktop";
 
 const DISPATCH_TIMEOUT_MS = 30_000;
 
@@ -913,6 +914,60 @@ export class RunService {
     if (archived === "1") sql += " AND archived_at IS NOT NULL";
     else if (archived !== "all") sql += " AND archived_at IS NULL";
     return (this.db.query(sql + " ORDER BY created_at DESC").all(...args) as any[]).map((r) => this.hydrateRun(r));
+  }
+
+  /**
+   * Codex 后台写完的 rollout。线程号单独存放，不写进 conversation_id。
+   * 用户句先绑定；task_complete 才把全文放到这张卡片上。
+   */
+  noteChatgptRollout(runId: string, jsonl: string): void {
+    const run = this.get(runId);
+    if (!run || this.terminal(run.status)) return;
+    const turns = readRollout(jsonl);
+    let threadId = typeof run.chatgpt_thread_id === "string" ? run.chatgpt_thread_id : "";
+    let turnId = typeof run.chatgpt_turn_id === "string" ? run.chatgpt_turn_id : "";
+    if (!threadId) {
+      const hit = matchRolloutTurn(turns, run.prompt ?? "");
+      if (!hit?.threadId || !hit.turnId) return;
+      threadId = hit.threadId;
+      turnId = hit.turnId;
+      this.db.query("UPDATE runs SET chatgpt_thread_id=?1, chatgpt_turn_id=?2 WHERE id=?3")
+        .run(threadId, turnId, runId);
+    }
+    const turn = turns.find((item) => item.turnId === turnId && (item.threadId === threadId || item.threadId === ""));
+    if (!turn) return;
+    this.writeChatgptTranscript(run, turn);
+    if (rolloutCardText(turn) != null) this.setStatus(runId, "completed", { end_reason: "completed" }, "chatgpt");
+  }
+
+  private writeChatgptTranscript(run: { id: string; machine_id: string }, turn: RolloutTurn): void {
+    const existing = this.db.query(
+      "SELECT payload FROM run_events WHERE run_id=?1 AND source='transcript'",
+    ).all(run.id) as { payload: string }[];
+    const have = new Set(existing.map((row) => row.payload));
+    const rows: { role: "user" | "assistant"; text: string }[] = [];
+    if (turn.user) rows.push({ role: "user", text: turn.user });
+    const finalText = rolloutCardText(turn);
+    if (finalText) rows.push({ role: "assistant", text: finalText });
+    for (const row of rows) {
+      const payload = JSON.stringify({
+        role: row.role,
+        message: { content: [{ type: "text", text: row.text }] },
+      });
+      if (have.has(payload)) continue;
+      this.insertTranscript(run, payload);
+      have.add(payload);
+    }
+  }
+
+  private insertTranscript(run: { id: string; machine_id: string }, payload: string): void {
+    const maxSeq = (this.db.query("SELECT COALESCE(MAX(seq),0) AS m FROM run_events WHERE run_id=?1").get(run.id) as { m: number }).m;
+    const minExt = (this.db.query("SELECT MIN(ext_seq) AS m FROM run_events WHERE machine_id=?1").get(run.machine_id) as { m: number | null }).m;
+    const extSeq = minExt == null || minExt >= 0 ? -1 : minExt - 1;
+    this.db.query(
+      `INSERT INTO run_events (run_id, seq, machine_id, ext_seq, source, hook_event_name, payload, ts, post_terminal)
+       VALUES (?1,?2,?3,?4,'transcript',NULL,?5,?6,0)`,
+    ).run(run.id, maxSeq + 1, run.machine_id, extSeq, payload, Date.now());
   }
 
   get(id: string): any {
