@@ -192,8 +192,10 @@ pub fn restore_desktop_join(app: tauri::AppHandle) -> Result<Option<DesktopJoinV
         stop_child();
         return Err("port-busy".into());
     }
+    let host_port = format!("127.0.0.1:{bound}");
+    apply_cursor_settings(&real_cursor_settings_path(), &host_port, placeholder, true)?;
     Ok(Some(DesktopJoinView {
-        webview_origin: format!("127.0.0.1:{bound}"),
+        webview_origin: host_port,
         token: placeholder.to_string(),
     }))
 }

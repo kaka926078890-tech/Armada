@@ -21,6 +21,22 @@ pub struct LocalAttachResult {
     pub vsix_path: Option<String>,
 }
 
+/// Automatic owned-hub restore may point Cursor at 7380, except when Cursor
+/// already uses another loopback port. That port is a relay desktop join.
+pub fn owned_cursor_overwrite(existing: Option<&str>) -> bool {
+    let Some(url) = existing else {
+        return true;
+    };
+    if url == "127.0.0.1:7380" {
+        return false;
+    }
+    let Some((host, port)) = url.rsplit_once(':') else {
+        return true;
+    };
+    let loopback = host == "127.0.0.1" || host.eq_ignore_ascii_case("localhost");
+    !(loopback && !port.is_empty() && port != "7380")
+}
+
 pub fn hub_url_to_write<'a>(overwrite: bool, existing_hub: Option<&'a str>, hub_url: &'a str) -> &'a str {
     if overwrite {
         hub_url
@@ -818,6 +834,15 @@ mod tests {
         assert_eq!(v["armada.hubUrl"], "127.0.0.1:7380");
         assert_eq!(v["armada.token"], "ab");
         assert!(v.get("armada.cdpPort").is_none());
+    }
+
+    #[test]
+    fn owned_restore_does_not_steal_a_relay_loopback() {
+        assert!(owned_cursor_overwrite(None));
+        assert!(!owned_cursor_overwrite(Some("127.0.0.1:7380")));
+        assert!(!owned_cursor_overwrite(Some("127.0.0.1:62957")));
+        assert!(!owned_cursor_overwrite(Some("localhost:62957")));
+        assert!(owned_cursor_overwrite(Some("192.168.1.23:7380")));
     }
 
     #[test]

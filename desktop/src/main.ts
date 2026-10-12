@@ -27,6 +27,7 @@ import {
   restoreDecisionNotice,
   restoreHubCopy,
   isLocalOwnedBoard,
+  ownedRestoreStillCurrent,
   newPlaceholderToken,
   selectShareCandidate,
   serializeBoardSession,
@@ -300,13 +301,16 @@ function onNeedToken() {
 }
 
 let restoringHub = false;
+let ownedEpoch = 0;
 
 async function restoreOwnedHub(opts?: { toast?: boolean }) {
   if (restoringHub) return;
   restoringHub = true;
+  const epoch = ownedEpoch;
   if (opts?.toast) showToast(restoreHubCopy());
   try {
     const r = await invoke<CreateFleetResult>("ensure_owned_hub");
+    if (!ownedRestoreStillCurrent(epoch, ownedEpoch)) return;
     reopenCount = 0;
     lastReopenAt = Date.now();
     rememberShareFromCreate(r.shareCandidates, r.token);
@@ -326,8 +330,10 @@ function startHubWatchdog() {
     if (!lastBoard) return;
     if (!document.body.classList.contains("board-open")) return;
     if (!isLocalOwnedBoard(lastBoard.origin)) return;
+    const epoch = ownedEpoch;
     void invoke<CreateFleetResult>("ensure_owned_hub")
       .then((r) => {
+        if (!ownedRestoreStillCurrent(epoch, ownedEpoch)) return;
         if (r.decision === "spawn") {
           reopenCount = 0;
           openBoard(r.webviewOrigin ?? "127.0.0.1:7380", r.token);
@@ -419,6 +425,7 @@ function joinFromPaste(raw: string) {
   if (!("error" in relayInvite) && relayInvite.kind === "desktop") {
     if (!canStartJoin(joinInFlight)) return;
     joinInFlight = true;
+    ownedEpoch += 1;
     setErr("");
     setBusy(true);
     void invoke<{ webviewOrigin: string; token: string }>("start_desktop_join", {

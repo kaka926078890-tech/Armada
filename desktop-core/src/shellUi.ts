@@ -110,7 +110,12 @@ export function restoreHubCopy(): string {
 
 export function isLocalOwnedBoard(origin: string): boolean {
   const host = origin.split("/")[0].toLowerCase();
-  return host.startsWith("127.0.0.1:") || host.startsWith("localhost:");
+  return host === "127.0.0.1:7380" || host === "localhost:7380";
+}
+
+/** An owned-hub restore that started before a relay join must not open 7380 afterwards. */
+export function ownedRestoreStillCurrent(started: number, current: number): boolean {
+  return started === current;
 }
 
 export function defaultLandingMode(platform: string): LandingMode {

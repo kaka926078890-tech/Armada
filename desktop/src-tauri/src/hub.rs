@@ -785,12 +785,15 @@ fn finish_create(
     require_share: bool,
     attach_cursor: bool,
 ) -> Result<CreateFleetResult, String> {
-    let existing = crate::attach::read_existing_hub_url();
-    let overwrite = existing.as_deref() != Some("127.0.0.1:7380");
     let attach = if attach_cursor {
+        let existing = crate::attach::read_existing_hub_url();
+        let overwrite = existing.as_deref() != Some("127.0.0.1:7380");
         crate::attach::run_local_attach(resource, "127.0.0.1:7380", &token, overwrite, None).ok()
     } else {
         let _ = crate::attach::install_vsix(resource);
+        // Read after vsix install. A relay join can set Cursor while that runs.
+        let existing = crate::attach::read_existing_hub_url();
+        let overwrite = crate::attach::owned_cursor_overwrite(existing.as_deref());
         if should_write_owned_cursor_hub_url(attach_cursor, overwrite) {
             let path = crate::attach::real_cursor_settings_path();
             let _ = crate::attach::apply_cursor_settings(&path, "127.0.0.1:7380", &token, overwrite);

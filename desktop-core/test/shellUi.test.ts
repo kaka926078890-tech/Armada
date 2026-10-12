@@ -13,6 +13,7 @@ import {
   decideNeedToken,
   firstArmadaJoinUri,
   isLocalOwnedBoard,
+  ownedRestoreStillCurrent,
   noShareIpCopy,
   parseBoardSession,
   parseDesktopBoardRequest,
@@ -142,6 +143,8 @@ describe("board session", () => {
     expect(main).toContain("localStorage.removeItem(BOARD_SESSION_KEY");
     expect(main).not.toMatch(/sessionStorage\.(setItem|getItem|removeItem)\(BOARD_SESSION_KEY/);
     expect(main).toContain("void restoreOwnedHub()");
+    expect(main).toContain("ownedRestoreStillCurrent(epoch, ownedEpoch)");
+    expect(main).toContain("ownedEpoch += 1");
     expect(main).toContain("isLocalOwnedBoard(lastBoard.origin)");
     expect(main).toMatch(/canCreate && \(!lastBoard \|\| isLocalOwnedBoard\(lastBoard\.origin\)\)/);
   });
@@ -170,10 +173,17 @@ describe("decideNeedToken", () => {
     expect(restoreHubCopy()).not.toMatch(/重新创建/);
   });
 
-  test("only loopback boards own the sidecar", () => {
+  test("only the owned hub port owns the sidecar", () => {
     expect(isLocalOwnedBoard("127.0.0.1:7380")).toBe(true);
     expect(isLocalOwnedBoard("localhost:7380")).toBe(true);
+    expect(isLocalOwnedBoard("127.0.0.1:62957")).toBe(false);
+    expect(isLocalOwnedBoard("localhost:62957")).toBe(false);
     expect(isLocalOwnedBoard("192.168.1.23:7380")).toBe(false);
+  });
+
+  test("a relay join started during restore supersedes that restore", () => {
+    expect(ownedRestoreStillCurrent(1, 1)).toBe(true);
+    expect(ownedRestoreStillCurrent(1, 2)).toBe(false);
   });
 });
 
