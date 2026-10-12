@@ -306,7 +306,10 @@ export default function RunDetail({
     return () => ro.disconnect();
   }, [run?.id, filePath, pinToEnd]);
 
-  const injectReady = run ? machines.find((m) => m.id === run.machine_id)?.cdp_ready === true : false;
+  const chatgptFollow = !!run?.chatgpt_thread_id && !run.conversation_id;
+  const injectReady = run
+    ? (chatgptFollow || machines.find((m) => m.id === run.machine_id)?.cdp_ready === true)
+    : false;
 
   const sendFollowup = useCallback((e?: FormEvent) => {
     e?.preventDefault();
@@ -322,6 +325,10 @@ export default function RunDetail({
     void (async () => {
       try {
         const ids: string[] = [];
+        if (chatgptFollow && followupFiles.length > 0) {
+          setFollowupError("Codex 续聊这一轮只发文字。");
+          return;
+        }
         if (run.status === "running" && followupFiles.length > 0) {
           setFollowupError("运行中续发暂只支持纯文本。");
           return;
@@ -575,7 +582,7 @@ export default function RunDetail({
         </div>
       </div>
       )}
-      {run.conversation_id && (
+      {run.conversation_id || chatgptFollow ? (
         <div className="p-3 border-t border-border flex flex-col gap-2">
           <PromptSnippetBar
             snippets={snippets}
@@ -620,7 +627,7 @@ export default function RunDetail({
           />
         </form>
         </div>
-      )}
+      ) : null}
     </DrawerShell>
   );
 }

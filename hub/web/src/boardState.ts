@@ -3,6 +3,7 @@ import { LIVE_STATUSES, RETRY_STATUSES, isStatus } from "../../src/runStatus";
 export interface RunRow {
   id: string; machine_id: string; window_id: string | null; workspace_root: string;
   prompt: string; title?: string | null; status: string; conversation_id: string | null;
+  chatgpt_thread_id?: string | null;
   transcript_path: string | null; parent_run_id: string | null;
   created_at: number; started_at: number | null; ended_at: number | null; end_reason: string | null;
   archived_at?: number | null;

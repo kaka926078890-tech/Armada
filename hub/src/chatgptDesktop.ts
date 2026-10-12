@@ -234,6 +234,16 @@ export function readRollout(jsonl: string): RolloutTurn[] {
   return [...map.values()];
 }
 
+/** 侧栏 `local:client-new-thread:…` 对应这条会话。对不上就不猜标题。 */
+export function sidebarThreadId(bindings: Record<string, unknown> | null, sessionId: string): string | null {
+  if (!bindings) return null;
+  for (const [key, value] of Object.entries(bindings)) {
+    if (value !== sessionId || !key.startsWith("client-new-thread:")) continue;
+    return `local:${key}`;
+  }
+  return null;
+}
+
 /** 派发提示词只在恰好一条回合上全等时挂上。两条相同则不猜。早于本次派发的回合不是这一轮。 */
 export function matchRolloutTurn(turns: RolloutTurn[], prompt: string, notBefore?: number): RolloutTurn | null {
   const want = prompt.trim();

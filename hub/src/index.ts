@@ -21,6 +21,7 @@ import { operatorChatTurns } from "../web/src/chatView";
 import type { RunEvent } from "../web/src/types";
 import { pruneHubLogs } from "./pruneLogs";
 import { ChatgptBridge } from "./chatgptBridge";
+import { parseChatgptRoot } from "./chatgptDesktop";
 
 export interface HubServer {
   server: ReturnType<typeof Bun.serve>;
@@ -110,6 +111,13 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
   app.get("/api/machines", (c) => c.json(chatgpt.machines(registry.listMachines())));
   app.post("/api/chatgpt/monitor", async (c) => {
     const result = await chatgpt.launchMonitor();
+    if ("error" in result) return c.json(result, 409);
+    return c.json(result);
+  });
+  app.post("/api/chatgpt/open", async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const root = typeof body.root === "string" ? body.root : "";
+    const result = await chatgpt.focusWorkspace(root);
     if ("error" in result) return c.json(result, 409);
     return c.json(result);
   });
@@ -346,7 +354,9 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
   app.post("/api/runs/:id/followup", async (c) => {
     const parent = runs.get(c.req.param("id"));
     if (!parent) return c.json({ error: "NOT_FOUND" }, 404);
-    if (!parent.conversation_id) return c.json({ error: "NO_CONVERSATION" }, 409);
+    if (!parent.conversation_id && !(parseChatgptRoot(parent.workspace_root) && parent.chatgpt_thread_id)) {
+      return c.json({ error: "NO_CONVERSATION" }, 409);
+    }
     if (parent.end_reason === "OPERATOR_CLOSED") {
       return c.json({ error: "CLOSED" }, 400);
     }

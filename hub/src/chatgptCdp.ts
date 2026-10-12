@@ -24,10 +24,30 @@ const COMPOSER_JS = `(() => {
   return (el.innerText || el.value || "");
 })()`;
 
+const VISIBLE_CONVERSATION_JS = `(() => {
+  const hit = [...document.querySelectorAll("[data-response-annotation-conversation]")].find((el) => {
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  });
+  return hit ? hit.getAttribute("data-response-annotation-conversation") || "" : "";
+})()`;
+
+function clickThreadJs(sidebarThreadId: string): string {
+  const selector = `[data-app-action-sidebar-thread-id=${JSON.stringify(sidebarThreadId)}]`;
+  return `(() => {
+    const el = document.querySelector(${JSON.stringify(selector)});
+    if (!el) return "missing";
+    const r = el.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) return "missing";
+    el.click();
+    return "clicked";
+  })()`;
+}
+
 function clickJs(name: string): string {
   return `(() => {
     const want = ${JSON.stringify(name)};
-    const hits = [...document.querySelectorAll("button, [role=menuitem]")].filter((el) => {
+    const hits = [...document.querySelectorAll("button, [role=button], [role=menuitem]")].filter((el) => {
       const r = el.getBoundingClientRect();
       const label = (el.getAttribute("aria-label") || el.innerText || "").replace(/\\s+/g, " ").trim();
       return label === want && r.width > 0 && r.height > 0 && !el.disabled && el.getAttribute("aria-disabled") !== "true";
@@ -104,6 +124,12 @@ export async function connectChatgptPage(): Promise<ChatgptPage> {
       await sleep(150);
     },
     composerText: async () => String(await evalJs(COMPOSER_JS) ?? ""),
+    visibleConversation: async () => String(await evalJs(VISIBLE_CONVERSATION_JS) ?? ""),
+    async clickThread(sidebarThreadId) {
+      const ok = await evalJs(clickThreadJs(sidebarThreadId));
+      if (ok !== "clicked") throw new Error("CHATGPT_THREAD_MISSING");
+      await sleep(400);
+    },
     close() {
       try { ws.close(); } catch { /* already closed */ }
     },

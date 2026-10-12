@@ -4,14 +4,26 @@ import { join } from "path";
 import {
   attachChatgpt, CHATGPT_LOCAL_MACHINE, sameHost, type ChatgptMachineView,
 } from "./chatgptAttach";
-import { boardTargets } from "./chatgptDesktop";
-import { prepareAndSend } from "./chatgptDrive";
+import { boardTargets, inNormalArea, openWorkspace, parseChatgptRoot, sidebarThreadId } from "./chatgptDesktop";
+import { prepareAndSend, prepareFollowup } from "./chatgptDrive";
+import { readFileSync } from "fs";
 import {
   chatgptAppRunning, chatgptPortUp, connectChatgptPage, readRolloutFile, recentRolloutFiles, relaunchChatgptWithPort,
 } from "./chatgptCdp";
 import type { Registry } from "./registry";
 import type { RunService } from "./runs";
 import type { SseHub } from "./sse";
+
+function readThreadBindings(): Record<string, unknown> | null {
+  try {
+    const raw = JSON.parse(readFileSync(join(homedir(), ".codex", ".codex-global-state.json"), "utf8")) as {
+      "electron-persisted-atom-state"?: { "client-thread-bindings-v1"?: Record<string, unknown> };
+    };
+    return raw["electron-persisted-atom-state"]?.["client-thread-bindings-v1"] ?? null;
+  } catch {
+    return null;
+  }
+}
 
 export class ChatgptBridge {
   private viewState: ChatgptMachineView = { port: "absent", targets: [] };
@@ -127,6 +139,32 @@ export class ChatgptBridge {
     }
   }
 
+  async focusWorkspace(root: string): Promise<{ ok: true } | { error: string }> {
+    const target = parseChatgptRoot(root);
+    if (!target) return { error: "CHATGPT_ROOT" };
+    if (this.viewState.port !== "ready") return { error: "CHATGPT_PORT_DOWN" };
+    let page;
+    try {
+      page = await connectChatgptPage();
+      const controls = await page.controls();
+      if (target.project === null) {
+        if (!inNormalArea(controls)) await page.clickName(openWorkspace(controls, null).name);
+        return { ok: true };
+      }
+      try {
+        openWorkspace(controls, target.project);
+      } catch {
+        await page.clickName(target.project);
+      }
+      return { ok: true };
+    } catch (err) {
+      const code = err instanceof Error && err.message.startsWith("CHATGPT_") ? err.message : "CHATGPT_PROJECT_MISSING";
+      return { error: code };
+    } finally {
+      page?.close();
+    }
+  }
+
   private async drain(): Promise<void> {
     if (this.viewState.port !== "ready") return;
     const run = this.runs.claimChatgptSend();
@@ -134,7 +172,11 @@ export class ChatgptBridge {
     let page;
     try {
       page = await connectChatgptPage();
-      await prepareAndSend(page, run.workspace_root, run.prompt);
+      if (run.chatgpt_thread_id) {
+        await prepareFollowup(page, run.chatgpt_thread_id, sidebarThreadId(readThreadBindings(), run.chatgpt_thread_id), run.prompt);
+      } else {
+        await prepareAndSend(page, run.workspace_root, run.prompt);
+      }
     } catch (err) {
       const code = err instanceof Error && err.message.startsWith("CHATGPT_") ? err.message : "CHATGPT_SEND_FAILED";
       this.runs.failChatgpt(run.id, code);

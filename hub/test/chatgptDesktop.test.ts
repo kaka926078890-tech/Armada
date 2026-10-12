@@ -7,6 +7,7 @@ import {
   planCodexMode,
   planAttach,
   matchRolloutTurn,
+  sidebarThreadId,
   planSend,
   planStop,
   readRollout,
@@ -229,6 +230,13 @@ describe("readRollout", () => {
     const notBefore = Date.parse("2026-10-12T08:25:45.513Z");
     expect(matchRolloutTurn(older, "你好", notBefore)).toBeNull();
     expect(matchRolloutTurn([...older, ...current], "你好", notBefore)?.turnId).toBe("new-turn");
+  });
+
+  test("sidebar binding maps a session id and ignores a title guess", () => {
+    expect(sidebarThreadId({
+      "client-new-thread:73120bf7-1bdb-4ad0-8248-70d5144cbcda": "01a12f45-5b9d-7371-bc85-32cedaf275f6",
+    }, "01a12f45-5b9d-7371-bc85-32cedaf275f6")).toBe("local:client-new-thread:73120bf7-1bdb-4ad0-8248-70d5144cbcda");
+    expect(sidebarThreadId({}, "01a12f45-5b9d-7371-bc85-32cedaf275f6")).toBeNull();
   });
 });
 

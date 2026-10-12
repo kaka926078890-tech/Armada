@@ -73,6 +73,25 @@ describe("chatgpt dispatch", () => {
     expect(run.chatgpt_thread_id).toBe("thread-1");
     expect(run.conversation_id).toBeNull();
   });
+
+  test("follow-up on a bound thread stays on that thread and clears the old turn", async () => {
+    const { api } = start();
+    hub!.db.query(
+      `INSERT INTO runs (id, machine_id, workspace_root, prompt, status, created_at, started_at, chatgpt_thread_id, chatgpt_turn_id)
+       VALUES ('r-1','m-1','chatgpt:desk','你好','completed',?1,?1,'session-1','turn-old')`,
+    ).run(Date.now());
+    const res = await api("/api/runs/r-1/followup", {
+      method: "POST",
+      body: JSON.stringify({ prompt: "下一句" }),
+    });
+    expect(res.status).toBe(200);
+    const run = hub!.runs.get("r-1");
+    expect(run.status).toBe("dispatched");
+    expect(run.prompt).toBe("下一句");
+    expect(run.chatgpt_thread_id).toBe("session-1");
+    expect(run.chatgpt_turn_id).toBeNull();
+    expect(run.conversation_id).toBeNull();
+  });
 });
 
 describe("attachChatgpt", () => {

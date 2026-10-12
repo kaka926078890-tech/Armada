@@ -393,15 +393,15 @@ export class RunService {
     return !!row;
   }
 
-  claimChatgptSend(): { id: string; workspace_root: string; prompt: string } | null {
+  claimChatgptSend(): { id: string; workspace_root: string; prompt: string; chatgpt_thread_id: string | null } | null {
     if (this.db.query(
       `SELECT id FROM runs WHERE workspace_root LIKE 'chatgpt:%' AND status='binding' LIMIT 1`,
     ).get()) return null;
     const row = this.db.query(
-      `SELECT id, workspace_root, prompt, status FROM runs
+      `SELECT id, workspace_root, prompt, chatgpt_thread_id, status FROM runs
        WHERE workspace_root LIKE 'chatgpt:%' AND status IN ('queued','dispatched')
        ORDER BY CASE status WHEN 'dispatched' THEN 0 ELSE 1 END, dispatch_seq ASC LIMIT 1`,
-    ).get() as { id: string; workspace_root: string; prompt: string } | null;
+    ).get() as { id: string; workspace_root: string; prompt: string; chatgpt_thread_id: string | null } | null;
     if (!row) return null;
     this.setStatus(row.id, "binding", { started_at: Date.now(), queued_at: null }, "chatgpt");
     return row;
@@ -1002,6 +1002,12 @@ export class RunService {
       turnId = hit.turnId;
       this.db.query("UPDATE runs SET chatgpt_thread_id=?1, chatgpt_turn_id=?2 WHERE id=?3")
         .run(threadId, turnId, runId);
+    } else if (!turnId) {
+      const notBefore = Number(run.started_at ?? run.created_at ?? 0);
+      const hit = matchRolloutTurn(turns.filter((item) => item.threadId === threadId), run.prompt ?? "", notBefore);
+      if (!hit?.turnId) return;
+      turnId = hit.turnId;
+      this.db.query("UPDATE runs SET chatgpt_turn_id=?1 WHERE id=?2").run(turnId, runId);
     }
     const turn = turns.find((item) => item.turnId === turnId && (item.threadId === threadId || item.threadId === ""));
     if (!turn) return;
@@ -1214,6 +1220,30 @@ export class RunService {
   }
 
   /**
+   * Codex 续聊回到同一条线程。不写 conversation_id。旧回合号清掉，下一句用户句才算这一轮。
+   */
+  private followupChatgpt(
+    run: { id: string; machine_id: string; status: string; chatgpt_thread_id?: string | null },
+    prompt: string,
+    attachmentIds: string[],
+  ): { error?: string; run?: any } {
+    if (!run.chatgpt_thread_id) return { error: "NO_CONVERSATION" };
+    if (attachmentIds.length) return { error: "CHATGPT_TEXT_ONLY" };
+    if (!normalizePrompt(prompt)) return { error: "EMPTY_PROMPT" };
+    if (["dispatched", "binding", "queued", "running"].includes(run.status)) return { error: "CONVERSATION_BUSY" };
+    this.db.query("UPDATE runs SET chatgpt_turn_id=NULL, prompt=?1 WHERE id=?2").run(prompt, run.id);
+    const status = this.chatgptSendBusy(run.machine_id) ? "queued" : "dispatched";
+    const now = Date.now();
+    this.setStatus(run.id, status, {
+      ended_at: null,
+      end_reason: null,
+      started_at: status === "dispatched" ? now : null,
+      queued_at: status === "queued" ? now : null,
+    }, "chatgpt");
+    return { run: this.get(run.id) };
+  }
+
+  /**
    * 续聊:同一张卡片回到 dispatched,事件继续追加。不新建 child run。
    * 本卡仍占用中 → CONVERSATION_BUSY；注入槽被其它 run 占用 → INJECT_SLOT_BUSY。
    * 同工作区其它卡已在 running 不拦：注入串行、生成并行。
@@ -1221,6 +1251,7 @@ export class RunService {
   followup(runId: string, prompt: string, attachmentIds: string[] = []): { error?: string; run?: any } {
     const run = this.get(runId);
     if (!run) return { error: "NOT_FOUND" };
+    if (parseChatgptRoot(run.workspace_root)) return this.followupChatgpt(run, prompt, attachmentIds);
     if (!run.conversation_id) return { error: "NO_CONVERSATION" };
     if (run.end_reason === "OPERATOR_CLOSED") return { error: "CLOSED" };
     if (run.status === "running") return this.followupWhileRunning(run, prompt, attachmentIds);

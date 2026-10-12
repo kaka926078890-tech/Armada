@@ -9,6 +9,8 @@ export type ChatgptPage = {
   clickName(name: string): Promise<void>;
   insertText(text: string): Promise<void>;
   composerText(): Promise<string>;
+  visibleConversation(): Promise<string>;
+  clickThread(sidebarThreadId: string): Promise<void>;
   close(): void;
 };
 
@@ -35,7 +37,14 @@ async function ensureTarget(page: ChatgptPage, controls: ChatgptControl[], proje
     await page.clickName(openWorkspace(current, null).name);
     return page.controls();
   }
-  await page.clickName(openWorkspace(controls, project).name);
+  let opened = controls;
+  try {
+    openWorkspace(opened, project);
+  } catch {
+    await page.clickName(project);
+    opened = await page.controls();
+  }
+  await page.clickName(openWorkspace(opened, project).name);
   return page.controls();
 }
 
@@ -45,6 +54,22 @@ export async function prepareAndSend(page: ChatgptPage, root: string, text: stri
   if (!target) throw new Error("CHATGPT_ROOT");
   let controls = await ensureCodex(page, await page.controls());
   controls = await ensureTarget(page, controls, target.project);
+  const focus = composerFocus(controls);
+  await page.pointer(focus.x, focus.y);
+  await page.insertText(text);
+  controls = await page.controls();
+  planSend(controls, text);
+  await page.clickName(sendButtonName(controls));
+}
+
+/** 回到已绑定的侧栏线程再发送。已经停在这条会话上就不再点侧栏。 */
+export async function prepareFollowup(page: ChatgptPage, sessionId: string, sidebarThreadId: string | null, text: string): Promise<void> {
+  if ((await page.visibleConversation()) !== sessionId) {
+    if (!sidebarThreadId) throw new Error("CHATGPT_THREAD_MISSING");
+    await page.clickThread(sidebarThreadId);
+    if ((await page.visibleConversation()) !== sessionId) throw new Error("CHATGPT_THREAD_MISSING");
+  }
+  let controls = await ensureCodex(page, await page.controls());
   const focus = composerFocus(controls);
   await page.pointer(focus.x, focus.y);
   await page.insertText(text);

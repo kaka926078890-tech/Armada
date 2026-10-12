@@ -25,6 +25,8 @@ export const api = {
   },
   monitorChatgpt: () =>
     req("/api/chatgpt/monitor", { method: "POST", body: "{}" }).then((r) => r.json()),
+  openChatgpt: (root: string) =>
+    req("/api/chatgpt/open", { method: "POST", body: JSON.stringify({ root }) }).then((r) => r.json()),
   dispatch: (machineId: string, workspaceRoot: string, prompt: string, attachmentIds: string[] = []) =>
     req("/api/runs", { method: "POST", body: JSON.stringify({ machineId, workspaceRoot, prompt, attachmentIds }) }).then((r) => r.json()),
   followup: (id: string, prompt: string, attachmentIds: string[] = []) =>

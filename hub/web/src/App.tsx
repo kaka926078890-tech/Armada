@@ -500,7 +500,14 @@ export default function App() {
           onMonitorChatgpt={() => api.monitorChatgpt().then(refresh)}
           onRename={(id, displayName) => { api.renameMachine(id, displayName).then(refresh); }}
           showDesktopActions={desktop}
-          onOpenWorkspace={() => requestDesktop("open-workspace")}
+          onOpenWorkspace={() => {
+            const root = preset?.workspaceRoot ?? "";
+            if (root.startsWith("chatgpt:") && root !== "chatgpt:monitor") {
+              void api.openChatgpt(root);
+              return;
+            }
+            requestDesktop("open-workspace");
+          }}
           onRepairCdp={() => requestDesktop("repair-cdp")}
           onGetShareLink={() => requestDesktop("get-share-link")}
           onReloadMachine={(id, action) => {
