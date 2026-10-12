@@ -1003,8 +1003,18 @@ export class RunService {
           ? hit.option_ids.filter((x): x is string => typeof x === "string" && x.trim() !== "")
           : [];
         if (option_ids.length !== 1) return { error: "ASK_INVALID_OPTION" };
-        if (!optionInAsk(ask, q.id, option_ids[0])) return { error: "ASK_INVALID_OPTION" };
-        picked.push({ question_id: q.id, option_ids });
+        const chosen = q.options.find((o) => o.id === option_ids[0]);
+        const freeform = option_ids[0] === "__freeform__" || chosen?.freeform === true;
+        if (!chosen && option_ids[0] !== "__freeform__") return { error: "ASK_INVALID_OPTION" };
+        if (freeform) {
+          const note = typeof hit?.text === "string" ? hit.text.trim() : "";
+          if (!note) return { error: "ASK_TEXT_EMPTY" };
+          if (note.length > ASK_TEXT_MAX) return { error: "ASK_TEXT_TOO_LONG" };
+          picked.push({ question_id: q.id, option_ids, text: note });
+        } else {
+          if (!optionInAsk(ask, q.id, option_ids[0])) return { error: "ASK_INVALID_OPTION" };
+          picked.push({ question_id: q.id, option_ids });
+        }
       }
       answers = picked;
     } else if (action === "freeform") {

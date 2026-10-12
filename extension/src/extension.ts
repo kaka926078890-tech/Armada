@@ -18,7 +18,7 @@ import { TranscriptDirWatcher, debounceLeading, watchTranscriptDir, watchFileSiz
 import { createExtSeq } from "./extSeq";
 import { hubRunsNeedingTranscriptFollow, shouldArmFollowupStopOnAdopt } from "./adoptRuns";
 import { noteOwnerBsp, clearGeneration, synthesizedStopPayload, noteHubGeneration, onFollowupBindGeneration } from "./generationStamp";
-import { parseAskInspect, askPollActions, coalesceAskInspect } from "./askDetect";
+import { parseAskInspect, askPollActions, askQuestionsKey, coalesceAskInspect, isAskUnknown } from "./askDetect";
 import { enrichPlanAsk, planDirsFor } from "./planFile";
 import { PENDING_RELOAD_ATTEMPT_NAME, PENDING_RELOAD_NAME, decideReloadFire, decideWindowReload, highestInstalledArmadaAgent, highestInstalledVsix, mergeReloadAttempt, noteReloadCommandSettled, parsePendingReload, parseReloadAttempt, reloadAttemptBlocksWindow, windowHasInFlightArmadaRun, windowHasOpenComposerTurn, windowHasRecentSettle, type ReloadFireState } from "../../desktop-core/src/cursorReload";
 import { readWorkspaceFile } from "./workspaceFileRead";
@@ -82,6 +82,8 @@ export function activate(context: vscode.ExtensionContext): void {
   const cancelWatcher = new CancelWatcher();
   const followupStopGuard = new FollowupStopGuard();
   const askLastByRun = new Map<string, string>();
+  const askRecent = new Map<string, { requestId: string; key: string }>();
+  let askMisses = 0;
   const askPlanTextByRun = new Map<string, string>();
 
   const cdpDeps = { port: config.cdpPort, log, windowId };
@@ -488,14 +490,22 @@ export function activate(context: vscode.ExtensionContext): void {
       if (inspect.present && inspect.kind === "plan") {
         inspect = enrichPlanAsk(inspect, planDirsFor(homedir(), inspectRoot));
       }
+      if (!isAskUnknown(inspect)) {
+        if (inspect.present) askMisses = 0;
+        else askMisses += 1;
+      }
+      const absentStreak = !isAskUnknown(inspect) && !inspect.present ? askMisses - 1 : undefined;
       const acts = askPollActions(
         boundRuns, askLastByRun, inspect,
         (runId) => `ask-${runId}-${nextExtSeq()}`, Date.now(), stopSent,
         askPlanTextByRun, cancelledRuns,
+        absentStreak,
+        askRecent,
       );
       for (const act of acts) {
         if (act.type === "askQuestion") {
           askLastByRun.set(act.runId, act.payload.request_id);
+          askRecent.set(act.runId, { requestId: act.payload.request_id, key: askQuestionsKey(act.payload.questions) });
           if (act.payload.kind === "plan") {
             askPlanTextByRun.set(act.runId, act.payload.questions[0]?.options[0]?.text ?? "");
           }

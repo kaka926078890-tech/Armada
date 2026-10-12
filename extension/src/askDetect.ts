@@ -18,8 +18,19 @@ export type AskInspect =
     skip_unidentified?: boolean;
   };
 
-function isAskUnknown(inspect: AskInspect): inspect is { unknown: true; reason: string } {
+export function isAskUnknown(inspect: AskInspect): inspect is { unknown: true; reason: string } {
   return "unknown" in inspect && inspect.unknown === true;
+}
+
+/** 连续这么多次确认「框不在」才当成已答完。一次闪断（控件重绘）不算。 */
+export const ASK_MISS_LIMIT = 3;
+
+export function askQuestionsKey(
+  questions: { prompt: string; options: { id: string; text: string; freeform?: boolean }[] }[],
+): string {
+  return questions.map((q) =>
+    `${q.prompt}\n${q.options.map((o) => `${o.id}=${o.freeform ? "*" : o.text}`).join("|")}`,
+  ).join("\n");
 }
 
 /** present:true wins. unknown only if no successful inspect. Confirmed false otherwise. */
@@ -199,8 +210,14 @@ export function askPollActions(
   stopped: Iterable<string> = [],
   prevPlanTextByRun: Iterable<[string, string]> = [],
   cancelled: Iterable<string> = [],
+  absentStreak?: number,
+  recentByRun?: Iterable<[string, { requestId: string; key: string }]>,
 ): AskPollAct[] {
   if (isAskUnknown(inspect)) return [];
+  if (!inspect.present) {
+    const prevMisses = absentStreak ?? (ASK_MISS_LIMIT - 1);
+    if (prevMisses + 1 < ASK_MISS_LIMIT) return [];
+  }
   const cancelledIds = new Set(cancelled);
   const dead = inspect.present && inspect.kind === "plan"
     ? cancelledIds
@@ -219,6 +236,11 @@ export function askPollActions(
   if (!inspect.present || !owner) return out;
   const act = nextAskAction(prev.get(owner) ?? null, inspect, () => makeId(owner), now, prevText.get(owner));
   if (act?.type === "askQuestion") {
+    const key = askQuestionsKey(act.payload.questions);
+    const remembered = new Map(recentByRun ?? []).get(owner);
+    if (!prev.get(owner) && remembered && remembered.key === key) {
+      act.payload.request_id = remembered.requestId;
+    }
     const conversation_id = act.payload.conversation_id || boundConversationId(live, owner) || "";
     out.push({ type: "askQuestion", runId: owner, payload: { ...act.payload, conversation_id } });
   }

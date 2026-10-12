@@ -542,9 +542,9 @@ export const ASK_INSPECT_JS = `function () {
       if (npos < 0) npos = upper.indexOf(" " + String(next).toUpperCase(), contentStart);
       if (npos > contentStart) end = npos;
     }
-    var numbered = raw.slice(contentStart, end).search(/\\s\\d+\\.\\s/);
+    var numbered = raw.slice(contentStart, end).search(/(?:^|\\s)\\d+\\.\\s/);
     if (numbered >= 0 && contentStart + numbered < end) end = contentStart + numbered;
-    var text = raw.slice(contentStart, end).replace(/\\s+Skip\\s+Esc\\s+Continue[\\s\\S]*$/i, "").trim() || L;
+    var text = raw.slice(contentStart, end).replace(/(?:^|\\s+)Skip\\s+Esc\\s+Continue[\\s\\S]*$/i, "").trim() || L;
     texts.push(text);
     starts.push(start >= 0 ? start : contentStart);
     ends.push(end);
@@ -558,7 +558,8 @@ export const ASK_INSPECT_JS = `function () {
     var opts = [];
     var letterAt = starts[cursor] != null ? starts[cursor] : promptFrom;
     var qPrompt = letterAt > promptFrom ? raw.slice(promptFrom, letterAt) : "";
-    qPrompt = qPrompt.replace(/^Questions\\s+\\d+\\s+of\\s+\\d+\\s+/i, "").replace(/^\\d+\\.\\s*/, "").replace(/\\s+\\d+\\.\\s*$/, "").trim();
+    qPrompt = qPrompt.replace(/^Questions\\s+\\d+\\s+of\\s+\\d+\\s+/i, "").trim();
+    qPrompt = qPrompt.replace(/^\\d+\\.\\s*/, "").replace(/\\s+\\d+\\.\\s*$/, "").trim();
     qPrompt = qPrompt.replace(/\\s+Skip\\s+Esc\\s+Continue[\\s\\S]*$/i, "").trim();
     for (var bi = 0; bi < groups[gi].length; bi++) {
       var btn = groups[gi][bi];
@@ -568,7 +569,7 @@ export const ASK_INSPECT_JS = `function () {
       var opt = { id: lab.toLowerCase(), label: lab, text: body };
       if (armadaIsFreeformLetter(btn)) {
         opt.freeform = true;
-        if (!body || body === lab) opt.text = "Other...";
+        opt.text = "Other...";
       }
       opts.push(opt);
     }
@@ -624,15 +625,32 @@ export const ASK_CLICK_SKIP_JS = `function () {
   return "OK";
 }`;
 
-/** 点 Other 字母并聚焦自由输入。禁止走 composer insertText。 */
-export const ASK_FOCUS_FREEFORM_JS = `function () {
+/** 点指定题的 Other 并聚焦该题自由输入。未传题号时用第一题。禁止走 composer insertText。 */
+export const ASK_FOCUS_FREEFORM_JS = `function (questionIndex) {
+  ${ASK_LETTER_BUTTONS_JS}
   var bar = document.querySelector(".composer-questionnaire-toolbar");
   if (!bar) return "GONE";
-  var input = bar.querySelector("textarea.composer-questionnaire-toolbar-freeform-input");
+  var btns = Array.prototype.slice.call(bar.querySelectorAll("button.composer-questionnaire-toolbar-option-letter"));
+  var real = armadaLetterButtons(btns, bar).real;
+  var groups = armadaQuestionGroups(real);
+  var gi = typeof questionIndex === "number" ? questionIndex : parseInt(questionIndex, 10);
+  if (!(gi >= 0)) gi = 0;
+  var pool = groups[gi] || groups[0] || [];
+  var btn = null;
+  for (var i = 0; i < pool.length; i++) {
+    if (armadaIsFreeformLetter(pool[i])) { btn = pool[i]; break; }
+  }
+  if (!btn) return "NO_FREEFORM";
+  if (typeof btn.click === "function") btn.click();
+  var input = null;
+  var n = btn;
+  for (var up = 0; up < 6 && n; up++) {
+    if (n.querySelector) input = n.querySelector("textarea.composer-questionnaire-toolbar-freeform-input");
+    if (input) break;
+    n = n.parentElement;
+  }
+  if (!input && bar.querySelector) input = bar.querySelector("textarea.composer-questionnaire-toolbar-freeform-input");
   if (!input) return "NO_FREEFORM";
-  var opt = input.closest ? input.closest(".composer-questionnaire-toolbar-option-freeform") : input.parentElement;
-  var letter = opt && opt.querySelector ? opt.querySelector("button.composer-questionnaire-toolbar-option-letter") : null;
-  if (letter && typeof letter.click === "function") letter.click();
   if (typeof input.focus === "function") input.focus();
   return "OK";
 }`;
@@ -857,7 +875,7 @@ export function createAskQuestionDriver(deps: CdpSubmitterDeps) {
     letter?: string,
     kind?: "plan",
     text?: string,
-    picks?: { index: number; letter: string }[],
+    picks?: { index: number; letter: string; text?: string }[],
   ): Promise<CdpSubmitResult> {
     const hit = await connectWorkspacePage(deps, workspaceRoot);
     if (!hit.ok) return { ok: false, reason: hit.reason };
@@ -887,12 +905,22 @@ export function createAskQuestionDriver(deps: CdpSubmitterDeps) {
         await dispatchKey(hit.session, "Enter");
       } else if (action === "continue") {
         const list = picks?.length ? picks : [{ index: 0, letter: String(letter || "") }];
-        for (const pick of list) {
+        const notes = list.filter((p) => p.text);
+        const letters = list.filter((p) => !p.text);
+        for (const pick of letters) {
           const clicked = String(await hit.session.call("Runtime.evaluate", {
             expression: `(${ASK_CLICK_LETTER_JS})(${JSON.stringify(String(pick.letter || "").toUpperCase())}, ${JSON.stringify(pick.index)})`,
             returnByValue: true,
           }).then((x) => x?.result?.value));
           if (clicked !== "OK") return { ok: false, reason: clicked === "GONE" ? "ASK_WIDGET_NOT_FOUND" : "ASK_INVALID_OPTION" };
+        }
+        for (const pick of notes) {
+          const focused = String(await hit.session.call("Runtime.evaluate", {
+            expression: `(${ASK_FOCUS_FREEFORM_JS})(${JSON.stringify(pick.index)})`,
+            returnByValue: true,
+          }).then((x) => x?.result?.value));
+          if (focused !== "OK") return { ok: false, reason: focused === "GONE" ? "ASK_WIDGET_NOT_FOUND" : "ASK_INVALID_OPTION" };
+          await hit.session.call("Input.insertText", { text: String(pick.text || "") });
         }
         await dispatchKey(hit.session, "Enter");
       } else {

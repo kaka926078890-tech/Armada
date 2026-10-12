@@ -18,6 +18,7 @@ import {
   COMPOSER_CLICK_FILE_MENTION_JS,
   ASK_INSPECT_JS,
   ASK_CLICK_LETTER_JS,
+  ASK_FOCUS_FREEFORM_JS,
   ASK_CLICK_SKIP_JS,
   PLAN_INSPECT_JS,
   PLAN_CLICK_BUILD_JS,
@@ -1196,6 +1197,70 @@ describe("AskQuestion toolbar JS", () => {
     expect(click("A", 1)).toBe("OK");
     expect(document.btns[0]?.clicked).toBe(false);
     expect(document.btns[2]?.clicked).toBe(true);
+  });
+
+  test("multi-question Other is not the next prompt or Skip chrome", () => {
+    const text = "Questions 1 of 2 1. Cursor 或 ChatGPT 没开着的时候，中台要做什么？ A 中台负责拉起 B 只读已经打开 C 列表里两边都留着 D 2. 带 Codex 前缀的一行，里面是什么？ A 最近项目 B 模式写进名字 C 只列项目 D Skip Esc Continue";
+    const skip = { className: "composer-skip-button", innerText: "Skip" };
+    const letters = ["A", "B", "C", "D", "A", "B", "C", "D"].map((L, i) => {
+      const freeform = i === 3 || i === 7;
+      const parent = {
+        className: freeform
+          ? "composer-questionnaire-toolbar-option composer-questionnaire-toolbar-option-freeform"
+          : "composer-questionnaire-toolbar-option",
+        parentElement: null as { className: string; querySelector: (sel: string) => unknown; parentElement: null } | null,
+        querySelector(sel: string) { return sel.includes("freeform-input") ? null : null; },
+      };
+      return {
+        innerText: L,
+        className: "composer-questionnaire-toolbar-option-letter",
+        parentElement: parent,
+        click() {},
+        getAttribute() { return null; },
+      };
+    });
+    const areas = [3, 7].map((i) => {
+      const area = { className: "composer-questionnaire-toolbar-freeform-input", focused: false, focus() { this.focused = true; } };
+      const parent = letters[i]!.parentElement as { querySelector: (sel: string) => unknown };
+      parent.querySelector = (sel: string) => sel.includes("freeform-input") ? area : null;
+      return area;
+    });
+    const bar = {
+      className: "composer-questionnaire-toolbar",
+      innerText: text,
+      parentElement: null,
+      querySelector(sel: string) {
+        if (sel === ".composer-skip-button") return skip;
+        if (sel === "textarea.composer-questionnaire-toolbar-freeform-input") return areas[0];
+        return null;
+      },
+      querySelectorAll(sel: string) {
+        if (sel === "button.composer-questionnaire-toolbar-option-letter") return letters;
+        return [];
+      },
+    };
+    const document = {
+      querySelector(sel: string) {
+        if (sel === ".composer-questionnaire-toolbar") return bar;
+        return null;
+      },
+      querySelectorAll() { return []; },
+    };
+    const inspect = (new Function("document", `return (${ASK_INSPECT_JS});`)(document) as () => {
+      questions: { prompt: string; options: { id: string; text: string; freeform?: boolean }[] }[];
+    })();
+    expect(inspect.questions).toHaveLength(2);
+    expect(inspect.questions[0]?.prompt).toContain("没开着");
+    expect(inspect.questions[0]?.options.map((o) => o.text)).toEqual(["中台负责拉起", "只读已经打开", "列表里两边都留着", "Other..."]);
+    expect(inspect.questions[0]?.options[3]?.freeform).toBe(true);
+    expect(inspect.questions[1]?.prompt).toContain("带 Codex");
+    expect(inspect.questions[1]?.prompt).not.toBe("Question 2");
+    expect(inspect.questions[1]?.options.map((o) => o.text)).toEqual(["最近项目", "模式写进名字", "只列项目", "Other..."]);
+    expect(inspect.questions[1]?.options[3]?.freeform).toBe(true);
+    const focus = new Function("document", `return (${ASK_FOCUS_FREEFORM_JS});`)(document) as (index: number) => string;
+    expect(focus(1)).toBe("OK");
+    expect(areas[0]?.focused).toBe(false);
+    expect(areas[1]?.focused).toBe(true);
   });
 
   test("inspect drops the Skip letter and keeps A/B/C from the CDP fixture", () => {

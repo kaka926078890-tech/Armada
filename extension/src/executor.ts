@@ -136,7 +136,7 @@ export interface ExecutorDeps {
     letter?: string;
     kind?: "plan";
     text?: string;
-    picks?: { index: number; letter: string }[];
+    picks?: { index: number; letter: string; text?: string }[];
   }) => Promise<{ ok: boolean; reason?: string }>;
 }
 
@@ -543,7 +543,7 @@ export class Executor {
     workspaceRoot: string;
     request_id: string;
     action: "continue" | "skip" | "freeform";
-    answers?: { question_id: string; option_ids: string[] }[];
+    answers?: { question_id: string; option_ids: string[]; text?: string }[];
     kind?: "plan";
     text?: string;
   }): Promise<void> {
@@ -566,7 +566,8 @@ export class Executor {
       await vscode.commands.executeCommand("composer.openComposer", msg.conversationId);
       const picks = (msg.answers ?? []).map((a, i) => {
         const m = /^q(\d+)$/.exec(a.question_id);
-        return { index: m ? Number(m[1]) : i, letter: a.option_ids?.[0] ?? "" };
+        const text = typeof a.text === "string" ? a.text.trim() : "";
+        return { index: m ? Number(m[1]) : i, letter: a.option_ids?.[0] ?? "", ...(text ? { text } : {}) };
       }).filter((p) => p.letter);
       const letter = msg.action === "continue" ? picks[0]?.letter : undefined;
       if (msg.action === "continue" && !letter) {

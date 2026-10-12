@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { askPollActions, coalesceAskInspect, nextAskAction, parseAskInspect, parsePlanInspect, planInspectToAsk } from "../src/askDetect";
+import { askPollActions, askQuestionsKey, coalesceAskInspect, nextAskAction, parseAskInspect, parsePlanInspect, planInspectToAsk } from "../src/askDetect";
 
 describe("nextAskAction", () => {
   const inspect = {
@@ -243,6 +243,37 @@ describe("askPollActions", () => {
     const bound = new Map([["r-1", { conversationId: "cid-1" }]]);
     const acts = askPollActions(bound, new Map([["r-1", "ask-1"]]), { present: false }, () => "x");
     expect(acts).toEqual([{ type: "askQuestionResolved", runId: "r-1", request_id: "ask-1" }]);
+  });
+
+  test("one or two absent polls keep the card; the third marks it done", () => {
+    const bound = new Map([["r-1", { conversationId: "cid-1" }]]);
+    const prev = new Map([["r-1", "ask-1"]]);
+    const gone = { present: false } as const;
+    expect(askPollActions(bound, prev, gone, () => "x", 1, [], [], [], 0)).toEqual([]);
+    expect(askPollActions(bound, prev, gone, () => "x", 1, [], [], [], 1)).toEqual([]);
+    expect(askPollActions(bound, prev, gone, () => "x", 1, [], [], [], 2)).toEqual([
+      { type: "askQuestionResolved", runId: "r-1", request_id: "ask-1" },
+    ]);
+  });
+
+  test("the same widget after a resolve reuses the request id", () => {
+    const bound = new Map([["r-1", { conversationId: "cid-1" }]]);
+    const inspect = {
+      present: true as const,
+      prompt: "第一题",
+      conversation_id: "cid-1",
+      options: [{ id: "a", label: "A", text: "甲" }],
+      questions: [{ id: "q0", prompt: "第一题", options: [{ id: "a", label: "A", text: "甲" }] }],
+    };
+    const recent = new Map([["r-1", { requestId: "ask-1", key: askQuestionsKey(inspect.questions) }]]);
+    const acts = askPollActions(bound, new Map(), inspect, () => "ask-new", 9, [], [], [], undefined, recent);
+    expect(acts).toEqual([
+      expect.objectContaining({
+        type: "askQuestion",
+        runId: "r-1",
+        payload: expect.objectContaining({ request_id: "ask-1" }),
+      }),
+    ]);
   });
 
   test("unknown inspect with pending does not emit resolved", () => {

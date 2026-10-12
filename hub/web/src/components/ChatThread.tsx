@@ -240,7 +240,7 @@ function CopyIconButton({ text }: { text: string }) {
 export type AnswerAskBody = {
   request_id: string;
   action: "continue" | "skip" | "freeform";
-  answers?: { question_id: string; option_ids: string[] }[];
+  answers?: { question_id: string; option_ids: string[]; text?: string }[];
   text?: string;
 };
 
@@ -293,6 +293,7 @@ function AskCard({ block, onAnswerAsk }: {
 }) {
   const [picked, setPicked] = useState("");
   const [pickedByQuestion, setPickedByQuestion] = useState<Record<string, string>>({});
+  const [freeformByQuestion, setFreeformByQuestion] = useState<Record<string, string>>({});
   const [freeform, setFreeform] = useState("");
   const [busyAction, setBusyAction] = useState<"continue" | "skip" | "freeform" | null>(null);
   const pending = block.action === "pending" || block.action === "submit_failed" || block.action === "submitting";
@@ -312,7 +313,12 @@ function AskCard({ block, onAnswerAsk }: {
   const typed = freeform.trim();
   const pickedFreeform = !multi && isFreeformAskOption(chips, picked);
   const canSubmit = plan || (multi
-    ? groups.every((q) => !!pickedByQuestion[q.id])
+    ? groups.every((q) => {
+      const id = pickedByQuestion[q.id];
+      if (!id) return false;
+      if (!isFreeformAskOption(visibleAskOptions(q.options), id)) return true;
+      return !!(freeformByQuestion[q.id] ?? "").trim();
+    })
     : (pickedFreeform ? !!typed : !!picked));
   useEffect(() => {
     if (!busyAction) return;
@@ -328,7 +334,15 @@ function AskCard({ block, onAnswerAsk }: {
         action,
         answers: action === "continue"
           ? (multi
-            ? groups.map((q) => ({ question_id: q.id, option_ids: [pickedByQuestion[q.id] || ""] })).filter((a) => a.option_ids[0])
+            ? groups.map((q) => {
+              const id = pickedByQuestion[q.id] || "";
+              const note = (freeformByQuestion[q.id] ?? "").trim();
+              return {
+                question_id: q.id,
+                option_ids: [id],
+                ...(isFreeformAskOption(visibleAskOptions(q.options), id) ? { text: note } : {}),
+              };
+            }).filter((a) => a.option_ids[0])
             : askContinueAnswers(block, picked))
           : [],
         ...(action === "freeform" ? { text: typed } : {}),
@@ -361,24 +375,36 @@ function AskCard({ block, onAnswerAsk }: {
         {groups.map((q) => (
           <div key={q.id} className="flex flex-col gap-2">
             <div className={`${UI_TYPE} text-foreground`}>{q.prompt}</div>
-            {q.options.filter((o) => o.freeform !== true).map((o) => {
+            {visibleAskOptions(q.options).map((o) => {
               const on = pickedByQuestion[q.id] === o.id;
-              const body = askOptionDisplayText(o.label, o.text);
+              const body = o.freeform ? "Other..." : askOptionDisplayText(o.label, o.text);
               return (
-                <button
-                  key={`${q.id}:${o.id}`}
-                  type="button"
-                  disabled={!interactive || wait}
-                  aria-pressed={on}
-                  onClick={(e) => {
-                    stopCard(e);
-                    setPickedByQuestion((prev) => ({ ...prev, [q.id]: o.id }));
-                  }}
-                  className={on ? UI_OPTION_ON : UI_OPTION_OFF}
-                >
-                  <span className="text-muted-foreground font-mono mr-1.5">{o.label}</span>
-                  {body}
-                </button>
+                <div key={`${q.id}:${o.id}`} className="flex flex-col gap-2">
+                  <button
+                    type="button"
+                    disabled={!interactive || wait}
+                    aria-pressed={on}
+                    onClick={(e) => {
+                      stopCard(e);
+                      setPickedByQuestion((prev) => ({ ...prev, [q.id]: o.id }));
+                      if (o.freeform !== true) setFreeformByQuestion((prev) => ({ ...prev, [q.id]: "" }));
+                    }}
+                    className={on ? UI_OPTION_ON : UI_OPTION_OFF}
+                  >
+                    <span className="text-muted-foreground font-mono mr-1.5">{o.label}</span>
+                    {body}
+                  </button>
+                  {on && o.freeform === true ? (
+                    <Textarea
+                      placeholder="Other..."
+                      value={freeformByQuestion[q.id] ?? ""}
+                      disabled={!interactive || wait}
+                      rows={2}
+                      className="min-h-8"
+                      onChange={(e) => setFreeformByQuestion((prev) => ({ ...prev, [q.id]: e.target.value }))}
+                    />
+                  ) : null}
+                </div>
               );
             })}
           </div>
@@ -388,7 +414,7 @@ function AskCard({ block, onAnswerAsk }: {
       <div className="mt-2.5 flex flex-col gap-2">
         {chips.map((o) => {
           const on = picked === o.id;
-          const body = askOptionDisplayText(o.label, o.text);
+          const body = o.freeform ? "Other..." : askOptionDisplayText(o.label, o.text);
           return (
             <div key={o.id} className="flex flex-col gap-2">
               <button

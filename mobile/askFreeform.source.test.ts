@@ -19,6 +19,8 @@ test("iOS and Android Ask cards show D Other like Cursor, not a lone textarea", 
   expect(android).not.toContain("it.freeform != true");
   expect(models).toContain("fun visibleAskOptions");
   expect(models).toContain("fun askOptionBody");
+  expect(ios).toContain("freeformByQuestion");
+  expect(android).toContain("freeformByQuestion");
 });
 
 test("iOS dispatch composer cannot expand over the Form", () => {

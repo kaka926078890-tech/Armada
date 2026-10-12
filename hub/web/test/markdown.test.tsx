@@ -253,6 +253,45 @@ describe("ask / plan action buttons", () => {
     expect(html).not.toContain("Continue");
   });
 
+  test("multi ask shows an Other row on each question", () => {
+    const html = renderToStaticMarkup(
+      <ChatThread
+        blocks={[{
+          kind: "ask",
+          seq: 1,
+          request_id: "ask-m",
+          prompt: "第一题",
+          options: [{ id: "a", label: "A", text: "甲" }],
+          questions: [
+            {
+              id: "q0",
+              prompt: "第一题",
+              options: [
+                { id: "a", label: "A", text: "甲" },
+                { id: "d", label: "D", text: "Skip Esc Continue", freeform: true },
+              ],
+            },
+            {
+              id: "q1",
+              prompt: "第二题",
+              options: [
+                { id: "a", label: "A", text: "乙" },
+                { id: "d", label: "D", text: "Other...", freeform: true },
+              ],
+            },
+          ],
+          action: "pending",
+          continueAllowed: true,
+        }]}
+        onAnswerAsk={async () => true}
+      />,
+    );
+    expect(html).toContain("第一题");
+    expect(html).toContain("第二题");
+    expect(html).not.toContain("Skip Esc Continue");
+    expect(html.match(/Other/g)?.length).toBeGreaterThanOrEqual(2);
+  });
+
   test("repeated letter ids hide the shared picker", () => {
     const html = renderToStaticMarkup(
       <ChatThread

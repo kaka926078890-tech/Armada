@@ -1604,6 +1604,63 @@ describe("answerAsk kind on wire", () => {
     ws.close();
   });
 
+  test("multi continue accepts Other text on one question", async () => {
+    const { ws, inbound, api } = await startWithExt();
+    const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "hello" }) });
+    const { run } = await r.json() as any;
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId: run.id, conversationId: "cid-1", transcriptPath: "/tmp/t.jsonl", promptMatch: true }));
+    await new Promise((x) => setTimeout(x, 80));
+    ws.send(JSON.stringify({
+      type: "run.event", runId: run.id, conversationId: "cid-1", source: "cdp", hookEventName: "askQuestion", seq: 1, ts: Date.now(),
+      payload: {
+        request_id: "ask-1",
+        conversation_id: "cid-1",
+        questions: [
+          { id: "q0", prompt: "第一题", options: [{ id: "a", label: "A", text: "甲" }, { id: "d", label: "D", text: "Other...", freeform: true }] },
+          { id: "q1", prompt: "第二题", options: [{ id: "a", label: "A", text: "乙" }, { id: "d", label: "D", text: "Other...", freeform: true }] },
+        ],
+        detected_at: 1, detect_via: "cdp",
+      },
+    }));
+    await new Promise((x) => setTimeout(x, 120));
+    inbound.length = 0;
+    const missing = await api(`/api/runs/${run.id}/answer-ask`, {
+      method: "POST",
+      body: JSON.stringify({
+        request_id: "ask-1",
+        action: "continue",
+        answers: [
+          { question_id: "q0", option_ids: ["a"] },
+          { question_id: "q1", option_ids: ["d"] },
+        ],
+      }),
+    });
+    expect(missing.status).toBe(409);
+    expect(((await missing.json()) as any).error).toBe("ASK_TEXT_EMPTY");
+    const ans = await api(`/api/runs/${run.id}/answer-ask`, {
+      method: "POST",
+      body: JSON.stringify({
+        request_id: "ask-1",
+        action: "continue",
+        answers: [
+          { question_id: "q0", option_ids: ["a"] },
+          { question_id: "q1", option_ids: ["d"], text: "自己写" },
+        ],
+      }),
+    });
+    expect(ans.status).toBe(202);
+    await new Promise((x) => setTimeout(x, 80));
+    expect(inbound.find((m) => m.type === "run.answerAsk")).toMatchObject({
+      action: "continue",
+      answers: [
+        { question_id: "q0", option_ids: ["a"] },
+        { question_id: "q1", option_ids: ["d"], text: "自己写" },
+      ],
+    });
+    ws.close();
+  });
+
   test("plan ask rejects freeform", async () => {
     const { ws, api } = await startWithExt();
     const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "hello" }) });

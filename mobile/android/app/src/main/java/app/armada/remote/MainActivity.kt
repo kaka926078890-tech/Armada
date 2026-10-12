@@ -1089,6 +1089,7 @@ fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend (
     var optionId by remember { mutableStateOf<String?>(null) }
     var pickedByQuestion by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var freeformText by remember { mutableStateOf("") }
+    var freeformByQuestion by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var busy by remember { mutableStateOf<String?>(null) }
     var err by remember { mutableStateOf<String?>(null) }
     val plan = isPlanAsk(ask)
@@ -1141,7 +1142,7 @@ fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend (
                 ask.questions.forEach { q ->
                     Text(q.prompt)
                     if (!canContinue) return@forEach
-                    val rows = if (ask.questions.size > 1) q.options.filter { it.freeform != true } else visibleAskOptions(q.options)
+                    val rows = visibleAskOptions(q.options)
                     rows.forEach { o ->
                         val selected = if (ask.questions.size > 1) pickedByQuestion[q.id] == o.id else optionId == o.id
                         Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
@@ -1153,6 +1154,7 @@ fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend (
                                     .clickable(enabled = busy == null) {
                                         if (ask.questions.size > 1) {
                                             pickedByQuestion = pickedByQuestion + (q.id to o.id)
+                                            if (o.freeform != true) freeformByQuestion = freeformByQuestion + (q.id to "")
                                         } else {
                                             optionId = o.id
                                             if (o.freeform != true) freeformText = ""
@@ -1163,12 +1165,16 @@ fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend (
                             ) {
                                 Text(o.label.ifEmpty { o.id.uppercase() }, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = FontFamily.Monospace)
                                 Spacer(Modifier.width(8.dp))
-                                Text(askOptionBody(o.label, o.text))
+                                Text(if (o.freeform == true) "Other..." else askOptionBody(o.label, o.text))
                             }
                             if (selected && o.freeform == true) {
+                                val note = if (ask.questions.size > 1) freeformByQuestion[q.id].orEmpty() else freeformText
                                 IosTextField(
-                                    value = freeformText,
-                                    onValueChange = { freeformText = it },
+                                    value = note,
+                                    onValueChange = {
+                                        if (ask.questions.size > 1) freeformByQuestion = freeformByQuestion + (q.id to it)
+                                        else freeformText = it
+                                    },
                                     placeholder = "Other...",
                                     modifier = Modifier.fillMaxWidth().padding(top = 6.dp).heightIn(min = 36.dp),
                                     minLines = 1,
@@ -1203,7 +1209,12 @@ fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend (
                     if (canContinue) {
                     val rows = visibleAskOptions(ask.questions.firstOrNull()?.options.orEmpty())
                     val pickedFreeform = isFreeformAskOption(rows, optionId)
-                    val multiReady = ask.questions.size > 1 && ask.questions.all { !pickedByQuestion[it.id].isNullOrEmpty() }
+                    val multiReady = ask.questions.size > 1 && ask.questions.all { q ->
+                        val id = pickedByQuestion[q.id]
+                        if (id.isNullOrEmpty()) return@all false
+                        if (!isFreeformAskOption(visibleAskOptions(q.options), id)) return@all true
+                        !freeformByQuestion[q.id].isNullOrBlank()
+                    }
                     BarButton(if (busy == "continue" || busy == "freeform") "Continuing..." else "Continue", filled = true, compact = true, enabled = (if (ask.questions.size > 1) multiReady else if (pickedFreeform) typed.isNotEmpty() else optionId != null) && busy == null, onClick = click@{
                         val q = ask.questions.firstOrNull() ?: return@click
                         val sendFreeform = ask.questions.size == 1 && pickedFreeform
@@ -1217,7 +1228,12 @@ fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend (
                                 } else if (ask.questions.size > 1) {
                                     val answers = JSONArray()
                                     ask.questions.forEach { question ->
-                                        answers.put(JSONObject().put("question_id", question.id).put("option_ids", JSONArray().put(pickedByQuestion[question.id])))
+                                        val id = pickedByQuestion[question.id]
+                                        val item = JSONObject().put("question_id", question.id).put("option_ids", JSONArray().put(id))
+                                        if (isFreeformAskOption(visibleAskOptions(question.options), id)) {
+                                            item.put("text", freeformByQuestion[question.id].orEmpty().trim())
+                                        }
+                                        answers.put(item)
                                     }
                                     body.put("action", "continue").put("answers", answers)
                                 } else {
