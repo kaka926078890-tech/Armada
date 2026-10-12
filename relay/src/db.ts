@@ -1,6 +1,13 @@
 import { Database } from "bun:sqlite";
+import { randomBytes } from "crypto";
 import { mkdirSync } from "fs";
 import { join } from "path";
+
+let desktopColumnReady = true;
+
+export function desktopTokenColumnReady(): boolean {
+  return desktopColumnReady;
+}
 
 const SCHEMA = `
 PRAGMA journal_mode=WAL;
@@ -59,10 +66,28 @@ function migratePushTokenEnvironments(db: Database): void {
   `);
 }
 
+export function migrateDesktopToken(db: Database): void {
+  desktopColumnReady = true;
+  try {
+    if (process.env.ARMADA_DESKTOP_MIGRATE_FAIL === "1") throw new Error("forced");
+    ensureColumn(db, "fleets", "desktop_token", "desktop_token TEXT");
+    const rows = db.query("SELECT id, desktop_token FROM fleets").all() as { id: string; desktop_token: string | null }[];
+    for (const row of rows) {
+      if (row.desktop_token) continue;
+      db.query("UPDATE fleets SET desktop_token=?2 WHERE id=?1").run(row.id, randomBytes(32).toString("hex"));
+    }
+    db.exec("CREATE UNIQUE INDEX IF NOT EXISTS fleets_desktop_token_uq ON fleets(desktop_token)");
+  } catch {
+    desktopColumnReady = false;
+    console.error("desktop_token migration failed");
+  }
+}
+
 export function openRelayDb(home: string): Database {
   mkdirSync(home, { recursive: true });
   const db = new Database(join(home, "relay.db"), { create: true });
   db.exec(SCHEMA);
+  migrateDesktopToken(db);
   ensureColumn(db, "runs", "outbound", "outbound TEXT");
   ensureColumn(db, "runs", "queue_message_default_behavior", "queue_message_default_behavior TEXT");
   ensureColumn(db, "runs", "archived_at", "archived_at INTEGER");

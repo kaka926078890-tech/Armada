@@ -2,8 +2,9 @@ import { randomBytes } from "crypto";
 import { join } from "path";
 import { mkdirSync } from "fs";
 import { Hono } from "hono";
-import { openRelayDb } from "./db";
-import { decodeWorkspaceId, encodeWorkspaceId, formatOpUri, formatPairUri } from "./uri";
+import { openRelayDb, desktopTokenColumnReady } from "./db";
+import { decodeWorkspaceId, encodeWorkspaceId, formatDesktopUri, formatOpUri, formatPairUri } from "./uri";
+import { createDesktopGateway } from "./desktopGateway";
 import { createApnsSender, type ApnsConfig, type ApnsEnvironment } from "./apns";
 import { createFcmSender, isFcmToken, type FcmConfig } from "./fcm";
 import { notifyEdges, type NotifyEdge } from "./notifyEdge";
@@ -144,7 +145,15 @@ export interface RelayServer {
   adminToken: string;
   stop: () => void;
   flushApns: () => Promise<void>;
-  createFleet: () => { fleet: string; pairUri: string; opUri: string; hubSecret: string; operatorToken: string };
+  createFleet: () => {
+    fleet: string;
+    pairUri: string;
+    opUri: string;
+    hubSecret: string;
+    operatorToken: string;
+    desktopToken?: string;
+    desktopUri?: string;
+  };
 }
 
 export function createRelayServer(opts: {
@@ -156,6 +165,7 @@ export function createRelayServer(opts: {
   apns?: ApnsConfig | null;
   fcm?: FcmConfig | null;
   ssePingMs?: number;
+  deskIdleMs?: number;
 }): RelayServer {
   const home = opts.home ?? join(process.env.HOME!, ".armada-relay");
   mkdirSync(home, { recursive: true });
@@ -297,14 +307,26 @@ export function createRelayServer(opts: {
       | undefined;
   }
 
+  function getFleetByDesktop(token: string) {
+    if (!desktopTokenColumnReady()) return undefined;
+    return db.query("SELECT id, hub_online FROM fleets WHERE desktop_token=?1").get(token) as
+      | { id: string; hub_online: number }
+      | undefined;
+  }
   function createFleet() {
     const id = fleetId();
     const hubSecret = hex64();
     const operatorToken = hex64();
+    const desktopToken = hex64();
     const pairCode = hex64();
     const now = Date.now();
-    db.query("INSERT INTO fleets (id, hub_secret, operator_token, hub_online, workspaces, created_at) VALUES (?1,?2,?3,0,'[]',?4)")
-      .run(id, hubSecret, operatorToken, now);
+    if (desktopTokenColumnReady()) {
+      db.query("INSERT INTO fleets (id, hub_secret, operator_token, desktop_token, hub_online, workspaces, created_at) VALUES (?1,?2,?3,?4,0,'[]',?5)")
+        .run(id, hubSecret, operatorToken, desktopToken, now);
+    } else {
+      db.query("INSERT INTO fleets (id, hub_secret, operator_token, hub_online, workspaces, created_at) VALUES (?1,?2,?3,0,'[]',?4)")
+        .run(id, hubSecret, operatorToken, now);
+    }
     db.query("INSERT INTO pair_codes (code, fleet_id, expires_at, used_at) VALUES (?1,?2,?3,NULL)")
       .run(pairCode, id, now + PAIR_TTL_MS);
     audit("admin", "fleet.create", id);
@@ -314,6 +336,9 @@ export function createRelayServer(opts: {
       operatorToken,
       pairUri: formatPairUri(publicBase, id, pairCode),
       opUri: formatOpUri(publicBase, id, operatorToken),
+      ...(desktopTokenColumnReady()
+        ? { desktopToken, desktopUri: formatDesktopUri(publicBase, id, desktopToken) }
+        : {}),
     };
   }
 
@@ -629,7 +654,7 @@ export function createRelayServer(opts: {
     if (!tok) return c.json({ error: "unauthorized" }, 401);
     const fleet = getFleetByOp(tok);
     if (!fleet) {
-      if (getFleetBySecret(tok)) return c.json({ error: "OPERATOR_REQUIRED" }, 403);
+      if (getFleetBySecret(tok) || getFleetByDesktop(tok)) return c.json({ error: "OPERATOR_REQUIRED" }, 403);
       return c.json({ error: "unauthorized" }, 401);
     }
     (c as any).set("fleet", fleet);
@@ -1080,7 +1105,17 @@ export function createRelayServer(opts: {
   app.post("/mobile/runs/:id/archive", (c) => archiveAction(c, "archive"));
   app.post("/mobile/runs/:id/unarchive", (c) => archiveAction(c, "unarchive"));
 
-  const server = Bun.serve<{ fleetId?: string; role?: string }>({
+  const desktop = createDesktopGateway({
+    protocolVersion: PROTOCOL_VERSION,
+    idleMs: opts.deskIdleMs,
+    getFleetByDesktop,
+    getFleetByOp,
+    getFleetBySecret,
+    sendHub,
+    audit,
+  });
+
+  const server = Bun.serve<{ fleetId?: string; role?: string; streamId?: string }>({
     port: opts.port ?? 8780,
     hostname: opts.hostname ?? "127.0.0.1",
     fetch(req, srv) {
@@ -1096,19 +1131,38 @@ export function createRelayServer(opts: {
         if (srv.upgrade(req, { data: { fleetId: fleet, role: "hub" } })) return;
         return new Response("upgrade failed", { status: 400 });
       }
+      if (url.pathname.startsWith("/desktop")) {
+        const handled = desktop.handle(req);
+        if (handled instanceof Promise) return handled;
+        if (handled instanceof Response) return handled;
+        if (srv.upgrade(req, { data: { role: "desktop", fleetId: handled.upgrade.fleetId, streamId: handled.upgrade.streamId } })) return;
+        return new Response("upgrade failed", { status: 400 });
+      }
       return app.fetch(req);
     },
     websocket: {
       open(ws) {
+        if (ws.data.role === "desktop") {
+          desktop.onDesktopOpen(ws);
+          return;
+        }
         const id = ws.data.fleetId!;
         hubSockets.set(id, { send: (s) => ws.send(s), ws });
         db.query("UPDATE fleets SET hub_online=1 WHERE id=?1").run(id);
         emitWorkspaces(id);
       },
       message(ws, data) {
+        if (ws.data.role === "desktop") {
+          desktop.onDesktopMessage(ws, data);
+          return;
+        }
         const fleetId = ws.data.fleetId!;
         let msg: any;
         try { msg = JSON.parse(String(data)); } catch { return; }
+        if (typeof msg?.type === "string" && msg.type.startsWith("desk.")) {
+          desktop.onHubFrame(msg);
+          return;
+        }
         if (msg.type === "snap.workspaces") {
           const machines = Array.isArray(msg.machines) ? msg.machines : [];
           const slots: WorkspaceSnap[] = [];
@@ -1143,6 +1197,10 @@ export function createRelayServer(opts: {
         }
       },
       close(ws) {
+        if (ws.data.role === "desktop") {
+          desktop.onDesktopClose(ws);
+          return;
+        }
         const id = ws.data.fleetId;
         if (!id) return;
         const cur = hubSockets.get(id);

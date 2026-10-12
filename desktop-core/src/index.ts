@@ -11,3 +11,4 @@ export * from "./relayHttpError";
 export * from "./shareIp";
 export * from "./settingsMerge";
 export * from "./shellUi";
+export * from "./desktopRelay";
