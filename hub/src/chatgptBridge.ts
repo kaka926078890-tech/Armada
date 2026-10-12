@@ -13,8 +13,6 @@ import type { Registry } from "./registry";
 import type { RunService } from "./runs";
 import type { SseHub } from "./sse";
 
-const BIND_TIMEOUT_MS = 45_000;
-
 export class ChatgptBridge {
   private viewState: ChatgptMachineView = { port: "absent", targets: [] };
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -109,7 +107,6 @@ export class ChatgptBridge {
           page.close();
         }
       }
-      this.runs.expireUnboundChatgpt(Date.now() - BIND_TIMEOUT_MS);
       await this.feedRollouts();
       await this.drain();
     } catch {

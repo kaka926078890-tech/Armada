@@ -181,6 +181,8 @@ export type RolloutTurn = {
   user: string | null;
   assistant: string | null;
   completed: boolean;
+  /** 用户句写入会话文件的时间。没有时间戳的旧夹具为 null。 */
+  at: number | null;
 };
 
 type TurnAcc = RolloutTurn;
@@ -188,7 +190,7 @@ type TurnAcc = RolloutTurn;
 function turnOf(map: Map<string, TurnAcc>, turnId: string): TurnAcc {
   let turn = map.get(turnId);
   if (!turn) {
-    turn = { threadId: "", turnId, user: null, assistant: null, completed: false };
+    turn = { threadId: "", turnId, user: null, assistant: null, completed: false, at: null };
     map.set(turnId, turn);
   }
   return turn;
@@ -200,7 +202,7 @@ export function readRollout(jsonl: string): RolloutTurn[] {
   for (const line of jsonl.split("\n")) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    let row: { type?: string; payload?: Record<string, unknown> };
+    let row: { timestamp?: string; type?: string; payload?: Record<string, unknown> };
     try {
       row = JSON.parse(trimmed);
     } catch {
@@ -220,6 +222,8 @@ export function readRollout(jsonl: string): RolloutTurn[] {
         .join("\n")
         .trim();
       if (text) turn.user = text;
+      const at = Date.parse(String(row.timestamp ?? ""));
+      if (Number.isFinite(at)) turn.at = at;
       if (typeof payload.thread_id === "string") turn.threadId = payload.thread_id;
     }
     if (payload.type === "task_complete" && typeof payload.last_agent_message === "string") {
@@ -230,10 +234,14 @@ export function readRollout(jsonl: string): RolloutTurn[] {
   return [...map.values()];
 }
 
-/** 派发提示词只在恰好一条回合上全等时挂上。两条相同则不猜。 */
-export function matchRolloutTurn(turns: RolloutTurn[], prompt: string): RolloutTurn | null {
+/** 派发提示词只在恰好一条回合上全等时挂上。两条相同则不猜。早于本次派发的回合不是这一轮。 */
+export function matchRolloutTurn(turns: RolloutTurn[], prompt: string, notBefore?: number): RolloutTurn | null {
   const want = prompt.trim();
-  const hits = turns.filter((turn) => (turn.user ?? "").trim() === want);
+  const hits = turns.filter((turn) => {
+    if ((turn.user ?? "").trim() !== want) return false;
+    if (notBefore == null) return true;
+    return turn.at != null && turn.at >= notBefore;
+  });
   return hits.length === 1 ? hits[0] : null;
 }
 

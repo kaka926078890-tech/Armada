@@ -12,6 +12,7 @@ const USER = "请执行 python3 -c \"import time\\nfor i in range(1,20):\\n prin
 const FINAL = "已执行完成，标记：`armada-bg-2`。\n\n输出为 `1` 到 `19`，进程退出码为 `0`。";
 
 const userLine = JSON.stringify({
+  timestamp: "2026-10-12T08:25:50.940Z",
   type: "event_msg",
   payload: {
     type: "item_completed",
@@ -33,9 +34,9 @@ function start() {
   hub = createServer({ port: 0, home });
   hub.db.query("INSERT INTO machines (id, name, os, open_workspaces) VALUES ('m-1','Mac','darwin','[]')").run();
   hub.db.query(
-    `INSERT INTO runs (id, machine_id, workspace_root, prompt, status, created_at)
-     VALUES ('r-1','m-1','chatgpt:desk',?1,'running',?2)`,
-  ).run(USER, Date.now());
+    `INSERT INTO runs (id, machine_id, workspace_root, prompt, status, created_at, started_at)
+     VALUES ('r-1','m-1','chatgpt:desk',?1,'running',?2,?2)`,
+  ).run(USER, Date.parse("2026-10-12T08:25:45.513Z"));
   const api = (path: string) => fetch(`http://127.0.0.1:${hub!.port}${path}`, {
     headers: { authorization: `Bearer ${hub!.token}` },
   });
@@ -71,5 +72,67 @@ describe("chatgpt rollout on the hub card", () => {
     ]);
     const events = hub!.db.query("SELECT * FROM run_events WHERE run_id=?1 ORDER BY seq").all("r-1") as RunEvent[];
     expect(runToSnap(run, events).finalText).toBe(FINAL);
+  });
+
+  test("an older finished turn with the same prompt does not complete this dispatch", () => {
+    const home = mkdtempSync(join(tmpdir(), "armada-chatgpt-"));
+    hub = createServer({ port: 0, home });
+    const started = Date.parse("2026-10-12T08:25:45.513Z");
+    hub.db.query("INSERT INTO machines (id, name, os, open_workspaces) VALUES ('m-1','Mac','darwin','[]')").run();
+    hub.db.query(
+      `INSERT INTO runs (id, machine_id, workspace_root, prompt, status, created_at, started_at)
+       VALUES ('r-1','m-1','chatgpt:desk','你好','binding',?1,?1)`,
+    ).run(started);
+    const old = [
+      JSON.stringify({
+        timestamp: "2026-10-12T08:16:35.382Z",
+        type: "event_msg",
+        payload: {
+          type: "item_completed",
+          thread_id: "01a12f2e-fdd9-7472-bf54-e635cf817b56",
+          turn_id: "01a12f2f-5c0e-7701-abf2-f1e9880cf173",
+          item: { type: "UserMessage", content: [{ type: "text", text: "你好\n" }] },
+        },
+      }),
+      JSON.stringify({
+        timestamp: "2026-10-12T08:16:54.091Z",
+        type: "event_msg",
+        payload: {
+          type: "task_complete",
+          turn_id: "01a12f2f-5c0e-7701-abf2-f1e9880cf173",
+          last_agent_message: "你好！我在这儿。你想写代码、看项目、查资料，还是先随便聊两句都行。",
+        },
+      }),
+    ].join("\n");
+    hub.runs.noteChatgptRollout("r-1", old);
+    expect(hub.runs.get("r-1").status).toBe("binding");
+    expect(hub.runs.get("r-1").chatgpt_thread_id).toBeNull();
+
+    const liveUser = JSON.stringify({
+      timestamp: "2026-10-12T08:25:50.940Z",
+      type: "event_msg",
+      payload: {
+        type: "item_completed",
+        thread_id: "01a12f37-c717-7ba2-b5bf-217ad28472ff",
+        turn_id: "01a12f37-c8-20f9825007df",
+        item: { type: "UserMessage", content: [{ type: "text", text: "你好\n" }] },
+      },
+    });
+    hub.runs.noteChatgptRollout("r-1", liveUser);
+    expect(hub.runs.get("r-1").status).toBe("running");
+
+    const liveDone = liveUser + "\n" + JSON.stringify({
+      timestamp: "2026-10-12T08:25:53.818Z",
+      type: "event_msg",
+      payload: {
+        type: "task_complete",
+        turn_id: "01a12f37-c8-20f9825007df",
+        last_agent_message: "你好！我在这儿。你想让我看代码、改东西、做个 review，还是先一起理一理思路？",
+      },
+    });
+    hub.runs.noteChatgptRollout("r-1", liveDone);
+    const run = hub.runs.get("r-1");
+    expect(run.status).toBe("completed");
+    expect(run.chatgpt_thread_id).toBe("01a12f37-c717-7ba2-b5bf-217ad28472ff");
   });
 });

@@ -184,13 +184,13 @@ const completeLine = JSON.stringify({
 describe("readRollout", () => {
   test("user line without task_complete is bound and not finished", () => {
     expect(readRollout(userLine)).toEqual([
-      { threadId: THREAD, turnId: TURN, user: USER, assistant: null, completed: false },
+      { threadId: THREAD, turnId: TURN, user: USER, assistant: null, completed: false, at: null },
     ]);
   });
 
   test("task_complete keeps the full last_agent_message for that turn", () => {
     expect(readRollout(`${userLine}\n${completeLine}`)).toEqual([
-      { threadId: THREAD, turnId: TURN, user: USER, assistant: FINAL, completed: true },
+      { threadId: THREAD, turnId: TURN, user: USER, assistant: FINAL, completed: true, at: null },
     ]);
   });
 
@@ -199,6 +199,36 @@ describe("readRollout", () => {
     expect(matchRolloutTurn(turns, USER)).toEqual(turns[0]);
     expect(matchRolloutTurn(turns, USER + "\n")).toEqual(turns[0]);
     expect(matchRolloutTurn([...turns, { ...turns[0], turnId: "other" }], USER)).toBeNull();
+  });
+
+  test("a turn recorded before this dispatch is not this send", () => {
+    const older = readRollout(JSON.stringify({
+      timestamp: "2026-10-12T08:16:35.382Z",
+      type: "event_msg",
+      payload: {
+        type: "item_completed",
+        thread_id: "old-thread",
+        turn_id: "old-turn",
+        item: { type: "UserMessage", content: [{ type: "text", text: "你好\n" }] },
+      },
+    }) + "\n" + JSON.stringify({
+      timestamp: "2026-10-12T08:16:54.091Z",
+      type: "event_msg",
+      payload: { type: "task_complete", turn_id: "old-turn", last_agent_message: "上一轮的回复" },
+    }));
+    const current = readRollout(JSON.stringify({
+      timestamp: "2026-10-12T08:25:50.940Z",
+      type: "event_msg",
+      payload: {
+        type: "item_completed",
+        thread_id: "new-thread",
+        turn_id: "new-turn",
+        item: { type: "UserMessage", content: [{ type: "text", text: "你好\n" }] },
+      },
+    }));
+    const notBefore = Date.parse("2026-10-12T08:25:45.513Z");
+    expect(matchRolloutTurn(older, "你好", notBefore)).toBeNull();
+    expect(matchRolloutTurn([...older, ...current], "你好", notBefore)?.turnId).toBe("new-turn");
   });
 });
 

@@ -413,14 +413,6 @@ export class RunService {
     this.setStatus(runId, "error", { end_reason: reason }, "chatgpt");
   }
 
-  expireUnboundChatgpt(olderThan: number): void {
-    const rows = this.db.query(
-      `SELECT id FROM runs WHERE workspace_root LIKE 'chatgpt:%' AND status='binding'
-       AND chatgpt_thread_id IS NULL AND started_at IS NOT NULL AND started_at < ?1`,
-    ).all(olderThan) as { id: string }[];
-    for (const row of rows) this.failChatgpt(row.id, "BIND_TIMEOUT");
-  }
-
   activeChatgptRuns(): { id: string }[] {
     return this.db.query(
       `SELECT id FROM runs WHERE workspace_root LIKE 'chatgpt:%' AND status IN ('binding','running')`,
@@ -1003,7 +995,8 @@ export class RunService {
     let threadId = typeof run.chatgpt_thread_id === "string" ? run.chatgpt_thread_id : "";
     let turnId = typeof run.chatgpt_turn_id === "string" ? run.chatgpt_turn_id : "";
     if (!threadId) {
-      const hit = matchRolloutTurn(turns, run.prompt ?? "");
+      const notBefore = Number(run.started_at ?? run.created_at ?? 0);
+      const hit = matchRolloutTurn(turns, run.prompt ?? "", notBefore);
       if (!hit?.threadId || !hit.turnId) return;
       threadId = hit.threadId;
       turnId = hit.turnId;

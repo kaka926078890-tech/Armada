@@ -53,11 +53,13 @@ describe("chatgpt dispatch", () => {
 
   test("the user line moves a dispatched card to running", () => {
     start();
+    const started = Date.now();
     hub!.db.query(
-      `INSERT INTO runs (id, machine_id, workspace_root, prompt, status, created_at)
-       VALUES ('r-1','m-1','chatgpt:desk','只回复 armada-hub-ok','dispatched',?1)`,
-    ).run(Date.now());
+      `INSERT INTO runs (id, machine_id, workspace_root, prompt, status, created_at, started_at)
+       VALUES ('r-1','m-1','chatgpt:desk','只回复 armada-hub-ok','dispatched',?1,?1)`,
+    ).run(started);
     hub!.runs.noteChatgptRollout("r-1", JSON.stringify({
+      timestamp: new Date(started + 1000).toISOString(),
       type: "event_msg",
       payload: {
         type: "item_completed",
