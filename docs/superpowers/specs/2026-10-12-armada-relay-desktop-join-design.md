@@ -129,6 +129,7 @@ v1 迁移，单独函数，包在失败可继续启动的路径里：
 | 入口 | 到中台的路径 | 时限 |
 | --- | --- | --- |
 | `GET /desktop/health` | 不转发。留在中转 | 无中台超时 |
+| `/desktop/`、`/desktop/assets/...` | 去掉 `/desktop` 前缀。`/desktop/` 到中台是 `/`，`/desktop/assets/...` 到中台是 `/assets/...`。页面和静态文件由 `hub/src/index.ts` 的 `serveStatic` 提供，不在 `/api` 下 | 与短 JSON 相同：**15 秒**，超时 502 `{ error: "HUB_TIMEOUT" }` |
 | `/desktop/api/...` | `/api/...` | 普通 JSON：**15 秒**，超时 502 `{ error: "HUB_TIMEOUT" }` |
 | `/desktop/api/events`、`/desktop/api/runs/:id/stream` | `/api/events`、`/api/runs/:id/stream` | 流式转发。空闲不断。中台的 `:ok` 和后续事件原样下送 |
 | `/desktop/ws` | `/ws` | 不按 15 秒切断。扩展侧仍是 45 秒无入站再重连，退避上限 30 秒 |
@@ -147,14 +148,16 @@ v1 迁移，单独函数，包在失败可继续启动的路径里：
 
 | 方向 | `type` | 字段 | 上限 |
 | --- | --- | --- | --- |
-| 中转 → 中台 | `desk.http` | `streamId`、`method`、`path`、`headers`、可选 `bodyBase64` | 单帧正文 64 KiB。更大的请求体拆帧，用同一 `streamId` 跟 `seq` |
-| 中台 → 中转 | `desk.http.result` | `streamId`、`status`、`headers`、可选 `bodyBase64` | 同上 |
+| 中转 → 中台 | `desk.http` | `streamId`、`seq`、`last`、`method`、`path`、`headers`、可选 `bodyBase64` | 单帧正文 64 KiB |
+| 中台 → 中转 | `desk.http.result` | `streamId`、`seq`、`last`、`status`、`headers`、可选 `bodyBase64` | 单帧正文 64 KiB |
 | 中转 → 中台 | `desk.stream.open` | `streamId`、`path`（已改写成 `/api/events` 或 `/api/runs/:id/stream`） | — |
 | 中台 → 中转 | `desk.stream.chunk` | `streamId`、`seq`、`data`（SSE 文本，含 `:ok`） | 单帧 64 KiB |
 | 双向 | `desk.stream.end` | `streamId`、可选 `status` | — |
 | 中转 → 中台 | `desk.ws.open` | `streamId` | 每 fleet 同时最多 8 条 |
-| 双向 | `desk.ws.frame` | `streamId`、`seq`、`data`（扩展现有文本帧） | 单帧 64 KiB。v1 不转发二进制帧；桌面套接字以 1003 关闭这一条，不断开 `/hub` |
+| 双向 | `desk.ws.frame` | `streamId`、`seq`、`last`、`data`（扩展现有文本帧） | 单帧 64 KiB。一条文本帧超过 64 KiB 时拆开，收齐后整段写入本机 `/ws`。不因为这一条大文本帧关闭桌面套接字。v1 不转发二进制帧；二进制仍以 1003 关闭这一条，不断开 `/hub` |
 | 双向 | `desk.ws.close` | `streamId`、`code`、`reason` | 至少原样送回 4001（未登记）和 4000（被替换） |
+
+请求和响应使用同一条拼包规则：`seq` 从 0 递增，最后一帧 `last: true`。收齐连续的 `0..n` 且见到 `last: true` 之后，才把完整正文交给本机 HTTP，或拼回给壳。缺序号、或短请求在 15 秒内没有 `last: true`，这条 `streamId` 以 502 结束，不把半截正文交给下游。看板会超过 64 KiB 的响应包括 `/api/runs/:id/events`、`/api/blobs/:id`（上限 `MAX_BLOB_BYTES` = 8MB，`hub/src/blobs.ts`）和页面的 JS 包。
 
 未知 `type`：中转和中台都忽略该帧，不关闭 `/hub`。中转先发布、中台仍是旧进程时，旧的 `createRelayCommandHandler` 会忽略非 `cmd.` 帧，`/mobile/*` 保持今天的行为。桌面短请求在 15 秒后 502，不占用 `waitHub`。
 
@@ -168,7 +171,7 @@ v1：
 
 - Intel 的 `armada.token` 是壳生成的 64 位小写 hex 占位值。扩展仍然发 `ws://${hubUrl}/ws?token=`。协议字段不改。
 - 壳监听的转发只绑 `127.0.0.1`。只有这个 webview 和这条扩展连接会经壳出门。出门前去掉查询串 `token` 和 hub `Authorization`，换上桌面 Bearer。
-- 中台沿用 `hubFetch`。真正的 hub token 只加在 `http://127.0.0.1:${hubPort}` 上。今天的实现先写 `authorization` 再展开 `init.headers`，调用方可以覆盖。v1 必须把 `authorization: Bearer ${opts.token}` 放在展开之后，调用方头不能覆盖它。
+- 中台沿用 `hubFetch`。真正的 hub token 只加在 `http://127.0.0.1:${hubPort}` 上。今天的实现先写 `authorization` 和 `content-type: application/json`，再展开 `init.headers`，调用方可以覆盖 Authorization。v1 只把 `authorization: Bearer ${opts.token}` 挪到展开调用方头之后，调用方头不能覆盖它。`content-type` 仍由原请求决定。`/api/blobs` 是 multipart，不能被写成 `application/json`。现有 `cmd.*` 若要 JSON，由那些调用自己带上 `content-type`。
 - 中台本机 `/ws` 升级仍对照 `~/.armada/token`（`hub/src/index.ts`）。这个查询参数由中台在回环上补上，不由中转或 Intel 提供。
 
 ```mermaid
@@ -194,10 +197,12 @@ sequenceDiagram
 
 | 项 | 值 |
 | --- | --- |
-| 看板 iframe | `http://127.0.0.1:<壳端口>/`。壳把 `/api/...` 转到中转 `/desktop/api/...` |
-| `armada.hubUrl` | `127.0.0.1:<壳端口>` |
+| 看板 iframe | `boardUrl("127.0.0.1:<壳端口>", 占位)`，即 `http://127.0.0.1:<端口>/?token=<占位>&desktop=1`（`desktop-core/src/shellUi.ts`）。没有查询串时，看板走到浏览器粘贴页，向用户要 `~/.armada/token`（`hub/web/src/App.tsx`）。`need-token` 只在 `isDesktopShell` 为真时发出，也就是查询串里有 `desktop=1`（`hub/web/src/tokenBootstrap.ts`） |
+| 出门的文档请求 | 壳删掉查询串里的 `token`。`desktop=1` 不转发。`/` 与 `/assets/...` 转到 `/desktop/` 与 `/desktop/assets/...`，`/api/...` 转到 `/desktop/api/...` |
+| 回环核对 | 先核对占位 token。对不上则不加桌面 Bearer，也不转发。本机其他进程打到该端口不会变成桌面客户端 |
+| `armada.hubUrl` | `127.0.0.1:<壳端口>`。端口固定 |
 | `armada.token` | 第 4.5 节的占位值 |
-| 再次打开 | 壳把邀请存在本机 `~/.armada/desktop-join.json`（mode `0600`），只含 `relay`、`fleet`、桌面 token。不含 hub token。再次打开不必重贴邀请，回环起来后扩展按原路径登记 |
+| 再次打开 | `~/.armada/desktop-join.json`（mode `0600`）含 `relay`、`fleet`、桌面 token 和这个固定端口。不含 hub token。扩展只在 `activate` 里调用 `loadConfig()`（`extension/src/extension.ts`），已经打开的 Cursor 不会改连新端口。再次打开时先绑定文件里的端口，再等扩展重连。不必重贴邀请 |
 | 离开舰队 | 壳停掉回环监听，删除该文件，并清掉指向这个 `127.0.0.1` 端口的 `armada.hubUrl` 与占位 `armada.token`。不清局域网加入留下的其他地址 |
 
 邀请里的 `fleet` 与 token 查出的舰队不一致时，不写上述文件，也不写 Cursor 设置。
@@ -258,7 +263,7 @@ sequenceDiagram
 | 威胁 | 缓解 | 剩余风险 |
 | --- | --- | --- |
 | 公网扫到中台 `:7380` | 不映射该端口。中台只出站 | 中台所在网络自己把 7380 暴露出去时，本文没有新增防护 |
-| 偷到操作者 token 后打开完整看板 | `/desktop/*` 拒绝操作者 token，403 `DESKTOP_REQUIRED` | 桌面 token 本身被盗时，影响等于拿到一份局域网加入链接 |
+| 偷到操作者 token 后打开完整看板 | `/desktop/*` 拒绝操作者 token，403 `DESKTOP_REQUIRED` | 偷到的是桌面 token。轮换 `desktop_token` 后这条凭证失效。hub token 仍在中台，不随桌面 token 一起离开 |
 | hub token 离开中台 | 公网只有桌面 Bearer。壳在回环上删掉查询串 `token`。`hubFetch` 在展开调用方头之后再写 `Bearer ${opts.token}`，且只发给 `127.0.0.1` | 壳若漏删查询串，占位值会到达中转。占位值不是 hub token。单测必须断言出门请求没有查询串 `token` |
 | 桌面 token 与 hub token 混用 | 中转只认 `desktop_token`。对不上则为 401 | — |
 | 转发把中转变成第二份权威 | 中转不写 `machines`，不解析 `register`。加入成功只看中台 `hub.db` | `fleets.workspaces` 不含未打开工作区的在线机器。不能用它单独判定加入 |
@@ -311,7 +316,12 @@ sequenceDiagram
 | 邀请 `fleet` 与 token 所属舰队不同 | 403 `FLEET_MISMATCH`，测试里的壳不写 `hubUrl` |
 | 桌面 token 调 `/mobile/workspaces` | 403 `OPERATOR_REQUIRED` |
 | `GET /desktop/health` | 200，正文含 `protocolVersion`，且没有对应的 `desk.http` |
-| 出门前的回环请求带 `?token=` | 到达中转的 URL 没有 `token` 查询参数，也没有 hub Bearer |
+| 出门前的回环请求带 `?token=` 和 `desktop=1` | 到达中转的 URL 没有 `token`，也没有 `desktop=1`，也没有 hub Bearer。iframe 本机地址仍是 `boardUrl` 的结果 |
+| 回环上的占位 token 对不上 | 壳不加桌面 Bearer，也不转发 |
+| `/` 与 `/assets/...` | 经 `/desktop/` 与 `/desktop/assets/...` 转到中台，15 秒时限。`/desktop/health` 仍不转发 |
+| 超过 64 KiB 的 JSON、JS 包或 8MB 附件 | `seq` 从 0 连续，最后一帧 `last: true` 之后才拼成完整正文。半截不交给下游。一条大文本帧不关闭桌面套接字 |
+| `/api/blobs` 经 `hubFetch` | `content-type` 仍是原请求的 multipart。`authorization` 在调用方头之后，且是中台 hub token |
+| 8MB 附件上传进行中 | 手机 `cmd.dispatch` 仍在 15 秒内返回 |
 | SSE 打开且 20 秒无业务包 | 连接仍在。其间 `cmd.dispatch` 在 15 秒内返回 |
 | 短 JSON 超过 15 秒 | 502 `HUB_TIMEOUT`。这条 SSE 不被这次超时关掉 |
 | 未知 `type` | `/hub` 保持。`/mobile/*` 行为与今天相同 |
@@ -347,7 +357,7 @@ sequenceDiagram
 - [x] 修订记录说明相对 `cc617c1` 改了什么
 - [ ] 同事再次评审通过
 
-骨架四项在 `cc617c1` 已通过。契约五项未通过，本次已按评审改写。最后一项未勾选之前，**不得**把本文标成实施基准，**不得**按第 7 节改生产代码。
+骨架四项在 `cc617c1` 已通过。`fec66c5` 的五条契约保留。`fec66c5` 评审指出的看板四条已写入本文。最后一项未勾选之前，**不得**把本文标成实施基准，**不得**按第 7 节改生产代码。
 
 ---
 
@@ -357,3 +367,4 @@ sequenceDiagram
 | --- | --- |
 | 2026-10-12 | 初稿。依据当天私网 TCP 超时、中转只读成功、210 快照无 Intel 机器，写出经中转的桌面加入方案，供主干评审 |
 | 2026-10-12 | 按 `cc617c1` 评审改契约：hub token 留在中台；SSE 与 `/desktop/ws` 不套 15 秒；补 `desk.*` 帧和 `streamId`；`desktop_token` 改为可空列再加唯一索引；加入成功只看 `machines.status=online`。核对台账写回 `192.168.1.196` 与 `192.168.2`。状态仍为待评审 |
+| 2026-10-12 | 按 `fec66c5` 评审补看板契约：iframe 使用 `boardUrl`（占位 token 与 `desktop=1` 只留在回环）；`/desktop/` 与 `/desktop/assets/...` 去掉前缀后按 15 秒转发；请求和响应以 `seq` 与 `last: true` 收齐，含超过 64 KiB 的正文和扩展文本帧；壳端口固定写入 `desktop-join.json`，回环先核对占位 token。`fec66c5` 的五条契约保留。状态仍为待评审 |
