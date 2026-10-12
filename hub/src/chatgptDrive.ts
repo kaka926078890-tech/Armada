@@ -39,7 +39,7 @@ async function ensureTarget(page: ChatgptPage, controls: ChatgptControl[], proje
   return page.controls();
 }
 
-/** 切到 Codex，打开目标，把文字放进输入框并点发送或排队。输入框里的字还在就算没发出去。 */
+/** 切到 Codex，打开目标，把文字放进输入框并点发送或排队。点下去不算成功；会话文件里出现用户句才算发出。 */
 export async function prepareAndSend(page: ChatgptPage, root: string, text: string): Promise<void> {
   const target = parseChatgptRoot(root);
   if (!target) throw new Error("CHATGPT_ROOT");
@@ -51,8 +51,6 @@ export async function prepareAndSend(page: ChatgptPage, root: string, text: stri
   controls = await page.controls();
   planSend(controls, text);
   await page.clickName(sendButtonName(controls));
-  const left = (await page.composerText()).trim();
-  if (left === text.trim()) throw new Error("CHATGPT_SEND_FAILED");
 }
 
 export function targetRoots(controls: ChatgptControl[]): string[] {

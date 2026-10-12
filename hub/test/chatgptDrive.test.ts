@@ -58,8 +58,9 @@ describe("prepareAndSend", () => {
     ]);
   });
 
-  test("text still in the composer is not a send", async () => {
+  test("text still in the composer does not fail the click", async () => {
     const page = pageOf([codex, codex, codex], "只回复 armada-hub-ok");
-    await expect(prepareAndSend(page, "chatgpt:desk", "只回复 armada-hub-ok")).rejects.toThrow("CHATGPT_SEND_FAILED");
+    await prepareAndSend(page, "chatgpt:desk", "只回复 armada-hub-ok");
+    expect(page.calls).toContain("click:发送");
   });
 });
