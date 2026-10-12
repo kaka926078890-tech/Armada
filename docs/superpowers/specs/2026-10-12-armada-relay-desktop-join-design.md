@@ -1,7 +1,7 @@
 # 跨网络受控机：经中转加入
 
 - 日期：2026-10-12
-- 状态：**待评审**。`cc617c1` 的评审结论是不通过。本文仍不是实施基准。再次评审通过之前不改生产代码，不部署 210。
+- 状态：**评审通过**。可作为实施基准。按第 7 节先写会失败的测试，再改生产代码。210 仍等阶段 4。
 - 父文档：[2026-09-12-armada-relay-mobile-design.md](./2026-09-12-armada-relay-mobile-design.md)（中转；手机走 `/mobile/*`；不把 `:7380` 映射到公网）
 - 核对台账：[2026-10-11-armada-cross-lan-fleet-probe.md](./2026-10-11-armada-cross-lan-fleet-probe.md)
 - 凭证：不要把 `~/.armada/token`、`relay.json` 的 `secret`、操作者 token、桌面 token 写进仓库、评审评论或截图。
@@ -15,7 +15,7 @@
 | 问题 | 另一网段的电脑要成为和局域网受控机一样的成员，并且它的 Armada 打开这支中台的完整看板。私网 `:7380` 不通。现有中转读接口不能登记机器 |
 | 核心方案 | 中台继续出站连接中转。桌面用新的 `armada-relay://desktop` 凭证把看板 HTTP 和扩展 `/ws` 经这条出站连接转回中台。机器仍只由 `Registry.onRegister` 写入 |
 | 关键约束 | ① 不把 `:7380` 映射到公网。② hub token 只在中台访问 `127.0.0.1` 时贴上，不抄到 Intel，不进入中转。③ 局域网 `armada://join` 与手机 `/mobile/*` 行为不变。④ 同一 `fleet` 仍只有一条中台连接。⑤ 短 JSON 与看板 SSE、扩展 WebSocket 分开计时 |
-| 明确不做 | 第二份中台；手机改看完整看板；在 Intel 上对着现有安装包继续试加入；未评审就改 `relay/src/server.ts` |
+| 明确不做 | 第二份中台；手机改看完整看板；在 Intel 上对着现有安装包继续试加入；未写先红测试就改 `relay/src/server.ts` |
 
 ```mermaid
 flowchart LR
@@ -38,7 +38,7 @@ flowchart LR
 | R2 | Intel 的 Armada 有中台完整看板 | 看板仍是中台 `hub/web` 的页面与 `/api/*`，经中转转发，不在中转重做一套 UI |
 | R3 | 加入方式不同 | 新邀请 `armada-relay://desktop`。局域网仍用 `armada://join?hub=<ip>:7380` |
 | R4 | 跨网络不依赖私网路由 | 中台出站，Intel 只访问中转的 HTTPS。不要求两边 `en0` 互通 |
-| R5 | 先评审再落地 | 本文合并到 `master` 后停。同事通过评审门禁之前不写生产代码 |
+| R5 | 先评审再落地 | 第 10 节已通过。生产代码从第 7 节阶段 1 开始，先红测试 |
 
 ---
 
@@ -81,7 +81,7 @@ flowchart LR
 
 | 阶段 | 做 | 不做 | 触发 |
 | --- | --- | --- | --- |
-| 评审 | 本文 | 生产代码、210 部署 | 当前 |
+| 评审 | 本文 | 生产代码、210 部署 | 已通过 |
 | v1 | 桌面凭证、转发、扩展经本机壳登记、Intel 打开完整看板 | 手机完整看板；多中台；改派发状态机 | 评审门禁通过 |
 | v1.5 | 看板静态资源在中转侧缓存 | 改变 `/api/*` 语义 | v1 真机看板上首屏超过 3 秒且剖面显示主要耗在静态文件 |
 | 不做 | — | 公网 `:7380`；用操作者 token 当桌面凭证 | — |
@@ -157,7 +157,11 @@ v1 迁移，单独函数，包在失败可继续启动的路径里：
 | 双向 | `desk.ws.frame` | `streamId`、`seq`、`last`、`data`（扩展现有文本帧） | 单帧 64 KiB。一条文本帧超过 64 KiB 时拆开，收齐后整段写入本机 `/ws`。不因为这一条大文本帧关闭桌面套接字。v1 不转发二进制帧；二进制仍以 1003 关闭这一条，不断开 `/hub` |
 | 双向 | `desk.ws.close` | `streamId`、`code`、`reason` | 至少原样送回 4001（未登记）和 4000（被替换） |
 
-请求和响应使用同一条拼包规则：`seq` 从 0 递增，最后一帧 `last: true`。收齐连续的 `0..n` 且见到 `last: true` 之后，才把完整正文交给本机 HTTP，或拼回给壳。缺序号、或短请求在 15 秒内没有 `last: true`，这条 `streamId` 以 502 结束，不把半截正文交给下游。看板会超过 64 KiB 的响应包括 `/api/runs/:id/events`、`/api/blobs/:id`（上限 `MAX_BLOB_BYTES` = 8MB，`hub/src/blobs.ts`）和页面的 JS 包。
+`desk.http`、`desk.http.result`、`desk.ws.frame` 使用同一条拼包规则：`seq` 从 0 递增，最后一帧 `last: true`。收齐连续的 `0..n` 且见到 `last: true` 之后，才把完整正文交给本机 HTTP，或拼回给壳。缺序号不把半截正文交给下游。
+
+15 秒按帧间空闲计算，不按整段正文计算。只有一帧的短 JSON：从发出到 `last: true` 超过 15 秒则 502。附件、JS 包、大 JSON 会有多帧：上一帧之后 15 秒内必须见到下一帧或 `last: true`，否则这条 `streamId` 502。整段上传或下载可以超过 15 秒。看板会超过 64 KiB 的响应包括 `/api/runs/:id/events`、`/api/blobs/:id`（上限 `MAX_BLOB_BYTES` = 8MB，`hub/src/blobs.ts`）和页面的 JS 包。
+
+`desk.stream.chunk` 没有 `last`。按 `seq` 顺序立刻写入 SSE 响应，不等待流结束，也不套上面的 15 秒。SSE 的结束只看 `desk.stream.end` 或连接断开。
 
 未知 `type`：中转和中台都忽略该帧，不关闭 `/hub`。中转先发布、中台仍是旧进程时，旧的 `createRelayCommandHandler` 会忽略非 `cmd.` 帧，`/mobile/*` 保持今天的行为。桌面短请求在 15 秒后 502，不占用 `waitHub`。
 
@@ -175,7 +179,7 @@ v1：
 | 来源 | 占位 token 在哪 | 代码 |
 | --- | --- | --- |
 | 页面、`EventSource`、扩展 `/ws` | 查询串 `token` | `boardUrl`、`App.tsx` 的 `/api/events?token=`、`api.ts` 的 `streamUrl`、扩展的 `ws://${hubUrl}/ws?token=` |
-| 看板的 `/api/*` | `Authorization: Bearer <占位>` | `hub/web/src/api.ts` 的 `req()` 和 `uploadBlob`。这些请求的路径上没有 `token` |
+| 看板的 `/api/*` | `Authorization: Bearer <占位>` | `hub/web/src/api.ts` 的 `req()`、`uploadBlob`、`getBlob`，以及 `RunDetail.tsx` 的 `/api/audit/export`。这些请求的路径上没有 `token`。认的是这个头，不是函数名单 |
 
 - 中台沿用 `hubFetch`。真正的 hub token 只加在 `http://127.0.0.1:${hubPort}` 上。v1 把 `authorization: Bearer ${opts.token}` 放在展开调用方头之后，调用方头不能覆盖它。默认 `content-type: application/json` 留在展开调用方头之前。现有 `cmd.*` 没有这个头，靠的就是这个默认值。`cmd.blobPut` 再用自己的 multipart 盖掉它。不要改成让 `cmd.*` 自己带 `content-type`。
 - 中台本机 `/ws` 升级仍对照 `~/.armada/token`（`hub/src/index.ts`）。这个查询参数由中台在回环上补上，不由中转或 Intel 提供。
@@ -208,7 +212,7 @@ sequenceDiagram
 | 回环核对 | 查询串 `token` 或 `Authorization: Bearer` 有一个等于占位值即可。对上之后删掉占位值，换上桌面 Bearer，再转发。两个位置都不是占位值时，不加桌面 Bearer，也不转发 |
 | `armada.hubUrl` | `127.0.0.1:<壳端口>`。端口固定 |
 | `armada.token` | 第 4.5 节的占位值 |
-| 再次打开 | `~/.armada/desktop-join.json`（mode `0600`）含 `relay`、`fleet`、桌面 token 和这个固定端口。不含 hub token。扩展只在 `activate` 里调用 `loadConfig()`（`extension/src/extension.ts`），已经打开的 Cursor 不会改连新端口。再次打开时先绑定文件里的端口，再等扩展重连。不必重贴邀请 |
+| 再次打开 | `~/.armada/desktop-join.json`（mode `0600`）含 `relay`、`fleet`、桌面 token 和这个固定端口。不含 hub token。扩展只在 `activate` 里调用 `loadConfig()`（`extension/src/extension.ts`），已经打开的 Cursor 不会改连新端口。再次打开时先绑定文件里的端口，再等扩展重连。该端口绑不上时，壳显示失败，不改用别的端口，也不改写已有 `hubUrl`。不必重贴邀请 |
 | 离开舰队 | 壳停掉回环监听，删除该文件，并清掉指向这个 `127.0.0.1` 端口的 `armada.hubUrl` 与占位 `armada.token`。不清局域网加入留下的其他地址 |
 
 邀请里的 `fleet` 与 token 查出的舰队不一致时，不写上述文件，也不写 Cursor 设置。
@@ -287,7 +291,7 @@ sequenceDiagram
 
 | 阶段 | 内容 | 验收 | 上线门禁 |
 | --- | --- | --- | --- |
-| 0 | 本文再次评审 | 第 10 节门禁全过，并有同事结论 | `cc617c1` 已不通过。未过则停止 |
+| 0 | 本文再次评审 | 第 10 节门禁全过 | 已通过。阶段 1 可以开始 |
 | 1 | 中转测试先红：迁移能在已有行上补齐各不相同的 `desktop_token`；无凭证与操作者 token 不能打开 `/desktop/ws`；桌面 SSE 打开时 `cmd.dispatch` 仍在 15 秒内返回 | `bun test relay/test` 新用例先红后绿 | 不部署 |
 | 2 | 中台在回环上为隧道补 hub token，仍走 `onRegister`。调用方头不能覆盖 `hubFetch` 的 Authorization | `bun test hub/test` 覆盖隧道登记；局域网 `/ws?token=` 用例仍绿 | 不部署 |
 | 3 | 桌面壳识别 `armada-relay://desktop`，只听 `127.0.0.1`，出门前去掉查询串 `token` | `desktop-core` 单测：中转加入不生成含 hub token 的公网 URL | 不给 Intel 装 |
@@ -329,7 +333,8 @@ sequenceDiagram
 | `/` 与 `/assets/...` | 经 `/desktop/` 与 `/desktop/assets/...` 转到中台，15 秒时限。`/desktop/health` 仍不转发 |
 | 超过 64 KiB 的 JSON、JS 包或 8MB 附件 | `seq` 从 0 连续，最后一帧 `last: true` 之后才拼成完整正文。半截不交给下游。一条大文本帧不关闭桌面套接字 |
 | `/api/blobs` 经 `hubFetch` | `content-type` 仍是原请求的 multipart。`authorization` 在调用方头之后，且是中台 hub token |
-| 8MB 附件上传进行中 | 手机 `cmd.dispatch` 仍在 15 秒内返回 |
+| 8MB 附件上传进行中，且总时长超过 15 秒 | 上传不被整段 15 秒掐断。帧间空闲超过 15 秒才 502。其间手机 `cmd.dispatch` 仍在 15 秒内返回 |
+| `desk.stream.chunk` | 按 `seq` 立刻下送。不因为没有 `last: true` 而攒完整段 SSE |
 | SSE 打开且 20 秒无业务包 | 连接仍在。其间 `cmd.dispatch` 在 15 秒内返回 |
 | 短 JSON 超过 15 秒 | 502 `HUB_TIMEOUT`。这条 SSE 不被这次超时关掉 |
 | 未知 `type` | `/hub` 保持。`/mobile/*` 行为与今天相同 |
@@ -352,7 +357,7 @@ sequenceDiagram
 
 `cc617c1` 里「隧道可看见 hub token」和「15 秒包住全部转发」两条已经撤掉。
 
-本文假定 Intel 安装的是带本次桌面壳的 Armada，且中台出站已经连着 210 上的中转。出站不在时，验收停在 503，不改判定标准。再次评审通过前，本文保持待评审。
+本文假定 Intel 安装的是带本次桌面壳的 Armada，且中台出站已经连着 210 上的中转。出站不在时，验收停在 503，不改判定标准。
 
 ---
 
@@ -363,9 +368,9 @@ sequenceDiagram
 - [x] 含非目标、风险、阻塞项（阶段 0）、验收
 - [x] 跨组件发布顺序已写明：中转 → 中台 → Intel 壳与扩展
 - [x] 修订记录说明相对 `cc617c1` 改了什么
-- [ ] 同事再次评审通过
+- [x] 同事再次评审通过
 
-骨架四项在 `cc617c1` 已通过。`fec66c5` 的五条契约保留。`64aba73` 的看板四条保留。占位 token 的两个位置已写入本文。最后一项未勾选之前，**不得**把本文标成实施基准，**不得**按第 7 节改生产代码。
+骨架四项在 `cc617c1` 已通过。`fec66c5` 的五条契约保留。`64aba73` 的看板四条保留。占位 token 的两个位置保留。本评审补上的只有：多帧正文按帧间空闲计 15 秒，SSE 不等 `last`。本文从此是实施基准。生产代码仍按第 7 节先红测试。
 
 ---
 
@@ -377,3 +382,4 @@ sequenceDiagram
 | 2026-10-12 | 按 `cc617c1` 评审改契约：hub token 留在中台；SSE 与 `/desktop/ws` 不套 15 秒；补 `desk.*` 帧和 `streamId`；`desktop_token` 改为可空列再加唯一索引；加入成功只看 `machines.status=online`。核对台账写回 `192.168.1.196` 与 `192.168.2`。状态仍为待评审 |
 | 2026-10-12 | 按 `fec66c5` 评审补看板契约：iframe 使用 `boardUrl`（占位 token 与 `desktop=1` 只留在回环）；`/desktop/` 与 `/desktop/assets/...` 去掉前缀后按 15 秒转发；请求和响应以 `seq` 与 `last: true` 收齐，含超过 64 KiB 的正文和扩展文本帧；壳端口固定写入 `desktop-join.json`，回环先核对占位 token。`fec66c5` 的五条契约保留。状态仍为待评审 |
 | 2026-10-12 | 按 `64aba73` 评审补占位 token 的两个位置：查询串 `token`，以及 `api.ts` 的 `Authorization: Bearer`。对上后删掉再换桌面 Bearer。`desk.http` 的 `path` 只删 `token`。`hubFetch` 的默认 `content-type: application/json` 留在展开调用方头之前。唯一索引用 `CREATE UNIQUE INDEX IF NOT EXISTS`，已存在不算失败。`64aba73` 的四条保留。状态仍为待评审 |
+| 2026-10-12 | 独立评审通过。多帧正文（附件、JS、大 JSON）改为帧间空闲 15 秒，整段可以超过 15 秒。`desk.stream.chunk` 按序立刻下送，不等 `last`。Bearer 占位同样覆盖 `getBlob` 与 `/api/audit/export`。保存的端口绑不上时不改端口、不改 `hubUrl`。状态改为评审通过 |
