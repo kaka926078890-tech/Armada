@@ -26,7 +26,7 @@ import { parsePendingAsk, continueAllowed, optionInAsk, isPlanAsk, mergePendingA
 import {
   OUTBOUND_LIMIT, QUEUE_DRAIN_MS, queueModeOf, transcriptUserPrompt,
 } from "./outboundClaim";
-import { matchRolloutTurn, readRollout, rolloutCardText, type RolloutTurn } from "./chatgptDesktop";
+import { matchRolloutTurn, parseChatgptRoot, readRollout, rolloutCardText, type RolloutTurn } from "./chatgptDesktop";
 
 const DISPATCH_TIMEOUT_MS = 30_000;
 
@@ -379,8 +379,84 @@ export class RunService {
     return this.attachHubGeneration(runId, "hub_windows");
   }
 
+  private chatgptRoots = new Set<string>();
+
+  setChatgptRoots(roots: string[]): void {
+    this.chatgptRoots = new Set(roots);
+  }
+
+  /** 上一条还没在 rollout 里出现用户句时，下一条继续排队。 */
+  private chatgptSendBusy(machineId: string): boolean {
+    const row = this.db.query(
+      `SELECT id FROM runs WHERE machine_id=?1 AND workspace_root LIKE 'chatgpt:%' AND status IN ('dispatched','binding') LIMIT 1`,
+    ).get(machineId);
+    return !!row;
+  }
+
+  claimChatgptSend(): { id: string; workspace_root: string; prompt: string } | null {
+    if (this.db.query(
+      `SELECT id FROM runs WHERE workspace_root LIKE 'chatgpt:%' AND status='binding' LIMIT 1`,
+    ).get()) return null;
+    const row = this.db.query(
+      `SELECT id, workspace_root, prompt, status FROM runs
+       WHERE workspace_root LIKE 'chatgpt:%' AND status IN ('queued','dispatched')
+       ORDER BY CASE status WHEN 'dispatched' THEN 0 ELSE 1 END, dispatch_seq ASC LIMIT 1`,
+    ).get() as { id: string; workspace_root: string; prompt: string } | null;
+    if (!row) return null;
+    this.setStatus(row.id, "binding", { started_at: Date.now(), queued_at: null }, "chatgpt");
+    return row;
+  }
+
+  failChatgpt(runId: string, reason: string): void {
+    const run = this.get(runId);
+    if (!run || this.terminal(run.status) || run.status === "running") return;
+    this.setStatus(runId, "error", { end_reason: reason }, "chatgpt");
+  }
+
+  expireUnboundChatgpt(olderThan: number): void {
+    const rows = this.db.query(
+      `SELECT id FROM runs WHERE workspace_root LIKE 'chatgpt:%' AND status='binding'
+       AND chatgpt_thread_id IS NULL AND started_at IS NOT NULL AND started_at < ?1`,
+    ).all(olderThan) as { id: string }[];
+    for (const row of rows) this.failChatgpt(row.id, "BIND_TIMEOUT");
+  }
+
+  activeChatgptRuns(): { id: string }[] {
+    return this.db.query(
+      `SELECT id FROM runs WHERE workspace_root LIKE 'chatgpt:%' AND status IN ('binding','running')`,
+    ).all() as { id: string }[];
+  }
+
+  private createChatgpt(machineId: string, workspaceRoot: string, prompt: string,
+                         opts: { attachmentIds?: string[] }) {
+    const m = this.registry.getMachine(machineId);
+    if (!m || m.status !== "online") return { error: "MACHINE_OFFLINE" };
+    if (!this.chatgptRoots.has(workspaceRoot)) return { error: "WORKSPACE_NOT_OPEN" };
+    const attachmentIds = opts.attachmentIds ?? [];
+    if (attachmentIds.length) return { error: "CHATGPT_TEXT_ONLY" };
+    if (!normalizePrompt(prompt)) return { error: "EMPTY_PROMPT" };
+    if (this.countOccupying(machineId) >= this.limits.maxPerMachine) return { error: "RUN_LIMIT" };
+    if (this.countOccupying(machineId, workspaceRoot) >= this.limits.maxPerWorkspace) return { error: "RUN_LIMIT" };
+    if (this.hasPromptCollision(machineId, workspaceRoot, prompt, [])) return { error: "PROMPT_COLLISION" };
+    const nextSeq = ((this.db.query(
+      `SELECT COALESCE(MAX(dispatch_seq), 0) AS n FROM runs WHERE machine_id=?1`,
+    ).get(machineId) as { n: number }).n) + 1;
+    const id = `r-${randomUUID()}`;
+    const status = this.chatgptSendBusy(machineId) ? "queued" : "dispatched";
+    const now = Date.now();
+    this.db.query(`INSERT INTO runs (id, machine_id, window_id, workspace_root, prompt, status, conversation_id, parent_run_id, created_at, queued_at, dispatch_seq, attachments)
+                   VALUES (?1,?2,NULL,?3,?4,?5,NULL,NULL,?6,?7,?8,'[]')`)
+      .run(id, machineId, workspaceRoot, prompt, status, now, status === "queued" ? now : null, nextSeq);
+    this.audit("operator", "run.create", id, { machineId, workspaceRoot, via: "chatgpt", status });
+    const queuePosition = status === "queued"
+      ? (this.db.query(`SELECT COUNT(*) AS n FROM runs WHERE machine_id=?1 AND status='queued' AND dispatch_seq<=?2`).get(machineId, nextSeq) as { n: number }).n
+      : 0;
+    return { run: this.get(id), queuePosition };
+  }
+
   create(machineId: string, workspaceRoot: string, prompt: string,
          opts: { parentRunId?: string; conversationId?: string; via?: "new" | "followup"; attachmentIds?: string[] } = {}) {
+    if (parseChatgptRoot(workspaceRoot)) return this.createChatgpt(machineId, workspaceRoot, prompt, opts);
     const m = this.registry.getMachine(machineId);
     if (!m || m.status !== "online") return { error: "MACHINE_OFFLINE" };
     if (!JSON.parse(m.open_workspaces).includes(workspaceRoot)) return { error: "WORKSPACE_NOT_OPEN" };
@@ -937,7 +1013,13 @@ export class RunService {
     const turn = turns.find((item) => item.turnId === turnId && (item.threadId === threadId || item.threadId === ""));
     if (!turn) return;
     this.writeChatgptTranscript(run, turn);
-    if (rolloutCardText(turn) != null) this.setStatus(runId, "completed", { end_reason: "completed" }, "chatgpt");
+    if (rolloutCardText(turn) != null) {
+      this.setStatus(runId, "completed", { end_reason: "completed" }, "chatgpt");
+      return;
+    }
+    if (run.status === "dispatched" || run.status === "binding" || run.status === "queued") {
+      this.setStatus(runId, "running", {}, "chatgpt");
+    }
   }
 
   private writeChatgptTranscript(run: { id: string; machine_id: string }, turn: RolloutTurn): void {

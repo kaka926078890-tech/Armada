@@ -90,6 +90,21 @@ describe("workspace slots and conversation filter", () => {
     expect(slots[0].cdpReady).toBe(false);
   });
 
+  test("ChatGPT targets sit beside Cursor folders under the same machine", () => {
+    const slots = listWorkspaceSlots([
+      {
+        id: "m-1", name: "a", os: "darwin", status: "online", open_workspaces: '["/ws/a"]', cdp_ready: true,
+        chatgpt_workspaces: [
+          { root: "chatgpt:", label: "普通区", ready: true },
+          { root: "chatgpt:desk", label: "desk", ready: true },
+        ],
+      },
+    ]);
+    expect(slots.map((s) => s.label ?? s.root)).toEqual(["/ws/a", "普通区", "desk"]);
+    expect(slots[1].cdpReady).toBe(true);
+    expect(slots[2].root).toBe("chatgpt:desk");
+  });
+
   test("cdp_ready true marks slots injectable", () => {
     const slots = listWorkspaceSlots([
       { id: "m-1", name: "a", os: "darwin", status: "online", open_workspaces: '["/ws/a"]', cdp_ready: true },

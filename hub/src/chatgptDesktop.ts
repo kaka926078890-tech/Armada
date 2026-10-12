@@ -59,6 +59,57 @@ function visibleComposer(controls: ChatgptControl[]): ChatgptControl {
   return box;
 }
 
+export const CHATGPT_NORMAL_ROOT = "chatgpt:";
+
+export function chatgptProjectRoot(name: string): string {
+  return `chatgpt:${name}`;
+}
+
+/** 普通区是 null。不是 ChatGPT 目标时返回 null 以外的空。 */
+export function parseChatgptRoot(root: string): { project: string | null } | null {
+  if (root === CHATGPT_NORMAL_ROOT) return { project: null };
+  if (!root.startsWith("chatgpt:")) return null;
+  const name = root.slice("chatgpt:".length);
+  if (!name || name === "monitor") return null;
+  return { project: name };
+}
+
+/** 中台列出来的是普通区加上每个已有项目。最近和聊天标题不是目标。 */
+export function boardTargets(controls: ChatgptControl[]): { root: string; label: string }[] {
+  const projects = listWorkspaces(controls).filter((item) => item.kind === "project");
+  return [
+    { root: CHATGPT_NORMAL_ROOT, label: "普通区" },
+    ...projects.map((item) => ({ root: chatgptProjectRoot(item.name), label: item.name })),
+  ];
+}
+
+export function codexComposer(controls: ChatgptControl[]): boolean {
+  return controls.some((control) => onScreen(control) && (control.name === "随心输入" || control.name === "与 Codex 协作"));
+}
+
+export function inNormalArea(controls: ChatgptControl[]): boolean {
+  return controls.some((control) => onScreen(control) && control.name === "选择项目");
+}
+
+/** 已经在 Codex 输入框时不用再点。否则指针打开模式菜单，再点 Codex 那一项。 */
+export function planCodexMode(controls: ChatgptControl[]): { pointer: { x: number; y: number }; item: string } | null {
+  if (codexComposer(controls)) return null;
+  const buttons = controls.filter((control) => onScreen(control) && control.kind === "button" && control.name.startsWith("切换模式"));
+  const button = buttons.find((control) => !control.name.includes("Codex")) ?? buttons[0];
+  if (!button) throw new Error("CHATGPT_MODE_MISSING");
+  return { pointer: center(button), item: "Codex 构建、调试和发布" };
+}
+
+export function composerFocus(controls: ChatgptControl[]): { name: string; x: number; y: number } {
+  const box = visibleComposer(controls);
+  return { name: box.name, x: box.x + 30, y: box.y + Math.min(16, box.h / 2) };
+}
+
+export function sendButtonName(controls: ChatgptControl[]): "排队" | "发送" {
+  const queued = controls.some((control) => onScreen(control) && control.name === "排队" && !control.disabled);
+  return queued ? "排队" : "发送";
+}
+
 export function listWorkspaces(controls: ChatgptControl[]): ChatgptWorkspace[] {
   const projects = controls
     .filter((control) => onScreen(control) && control.kind === "button" && OPEN_PROJECT.test(control.name))

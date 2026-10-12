@@ -82,7 +82,7 @@ function ReloadChrome({
 }
 
 export default function Sidebar({
-  slots, machines, allRuns, selectedKey, onSelectWorkspace, readMap, onDispatch, onRename,
+  slots, machines, allRuns, selectedKey, onSelectWorkspace, readMap, onDispatch, onRename, onMonitorChatgpt,
   showDesktopActions, onOpenWorkspace, onRepairCdp, onGetShareLink, onReloadMachine, reloadMachineIds,
   reloadPending, reloadBusy, requiredVsix, packNotice, quietUnread = false,
 }: {
@@ -94,6 +94,7 @@ export default function Sidebar({
   readMap: Record<string, number>;
   onDispatch: () => void;
   onRename: (machineId: string, displayName: string) => void;
+  onMonitorChatgpt?: () => void;
   showDesktopActions?: boolean;
   onOpenWorkspace?: () => void;
   onRepairCdp?: () => void;
@@ -111,6 +112,7 @@ export default function Sidebar({
   const canDispatch = !!selected?.online && selected.cdpReady;
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const [monitoring, setMonitoring] = useState(false);
 
   const hostOf = (id: string) => machines.find((m) => m.id === id)?.name ?? "";
   const lagOf = (id: string) => packNotice
@@ -198,24 +200,53 @@ export default function Sidebar({
                 onReload={onReloadMachine}
               />
             ) : null}
-            {g.workspaces.map((s) => {
+            {g.workspaces.map((s, index) => {
+              const gpt = s.root.startsWith("chatgpt:");
+              const prevGpt = index > 0 && g.workspaces[index - 1].root.startsWith("chatgpt:");
+              const showCursor = !gpt && (index === 0) && g.workspaces.some((item) => item.root.startsWith("chatgpt:"));
+              const showGpt = gpt && !prevGpt;
               const key = encodeWorkspaceKey(s.machineId, s.root);
               const wsRuns = filterRunsByWorkspace(allRuns, s.machineId, s.root);
               const unread = workspaceUnreadCount(wsRuns, readMap);
               const live = workspaceHasLiveRun(wsRuns);
+              const title = s.label || workspaceFolderName(s.root);
               return (
-                <button
-                  key={key}
-                  onClick={() => onSelectWorkspace(key)}
-                  className={`w-full text-left pl-7 pr-3 py-1 flex items-center gap-1.5 ${key === selectedKey ? "bg-sidebar-accent text-sidebar-accent-foreground" : "hover:bg-sidebar-accent/50 text-muted-foreground"}`}
-                >
-                  <span className="text-muted-foreground text-[12px] shrink-0">–</span>
-                  <span className="min-w-0 flex-1 flex items-center gap-1.5">
-                    <span className={`min-w-0 truncate ${UI_TYPE}`} title={s.root}>{workspaceFolderName(s.root)}</span>
-                    {live ? <LiveSpinner /> : null}
-                  </span>
-                  <UnreadCount n={unread} quiet={quietUnread} />
-                </button>
+                <div key={key}>
+                  {showCursor ? <div className={`pl-7 pr-3 pt-1 ${UI_META} text-muted-foreground`}>Cursor</div> : null}
+                  {showGpt ? <div className={`pl-7 pr-3 pt-1 ${UI_META} text-muted-foreground`}>ChatGPT</div> : null}
+                  {s.root === "chatgpt:monitor" ? (
+                    <div className="pl-7 pr-3 py-1">
+                      <div className={`${UI_TYPE} text-amber-400`}>需要用监控启动</div>
+                      <Button
+                        type="button"
+                        size="xs"
+                        variant="outline"
+                        className="mt-1"
+                        disabled={monitoring}
+                        onClick={() => {
+                          if (!onMonitorChatgpt || monitoring) return;
+                          setMonitoring(true);
+                          Promise.resolve(onMonitorChatgpt()).finally(() => setMonitoring(false));
+                        }}
+                      >
+                        {monitoring ? "正在打开…" : "用监控方式打开"}
+                      </Button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => onSelectWorkspace(key)}
+                      className={`w-full text-left pl-7 pr-3 py-1 flex items-center gap-1.5 ${key === selectedKey ? "bg-sidebar-accent text-sidebar-accent-foreground" : "hover:bg-sidebar-accent/50 text-muted-foreground"}`}
+                    >
+                      <span className="text-muted-foreground text-[12px] shrink-0">–</span>
+                      <span className="min-w-0 flex-1 flex items-center gap-1.5">
+                        <span className={`min-w-0 truncate ${UI_TYPE}`} title={s.label ? s.root : s.root}>{title}</span>
+                        {live ? <LiveSpinner /> : null}
+                      </span>
+                      <UnreadCount n={unread} quiet={quietUnread} />
+                    </button>
+                  )}
+                </div>
               );
             })}
           </div>

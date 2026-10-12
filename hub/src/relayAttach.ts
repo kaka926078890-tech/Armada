@@ -75,7 +75,7 @@ export function attachWithConfig(
       const reload = await (await hubFetch("/api/cursor-reload")).json().catch(() => null);
       if (Array.isArray(machines)) {
         const fp = JSON.stringify({
-          machines: machines.map((m: any) => [m.id, m.status, m.open_workspaces ?? m.openWorkspaces, m.cdp_ready ?? null, m.extension_version ?? m.extensionVersion ?? null]),
+          machines: machines.map((m: any) => [m.id, m.status, m.open_workspaces ?? m.openWorkspaces, m.chatgpt_workspaces ?? null, m.cdp_ready ?? null, m.extension_version ?? m.extensionVersion ?? null]),
           reload,
         });
         if (fp !== lastMachinesFp) {

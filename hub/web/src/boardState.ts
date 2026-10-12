@@ -98,6 +98,7 @@ export type WorkspaceSlot = {
   machineName: string;
   os: string;
   root: string;
+  label?: string;
   online: boolean;
   cdpReady: boolean;
 };
@@ -180,6 +181,7 @@ export function reloadPendingForMachine(
 export function listWorkspaceSlots(machines: Array<{
   id: string; name: string; os: string; status: string; open_workspaces: string; display_name?: string | null;
   cdp_ready?: boolean | null;
+  chatgpt_workspaces?: { root: string; label: string; ready: boolean }[];
 }>): WorkspaceSlot[] {
   const out: WorkspaceSlot[] = [];
   for (const m of machines) {
@@ -187,12 +189,19 @@ export function listWorkspaceSlots(machines: Array<{
     try {
       const parsed = JSON.parse(m.open_workspaces || "[]");
       if (Array.isArray(parsed)) roots = parsed.filter((x): x is string => typeof x === "string");
-    } catch { continue; }
+    } catch { /* 这一台的 Cursor 列表坏了，ChatGPT 列仍要留 */ }
     for (const root of roots) {
       out.push({
         machineId: m.id, machineName: machineLabel(m), os: m.os, root,
         online: m.status === "online",
         cdpReady: m.cdp_ready === true,
+      });
+    }
+    for (const item of m.chatgpt_workspaces ?? []) {
+      if (!item || typeof item.root !== "string") continue;
+      out.push({
+        machineId: m.id, machineName: machineLabel(m), os: m.os, root: item.root,
+        label: item.label, online: true, cdpReady: item.ready === true,
       });
     }
   }

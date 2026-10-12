@@ -206,6 +206,7 @@ export function startRelayClient(opts: {
   runs: RunService;
   db: Database;
   sse: SseHub;
+  listMachines?: () => unknown[];
 }): { stop: () => void } | null {
   const cfg = loadRelayConfig(opts.home);
   if (!cfg) return null;
@@ -232,7 +233,7 @@ export function startRelayClient(opts: {
   const pushWorkspaces = () => {
     send({
       type: "snap.workspaces",
-      machines: opts.registry.listMachines(),
+      machines: opts.listMachines ? opts.listMachines() : opts.registry.listMachines(),
       cursorReload: cursorReloadView(opts.home, opts.registry.listMachines()),
     });
   };

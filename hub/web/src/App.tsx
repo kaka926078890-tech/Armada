@@ -496,7 +496,8 @@ export default function App() {
           selectedKey={resolvedWs}
           onSelectWorkspace={selectWorkspace}
           readMap={readMap}
-          onDispatch={() => { if (preset) { reloadSnippets(); setDispatchOpen(true); } }}
+          onDispatch={() => { if (preset && preset.workspaceRoot !== "chatgpt:monitor") { reloadSnippets(); setDispatchOpen(true); } }}
+          onMonitorChatgpt={() => api.monitorChatgpt().then(refresh)}
           onRename={(id, displayName) => { api.renameMachine(id, displayName).then(refresh); }}
           showDesktopActions={desktop}
           onOpenWorkspace={() => requestDesktop("open-workspace")}
@@ -577,7 +578,7 @@ export default function App() {
         <DispatchModal
           machines={machines}
           preset={preset}
-          presetLabel={`${presetSlot?.machineName ?? preset.machineId} · ${workspaceFolderName(preset.workspaceRoot)}`}
+          presetLabel={`${presetSlot?.machineName ?? preset.machineId} · ${presetSlot?.label ?? workspaceFolderName(preset.workspaceRoot)}`}
           activeOnWorkspace={filterRunsByWorkspace(runs, preset.machineId, preset.workspaceRoot)
             .filter((r) => ["queued", "dispatched", "binding", "running"].includes(r.status)).length}
           snippets={snippets}

@@ -22,6 +22,7 @@ const ERR: Record<string, string> = {
   WORKSPACE_NOT_OPEN: "工作区未打开",
   MACHINE_OFFLINE: "机器离线",
   CDP_NOT_READY: CDP_NOT_READY_COPY,
+  CHATGPT_TEXT_ONLY: "ChatGPT 这一版只派发文字",
 };
 
 function parseWorkspaces(raw: string | undefined): { workspaces: string[]; parseFailed: boolean } {
@@ -64,8 +65,10 @@ export function DispatchModal({
   const { workspaces, parseFailed } = machineId ? parseWorkspaces(raw) : { workspaces: [] as string[], parseFailed: false };
   const locked = !!preset;
   const selectedMachine = machineId ? online.find((m) => m.id === machineId) : undefined;
-  const injectReady = selectedMachine?.cdp_ready === true;
-  const canDispatch = !!machineId && !!workspace && (!!prompt.trim() || files.length > 0) && !sending && injectReady;
+  const chatgpt = workspace.startsWith("chatgpt:") && workspace !== "chatgpt:monitor";
+  const gptReady = !!selectedMachine?.chatgpt_workspaces?.some((item) => item.root === workspace && item.ready);
+  const injectReady = chatgpt ? gptReady : selectedMachine?.cdp_ready === true;
+  const canDispatch = !!machineId && !!workspace && (!!prompt.trim() || files.length > 0) && !sending && injectReady && (!chatgpt || files.length === 0);
 
   const submitDispatch = () => {
     if (!machineId || !workspace || (!prompt.trim() && files.length === 0)) return;
@@ -120,8 +123,17 @@ export function DispatchModal({
             该工作区已有 {activeOnWorkspace} 个任务在跑或排队，并行可能争用同一批文件。
           </div>
         )}
-        {selectedMachine && !injectReady && (
+        {chatgpt && (
+          <div className={`${UI_TYPE} text-muted-foreground`}>模式：Codex</div>
+        )}
+        {selectedMachine && !injectReady && !chatgpt && (
           <div className={`${UI_TYPE} text-destructive`}>{CDP_NOT_READY_COPY}</div>
+        )}
+        {chatgpt && !injectReady && (
+          <div className={`${UI_TYPE} text-destructive`}>ChatGPT 调试口没开，不能派发。</div>
+        )}
+        {chatgpt && files.length > 0 && (
+          <div className={`${UI_TYPE} text-destructive`}>ChatGPT 这一版只派发文字</div>
         )}
         <PromptSnippetBar
           snippets={snippets}

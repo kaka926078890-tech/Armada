@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
   libraryAddReady,
+  boardTargets,
   listWorkspaces,
   openWorkspace,
+  planCodexMode,
   planAttach,
   matchRolloutTurn,
   planSend,
@@ -52,6 +54,37 @@ describe("listWorkspaces", () => {
       { kind: "project", name: "desk" },
     ]);
     expect(listWorkspaces(projectMenu)).toEqual([]);
+  });
+});
+
+describe("boardTargets", () => {
+  test("dispatch lists 普通区 and projects, not 最近 or chat titles", () => {
+    expect(boardTargets(sidebar)).toEqual([
+      { root: "chatgpt:", label: "普通区" },
+      { root: "chatgpt:armada-probe", label: "armada-probe" },
+      { root: "chatgpt:desk", label: "desk" },
+    ]);
+  });
+});
+
+describe("planCodexMode", () => {
+  test("a Codex composer does not open the mode menu", () => {
+    const controls: ChatgptControl[] = [
+      { name: "切换模式，当前模式：Codex", kind: "button", x: 62, y: 54, w: 108, h: 32 },
+      { name: "随心输入", kind: "textbox", x: 568, y: 779, w: 712, h: 44 },
+    ];
+    expect(planCodexMode(controls)).toBeNull();
+  });
+
+  test("ChatGPT mode points at the mode button and the Codex menu item", () => {
+    const controls: ChatgptControl[] = [
+      { name: "切换模式，当前模式：ChatGPT", kind: "button", x: 62, y: 54, w: 108, h: 32 },
+      { name: "询问 ChatGPT", kind: "textbox", x: 597, y: 823, w: 540, h: 36 },
+    ];
+    expect(planCodexMode(controls)).toEqual({
+      pointer: { x: 116, y: 70 },
+      item: "Codex 构建、调试和发布",
+    });
   });
 });
 

@@ -1181,6 +1181,19 @@ export function createRelayServer(opts: {
               });
             }
           }
+          const gpt = Array.isArray(m.chatgpt_workspaces) ? m.chatgpt_workspaces : [];
+          for (const item of gpt) {
+            if (!item || typeof item.root !== "string" || item.root === "chatgpt:monitor") continue;
+            slots.push({
+              machineId: m.id ?? m.machineId,
+              workspaceRoot: item.root,
+              label: typeof item.label === "string" && item.label ? item.label : labelOf(item.root),
+              machineName: machineLabel(m),
+              os: typeof m.os === "string" ? m.os : "",
+              online: item.ready === true || m.status !== "offline",
+              cdpReady: item.ready === true,
+            });
+          }
           }
           db.query("UPDATE fleets SET workspaces=?1 WHERE id=?2").run(JSON.stringify(slots), fleetId);
           const reload = parseCursorReloadSnap(msg.cursorReload);

@@ -23,6 +23,8 @@ export const api = {
     else if (opts?.afterSeq != null) p.set("afterSeq", String(opts.afterSeq));
     return req(`/api/runs/${id}/events?${p}`).then((r) => r.json());
   },
+  monitorChatgpt: () =>
+    req("/api/chatgpt/monitor", { method: "POST", body: "{}" }).then((r) => r.json()),
   dispatch: (machineId: string, workspaceRoot: string, prompt: string, attachmentIds: string[] = []) =>
     req("/api/runs", { method: "POST", body: JSON.stringify({ machineId, workspaceRoot, prompt, attachmentIds }) }).then((r) => r.json()),
   followup: (id: string, prompt: string, attachmentIds: string[] = []) =>

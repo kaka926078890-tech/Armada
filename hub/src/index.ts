@@ -20,6 +20,7 @@ import { fileHttpStatus, WorkspaceFileBroker } from "./workspaceFileBroker";
 import { operatorChatTurns } from "../web/src/chatView";
 import type { RunEvent } from "../web/src/types";
 import { pruneHubLogs } from "./pruneLogs";
+import { ChatgptBridge } from "./chatgptBridge";
 
 export interface HubServer {
   server: ReturnType<typeof Bun.serve>;
@@ -31,7 +32,7 @@ export interface HubServer {
   stop: () => void;
 }
 
-export function createServer(opts: { port?: number; hostname?: string; home?: string; concurrency?: ConcurrencyLimits; vsixSearchDirs?: string[]; fileReadTimeoutMs?: number } = {}): HubServer {
+export function createServer(opts: { port?: number; hostname?: string; home?: string; concurrency?: ConcurrencyLimits; vsixSearchDirs?: string[]; fileReadTimeoutMs?: number; chatgpt?: boolean } = {}): HubServer {
   const home = ARMADA_HOME(opts.home);
   const token = loadToken(home);
   const db = openDb(home);
@@ -43,6 +44,7 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
   const blobs = new BlobStore(db, home);
   const tickets = new JoinTickets(db);
   const runs = new RunService(db, registry, sse, { limits, blobs });
+  const chatgpt = new ChatgptBridge(db, runs, registry, sse);
   const fileBroker = new WorkspaceFileBroker(opts.fileReadTimeoutMs);
   const vsixDirs = opts.vsixSearchDirs ?? vsixPackSearchDirs(process.cwd());
   const packPresent = () => findVsixPack(REQUIRED_EXTENSION_VERSION, vsixDirs) != null;
@@ -105,7 +107,12 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
     tickets.revoke();
     return c.json({ ok: true });
   });
-  app.get("/api/machines", (c) => c.json(registry.listMachines()));
+  app.get("/api/machines", (c) => c.json(chatgpt.machines(registry.listMachines())));
+  app.post("/api/chatgpt/monitor", async (c) => {
+    const result = await chatgpt.launchMonitor();
+    if ("error" in result) return c.json(result, 409);
+    return c.json(result);
+  });
   app.get("/api/cursor-reload", (c) => {
     return c.json(reloadView());
   });
@@ -414,12 +421,17 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
     if (dropped.events >= 10_000) db.exec("VACUUM");
   }, 60 * 60 * 1000);
   const port = server.port!;
-  const relay = startRelayClient({ home, hubPort: port, token, registry, runs, db, sse });
+  if (opts.chatgpt) chatgpt.start();
+  const relay = startRelayClient({
+    home, hubPort: port, token, registry, runs, db, sse,
+    listMachines: () => chatgpt.machines(registry.listMachines()),
+  });
   return {
     server, db, registry, runs, token,
     port,
     stop() {
       fileBroker.dispose();
+      chatgpt.stop();
       relay?.stop();
       clearInterval(sweepTimer);
       clearInterval(logTimer);
@@ -433,7 +445,7 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
 if (import.meta.main) {
   const lan = process.argv.includes("--lan");
   const limits = limitsFromEnv();
-  const s = createServer({ hostname: lan ? "0.0.0.0" : "127.0.0.1", concurrency: limits });
+  const s = createServer({ hostname: lan ? "0.0.0.0" : "127.0.0.1", concurrency: limits, chatgpt: true });
   console.log(`armada-hub listening on http://${s.server.hostname}:${s.port} (token in ${ARMADA_HOME()}/token)`);
   console.log(`armada-hub concurrency=v2-slot N=${limits.maxPerMachine} M=${limits.maxPerWorkspace} multiWindow=${limits.multiRunPerWindow ? 1 : 0}`);
 }

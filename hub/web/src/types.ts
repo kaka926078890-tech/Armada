@@ -4,6 +4,8 @@ export interface Machine {
   open_workspaces: string; status: string; last_seen_at: number | null;
   display_name?: string | null;
   cdp_ready?: boolean | null;
+  chatgpt_workspaces?: { root: string; label: string; ready: boolean }[];
+  chatgpt_port?: "absent" | "down" | "ready";
 }
 export interface RunEvent {
   id: number; run_id: string; seq: number; source: string;
