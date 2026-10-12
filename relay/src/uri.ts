@@ -1,6 +1,7 @@
 export type PairInvite = { kind: "pair"; relay: string; fleet: string; code?: string; secret?: string };
 export type OpInvite = { kind: "op"; relay: string; fleet: string; token: string };
-export type RelayInvite = PairInvite | OpInvite;
+export type DesktopInvite = { kind: "desktop"; relay: string; fleet: string; token: string };
+export type RelayInvite = PairInvite | OpInvite | DesktopInvite;
 export type RelayUriError = { error: "invalid" | "incomplete" | "insecure" };
 
 const FLEET_RE = /^[a-z0-9-]{8,64}$/;
@@ -32,6 +33,11 @@ export function formatOpUri(relay: string, fleet: string, token: string): string
   return `armada-relay://op?${q}`;
 }
 
+export function formatDesktopUri(relay: string, fleet: string, token: string): string {
+  const q = new URLSearchParams({ relay, fleet, token });
+  return `armada-relay://desktop?${q}`;
+}
+
 export function parseRelayUri(input: string): RelayInvite | RelayUriError {
   let url: URL;
   try {
@@ -43,6 +49,7 @@ export function parseRelayUri(input: string): RelayInvite | RelayUriError {
   const path = `${url.hostname}${url.pathname}`.replace(/\/+$/, "");
   const kind = path === "pair" || path === "//pair" ? "pair"
     : path === "op" || path === "//op" ? "op"
+    : path === "desktop" || path === "//desktop" ? "desktop"
     : null;
   if (!kind) return { error: "invalid" };
   const relayRaw = url.searchParams.get("relay")?.trim() ?? "";
@@ -60,7 +67,7 @@ export function parseRelayUri(input: string): RelayInvite | RelayUriError {
   }
   const token = url.searchParams.get("token")?.trim() ?? "";
   if (!HEX64.test(token)) return { error: "incomplete" };
-  return { kind: "op", relay: origin, fleet, token };
+  return { kind, relay: origin, fleet, token };
 }
 
 export function encodeWorkspaceId(machineId: string, workspaceRoot: string): string {

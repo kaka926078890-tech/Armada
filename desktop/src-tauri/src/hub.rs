@@ -547,7 +547,7 @@ pub fn resolve_hub_root_from(
     Err("hub-root-missing".into())
 }
 
-fn find_bun(resource_dir: Option<&Path>) -> Result<PathBuf, String> {
+pub(crate) fn find_bun(resource_dir: Option<&Path>) -> Result<PathBuf, String> {
     let env_bun = env::var("ARMADA_DESKTOP_BUN").ok();
     find_bun_from(
         env_bun.as_deref().map(Path::new),

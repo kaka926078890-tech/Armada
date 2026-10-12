@@ -7,10 +7,19 @@ import { runDisplayName } from "../web/src/boardState";
 import type { RunEvent } from "../web/src/types";
 import { canRetryStatus, LIVE_STATUSES, TERMINAL_STATUSES } from "./concurrency";
 import { createRelayCommandHandler, startRelayHeartbeat } from "./relayCommandHandler";
+import { createDeskTunnel } from "./deskTunnel";
 import { cursorReloadView } from "./cursorReloadStore";
 import type { Registry } from "./registry";
 import type { RunService } from "./runs";
 import type { SseHub } from "./sse";
+
+export function hubLoopbackHeaders(token: string, caller?: HeadersInit): HeadersInit {
+  return {
+    "content-type": "application/json",
+    ...(caller as Record<string, string> | undefined),
+    authorization: `Bearer ${token}`,
+  };
+}
 
 const HEX64 = /^[a-f0-9]{64}$/;
 const FLEET_RE = /^[a-z0-9-]{8,64}$/;
@@ -275,14 +284,15 @@ export function startRelayClient(opts: {
   const hubFetch = (path: string, init?: RequestInit) =>
     fetch(`http://127.0.0.1:${opts.hubPort}${path}`, {
       ...init,
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${opts.token}`,
-        ...(init?.headers ?? {}),
-      },
+      headers: hubLoopbackHeaders(opts.token, init?.headers),
     });
 
   const onCommand = createRelayCommandHandler({ hubFetch, snapOf, send });
+  const onDesk = createDeskTunnel({
+    hubFetch,
+    send,
+    localWsUrl: `ws://127.0.0.1:${opts.hubPort}/ws?token=${encodeURIComponent(opts.token)}`,
+  });
 
   const connect = () => {
     if (stopped) return;
@@ -298,6 +308,10 @@ export function startRelayClient(opts: {
     next.addEventListener("message", (e) => {
       let msg: any;
       try { msg = JSON.parse(String(e.data)); } catch { return; }
+      if (typeof msg?.type === "string" && msg.type.startsWith("desk.")) {
+        void onDesk(msg);
+        return;
+      }
       void onCommand(msg);
     });
     const retry = () => {

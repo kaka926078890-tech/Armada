@@ -1,5 +1,6 @@
 mod attach;
 mod cursor;
+mod desktop_join;
 mod discovery;
 mod hub;
 mod run_alert;
@@ -21,6 +22,9 @@ pub fn run() {
             hub::create_fleet,
             hub::ensure_owned_hub,
             hub::join_fleet,
+            desktop_join::start_desktop_join,
+            desktop_join::restore_desktop_join,
+            desktop_join::stop_desktop_join,
             hub::quit_owned_hub,
             hub::start_fleet_browse,
             hub::stop_fleet_browse,
@@ -39,6 +43,7 @@ pub fn run() {
             tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }
         ) {
             hub::quit_owned_inner(&app_handle.state::<HubState>());
+            desktop_join::stop_loopback_process();
         }
     });
 }

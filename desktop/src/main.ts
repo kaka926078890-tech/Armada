@@ -27,6 +27,7 @@ import {
   restoreDecisionNotice,
   restoreHubCopy,
   isLocalOwnedBoard,
+  newPlaceholderToken,
   selectShareCandidate,
   serializeBoardSession,
   shareJoinUri,
@@ -37,6 +38,7 @@ import {
   type LocalAttachView,
   type ShareCandidate,
 } from "../../desktop-core/src/index.ts";
+import { parseRelayUri } from "../../relay/src/uri.ts";
 
 const errEl = () => document.querySelector<HTMLParagraphElement>("#err");
 const uriEl = () => document.querySelector<HTMLInputElement>("#join-uri");
@@ -386,7 +388,12 @@ function leaveBoard() {
     .catch(() => {
       /* attach mode has no owned child */
     })
-    .finally(() => applyLandingMode(mode));
+    .finally(() => {
+      void invoke("stop_desktop_join").catch(() => {
+        /* no relay join file */
+      });
+      applyLandingMode(mode);
+    });
 }
 
 function rememberShareFromCreate(candidates: ShareCandidate[], token: string) {
@@ -408,6 +415,27 @@ async function copyShare() {
 }
 
 function joinFromPaste(raw: string) {
+  const relayInvite = parseRelayUri(raw.trim());
+  if (!("error" in relayInvite) && relayInvite.kind === "desktop") {
+    if (!canStartJoin(joinInFlight)) return;
+    joinInFlight = true;
+    setErr("");
+    setBusy(true);
+    void invoke<{ webviewOrigin: string; token: string }>("start_desktop_join", {
+      relay: relayInvite.relay,
+      fleet: relayInvite.fleet,
+      desktopToken: relayInvite.token,
+      placeholder: newPlaceholderToken(),
+      port: 0,
+    })
+      .then((r) => openBoard(r.webviewOrigin, r.token))
+      .catch((e) => setErr(fleetErrorMessage(String(e))))
+      .finally(() => {
+        joinInFlight = false;
+        setBusy(false);
+      });
+    return;
+  }
   if (!canStartJoin(joinInFlight)) return;
   const parsed = parsePastedJoin(raw);
   if ("error" in parsed) {
@@ -475,11 +503,23 @@ window.addEventListener("DOMContentLoaded", () => {
   modeCreate()?.addEventListener("change", () => applyLandingMode("create"));
   modeJoin()?.addEventListener("change", () => applyLandingMode("join"));
 
-  if (canCreate && (!lastBoard || isLocalOwnedBoard(lastBoard.origin))) {
-    void restoreOwnedHub();
-  } else if (lastBoard) {
-    openBoard(lastBoard.origin, lastBoard.token);
-  }
+  void (async () => {
+    try {
+      const restored = await invoke<{ webviewOrigin: string; token: string } | null>("restore_desktop_join");
+      if (restored) {
+        openBoard(restored.webviewOrigin, restored.token);
+        return;
+      }
+    } catch (e) {
+      setErr(fleetErrorMessage(String(e)));
+      return;
+    }
+    if (canCreate && (!lastBoard || isLocalOwnedBoard(lastBoard.origin))) {
+      void restoreOwnedHub();
+    } else if (lastBoard) {
+      openBoard(lastBoard.origin, lastBoard.token);
+    }
+  })();
   startHubWatchdog();
 
   document.querySelector("#create")?.addEventListener("click", () => {
