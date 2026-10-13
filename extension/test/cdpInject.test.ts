@@ -1430,6 +1430,36 @@ describe("AskQuestion CDP driver", () => {
     expect(hit).not.toEqual({ present: false });
   });
 
+  test("inspect: a hung evaluate times out as unknown and releases the session", async () => {
+    let closed = false;
+    const driver = createAskQuestionDriver(deps({
+      callTimeoutMs: 40,
+      connect: async () => ({
+        call() { return new Promise(() => {}); },
+        close() { closed = true; },
+      }),
+    }));
+    const hit = await driver.inspect("/Users/x/armada-test-ws");
+    expect(hit).toEqual({ unknown: true, reason: "CDP_CALL_TIMEOUT" });
+    expect(closed).toBe(true);
+  });
+
+  test("inspect: a hung window-stamp read is skipped so the poll can return", async () => {
+    const driver = createAskQuestionDriver(deps({
+      windowId: "win-a",
+      callTimeoutMs: 40,
+      connect: async () => ({
+        call() { return new Promise(() => {}); },
+        close() {},
+      }),
+    }));
+    const started = Date.now();
+    const hit = await driver.inspect("/Users/x/armada-test-ws");
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(hit).toMatchObject({ unknown: true });
+    expect(hit).not.toEqual({ present: false });
+  });
+
   test("plan inspect maps CDP value through planInspectToAsk(parsePlanInspect)", async () => {
     const raw = {
       present: true,

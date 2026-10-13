@@ -42,6 +42,26 @@ export interface CdpSubmitterDeps {
   log?: (s: string) => void;
   /** vscode.env.sessionId；缺省时不扫 stamp，选窗只走标题切段。 */
   windowId?: string;
+  /** Runtime.evaluate 不返回时的上限。缺省 4s。卡住的 target 不能占住 Ask 轮询。 */
+  callTimeoutMs?: number;
+}
+
+/** 一次 CDP 调用的上限。Ask 轮询拿不到结果就当 unknown，下一拍再扫。 */
+export const CDP_CALL_TIMEOUT_MS = 4000;
+
+export function withCallTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("CDP_CALL_TIMEOUT")), ms);
+    work.then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      (e) => { clearTimeout(timer); reject(e instanceof Error ? e : new Error(String(e))); },
+    );
+  });
+}
+
+function callBudget(deps: CdpSubmitterDeps): number {
+  const n = deps.callTimeoutMs;
+  return typeof n === "number" && Number.isFinite(n) && n > 0 ? n : CDP_CALL_TIMEOUT_MS;
 }
 
 export const WINDOW_STAMP_ATTR = "data-armada-window-id";
@@ -743,12 +763,12 @@ export const PLAN_CLICK_BUILD_JS = `function () {
 
 export type AskCdpInspect = AskInspect;
 
-async function readWindowStamp(session: CdpSession): Promise<string | null> {
+async function readWindowStamp(session: CdpSession, timeoutMs: number): Promise<string | null> {
   try {
-    const v = await session.call("Runtime.evaluate", {
+    const v = await withCallTimeout(session.call("Runtime.evaluate", {
       expression: WINDOW_STAMP_READ_EXPRESSION,
       returnByValue: true,
-    });
+    }), timeoutMs);
     const val = v?.result?.value;
     return typeof val === "string" && val ? val : null;
   } catch {
@@ -772,6 +792,7 @@ async function connectWorkspacePage(
   if (!listed.ok) return { ok: false, reason: "CDP_UNREACHABLE" };
   const targets = listed.body as any[];
   const windowId = typeof deps.windowId === "string" ? deps.windowId.trim() : "";
+  const timeoutMs = callBudget(deps);
   if (windowId) {
     const pages = (Array.isArray(targets) ? targets : []).filter(
       (t) => t?.type === "page" && typeof t.webSocketDebuggerUrl === "string" && t.webSocketDebuggerUrl,
@@ -780,7 +801,7 @@ async function connectWorkspacePage(
     for (const t of pages) {
       try {
         const session = await connect(String(t.webSocketDebuggerUrl), 2000);
-        const stamp = await readWindowStamp(session);
+        const stamp = await readWindowStamp(session, timeoutMs);
         opened.push({
           session,
           stamp,
@@ -797,10 +818,10 @@ async function connectWorkspacePage(
     };
     const writeStamp = async (session: CdpSession) => {
       try {
-        await session.call("Runtime.evaluate", {
+        await withCallTimeout(session.call("Runtime.evaluate", {
           expression: windowStampWriteExpression(windowId),
           returnByValue: true,
-        });
+        }), timeoutMs);
       } catch (e) {
         log(`window stamp write failed: ${String(e)}`);
       }
@@ -852,18 +873,20 @@ export function createAskQuestionDriver(deps: CdpSubmitterDeps) {
   async function inspect(workspaceRoot: string): Promise<AskCdpInspect> {
     const hit = await connectWorkspacePage(deps, workspaceRoot);
     if (!hit.ok) return { unknown: true, reason: hit.reason };
+    const timeoutMs = callBudget(deps);
     try {
-      const ask = parseAskInspect(await hit.session.call("Runtime.evaluate", {
+      const ask = parseAskInspect(await withCallTimeout(hit.session.call("Runtime.evaluate", {
         expression: `(${ASK_INSPECT_JS})()`, returnByValue: true,
-      }).then((x) => x?.result?.value));
+      }).then((x) => x?.result?.value), timeoutMs));
       if (ask.present && ask.options.length > 0) return ask;
       return planInspectToAsk(parsePlanInspect(
-        await hit.session.call("Runtime.evaluate", {
+        await withCallTimeout(hit.session.call("Runtime.evaluate", {
           expression: `(${PLAN_INSPECT_JS})()`, returnByValue: true,
-        }).then((x) => x?.result?.value),
+        }).then((x) => x?.result?.value), timeoutMs),
       ));
     } catch (e) {
-      return { unknown: true, reason: `CDP_EVAL_FAIL:${String(e)}` };
+      const msg = e instanceof Error ? e.message : String(e);
+      return { unknown: true, reason: msg === "CDP_CALL_TIMEOUT" ? msg : `CDP_EVAL_FAIL:${msg}` };
     } finally {
       hit.session.close();
     }
