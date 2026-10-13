@@ -1,6 +1,9 @@
 import type { RunEvent } from "./types";
 import { displayUserText } from "../../../extension/src/imageMarkers";
+import { CURSOR_INTERNAL_CONTEXT_MARKERS } from "../../src/outboundClaim";
 import { optionIdsCollide } from "./askOptions";
+
+export { CURSOR_INTERNAL_CONTEXT_MARKERS };
 
 export type ChatBlock =
   | { kind: "user"; text: string; seq: number; imageIds?: string[] }
@@ -178,12 +181,6 @@ export const CURSOR_PROTOCOL_USER_PREFIXES = [
   "Perform any necessary follow-up actions",
   "Implement the plan as specified",
   "Briefly inform the user about the task result",
-] as const;
-
-/** Cursor 塞进 jsonl user 行的内部目录；不是操作员输入。必须带尖括号，避免「帮我看看 available_subagent_types」被误收。 */
-export const CURSOR_INTERNAL_CONTEXT_MARKERS = [
-  "<available_subagent_types>",
-  "<available_subagent_models>",
 ] as const;
 
 /** Cursor 协议注入的用户句，不是操作员输入；详情不画成气泡。不参与忙/闲。 */

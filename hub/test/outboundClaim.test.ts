@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { extractUserText, transcriptUserPrompt, hookSubmitPrompt, queueModeOf } from "../src/outboundClaim";
+import { extractUserText, transcriptUserPrompt, statusUserPrompt, hookSubmitPrompt, queueModeOf } from "../src/outboundClaim";
 
 describe("outboundClaim", () => {
   test("extractUserText strips wrappers", () => {
@@ -20,5 +20,15 @@ describe("outboundClaim", () => {
   });
   test("hook submit prompt normalizes", () => {
     expect(hookSubmitPrompt({ prompt: "  排队句  " })).toBe("排队句");
+  });
+
+  test("statusUserPrompt ignores Cursor internal catalogs and keeps operator text", () => {
+    const user = (text: string) => ({ role: "user", message: { content: [{ type: "text", text }] } });
+    expect(statusUserPrompt(user("<available_subagent_types>\nAvailable subagent_types\n</available_subagent_types>"))).toBeNull();
+    expect(statusUserPrompt(user("<available_subagent_models>\nAvailable models\n</available_subagent_models>"))).toBeNull();
+    expect(statusUserPrompt(user("<user_query>\n打完包了再通知我\n</user_query>"))).toBe("打完包了再通知我");
+    expect(statusUserPrompt(user("<user_query>\n帮我看看 available_subagent_types 是什么\n</user_query>"))).toBe("帮我看看 available_subagent_types 是什么");
+    expect(statusUserPrompt(user("<user_query>Briefly inform the user about the task result.</user_query>"))).toBe("Briefly inform the user about the task result.");
+    expect(statusUserPrompt({ role: "assistant", message: { content: [{ type: "text", text: "<available_subagent_types>" }] } })).toBeNull();
   });
 });

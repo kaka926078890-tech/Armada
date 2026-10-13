@@ -24,7 +24,7 @@ import { BlobStore, parseAttachmentIds, type BlobMeta } from "./blobs";
 import { appendRetired, decideArm, decideStop, parseRetiredIds, isWindowsMachineOs, genOf, stopFromCursorSessionEnd, isResumeStallError } from "./generationOwnership";
 import { parsePendingAsk, continueAllowed, optionInAsk, isPlanAsk, mergePendingAskRecord, ASK_TEXT_MAX } from "./pendingAsk";
 import {
-  OUTBOUND_LIMIT, QUEUE_DRAIN_MS, queueModeOf, transcriptUserPrompt,
+  OUTBOUND_LIMIT, QUEUE_DRAIN_MS, queueModeOf, statusUserPrompt,
 } from "./outboundClaim";
 import { matchRolloutTurn, parseChatgptRoot, readRollout, rolloutCardText, type RolloutTurn } from "./chatgptDesktop";
 
@@ -799,10 +799,11 @@ export class RunService {
 
   /**
    * resume 空转把本卡打成 error 之后，Cursor 会在同一条对话里自动追问并继续跑。
-   * 有正文的新用户句一到就回到 running；只有时间戳的空行不算追问。
+   * 操作员或协议用户句一到就回到 running；内部目录和只有时间戳的空行不算追问。
+   * 不在这里签发或退役 generation。
    */
   reopenAfterResumeStall(runId: string, payload: unknown): boolean {
-    if (!transcriptUserPrompt(payload)) return false;
+    if (!statusUserPrompt(payload)) return false;
     const run = this.get(runId);
     if (!run || run.status !== "error" || !isResumeStallError(run.end_reason)) return false;
     this.setStatus(runId, "running", { ended_at: null, end_reason: null }, "extension");
@@ -835,7 +836,7 @@ export class RunService {
     const run = this.get(runId);
     if (!run) return;
     // BIND_TIMEOUT / DISPATCH_TIMEOUT 误杀后真实事件仍可能到达
-    const recoverable = this.isFalseBindTimeout(run) || this.isFalseDispatchTimeout(run);
+    const recoverable = this.isFalseBindTimeout(run) || this.isFalseDispatchTimeout(run) || this.isRecoverableResumeStall(run, payload);
     if (!(ACTIVE_STATUSES as readonly string[]).includes(run.status) && !recoverable) return;
     const retired = this.retiredState(run);
     const live = genOf(run.live_generation_id);
@@ -880,9 +881,23 @@ export class RunService {
     } else {
       return;
     }
-    this.persistGeneration(runId, null, appendRetired(retired, run.live_generation_id));
+    const keepLive = s === "error"
+      && isResumeStallError(payload?.error)
+      && !this.cancelRequested.has(runId)
+      && !this.isUserAbort(payload);
+    if (!keepLive) this.persistGeneration(runId, null, appendRetired(retired, run.live_generation_id));
     this.cancelRequested.delete(runId);
     this.promoteNextQueued(run.machine_id);
+  }
+
+  /** 空转已写成 error 且 live 还在。两边 generation 都非空才放行，空对空不进 STOP_NO_GEN_INITIAL。 */
+  private isRecoverableResumeStall(
+    run: { status: string; end_reason: string | null; live_generation_id?: string | null },
+    payload: { generation_id?: unknown },
+  ): boolean {
+    const live = genOf(run.live_generation_id);
+    if (!live || run.status !== "error" || !isResumeStallError(run.end_reason)) return false;
+    return genOf(payload?.generation_id) === live;
   }
 
   sweepTimeouts(now = Date.now()) {
@@ -923,7 +938,44 @@ export class RunService {
       this.maybeReplayDeferredStop(r.id, { ignoreOpenChildren: snap.reason === "BG_DRAIN" });
     }
     this.replayCursorSessionEndStops();
+    for (const machineId of this.sweepOrphanRunning()) machines.add(machineId);
     for (const machineId of machines) this.promoteNextQueued(machineId);
+  }
+
+  /**
+   * live 已被空转退役、卡又被内部用户句拉回 running 时，decideStop 会 STOP_NO_GEN。
+   * 这里直接收口，不进 onStopEvent。
+   */
+  private sweepOrphanRunning(): string[] {
+    const rows = this.db.query(
+      `SELECT id, machine_id FROM runs
+       WHERE status='running' AND (live_generation_id IS NULL OR trim(live_generation_id)='')`,
+    ).all() as { id: string; machine_id: string }[];
+    const machines: string[] = [];
+    for (const r of rows) {
+      if (this.unconsumedOutboundCount(r.id) > 0) continue;
+      const ended = this.db.query(
+        `SELECT seq, payload FROM run_events
+         WHERE run_id=?1 AND source='transcript' AND json_extract(payload, '$.type')='turn_ended'
+         ORDER BY seq DESC LIMIT 1`,
+      ).get(r.id) as { seq: number; payload: string } | null;
+      if (!ended) continue;
+      let body: { status?: unknown };
+      try { body = JSON.parse(ended.payload); } catch { continue; }
+      if (body.status !== "success") continue;
+      const later = this.db.query(
+        `SELECT 1 AS n FROM run_events
+         WHERE run_id=?1 AND source='transcript' AND seq>?2
+           AND json_extract(payload, '$.role')='user'
+           AND instr(payload, '<user_query>') > 0
+         LIMIT 1`,
+      ).get(r.id, ended.seq) as { n: number } | null;
+      if (later) continue;
+      this.setStatus(r.id, "completed", { end_reason: "completed" }, "hub");
+      this.audit("hub", "STOP_ORPHAN_RUNNING", r.id);
+      machines.push(r.machine_id);
+    }
+    return machines;
   }
 
   /** Latest Cursor sessionEnd on a live run. `generating` stays busy; teardown maps to stop. */

@@ -1515,4 +1515,178 @@ describe("event ingest", () => {
     expect(after.end_reason).toBe("completed");
     ws.close();
   });
+
+  // r-6aa7207c: seq 171 turn_ended error retires live today; seq 191 internal user
+  // reopens running; seq 199/200 then hit STOP_NO_GEN / STOP_GEN_RETIRED.
+  const STALL = "Agent turn stopped after repeated resume attempts made no progress";
+  const STALL_GEN = "3b920548-784b-4d5c-9b54-2d7ee2676bbe";
+
+  function transcriptEv(runId: string, seq: number, payload: unknown) {
+    return { type: "run.event", runId, source: "transcript", seq, ts: Date.now(), payload };
+  }
+
+  test("r-6aa7207c: internal catalog does not reopen, and the same gen turn_ended success completes", async () => {
+    const { ws, api, runId } = await startBoundRun();
+    const snap = async () => (await (await api(`/api/runs/${runId}`)).json()) as any;
+    ws.send(JSON.stringify(ev(runId, 1, "beforeSubmitPrompt", {
+      conversation_id: "cid-1", generation_id: STALL_GEN, prompt: "打完包了再通知我",
+    })));
+    await new Promise((r) => setTimeout(r, 80));
+    ws.send(JSON.stringify(transcriptEv(runId, 2, {
+      type: "turn_ended", status: "error", error: STALL,
+    })));
+    await new Promise((r) => setTimeout(r, 80));
+    ws.send(JSON.stringify(ev(runId, 3, "stop", {
+      status: "error", error: STALL, generation_id: STALL_GEN, conversation_id: "cid-1",
+    })));
+    await new Promise((r) => setTimeout(r, 80));
+    const stalled = await snap();
+    expect(stalled.status).toBe("error");
+    expect(stalled.end_reason).toBe(STALL);
+    expect(stalled.live_generation_id).toBe(STALL_GEN);
+    expect(JSON.parse(stalled.retired_generation_ids || "[]")).not.toContain(STALL_GEN);
+
+    ws.send(JSON.stringify(transcriptEv(runId, 4, {
+      role: "user",
+      message: { content: [{ type: "text", text: "<available_subagent_types>\nAvailable subagent_types and a quick description of what they do:\n</available_subagent_types>" }] },
+    })));
+    await new Promise((r) => setTimeout(r, 80));
+    const catalog = await snap();
+    expect(catalog.status).toBe("error");
+    expect(catalog.live_generation_id).toBe(STALL_GEN);
+
+    ws.send(JSON.stringify(transcriptEv(runId, 5, { type: "turn_ended", status: "success" })));
+    await new Promise((r) => setTimeout(r, 120));
+    const done = await snap();
+    expect(done.status).toBe("completed");
+    expect(done.end_reason).toBe("completed");
+    expect(done.live_generation_id).toBeNull();
+    expect(JSON.parse(done.retired_generation_ids || "[]")).toContain(STALL_GEN);
+    ws.close();
+  });
+
+  test("r-6aa7207c: same generation stop completed after resume stall completes", async () => {
+    const { ws, api, runId } = await startBoundRun();
+    const snap = async () => (await (await api(`/api/runs/${runId}`)).json()) as any;
+    ws.send(JSON.stringify(ev(runId, 1, "beforeSubmitPrompt", {
+      conversation_id: "cid-1", generation_id: STALL_GEN, prompt: "打完包了再通知我",
+    })));
+    await new Promise((r) => setTimeout(r, 80));
+    ws.send(JSON.stringify(transcriptEv(runId, 2, {
+      type: "turn_ended", status: "error", error: STALL,
+    })));
+    await new Promise((r) => setTimeout(r, 80));
+    const stalled = await snap();
+    expect(stalled.live_generation_id).toBe(STALL_GEN);
+    ws.send(JSON.stringify(ev(runId, 3, "stop", {
+      status: "completed", generation_id: STALL_GEN, conversation_id: "cid-1",
+    })));
+    await new Promise((r) => setTimeout(r, 120));
+    const done = await snap();
+    expect(done.status).toBe("completed");
+    expect(done.end_reason).toBe("completed");
+    expect(done.live_generation_id).toBeNull();
+    ws.close();
+  });
+
+  test("resume stall does not retire live; a later BSP still ignores the old generation stop", async () => {
+    const next = "836ee87e-798d-45db-a766-c6dac22b0382";
+    const { ws, api, runId } = await startBoundRun();
+    const snap = async () => (await (await api(`/api/runs/${runId}`)).json()) as any;
+    ws.send(JSON.stringify(ev(runId, 1, "beforeSubmitPrompt", {
+      conversation_id: "cid-1", generation_id: STALL_GEN, prompt: "打完包了再通知我",
+    })));
+    await new Promise((r) => setTimeout(r, 80));
+    ws.send(JSON.stringify(transcriptEv(runId, 2, {
+      type: "turn_ended", status: "error", error: STALL,
+    })));
+    await new Promise((r) => setTimeout(r, 80));
+    ws.send(JSON.stringify(transcriptEv(runId, 3, {
+      role: "user",
+      message: { content: [{ type: "text", text: "<user_query>\n打完包了再通知我\n</user_query>" }] },
+    })));
+    await new Promise((r) => setTimeout(r, 80));
+    const reopened = await snap();
+    expect(reopened.status).toBe("running");
+    expect(reopened.live_generation_id).toBe(STALL_GEN);
+
+    ws.send(JSON.stringify(ev(runId, 4, "beforeSubmitPrompt", {
+      conversation_id: "cid-1", generation_id: next, prompt: "下一轮",
+    })));
+    await new Promise((r) => setTimeout(r, 80));
+    const armed = await snap();
+    expect(armed.live_generation_id).toBe(next);
+    expect(JSON.parse(armed.retired_generation_ids || "[]")).toContain(STALL_GEN);
+
+    ws.send(JSON.stringify(ev(runId, 5, "stop", {
+      status: "completed", generation_id: STALL_GEN, conversation_id: "cid-1",
+    })));
+    await new Promise((r) => setTimeout(r, 80));
+    expect((await snap()).status).toBe("running");
+    ws.send(JSON.stringify(ev(runId, 6, "stop", {
+      status: "completed", generation_id: next, conversation_id: "cid-1",
+    })));
+    await new Promise((r) => setTimeout(r, 120));
+    expect((await snap()).status).toBe("completed");
+    ws.close();
+  });
+
+  test("sweepTimeouts completes a running card whose live gen is already empty after turn_ended success", async () => {
+    const { ws, api, runId } = await startBoundRun();
+    hub!.db.query(
+      `INSERT INTO run_events (run_id, seq, machine_id, ext_seq, source, hook_event_name, payload, ts, post_terminal)
+       VALUES (?1, 1, 'm-1', 91001, 'hub', 'beforeSubmitPrompt', ?2, ?3, 0)`,
+    ).run(runId, JSON.stringify({ prompt: "打完包了再通知我" }), Date.now());
+    ws.send(JSON.stringify(transcriptEv(runId, 2, {
+      role: "user",
+      message: { content: [{ type: "text", text: "<user_query>\n打完包了再通知我\n</user_query>" }] },
+    })));
+    ws.send(JSON.stringify(transcriptEv(runId, 3, {
+      role: "user",
+      message: { content: [{ type: "text", text: "<available_subagent_types>\nAvailable subagent_types\n</available_subagent_types>" }] },
+    })));
+    ws.send(JSON.stringify(transcriptEv(runId, 4, { type: "turn_ended", status: "success" })));
+    await new Promise((r) => setTimeout(r, 120));
+    hub!.db.query(
+      "UPDATE runs SET status='running', live_generation_id=NULL, end_reason=NULL, ended_at=NULL, retired_generation_ids=?1 WHERE id=?2",
+    ).run(JSON.stringify([STALL_GEN]), runId);
+    const before = (await (await api(`/api/runs/${runId}`)).json()) as any;
+    expect(before.status).toBe("running");
+    expect(before.live_generation_id).toBeNull();
+    hub!.runs.sweepTimeouts();
+    const after = (await (await api(`/api/runs/${runId}`)).json()) as any;
+    expect(after.status).toBe("completed");
+    expect(after.end_reason).toBe("completed");
+    const audits = hub!.db.query(
+      "SELECT COUNT(*) AS n FROM audit WHERE target=?1 AND action='STOP_ORPHAN_RUNNING'",
+    ).get(runId) as { n: number };
+    expect(audits.n).toBe(1);
+    ws.close();
+  });
+
+  test("sweepTimeouts leaves the card running when a user_query or outbound follows turn_ended", async () => {
+    const { ws, api, runId } = await startBoundRun();
+    const park = () => hub!.db.query(
+      "UPDATE runs SET status='running', live_generation_id=NULL, end_reason=NULL, ended_at=NULL WHERE id=?1",
+    ).run(runId);
+    ws.send(JSON.stringify(transcriptEv(runId, 1, { type: "turn_ended", status: "success" })));
+    ws.send(JSON.stringify(transcriptEv(runId, 2, {
+      role: "user",
+      message: { content: [{ type: "text", text: "<user_query>\n再改一处\n</user_query>" }] },
+    })));
+    await new Promise((r) => setTimeout(r, 120));
+    park();
+    hub!.runs.sweepTimeouts();
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).status).toBe("running");
+
+    hub!.db.query(
+      `INSERT INTO run_outbound (id, run_id, prompt, attachments, expected_mode, state, created_at)
+       VALUES ('o-stall', ?1, '还在注入', '[]', 'queue', 'injecting', ?2)`,
+    ).run(runId, Date.now());
+    hub!.db.query("DELETE FROM run_events WHERE run_id=?1 AND seq=2").run(runId);
+    park();
+    hub!.runs.sweepTimeouts();
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).status).toBe("running");
+    ws.close();
+  });
 });

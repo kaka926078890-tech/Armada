@@ -13,12 +13,30 @@ export function queueModeOf(raw: unknown): "queue" | "steer" | "unknown" {
   return raw === "queue" || raw === "steer" ? raw : "unknown";
 }
 
+/** Cursor 塞进 jsonl user 行的内部目录。必须带尖括号，避免只是提到这两个词。 */
+export const CURSOR_INTERNAL_CONTEXT_MARKERS = [
+  "<available_subagent_types>",
+  "<available_subagent_models>",
+] as const;
+
+function userMessageText(payload: any): string {
+  const parts = Array.isArray(payload?.message?.content) ? payload.message.content : [];
+  return parts.filter((c: any) => c?.type === "text").map((c: any) => String(c.text ?? "")).join("\n");
+}
+
 export function transcriptUserPrompt(payload: any): string | null {
   if (payload?.role !== "user") return null;
-  const parts = Array.isArray(payload?.message?.content) ? payload.message.content : [];
-  const text = parts.filter((c: any) => c?.type === "text").map((c: any) => String(c.text ?? "")).join("\n");
-  const n = normalizePrompt(extractUserText(text));
+  const n = normalizePrompt(extractUserText(userMessageText(payload)));
   return n || null;
+}
+
+/** 这段用户正文能不能改 run 状态。内部目录返回 null。协议续聊仍返回正文。 */
+export function statusUserPrompt(payload: unknown): string | null {
+  const text = transcriptUserPrompt(payload);
+  if (!text) return null;
+  const raw = userMessageText(payload);
+  if (CURSOR_INTERNAL_CONTEXT_MARKERS.some((marker) => raw.includes(marker))) return null;
+  return text;
 }
 
 export function hookSubmitPrompt(payload: any): string | null {
