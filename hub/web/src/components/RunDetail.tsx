@@ -101,6 +101,19 @@ export default function RunDetail({
   const [run, setRun] = useState<RunRow | null>(null);
   const [events, setEvents] = useState<RunEvent[]>([]);
   const [followup, setFollowup] = useState("");
+  const followupRef = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const el = followupRef.current;
+    if (!el) return;
+    const sync = () => {
+      el.style.overflowY = "hidden";
+      el.style.overflowY = el.scrollHeight - el.clientHeight > 4 ? "auto" : "hidden";
+    };
+    sync();
+    const ro = new ResizeObserver(sync);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [followup]);
   const [followupFiles, setFollowupFiles] = useState<File[]>([]);
   const [followupError, setFollowupError] = useState("");
   const [cancelError, setCancelError] = useState("");
@@ -598,6 +611,7 @@ export default function RunDetail({
           ) : null}
           <div className="flex gap-2 items-end">
             <Textarea
+              ref={followupRef}
               value={followup}
               onChange={(e) => setFollowup(e.target.value)}
               onPaste={(e) => {
@@ -616,7 +630,7 @@ export default function RunDetail({
               }}
               rows={3}
               placeholder={run.pending_ask ? (run.pending_ask.kind === "plan" ? "请先点上方 Build…" : "请先回答上方选择题…") : "接着说。Enter 发送，Shift+Enter 换行"}
-              className="followup-input flex-1 min-h-[4.5rem] max-h-48 resize-y"
+              className="followup-input min-w-0 flex-1 min-h-[4.5rem] max-h-48 resize-y"
             />
             <Button type="submit" disabled={!injectReady || sending || (!followup.trim() && followupFiles.length === 0)} className="shrink-0">发送</Button>
           </div>

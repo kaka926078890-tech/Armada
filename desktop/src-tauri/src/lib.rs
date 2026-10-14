@@ -4,6 +4,7 @@ mod desktop_join;
 mod discovery;
 mod hub;
 mod run_alert;
+mod titlebar;
 
 use hub::HubState;
 use tauri::Manager;
@@ -32,7 +33,9 @@ pub fn run() {
             cursor::cdp_status,
             cursor::open_workspace,
             cursor::pick_workspace,
-            run_alert::show_run_alert
+            run_alert::show_run_alert,
+            titlebar::hub_ui_theme,
+            titlebar::set_titlebar_theme
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application");

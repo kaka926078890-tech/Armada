@@ -157,9 +157,23 @@ html[data-theme="light"] {
   }
 }
 
+.machine-list {
+  scrollbar-width: none;
+}
+.machine-list::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
 .followup-input {
   field-sizing: fixed;
-  overflow-y: auto;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.followup-input::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 .mermaid-block { max-width: 100%; min-width: 0; }
 .mermaid-block svg { display: block; max-width: 100%; height: auto; }

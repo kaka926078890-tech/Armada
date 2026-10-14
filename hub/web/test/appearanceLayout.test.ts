@@ -49,7 +49,15 @@ describe("appearance layout stays coordinated when text scales", () => {
     const board = readFileSync(join(web, "src/components/Board.tsx"), "utf8");
     const button = readFileSync(join(web, "src/components/ui/button.tsx"), "utf8");
     const detail = readFileSync(join(web, "src/components/RunDetail.tsx"), "utf8");
+    const css = readFileSync(join(web, "src/index.css"), "utf8");
     expect(sidebar).toContain("w-60");
+    expect(sidebar).toContain("overflow-hidden");
+    expect(sidebar).toContain("machine-list min-h-0 flex-1 overflow-x-hidden overflow-y-auto");
+    expect(sidebar).not.toContain("ScrollArea");
+    expect(css).toMatch(/\.machine-list\s*\{[^}]*scrollbar-width:\s*none/);
+    expect(css).toMatch(/\.followup-input\s*\{[^}]*overflow-x:\s*hidden/);
+    expect(css).toMatch(/\.followup-input\s*\{[^}]*scrollbar-width:\s*none/);
+    expect(detail).toContain("min-w-0");
     expect(button).toContain("whitespace-nowrap");
     expect(board).toContain("min-w-0");
     expect(board).toContain("overflow-x-hidden");

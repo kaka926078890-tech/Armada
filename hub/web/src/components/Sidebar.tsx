@@ -8,7 +8,6 @@ import {
 } from "../boardState";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
-import { ScrollArea } from "./ui/scroll-area";
 import { UI_BODY, UI_META, UI_TYPE } from "../ui";
 
 function UnreadCount({ n, quiet }: { n: number; quiet: boolean }) {
@@ -125,7 +124,7 @@ export default function Sidebar({
   };
 
   return (
-    <aside className="w-60 shrink-0 border-r border-border flex flex-col bg-muted/40 text-sidebar-foreground overflow-x-hidden">
+    <aside className="w-60 shrink-0 min-h-0 border-r border-border flex flex-col bg-muted/40 text-sidebar-foreground overflow-hidden">
       <div className="flex items-center gap-2.5 px-4 pt-4 pb-3">
         <div className="flex size-8 items-center justify-center rounded-lg bg-foreground text-background text-[13px] font-semibold">A</div>
         <div className="min-w-0">
@@ -158,7 +157,7 @@ export default function Sidebar({
       {packNotice ? (
         <div className={`px-3 pb-2 ${UI_META} text-amber-400 leading-snug`}>{packNotice}</div>
       ) : null}
-      <ScrollArea className="flex-1">
+      <div className="machine-list min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
         {groups.length === 0 && (
           <div className={`px-3 py-4 ${UI_META} text-muted-foreground`}>暂无在线工作区</div>
         )}
@@ -278,7 +277,7 @@ export default function Sidebar({
           </div>
           );
         })}
-      </ScrollArea>
+      </div>
     </aside>
   );
 }

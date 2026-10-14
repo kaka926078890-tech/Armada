@@ -263,7 +263,10 @@ function openBoard(origin: string, token: string, fromNeedToken = false) {
     frame.hidden = false;
     frame.src = url;
     document.body.classList.add("board-open");
-    frame.addEventListener("load", () => flushPendingOpen(frame), { once: true });
+    frame.addEventListener("load", () => {
+      flushPendingOpen(frame);
+      if (appliedWindowTheme) applyWindowTheme(appliedWindowTheme);
+    }, { once: true });
     return;
   }
   window.location.assign(url);
@@ -377,16 +380,40 @@ function wireRunAlertClick() {
     });
 }
 
+let appliedWindowTheme: "light" | "dark" | null = null;
+
+function colorSchemeMeta(theme: "light" | "dark") {
+  let meta = document.querySelector<HTMLMetaElement>('meta[name="color-scheme"]');
+  if (!meta) {
+    meta = document.createElement("meta");
+    meta.name = "color-scheme";
+    document.head.appendChild(meta);
+  }
+  meta.content = theme;
+}
+
 function applyWindowTheme(theme: "light" | "dark") {
+  appliedWindowTheme = theme;
   document.documentElement.dataset.theme = theme;
   document.documentElement.style.colorScheme = theme;
+  colorSchemeMeta(theme);
   const board = document.getElementById("board");
   if (board instanceof HTMLElement) {
     board.style.background = theme === "light" ? "#ffffff" : "#09090b";
   }
-  void import("@tauri-apps/api/window")
-    .then(({ getCurrentWindow }) => getCurrentWindow().setTheme(theme))
-    .catch(() => { /* browser preview has no window theme */ });
+  void invoke("set_titlebar_theme", { theme }).catch(() => {
+    void import("@tauri-apps/api/window")
+      .then(({ getCurrentWindow }) => getCurrentWindow().setTheme(theme))
+      .catch(() => { /* browser preview has no window theme */ });
+  });
+}
+
+function restoreWindowTheme() {
+  void invoke<"light" | "dark" | null>("hub_ui_theme")
+    .then((theme) => {
+      if (theme === "light" || theme === "dark") applyWindowTheme(theme);
+    })
+    .catch(() => { /* browser preview */ });
 }
 
 function leaveBoard() {
@@ -503,6 +530,7 @@ function wireDeepLink() {
 }
 
 window.addEventListener("DOMContentLoaded", () => {
+  restoreWindowTheme();
   const platform = detectPlatform();
   const canCreate = shouldShowCreate(platform);
   if (!canCreate) {

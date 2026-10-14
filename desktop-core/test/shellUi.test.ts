@@ -110,6 +110,9 @@ describe("parseDesktopBoardRequest", () => {
     expect(main).toContain("boardFrameOrigin");
     expect(main).toMatch(/e\.origin !== currentBoardOrigin|!isTrustedBoardMessageOrigin\(e\.origin/);
     expect(main).not.toMatch(/postMessage\([^;]*,\s*"\*"\s*\)/);
+    expect(main).toContain("hub_ui_theme");
+    expect(main).toContain("set_titlebar_theme");
+    expect(main).toContain('meta[name="color-scheme"]');
   });
 
   test("tauri CSP does not allow any host on any port", () => {

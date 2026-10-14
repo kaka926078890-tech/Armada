@@ -199,7 +199,7 @@ h1 {
 
 body.board-open {
   overflow: hidden;
-  background: #09090b;
+  background: var(--bg);
 }
 
 body.board-open #landing {
