@@ -401,79 +401,128 @@ struct BindView: View {
     }
 }
 
-struct FleetClusterCard: View {
-    @EnvironmentObject var session: Session
+enum FleetSlotPlace {
+    case only, first, middle, last
+}
+
+func fleetSlotPlace(_ index: Int, count: Int) -> FleetSlotPlace {
+    if count <= 1 { return .only }
+    if index == 0 { return .first }
+    if index == count - 1 { return .last }
+    return .middle
+}
+
+struct FleetLine: Identifiable {
+    enum Kind {
+        case header(String, Bool)
+        case slot(WorkspaceDTO, Bool, FleetSlotPlace)
+    }
+
+    let id: String
+    let kind: Kind
+}
+
+func fleetLines(_ slots: [WorkspaceDTO]) -> [FleetLine] {
+    var lines: [FleetLine] = []
+    for cluster in fleetClusters(slots) {
+        if cluster.boxed {
+            lines.append(FleetLine(id: "header-\(cluster.label)", kind: .header(cluster.label, cluster.chatgpt)))
+        }
+        for (index, slot) in cluster.slots.enumerated() {
+            lines.append(FleetLine(
+                id: slot.id,
+                kind: .slot(slot, cluster.boxed, fleetSlotPlace(index, count: cluster.slots.count))
+            ))
+        }
+    }
+    return lines
+}
+
+struct FleetClusterHeader: View {
     @Environment(\.hub) private var hub
-    let cluster: FleetCluster
+    @Environment(\.colorScheme) private var colorScheme
+    let title: String
+    let chatgpt: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if cluster.boxed {
-                Text(cluster.label)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(cluster.chatgpt ? hub.background : hub.foreground)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(cluster.chatgpt ? hub.foreground : hub.muted)
-            }
-            ForEach(cluster.slots) { slot in
-                FleetSlotRow(slot: slot)
-            }
-        }
-        .background(cluster.boxed ? hub.card : Color.clear)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay {
-            if cluster.boxed {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder(hub.border, lineWidth: 1)
-            }
-        }
+        Text(title)
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(chatgpt ? hub.background : hub.foreground)
+            .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
+            .padding(.horizontal, 16)
+            .background(chatgpt ? hub.foreground : (colorScheme == .dark ? hub.muted : hub.border))
+            .clipShape(UnevenRoundedRectangle(topLeadingRadius: 14, bottomLeadingRadius: 0, bottomTrailingRadius: 0, topTrailingRadius: 14, style: .continuous))
     }
 }
 
 struct FleetSlotRow: View {
     @EnvironmentObject var session: Session
     @Environment(\.hub) private var hub
+    @Environment(\.colorScheme) private var colorScheme
     let slot: WorkspaceDTO
+    var boxed: Bool
+    var place: FleetSlotPlace
 
     var body: some View {
-        if slot.workspaceRoot == "chatgpt:monitor" {
-            Text("需要用监控启动")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(hub.plan)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-        } else {
-            HStack(spacing: 8) {
+        Group {
+            if slot.workspaceRoot == "chatgpt:monitor" {
+                Text("需要用监控启动")
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(hub.plan)
+                    .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                    .padding(.horizontal, 16)
+            } else {
                 NavigationLink(value: AppRoute.workspace(slot)) {
-                    HStack(spacing: 6) {
+                    HStack(spacing: 12) {
                         Text(fleetSlotTitle(slot))
-                            .font(.system(size: 13, weight: .medium))
+                            .font(.system(size: 17, weight: .medium))
+                            .foregroundStyle(hub.foreground)
                             .lineLimit(1)
+                        Spacer(minLength: 8)
                         if session.hasLive(slot) {
                             ProgressView().controlSize(.small)
                         }
+                        if session.unreadCount(in: slot) > 0 {
+                            Circle()
+                                .fill(hub.destructive)
+                                .frame(width: 8, height: 8)
+                                .accessibilityLabel("未读")
+                        }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                if session.unreadCount(in: slot) > 0 {
-                    Circle()
-                        .fill(hub.destructive)
-                        .frame(width: 8, height: 8)
-                        .accessibilityLabel("未读")
-                    Button("全部已读") {
-                        session.markAllRead(.workspace(machineId: slot.machineId, workspaceRoot: slot.workspaceRoot))
-                    }
-                    .font(.system(size: 12, weight: .semibold))
-                    .buttonStyle(.borderless)
-                }
+                .navigationLinkIndicatorVisibility(.hidden)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
         }
+        .background(rowFill)
+        .clipShape(rowShape)
+        .overlay(alignment: .bottom) {
+            if boxed && place != .last && place != .only {
+                Rectangle().fill(hub.border).frame(height: 1)
+            }
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            if slot.workspaceRoot != "chatgpt:monitor", session.unreadCount(in: slot) > 0 {
+                Button("全部已读") {
+                    session.markAllRead(.workspace(machineId: slot.machineId, workspaceRoot: slot.workspaceRoot))
+                }
+                .tint(hub.primary)
+            }
+        }
+    }
+
+    private var rowFill: Color {
+        guard boxed else { return .clear }
+        return colorScheme == .dark ? hub.card : hub.muted
+    }
+
+    private var rowShape: UnevenRoundedRectangle {
+        let bottom: CGFloat = (place == .last || place == .only) && boxed ? 14 : (boxed ? 0 : 14)
+        let top: CGFloat = boxed ? 0 : 14
+        return UnevenRoundedRectangle(topLeadingRadius: top, bottomLeadingRadius: bottom, bottomTrailingRadius: bottom, topTrailingRadius: top, style: .continuous)
     }
 }
 
@@ -549,6 +598,86 @@ struct FleetReloadBanner: View {
     }
 }
 
+struct FleetLineRow: View {
+    let line: FleetLine
+
+    var body: some View {
+        lineBody
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+            .listRowInsets(insets)
+    }
+
+    @ViewBuilder
+    private var lineBody: some View {
+        switch line.kind {
+        case .header(let title, let chatgpt):
+            FleetClusterHeader(title: title, chatgpt: chatgpt)
+        case .slot(let slot, let boxed, let place):
+            FleetSlotRow(slot: slot, boxed: boxed, place: place)
+        }
+    }
+
+    private var insets: EdgeInsets {
+        switch line.kind {
+        case .header:
+            return EdgeInsets(top: 12, leading: 16, bottom: 0, trailing: 16)
+        case .slot(_, let boxed, let place):
+            let bottom: CGFloat = boxed && (place == .last || place == .only) ? 4 : (boxed ? 0 : 4)
+            return EdgeInsets(top: boxed ? 0 : 4, leading: 16, bottom: bottom, trailing: 16)
+        }
+    }
+}
+
+struct FleetMachineSection: View {
+    @EnvironmentObject var session: Session
+    @Environment(\.hub) private var hub
+    let id: String
+    let name: String
+    let slots: [WorkspaceDTO]
+
+    var body: some View {
+        let online = slots.contains(where: \.online)
+        Section {
+            ForEach(fleetLines(slots)) { line in
+                FleetLineRow(line: line)
+            }
+            if session.machineNeedsReload(id), online {
+                FleetReloadBanner(machineId: id)
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 12))
+            }
+        } header: {
+            machineHeader(online: online)
+        }
+    }
+
+    private func machineHeader(online: Bool) -> some View {
+        let unread = session.unreadCount(machineId: id)
+        return HStack(spacing: 8) {
+            Circle()
+                .fill(online ? Hub.done : hub.mutedForeground)
+                .frame(width: 8, height: 8)
+            Text(name)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(hub.foreground)
+            Spacer(minLength: 8)
+            if unread > 0 {
+                Button("全部已读") {
+                    session.markAllRead(.machine(id))
+                }
+                .font(.system(size: 15, weight: .semibold))
+                .padding(.vertical, 8)
+                .padding(.horizontal, 4)
+                .contentShape(Rectangle())
+                .buttonStyle(.borderless)
+            }
+        }
+        .textCase(nil)
+    }
+}
+
 struct WorkspaceListView: View {
     @EnvironmentObject var session: Session
     @Environment(\.hub) private var hub
@@ -563,44 +692,13 @@ struct WorkspaceListView: View {
                     Text("中台离线或没有打开的仓").foregroundStyle(.secondary)
                 }
                 ForEach(session.machineGroups, id: \.id) { group in
-                    Section {
-                        ForEach(fleetClusters(group.slots)) { cluster in
-                            FleetClusterCard(cluster: cluster)
-                                .listRowBackground(Color.clear)
-                                .listRowSeparator(.hidden)
-                                .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
-                        }
-                        if session.machineNeedsReload(group.id), group.slots.contains(where: \.online) {
-                            FleetReloadBanner(machineId: group.id)
-                                .listRowBackground(Color.clear)
-                                .listRowSeparator(.hidden)
-                                .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 12))
-                        }
-                    } header: {
-                        let n = session.unreadCount(machineId: group.id)
-                        HStack(spacing: 6) {
-                            Circle()
-                                .fill(group.slots.contains(where: \.online) ? Hub.done : hub.mutedForeground)
-                                .frame(width: 8, height: 8)
-                            Text(group.name)
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(hub.foreground)
-                            Spacer(minLength: 8)
-                            if n > 0 {
-                                Button("全部已读") {
-                                    session.markAllRead(.machine(group.id))
-                                }
-                                .font(.system(size: 12, weight: .semibold))
-                                .buttonStyle(.borderless)
-                            }
-                        }
-                        .textCase(nil)
-                    }
+                    FleetMachineSection(id: group.id, name: group.name, slots: group.slots)
                 }
             }
             .navigationTitle("舰队")
             .navigationBarTitleDisplayMode(.inline)
             .listStyle(.plain)
+            .listRowSpacing(0)
             .scrollContentBackground(.hidden)
             .background(hub.background)
             .toolbarBackground(hub.background, for: .navigationBar)

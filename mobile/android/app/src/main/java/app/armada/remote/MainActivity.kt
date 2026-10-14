@@ -343,19 +343,21 @@ fun FleetScreen(vm: SessionVm, state: UiState, onOpen: (WorkspaceDto) -> Unit, o
                     val machineUnread = vm.unreadCount(MarkReadScope.Machine(mid))
                     Column(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
                         Row(
-                            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+                            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Box(Modifier.size(8.dp).clip(CircleShape).background(if (online) StatusGreen else StatusGray))
-                            Spacer(Modifier.width(6.dp))
-                            Text(name, fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                            Spacer(Modifier.width(8.dp))
+                            Text(name, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                             if (machineUnread > 0) {
                                 Text(
                                     "全部已读",
                                     color = MaterialTheme.colorScheme.onSurface,
-                                    fontSize = 13.sp,
+                                    fontSize = 15.sp,
                                     fontWeight = FontWeight.SemiBold,
-                                    modifier = Modifier.clickable { vm.markAllRead(MarkReadScope.Machine(mid)) },
+                                    modifier = Modifier
+                                        .clickable { vm.markAllRead(MarkReadScope.Machine(mid)) }
+                                        .padding(horizontal = 4.dp, vertical = 10.dp),
                                 )
                             }
                         }
@@ -451,14 +453,17 @@ fun FleetClusterBlock(
     state: UiState,
     onOpen: (WorkspaceDto) -> Unit,
 ) {
-    val shape = RoundedCornerShape(12.dp)
+    val dark = LocalAppTheme.current == "dark"
+    val shape = RoundedCornerShape(14.dp)
+    val bodyColor = if (dark) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surfaceVariant
+    val cursorHeader = if (dark) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.outline
     Column(
         Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .padding(horizontal = 16.dp, vertical = 6.dp)
             .then(
                 if (cluster.boxed) {
-                    Modifier.clip(shape).background(MaterialTheme.colorScheme.surface).border(1.dp, MaterialTheme.colorScheme.outline, shape)
+                    Modifier.clip(shape).background(bodyColor)
                 } else {
                     Modifier
                 },
@@ -469,25 +474,33 @@ fun FleetClusterBlock(
             Text(
                 cluster.label,
                 color = if (inverted) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.onSurface,
-                fontSize = 12.sp,
+                fontSize = 13.sp,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(if (inverted) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.surfaceVariant)
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                    .background(if (inverted) MaterialTheme.colorScheme.onSurface else cursorHeader)
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
             )
         }
-        cluster.slots.forEach { w ->
+        cluster.slots.forEachIndexed { index, w ->
             val unread = vm.unreadCount(MarkReadScope.Workspace(w.machineId, w.workspaceRoot))
             val live = state.board.runs.any { it.machineId == w.machineId && it.workspaceRoot == w.workspaceRoot && it.isLive }
+            if (index > 0 && cluster.boxed) {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+            }
             if (w.workspaceRoot == "chatgpt:monitor") {
-                Text(
-                    "需要用监控启动",
-                    color = LocalIosPalette.current.orange,
-                    fontSize = 13.sp,
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                )
-                return@forEach
+                Box(
+                    Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = 16.dp),
+                    contentAlignment = Alignment.CenterStart,
+                ) {
+                    Text(
+                        "需要用监控启动",
+                        color = LocalIosPalette.current.orange,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+                return@forEachIndexed
             }
             SwipeActionRow(
                 trailing = if (unread > 0) listOf(
@@ -497,23 +510,23 @@ fun FleetClusterBlock(
                 ) else emptyList(),
             ) {
                 Row(
-                    Modifier.fillMaxWidth().clickable { onOpen(w) }.padding(horizontal = 10.dp, vertical = 8.dp),
+                    Modifier.fillMaxWidth().heightIn(min = 52.dp).clickable { onOpen(w) }.padding(horizontal = 16.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
                         w.label.ifBlank { w.workspaceRoot.substringAfterLast('/').substringAfterLast('\\') },
-                        fontSize = 13.sp,
+                        fontSize = 17.sp,
                         fontWeight = FontWeight.Medium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
                     )
                     if (live) {
-                        Spacer(Modifier.width(6.dp))
-                        CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp, color = StatusBlue)
+                        Spacer(Modifier.width(8.dp))
+                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = StatusBlue)
                     }
                     if (unread > 0) {
-                        Spacer(Modifier.width(8.dp))
+                        Spacer(Modifier.width(12.dp))
                         Box(Modifier.size(8.dp).clip(CircleShape).background(StatusRed))
                     }
                 }
