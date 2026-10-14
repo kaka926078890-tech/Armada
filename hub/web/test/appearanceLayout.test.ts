@@ -10,8 +10,11 @@ describe("appearance layout stays coordinated when text scales", () => {
     const css = readFileSync(join(web, "src/index.css"), "utf8");
     expect(css).toMatch(/html\s*\{[^}]*font-size:\s*16px/);
     expect(css).not.toMatch(/html\s*\{[^}]*font-size:\s*calc\(16px \* var\(--armada-text-scale\)\)/);
-    expect(css).toMatch(/html\[data-font-scale="large"\][^{]*\{[^}]*zoom:\s*1\.25/);
-    expect(css).toMatch(/html\[data-font-scale="xlarge"\][^{]*\{[^}]*zoom:\s*1\.5/);
+    expect(css).toMatch(/html\[data-font-scale="large"\][^{]*\{[^}]*transform:\s*scale\(1\.25\)/);
+    expect(css).toMatch(/html\[data-font-scale="large"\][^{]*\{[^}]*width:\s*calc\(100% \/ 1\.25\)/);
+    expect(css).toMatch(/html\[data-font-scale="xlarge"\][^{]*\{[^}]*transform:\s*scale\(1\.5\)/);
+    expect(css).toMatch(/html\[data-font-scale="xlarge"\][^{]*\{[^}]*height:\s*calc\(100% \/ 1\.5\)/);
+    expect(css).not.toMatch(/html\[data-font-scale="large"\][^{]*\{[^}]*zoom:/);
     expect(css).not.toMatch(/calc\(\d+px \* var\(--armada-text-scale\)\)/);
   });
 
@@ -43,14 +46,19 @@ describe("appearance layout stays coordinated when text scales", () => {
     expect(board).toContain("whitespace-nowrap");
   });
 
-  test("sidebar and board columns keep a 240px floor; extra width can grow", () => {
+  test("sidebar stays fixed; board columns share the width without a horizontal scrollbar", () => {
     const sidebar = readFileSync(join(web, "src/components/Sidebar.tsx"), "utf8");
     const board = readFileSync(join(web, "src/components/Board.tsx"), "utf8");
     const button = readFileSync(join(web, "src/components/ui/button.tsx"), "utf8");
+    const detail = readFileSync(join(web, "src/components/RunDetail.tsx"), "utf8");
     expect(sidebar).toContain("w-60");
     expect(button).toContain("whitespace-nowrap");
-    expect(board).toContain("min-w-[240px]");
-    expect(board).not.toMatch(/max-w-\[240px\]/);
+    expect(board).toContain("min-w-0");
+    expect(board).toContain("overflow-x-hidden");
+    expect(board).not.toContain("min-w-[240px]");
+    expect(board).not.toContain("overflow-x-auto");
+    expect(detail).toContain("followup-input");
+    expect(detail).toContain("shrink-0 p-3 border-t");
   });
 
   test("hub and App share cursor vsix reload controls on the machine region", () => {

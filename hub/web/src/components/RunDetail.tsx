@@ -72,7 +72,7 @@ function DrawerShell({ children }: { children: ReactNode }) {
   };
 
   return (
-    <aside className="h-full min-h-0 shrink-0 border-l border-border flex flex-col bg-background shadow-2xl relative max-w-full" style={{ width, maxWidth: "100%" }}>
+    <aside className="h-full min-h-0 shrink-0 overflow-hidden border-l border-border flex flex-col bg-background shadow-2xl relative max-w-full" style={{ width, maxWidth: "100%" }}>
       <div
         role="separator"
         aria-orientation="vertical"
@@ -535,7 +535,7 @@ export default function RunDetail({
             loading: loadingOlderRef.current,
           })) loadOlder();
         }}
-        className="flex-1 min-w-0 overflow-y-auto px-4 py-4 [scrollbar-gutter:stable]"
+        className="flex-1 min-h-0 min-w-0 overflow-y-auto px-4 py-4 [scrollbar-gutter:stable]"
       >
         <div ref={contentRef}>
         {hasOlder && (
@@ -583,7 +583,7 @@ export default function RunDetail({
       </div>
       )}
       {run.conversation_id || chatgptFollow ? (
-        <div className="p-3 border-t border-border flex flex-col gap-2">
+        <div className="shrink-0 p-3 border-t border-border flex flex-col gap-2">
           <PromptSnippetBar
             snippets={snippets}
             onAppend={(body) => setFollowup(appendSnippetBody(followup, body))}
@@ -616,7 +616,7 @@ export default function RunDetail({
               }}
               rows={3}
               placeholder={run.pending_ask ? (run.pending_ask.kind === "plan" ? "请先点上方 Build…" : "请先回答上方选择题…") : "接着说。Enter 发送，Shift+Enter 换行"}
-              className="flex-1 min-h-[4.5rem] max-h-48 resize-y"
+              className="followup-input flex-1 min-h-[4.5rem] max-h-48 resize-y"
             />
             <Button type="submit" disabled={!injectReady || sending || (!followup.trim() && followupFiles.length === 0)} className="shrink-0">发送</Button>
           </div>

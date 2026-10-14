@@ -51,9 +51,9 @@ export default function Board({ runs, selected, onSelect, showArchived, onHide, 
     onRename(id, t);
   };
   return (
-    <main className="flex-1 min-w-0 overflow-x-auto flex gap-3 p-4">
+    <main className="flex-1 min-h-0 min-w-0 overflow-x-hidden flex gap-3 p-4">
       {(Object.keys(COLUMN_LABELS) as ColumnKey[]).map((col) => (
-        <section key={col} className="flex-1 min-w-[240px] shrink-0 flex flex-col rounded-2xl bg-muted/30">
+        <section key={col} className="flex-1 min-w-0 min-h-0 overflow-hidden flex flex-col rounded-2xl bg-muted/30">
           <h2 className={`${UI_TYPE} font-medium tracking-tight text-foreground px-3 pb-2 pt-3 inline-flex items-center gap-1.5 whitespace-nowrap`}>
             <span className={`size-1.5 rounded-full ${COL_DOT[col]}`} />
             {COLUMN_LABELS[col]} <span className={`${UI_META} text-muted-foreground font-normal`}>{g[col].length}</span>
@@ -61,7 +61,7 @@ export default function Board({ runs, selected, onSelect, showArchived, onHide, 
               <span className={`size-1.5 shrink-0 rounded-full ${unreadAlertDotClass(quietUnread)}`} data-col-alert={col} title={quietUnread ? "待处理或未读异常（免打扰）" : "待处理或未读异常"} />
             ) : null}
           </h2>
-          <div className="flex-1 overflow-y-auto flex flex-col gap-2 px-2 pb-3">
+          <div className="flex-1 min-h-0 overflow-x-hidden overflow-y-auto flex flex-col gap-2 px-2 pb-3">
             {g[col].length === 0 && (
               <div className={`${UI_META} text-muted-foreground px-2 py-6 text-center`}>暂无</div>
             )}

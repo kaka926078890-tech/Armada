@@ -16,6 +16,7 @@ Armada 按 **面** 发版：扩展、桌面、iOS、Android 可以不同号。RE
 
 ### 修复
 
+- 显示放大后，续聊框留在详情底部，对话在上面滚。空的输入框不再自带滚动条。五列看板缩进窗口里，不再出现横向滚动条。
 - 手机上的 Codex 卡片在绑上线程后可以续聊。快照带上 `chatgptThreadId`，不再要求 Cursor 的 `conversationId`。ChatGPT 目标仍只发文字。已安装的 TestFlight 35 和 Android 0.1.14 还没有这一项，要等下一次手机包。
 
 ---

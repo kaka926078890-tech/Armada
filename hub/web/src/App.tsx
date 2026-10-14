@@ -417,7 +417,7 @@ export default function App() {
   if (!authed) {
     if (desktop) {
       return (
-        <div className="h-screen flex items-center justify-center bg-background text-foreground">
+        <div className="h-full flex items-center justify-center bg-background text-foreground">
           <div className="flex flex-col items-center gap-3">
             <p className={`${UI_TYPE} text-muted-foreground`}>正在重新连接中台…</p>
             <Button type="button" variant="outline" onClick={() => requestDesktop("leave-fleet")}>
@@ -428,7 +428,7 @@ export default function App() {
       );
     }
     return (
-      <div className="h-screen flex items-center justify-center bg-background text-foreground">
+      <div className="h-full flex items-center justify-center bg-background text-foreground">
         <form className="flex flex-col gap-3 w-80" onSubmit={(e) => {
           e.preventDefault();
           const v = new FormData(e.currentTarget).get("token");
@@ -460,7 +460,7 @@ export default function App() {
   const presetSlot = selected ? slots.find((s) => s.machineId === selected.machineId && s.root === selected.root) : null;
 
   return (
-    <div className="h-screen flex flex-col bg-background text-foreground">
+    <div className="h-full flex flex-col bg-background text-foreground">
       {loadError && (
         <div className={`px-4 py-2 ${UI_TYPE} text-destructive bg-destructive/10 border-b border-destructive/30`}>{loadError}</div>
       )}

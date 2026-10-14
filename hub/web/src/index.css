@@ -7,10 +7,27 @@
 
 html {
   font-size: 16px;
+  height: 100%;
+  overflow: hidden;
 }
-/* 整页一起放大。只乘字号会把字撑出固定的侧栏和列宽。 */
-html[data-font-scale="large"] { zoom: 1.25; }
-html[data-font-scale="xlarge"] { zoom: 1.5; }
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
+}
+/* 整页一起放大。布局框按同样倍数缩小，再用 scale 画回窗口，避免 zoom 把页面撑出滚动条。 */
+html[data-font-scale="large"] body {
+  width: calc(100% / 1.25);
+  height: calc(100% / 1.25);
+  transform: scale(1.25);
+  transform-origin: 0 0;
+}
+html[data-font-scale="xlarge"] body {
+  width: calc(100% / 1.5);
+  height: calc(100% / 1.5);
+  transform: scale(1.5);
+  transform-origin: 0 0;
+}
 
 @theme inline {
   --font-heading: var(--font-sans);
@@ -146,6 +163,10 @@ html[data-theme="light"] {
   }
 }
 
+.followup-input {
+  field-sizing: fixed;
+  overflow-y: auto;
+}
 .mermaid-block { max-width: 100%; min-width: 0; }
 .mermaid-block svg { display: block; max-width: 100%; height: auto; }
 .mermaid-block .background { fill: transparent !important; }
