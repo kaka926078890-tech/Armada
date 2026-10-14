@@ -72,6 +72,8 @@ describe("chatgpt rollout on the hub card", () => {
     ]);
     const events = hub!.db.query("SELECT * FROM run_events WHERE run_id=?1 ORDER BY seq").all("r-1") as RunEvent[];
     expect(runToSnap(run, events).finalText).toBe(FINAL);
+    expect(runToSnap(run, events).conversationId).toBeNull();
+    expect(runToSnap(run, events).chatgptThreadId).toBe(THREAD);
   });
 
   test("an older finished turn with the same prompt does not complete this dispatch", () => {

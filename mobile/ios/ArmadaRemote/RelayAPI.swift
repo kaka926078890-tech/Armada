@@ -130,6 +130,7 @@ struct RunDTO: Decodable, Identifiable, Hashable {
     var updatedAt: Int?
     var title: String?
     var conversationId: String?
+    var chatgptThreadId: String?
     var attachments: [RunAttachment]?
     var id: String { runId }
 
@@ -148,7 +149,7 @@ struct RunDTO: Decodable, Identifiable, Hashable {
     }
 
     var canFollowup: Bool {
-        pendingAsk == nil && !(conversationId ?? "").isEmpty
+        pendingAsk == nil && (!(conversationId ?? "").isEmpty || !(chatgptThreadId ?? "").isEmpty)
     }
 
     var displayTitle: String {
@@ -388,6 +389,7 @@ enum RelayAPIError: LocalizedError {
         switch code {
         case "CONVERSATION_BUSY": return "该对话仍在排队或绑定，结束后才能续聊"
         case "NO_CONVERSATION": return "还没有绑上 Cursor 对话，不能续聊"
+        case "CHATGPT_TEXT_ONLY": return "ChatGPT 这一版只派发文字"
         case "INJECT_SLOT_BUSY": return "这台机器正在注入另一条任务，稍后再试"
         case "CDP_NOT_READY": return "Cursor 在线但无法注入。请确认已安装最新 Armada 扩展，并用 Armada 打开工作区。若窗口已开、调试口不通：请完全退出 Cursor（Mac Cmd+Q / Windows 托盘 Exit），不要点 Cursor 图标。"
         case "WORKSPACE_NOT_OPEN": return "工作区没有打开"

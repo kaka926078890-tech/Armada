@@ -11,7 +11,9 @@ describe("App snap parity", () => {
     expect(swift).toMatch(/var conversationId: String\?/);
     const follow = swift.slice(swift.indexOf("var canFollowup"), swift.indexOf("var showsRetry"));
     expect(follow).toContain("conversationId");
+    expect(follow).toContain("chatgptThreadId");
     expect(follow).toContain("pendingAsk");
+    expect(swift).toContain("case \"CHATGPT_TEXT_ONLY\"");
   });
 
   test("Android parseRun reads title+conversationId", () => {

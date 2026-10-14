@@ -806,7 +806,8 @@ struct DispatchSheet: View {
         prompt.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private var photoEnabled: Bool { !followupIsLive }
+    private var chatgptTextOnly: Bool { live.workspaceRoot.hasPrefix("chatgpt:") }
+    private var photoEnabled: Bool { !followupIsLive && !chatgptTextOnly }
     private var canSend: Bool {
         live.canInject && !sending && !speech.listening && (!trimmed.isEmpty || (photoEnabled && !drafts.isEmpty))
     }
@@ -892,7 +893,11 @@ struct DispatchSheet: View {
                         maxPick: max(1, 4 - drafts.count),
                         onMic: { toggleMic() },
                         onPhotoDisabled: {
-                            err = RelayAPIError.operatorMessage(followupIsLive ? "OUTBOUND_TEXT_ONLY" : "ATTACHMENT_COUNT")
+                            if chatgptTextOnly {
+                                err = RelayAPIError.operatorMessage("CHATGPT_TEXT_ONLY")
+                            } else {
+                                err = RelayAPIError.operatorMessage(followupIsLive ? "OUTBOUND_TEXT_ONLY" : "ATTACHMENT_COUNT")
+                            }
                         },
                         onSend: { Task { await send() } },
                         onPasteImage: { data in addDraft(data, name: "paste") }
@@ -930,6 +935,10 @@ struct DispatchSheet: View {
     }
 
     private func addDraft(_ data: Data, name: String) {
+        if chatgptTextOnly {
+            err = RelayAPIError.operatorMessage("CHATGPT_TEXT_ONLY")
+            return
+        }
         if drafts.count >= 4 {
             err = RelayAPIError.operatorMessage("ATTACHMENT_COUNT")
             return

@@ -36,6 +36,8 @@ class ModelsTest {
         assertFalse(live.showsArchive)
         assertFalse(run("running").canFollowup)
         assertFalse(run("completed").canFollowup)
+        assertTrue(run("completed").copy(chatgptThreadId = "thread-1").canFollowup)
+        assertFalse(run("completed", ask = PendingAskDto("q", emptyList())).copy(chatgptThreadId = "thread-1").canFollowup)
         val done = run("completed")
         assertTrue(done.showsArchive)
         val asking = run("running", ask = PendingAskDto("q", emptyList()), conversationId = "cid-1")

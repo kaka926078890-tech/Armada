@@ -92,6 +92,7 @@ export type RunSnap = {
   archived?: boolean;
   canRetry?: boolean;
   attachments?: { id: string; mime: string; name: string; size: number }[];
+  chatgptThreadId?: string | null;
   updatedAt?: number;
 };
 
@@ -353,6 +354,7 @@ export function createRelayServer(opts: {
     canRetry: boolean;
     title: string;
     conversationId: string;
+    chatgptThreadId: string;
     attachments: unknown;
   }): string {
     return JSON.stringify({
@@ -366,6 +368,7 @@ export function createRelayServer(opts: {
       canRetry: input.canRetry,
       title: input.title,
       conversationId: input.conversationId,
+      chatgptThreadId: input.chatgptThreadId,
       attachments: input.attachments ?? [],
     });
   }
@@ -382,6 +385,9 @@ export function createRelayServer(opts: {
     const conversationId = typeof snap.conversationId === "string" && snap.conversationId.trim()
       ? snap.conversationId.trim()
       : null;
+    const chatgptThreadId = typeof snap.chatgptThreadId === "string" && snap.chatgptThreadId.trim()
+      ? snap.chatgptThreadId.trim()
+      : null;
     const existing = db.query("SELECT * FROM runs WHERE id=?1 AND fleet_id=?2").get(snap.runId, fleetId) as
       | {
         id: string;
@@ -390,6 +396,7 @@ export function createRelayServer(opts: {
         prompt?: string;
         title?: string | null;
         conversation_id?: string | null;
+        chatgpt_thread_id?: string | null;
         final_text?: string | null;
         error?: string | null;
         pending_ask?: string | null;
@@ -426,6 +433,7 @@ export function createRelayServer(opts: {
       canRetry,
       title: title ?? "",
       conversationId: conversationId ?? "",
+      chatgptThreadId: chatgptThreadId ?? "",
       attachments: attachmentsFp,
     });
     if (existing) {
@@ -440,6 +448,7 @@ export function createRelayServer(opts: {
         canRetry: canRetryStatus(String(existing.status ?? "")),
         title: existing.title ?? "",
         conversationId: existing.conversation_id ?? "",
+        chatgptThreadId: existing.chatgpt_thread_id ?? "",
         attachments: existing.attachments ? JSON.parse(existing.attachments) : [],
       });
       if (prevFp === nextFp) return existing;
@@ -450,12 +459,12 @@ export function createRelayServer(opts: {
     };
     if (existing) {
       db.query(`UPDATE runs SET machine_id=?3, workspace_root=?4, prompt=?5, status=?6,
-        final_text=?7, error=?8, pending_ask=?9, outbound=?11, queue_message_default_behavior=?12, archived_at=?13, updated_at=?10, title=?14, conversation_id=?15, attachments=?16 WHERE id=?1 AND fleet_id=?2`)
-        .run(snap.runId, fleetId, snap.machineId, snap.workspaceRoot, snap.prompt, status, finalText, error, pendingAsk, now, outbound, queueMode, archivedAt, title, conversationId, attachmentsJson);
+        final_text=?7, error=?8, pending_ask=?9, outbound=?11, queue_message_default_behavior=?12, archived_at=?13, updated_at=?10, title=?14, conversation_id=?15, chatgpt_thread_id=?16, attachments=?17 WHERE id=?1 AND fleet_id=?2`)
+        .run(snap.runId, fleetId, snap.machineId, snap.workspaceRoot, snap.prompt, status, finalText, error, pendingAsk, now, outbound, queueMode, archivedAt, title, conversationId, chatgptThreadId, attachmentsJson);
     } else {
-      db.query(`INSERT INTO runs (id, fleet_id, machine_id, workspace_root, prompt, status, final_text, error, pending_ask, outbound, queue_message_default_behavior, archived_at, updated_at, created_at, title, conversation_id, attachments)
-        VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?11,?12,?13,?10,?10,?14,?15,?16)`)
-        .run(snap.runId, fleetId, snap.machineId, snap.workspaceRoot, snap.prompt, status, finalText, error, pendingAsk, now, outbound, queueMode, archivedAt, title, conversationId, attachmentsJson);
+      db.query(`INSERT INTO runs (id, fleet_id, machine_id, workspace_root, prompt, status, final_text, error, pending_ask, outbound, queue_message_default_behavior, archived_at, updated_at, created_at, title, conversation_id, chatgpt_thread_id, attachments)
+        VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?11,?12,?13,?10,?10,?14,?15,?16,?17)`)
+        .run(snap.runId, fleetId, snap.machineId, snap.workspaceRoot, snap.prompt, status, finalText, error, pendingAsk, now, outbound, queueMode, archivedAt, title, conversationId, chatgptThreadId, attachmentsJson);
     }
     const decided = notifyEdges(prev, {
       prompt: snap.prompt,
@@ -479,6 +488,7 @@ export function createRelayServer(opts: {
       prompt: row.prompt,
       title: row.title ?? null,
       conversationId: row.conversation_id ?? null,
+      chatgptThreadId: row.chatgpt_thread_id ?? null,
       status: row.status,
       finalText: forList ? null : row.final_text,
       error: row.error,

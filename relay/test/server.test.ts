@@ -2267,4 +2267,38 @@ describe("relay HTTP map and snap fingerprint", () => {
     expect(renamed.updatedAt).not.toBe(t1);
     ws.close();
   });
+
+  test("persists chatgptThreadId without a Cursor conversationId", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    const headers = { authorization: `Bearer ${fleet.operatorToken}` };
+    const base = {
+      runId: "r-gpt",
+      machineId: "m-1",
+      workspaceRoot: "chatgpt:desk",
+      prompt: "hi",
+      conversationId: null,
+      status: "running",
+      updatedAt: 1,
+    };
+    ws.send(JSON.stringify({ type: "snap.run", run: base }));
+    await Bun.sleep(40);
+    const before = await (await fetch(url(s, "/mobile/runs/r-gpt"), { headers })).json() as {
+      conversationId?: string | null; chatgptThreadId?: string | null;
+    };
+    expect(before.conversationId ?? null).toBeNull();
+    expect(before.chatgptThreadId ?? null).toBeNull();
+    ws.send(JSON.stringify({
+      type: "snap.run",
+      run: { ...base, chatgptThreadId: "thread-1", updatedAt: 1 },
+    }));
+    await Bun.sleep(40);
+    const after = await (await fetch(url(s, "/mobile/runs/r-gpt"), { headers })).json() as {
+      conversationId?: string | null; chatgptThreadId?: string | null;
+    };
+    expect(after.conversationId ?? null).toBeNull();
+    expect(after.chatgptThreadId).toBe("thread-1");
+    ws.close();
+  });
 });

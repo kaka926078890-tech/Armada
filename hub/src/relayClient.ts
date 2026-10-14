@@ -53,6 +53,8 @@ export type RunSnap = {
   canRetry?: boolean;
   archived?: boolean;
   attachments?: SnapAttachment[];
+  /** Codex 桌面线程。有值时手机可以续聊；不写入 conversationId。 */
+  chatgptThreadId?: string | null;
   updatedAt: number;
 };
 
@@ -177,6 +179,9 @@ export function runToSnap(run: any, events: RunEvent[]): RunSnap {
   const cid = typeof run.conversation_id === "string" && run.conversation_id.trim()
     ? run.conversation_id.trim()
     : null;
+  const chatgptThreadId = typeof run.chatgpt_thread_id === "string" && run.chatgpt_thread_id.trim()
+    ? run.chatgpt_thread_id.trim()
+    : null;
   const attachments = snapAttachmentsOf(run);
   return {
     runId: run.id,
@@ -194,6 +199,7 @@ export function runToSnap(run: any, events: RunEvent[]): RunSnap {
     canRetry: canRetryStatus(status),
     archived: Number(run.archived_at) > 0,
     ...(attachments.length ? { attachments } : {}),
+    ...(chatgptThreadId ? { chatgptThreadId } : {}),
     updatedAt: Number(run.ended_at ?? run.started_at ?? run.created_at ?? Date.now()),
   };
 }

@@ -349,6 +349,7 @@ fun parseRun(o: JSONObject) = RunDto(
     updatedAt = if (o.has("updatedAt")) o.optLong("updatedAt") else null,
     title = o.optNullableString("title"),
     conversationId = o.optNullableString("conversationId"),
+    chatgptThreadId = o.optNullableString("chatgptThreadId"),
     attachments = o.optJSONArray("attachments")?.let { arr ->
         buildList { for (i in 0 until arr.length()) add(parseAttachment(arr.getJSONObject(i))) }
     } ?: emptyList(),

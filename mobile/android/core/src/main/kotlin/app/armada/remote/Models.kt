@@ -135,6 +135,7 @@ data class RunDto(
     val updatedAt: Long? = null,
     val title: String? = null,
     val conversationId: String? = null,
+    val chatgptThreadId: String? = null,
     val attachments: List<RunAttachmentDto> = emptyList(),
 ) {
     val isLive: Boolean
@@ -143,7 +144,7 @@ data class RunDto(
     val showsArchive: Boolean get() = !isLive && !isArchived
     val queuedOutbound: List<OutboundDto>
         get() = (outbound ?: emptyList()).filter { it.state == "queued" || (it.state == "injecting" && it.expectedMode == "queue") }
-    val canFollowup: Boolean get() = pendingAsk == null && !conversationId.isNullOrBlank()
+    val canFollowup: Boolean get() = pendingAsk == null && (!conversationId.isNullOrBlank() || !chatgptThreadId.isNullOrBlank())
     val displayTitle: String get() = runDisplayTitle(title, prompt, attachments.size)
     val showsRetry: Boolean
         get() = canRetry ?: (status in setOf("error", "unknown", "aborted"))

@@ -10,6 +10,10 @@ Armada 按 **面** 发版：扩展、桌面、iOS、Android 可以不同号。RE
 
 ## Unreleased
 
+### 修复
+
+- 手机上的 Codex 卡片在绑上线程后可以续聊。快照带上 `chatgptThreadId`，不再要求 Cursor 的 `conversationId`。ChatGPT 目标仍只发文字。已安装的 TestFlight 35 和 Android 0.1.14 还没有这一项，要等下一次手机包。
+
 ---
 
 ## 2026-10-13 — 扩展 0.4.49 · iOS TF 35 · Android 0.1.14 · 桌面 0.1.0

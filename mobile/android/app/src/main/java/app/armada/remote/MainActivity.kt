@@ -727,7 +727,8 @@ fun DispatchSheet(vm: SessionVm, workspace: WorkspaceDto, followupRunId: String?
         }
     }
     val trimmed = prompt.trim()
-    val photoEnabled = !followupIsLive
+    val chatgptTextOnly = workspace.workspaceRoot.startsWith("chatgpt:")
+    val photoEnabled = !followupIsLive && !chatgptTextOnly
     val canSend = workspace.canInject && !sending && !listening && (trimmed.isNotEmpty() || (photoEnabled && drafts.isNotEmpty()))
     fun send() {
         if (listening) {
@@ -861,7 +862,9 @@ fun DispatchSheet(vm: SessionVm, workspace: WorkspaceDto, followupRunId: String?
             photoVisible = blobsAvailable,
             photoEnabled = photoEnabled && !sending,
             onPhoto = {
-                if (!photoEnabled) {
+                if (chatgptTextOnly) {
+                    err = operatorMessage("CHATGPT_TEXT_ONLY")
+                } else if (!photoEnabled) {
                     err = operatorMessage("OUTBOUND_TEXT_ONLY")
                 } else if (!canAcceptMoreAttachments(drafts.size, 1)) {
                     err = operatorMessage("ATTACHMENT_COUNT")
@@ -870,7 +873,8 @@ fun DispatchSheet(vm: SessionVm, workspace: WorkspaceDto, followupRunId: String?
                 }
             },
             onPhotoLong = {
-                if (!photoEnabled) err = operatorMessage("OUTBOUND_TEXT_ONLY")
+                if (chatgptTextOnly) err = operatorMessage("CHATGPT_TEXT_ONLY")
+                else if (!photoEnabled) err = operatorMessage("OUTBOUND_TEXT_ONLY")
                 else addClipboard()
             },
         )

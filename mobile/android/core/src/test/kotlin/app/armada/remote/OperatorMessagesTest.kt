@@ -44,6 +44,7 @@ class OperatorMessagesTest {
         assertEquals("回复太长，请缩短后再发", operatorMessage("ASK_TEXT_TOO_LONG"))
         assertEquals("写点字或加一张图", operatorMessage("EMPTY_PROMPT"))
         assertEquals("运行中只能发文字", operatorMessage("OUTBOUND_TEXT_ONLY"))
+        assertEquals("ChatGPT 这一版只派发文字", operatorMessage("CHATGPT_TEXT_ONLY"))
         assertEquals("单张不能超过 8 MB", operatorMessage("ATTACHMENT_TOO_LARGE"))
         assertEquals("只支持 PNG / JPEG", operatorMessage("ATTACHMENT_INVALID_MIME"))
         assertEquals("最多 4 张图", operatorMessage("ATTACHMENT_COUNT"))
