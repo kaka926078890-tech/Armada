@@ -464,27 +464,27 @@ export default function App() {
       {loadError && (
         <div className={`px-4 py-2 ${UI_TYPE} text-destructive bg-destructive/10 border-b border-destructive/30`}>{loadError}</div>
       )}
-      <header className="flex items-center gap-x-3 gap-y-1.5 px-4 py-2 border-b border-border flex-wrap">
-        <span className={`font-semibold ${UI_TYPE} tracking-wide shrink-0 whitespace-nowrap`}>Armada</span>
-        <span className={`text-muted-foreground ${UI_META} shrink-0 whitespace-nowrap`}>{location.host}</span>
-        <span className={`${UI_META} text-emerald-500/90 shrink-0 whitespace-nowrap`}>令牌已连接</span>
-        <Button
-          type="button"
-          variant={showArchived ? "secondary" : "outline"}
-          className="shrink-0"
-          onClick={() => { setShowArchived((v) => !v); setSelectedRun(null); }}
-        >
-          {showArchived ? "返回看板" : `查看已隐藏${hiddenRuns.length ? ` ${hiddenRuns.length}` : ""}`}
-        </Button>
-        <span className="ml-auto flex items-center gap-2 flex-wrap shrink-0">
-          <span className={`${UI_META} text-muted-foreground whitespace-nowrap`}>
+      <header className="flex items-center gap-x-3 gap-y-1.5 px-5 py-2.5 border-b border-border flex-wrap">
+        <span className={`min-w-0 font-medium tracking-tight shrink-0 whitespace-nowrap ${UI_TYPE}`}>
+          {showArchived ? "已隐藏" : (presetSlot?.label || (preset ? workspaceFolderName(preset.workspaceRoot) : "看板"))}
+        </span>
+        <span className="ml-auto flex items-center gap-1 flex-wrap shrink-0">
+          <span className={`${UI_META} text-muted-foreground whitespace-nowrap px-2`}>
             在线 {machines.filter((m) => m.status === "online").length}/{machines.length}
           </span>
-          <Button type="button" variant="outline" className="shrink-0" onClick={() => { reloadSnippets(); setSettingsOpen(true); }}>
+          <Button
+            type="button"
+            variant="ghost"
+            className="shrink-0"
+            onClick={() => { setShowArchived((v) => !v); setSelectedRun(null); }}
+          >
+            {showArchived ? "返回看板" : `已隐藏${hiddenRuns.length ? ` ${hiddenRuns.length}` : ""}`}
+          </Button>
+          <Button type="button" variant="ghost" className="shrink-0" onClick={() => { reloadSnippets(); setSettingsOpen(true); }}>
             设置
           </Button>
-          <Button type="button" variant="outline" className="shrink-0" onClick={leaveFleet}>
-            退出中台
+          <Button type="button" variant="ghost" className="shrink-0" onClick={leaveFleet}>
+            退出
           </Button>
         </span>
       </header>

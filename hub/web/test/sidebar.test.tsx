@@ -105,7 +105,7 @@ describe("Sidebar inject gate", () => {
     expect(html).toContain("派发任务");
   });
 
-  test("desktop actions include 修复调试口", () => {
+  test("desktop actions include 重新连接 Cursor", () => {
     const html = renderToStaticMarkup(
       <Sidebar
         slots={[slot]}
@@ -125,9 +125,9 @@ describe("Sidebar inject gate", () => {
         onGetShareLink={() => {}}
       />,
     );
-    expect(html).toContain("修复调试口");
+    expect(html).toContain("重新连接 Cursor");
     expect(html).toContain("打开工作区");
-    expect(html).toContain("获取分享链接");
+    expect(html).toContain("分享给手机");
     expect(html).not.toContain("grid-cols-3 gap-1");
   });
 });

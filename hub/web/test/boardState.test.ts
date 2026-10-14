@@ -54,9 +54,9 @@ describe("cardView", () => {
   });
   test("waiting badge text", () => {
     const v = cardView({ ...base, status: "dispatched" }, 5000);
-    expect(v.badge).toBe("待本机回车");
+    expect(v.badge).toBe("待开始");
   });
-  test("binding badge is 绑定中, not 待本机回车", () => {
+  test("binding badge is 绑定中, not 待开始", () => {
     const v = cardView({ ...base, status: "binding" }, 5000);
     expect(v.badge).toBe("绑定中");
   });
@@ -201,7 +201,9 @@ describe("unread dots", () => {
     expect(cardChromeClass("need", true)).toContain("border-l-red-400");
     expect(cardChromeClass("done", false)).toContain("border-l-emerald-400");
     expect(cardChromeClass("none", true)).toContain("border-primary/80");
-    expect(cardChromeClass("none", false)).toContain("border-transparent");
+    expect(cardChromeClass("none", false)).toContain("border-border");
+    expect(cardChromeClass("none", false)).toContain("bg-card");
+    expect(cardChromeClass("none", false)).not.toContain("border-transparent");
   });
 
   test("column alert dots follow need-input and unread errors, not completed", () => {

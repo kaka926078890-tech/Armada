@@ -9,7 +9,7 @@ import {
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { ScrollArea } from "./ui/scroll-area";
-import { UI_META, UI_TYPE } from "../ui";
+import { UI_BODY, UI_META, UI_TYPE } from "../ui";
 
 function UnreadCount({ n, quiet }: { n: number; quiet: boolean }) {
   const label = formatUnreadCount(n);
@@ -125,29 +125,36 @@ export default function Sidebar({
   };
 
   return (
-    <aside className="w-[224px] shrink-0 border-r border-border flex flex-col bg-sidebar text-sidebar-foreground overflow-x-hidden">
-      {showDesktopActions ? (
-        <div className="mx-3 mt-3 mb-1.5 flex flex-col gap-1.5">
-          <Button type="button" variant="outline" className="w-full" onClick={onOpenWorkspace}>
-            打开工作区
-          </Button>
-          <Button type="button" variant="outline" className="w-full" onClick={onRepairCdp}>
-            修复调试口
-          </Button>
-          <Button type="button" variant="outline" className="w-full" onClick={onGetShareLink}>
-            获取分享链接
-          </Button>
+    <aside className="w-60 shrink-0 border-r border-border flex flex-col bg-muted/40 text-sidebar-foreground overflow-x-hidden">
+      <div className="flex items-center gap-2.5 px-4 pt-4 pb-3">
+        <div className="flex size-8 items-center justify-center rounded-lg bg-foreground text-background text-[13px] font-semibold">A</div>
+        <div className="min-w-0">
+          <div className={`${UI_BODY} font-semibold tracking-tight`}>Armada</div>
+          <div className={`${UI_META} text-muted-foreground`}>舰队指挥</div>
         </div>
-      ) : null}
+      </div>
       <Button
         type="button"
         disabled={!canDispatch}
         onClick={onDispatch}
-        className={`mx-3 mb-1 w-[calc(100%-1.5rem)] ${showDesktopActions ? "mt-0" : "mt-3"}`}
+        className="mx-3 mb-1 w-[calc(100%-1.5rem)]"
       >
-        + 派发任务
+        派发任务
       </Button>
-      <div className={`px-3 pt-1.5 pb-1 ${UI_META} uppercase tracking-wide text-muted-foreground`}>机器</div>
+      {showDesktopActions ? (
+        <div className="mx-2 mb-1 flex flex-col">
+          <button type="button" className={`rounded-lg px-2 py-1.5 text-left ${UI_TYPE} text-muted-foreground hover:bg-background hover:text-foreground`} onClick={onOpenWorkspace}>
+            打开工作区
+          </button>
+          <button type="button" className={`rounded-lg px-2 py-1.5 text-left ${UI_TYPE} text-muted-foreground hover:bg-background hover:text-foreground`} onClick={onRepairCdp}>
+            重新连接 Cursor
+          </button>
+          <button type="button" className={`rounded-lg px-2 py-1.5 text-left ${UI_TYPE} text-muted-foreground hover:bg-background hover:text-foreground`} onClick={onGetShareLink}>
+            分享给手机
+          </button>
+        </div>
+      ) : null}
+      <div className={`px-4 pt-3 pb-1 ${UI_META} text-muted-foreground`}>电脑</div>
       {packNotice ? (
         <div className={`px-3 pb-2 ${UI_META} text-amber-400 leading-snug`}>{packNotice}</div>
       ) : null}
@@ -200,22 +207,19 @@ export default function Sidebar({
                 onReload={onReloadMachine}
               />
             ) : null}
-            {g.workspaces.map((s, index) => {
-              const gpt = s.root.startsWith("chatgpt:");
-              const prevGpt = index > 0 && g.workspaces[index - 1].root.startsWith("chatgpt:");
-              const showCursor = !gpt && (index === 0) && g.workspaces.some((item) => item.root.startsWith("chatgpt:"));
-              const showGpt = gpt && !prevGpt;
-              const key = encodeWorkspaceKey(s.machineId, s.root);
-              const wsRuns = filterRunsByWorkspace(allRuns, s.machineId, s.root);
-              const unread = workspaceUnreadCount(wsRuns, readMap);
-              const live = workspaceHasLiveRun(wsRuns);
-              const title = s.label || workspaceFolderName(s.root);
-              return (
-                <div key={key}>
-                  {showCursor ? <div className="pl-7 pr-3 pt-3 pb-0.5 text-[12px] font-medium tracking-wide text-sidebar-foreground">Cursor</div> : null}
-                  {showGpt ? <div className="pl-7 pr-3 pt-3 pb-0.5 text-[12px] font-medium tracking-wide text-sidebar-foreground">ChatGPT</div> : null}
-                  {s.root === "chatgpt:monitor" ? (
-                    <div className="pl-7 pr-3 py-1">
+            {(() => {
+              const cursorSlots = g.workspaces.filter((s) => !s.root.startsWith("chatgpt:"));
+              const gptSlots = g.workspaces.filter((s) => s.root.startsWith("chatgpt:"));
+              const split = cursorSlots.length > 0 && gptSlots.length > 0;
+              const row = (s: WorkspaceSlot) => {
+                const key = encodeWorkspaceKey(s.machineId, s.root);
+                const wsRuns = filterRunsByWorkspace(allRuns, s.machineId, s.root);
+                const unread = workspaceUnreadCount(wsRuns, readMap);
+                const live = workspaceHasLiveRun(wsRuns);
+                const title = s.label || workspaceFolderName(s.root);
+                if (s.root === "chatgpt:monitor") {
+                  return (
+                    <div key={key} className="px-2 py-1">
                       <div className={`${UI_TYPE} text-amber-400`}>需要用监控启动</div>
                       <Button
                         type="button"
@@ -232,23 +236,46 @@ export default function Sidebar({
                         {monitoring ? "正在打开…" : "用监控方式打开"}
                       </Button>
                     </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => onSelectWorkspace(key)}
-                      className={`w-full text-left pl-7 pr-3 py-1 flex items-center gap-1.5 ${key === selectedKey ? "bg-sidebar-accent text-sidebar-accent-foreground" : "hover:bg-sidebar-accent/50 text-muted-foreground"}`}
-                    >
-                      <span className="text-muted-foreground text-[12px] shrink-0">–</span>
-                      <span className="min-w-0 flex-1 flex items-center gap-1.5">
-                        <span className={`min-w-0 truncate ${UI_TYPE}`} title={s.label ? s.root : s.root}>{title}</span>
-                        {live ? <LiveSpinner /> : null}
-                      </span>
-                      <UnreadCount n={unread} quiet={quietUnread} />
-                    </button>
-                  )}
-                </div>
+                  );
+                }
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => onSelectWorkspace(key)}
+                    className={`w-full text-left rounded-lg px-2 py-1.5 flex items-center gap-1.5 motion-safe:transition-colors motion-safe:duration-200 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)] ${key === selectedKey ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted/70"}`}
+                  >
+                    <span className="min-w-0 flex-1 flex items-center gap-1.5">
+                      <span className={`min-w-0 truncate ${UI_TYPE}`} title={s.label ? s.root : s.root}>{title}</span>
+                      {live ? <LiveSpinner /> : null}
+                    </span>
+                    <UnreadCount n={unread} quiet={quietUnread} />
+                  </button>
+                );
+              };
+              const stack = (slots: WorkspaceSlot[]) => (
+                <div className="flex flex-col gap-2 px-1.5 py-1.5">{slots.map(row)}</div>
               );
-            })}
+              const cluster = (label: string, slots: WorkspaceSlot[], tone: "cursor" | "gpt") => {
+                if (!slots.length) return null;
+                if (!split) return <div key={label} className="px-1">{stack(slots)}</div>;
+                const head = tone === "cursor"
+                  ? "bg-muted text-foreground"
+                  : "bg-foreground text-background";
+                return (
+                  <div key={label} className="mx-2 mt-2.5 overflow-hidden rounded-xl bg-background shadow-sm ring-1 ring-border">
+                    <div className={`px-2.5 py-1.5 text-[12px] font-semibold leading-4 ${head}`}>{label}</div>
+                    {stack(slots)}
+                  </div>
+                );
+              };
+              return (
+                <>
+                  {cluster("Cursor", cursorSlots, "cursor")}
+                  {cluster("ChatGPT", gptSlots, "gpt")}
+                </>
+              );
+            })()}
           </div>
           );
         })}

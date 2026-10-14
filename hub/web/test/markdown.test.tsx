@@ -205,7 +205,7 @@ describe("ask / plan action buttons", () => {
         onAnswerAsk={async () => true}
       />,
     );
-    expect(html).toContain("Questions");
+    expect(html).toContain("提问");
     expect(html).toContain("Continue");
     expect(html).not.toContain("Created Plan");
     expect(html).not.toContain("border-l-[#F1B467]");

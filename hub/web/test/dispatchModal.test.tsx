@@ -22,9 +22,9 @@ describe("DispatchModal prompt", () => {
         onDone={() => {}}
       />,
     );
-    expect(html).toContain("Enter 派发");
+    expect(html).toContain("Enter 发送");
     expect(html).toContain("Shift+Enter 换行");
-    expect(html).toContain("Markdown 原文");
+    expect(html).toContain("写下要做的事");
   });
 
   test("cdp_ready false lists workspace but blocks dispatch with zombie copy", () => {
@@ -117,7 +117,7 @@ describe("DispatchModal prompt", () => {
     expect(html).toContain('aria-label="添加快捷提示词"');
     expect(html).toContain("规范");
     const addAt = html.indexOf('aria-label="添加快捷提示词"');
-    const taAt = html.indexOf("提示词（Markdown 原文");
+    const taAt = html.indexOf("写下要做的事");
     expect(addAt).toBeGreaterThan(-1);
     expect(taAt).toBeGreaterThan(addAt);
   });

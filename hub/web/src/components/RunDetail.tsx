@@ -570,7 +570,7 @@ export default function RunDetail({
         {queued.length > 0 && (
           <div className="mt-3 rounded-lg border border-border bg-card/60 px-3 py-2" aria-label="Queued messages">
             <div className={`${UI_META} text-muted-foreground mb-1`}>
-              {queued.length} Queued Message{queued.length > 1 ? "s" : ""}
+              {queued.length} 条还在排队
             </div>
             <div className="flex flex-col gap-1.5">
               {queued.map((q) => (
@@ -615,7 +615,7 @@ export default function RunDetail({
                 sendFollowup();
               }}
               rows={3}
-              placeholder={run.pending_ask ? (run.pending_ask.kind === "plan" ? "请先点上方 Build…" : "请先回答上方选择题…") : run.status === "running" ? "Add a follow-up…" : "续聊同一对话…（Enter 发送，Shift+Enter 换行；可粘贴截图）"}
+              placeholder={run.pending_ask ? (run.pending_ask.kind === "plan" ? "请先点上方 Build…" : "请先回答上方选择题…") : "接着说。Enter 发送，Shift+Enter 换行"}
               className="flex-1 min-h-[4.5rem] max-h-48 resize-y"
             />
             <Button type="submit" disabled={!injectReady || sending || (!followup.trim() && followupFiles.length === 0)} className="shrink-0">发送</Button>

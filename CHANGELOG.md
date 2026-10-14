@@ -10,6 +10,10 @@ Armada 按 **面** 发版：扩展、桌面、iOS、Android 可以不同号。RE
 
 ## Unreleased
 
+### 新增
+
+- 中台整页按显示大小一起放大。同一台电脑上的 Cursor 和 ChatGPT 分成两块。卡片只留标题和右上角用时，不再重复列名、电脑和工作区。已读卡片有边框；工作区切换，以及「改标题 / 隐藏」的展开，都有过渡。
+
 ### 修复
 
 - 手机上的 Codex 卡片在绑上线程后可以续聊。快照带上 `chatgptThreadId`，不再要求 Cursor 的 `conversationId`。ChatGPT 目标仍只发文字。已安装的 TestFlight 35 和 Android 0.1.14 还没有这一项，要等下一次手机包。

@@ -1,26 +1,17 @@
 import { useState } from "react";
-import { groupRuns, cardView, clipCardTitle, COLUMN_LABELS, canArchiveRun, canRetryRun, isUnreadAlert, isUnreadNeedInput, machineLabel, workspaceFolderName, runDisplayName, cardChromeClass, cardChromeOf, columnHasAlert, unreadAlertDotClass, resumeStallCopy, type ColumnKey, type RunRow } from "../boardState";
+import { groupRuns, cardView, clipCardTitle, COLUMN_LABELS, canArchiveRun, canRetryRun, runDisplayName, cardChromeClass, cardChromeOf, columnHasAlert, unreadAlertDotClass, resumeStallCopy, type ColumnKey, type RunRow } from "../boardState";
 import type { Machine } from "../types";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
-import { Badge } from "./ui/badge";
 import { Card, CardContent } from "./ui/card";
 import { UI_META, UI_TYPE } from "../ui";
 
-const COL_ACCENT: Record<ColumnKey, string> = {
-  waiting: "border-t-amber-500",
-  running: "border-t-sky-500",
-  completed: "border-t-emerald-500",
-  cancelled: "border-t-zinc-500",
-  error: "border-t-red-500",
-};
-
-const BADGE_COLOR: Record<ColumnKey, string> = {
-  waiting: "text-amber-400",
-  running: "text-sky-400",
-  completed: "text-emerald-400",
-  cancelled: "text-zinc-500",
-  error: "text-red-400",
+const COL_DOT: Record<ColumnKey, string> = {
+  waiting: "bg-muted-foreground/70",
+  running: "bg-foreground",
+  completed: "bg-muted-foreground/50",
+  cancelled: "bg-muted-foreground/35",
+  error: "bg-destructive",
 };
 
 function CardSpinner() {
@@ -34,7 +25,7 @@ function CardSpinner() {
   );
 }
 
-export default function Board({ runs, machines, selected, onSelect, showArchived, onHide, onUnhide, readMap, onRename, onRetry, quietUnread = false }: {
+export default function Board({ runs, selected, onSelect, showArchived, onHide, onUnhide, readMap, onRename, onRetry, quietUnread = false }: {
   runs: RunRow[]; machines: Machine[]; selected: string | null; onSelect: (id: string) => void;
   showArchived: boolean;
   onHide: (id: string) => void;
@@ -48,10 +39,6 @@ export default function Board({ runs, machines, selected, onSelect, showArchived
   const now = Date.now();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
-  const nameOf = (id: string) => {
-    const m = machines.find((x) => x.id === id);
-    return m ? machineLabel(m) : id;
-  };
   const startEdit = (r: RunRow) => {
     setDraft(runDisplayName(r));
     setEditingId(r.id);
@@ -64,26 +51,26 @@ export default function Board({ runs, machines, selected, onSelect, showArchived
     onRename(id, t);
   };
   return (
-    <main className="flex-1 min-w-0 overflow-x-auto flex gap-2 p-3">
+    <main className="flex-1 min-w-0 overflow-x-auto flex gap-3 p-4">
       {(Object.keys(COLUMN_LABELS) as ColumnKey[]).map((col) => (
-        <section key={col} className={`flex-1 min-w-[240px] shrink-0 flex flex-col rounded-xl bg-card/40 border-t-2 ${COL_ACCENT[col]}`}>
-          <h2 className={`${UI_META} tracking-wide uppercase text-muted-foreground px-2.5 pb-2 pt-2 inline-flex items-center gap-1.5 whitespace-nowrap`}>
-            {COLUMN_LABELS[col]} <span className="text-muted-foreground/70 normal-case tracking-normal">{g[col].length}</span>
+        <section key={col} className="flex-1 min-w-[240px] shrink-0 flex flex-col rounded-2xl bg-muted/30">
+          <h2 className={`${UI_TYPE} font-medium tracking-tight text-foreground px-3 pb-2 pt-3 inline-flex items-center gap-1.5 whitespace-nowrap`}>
+            <span className={`size-1.5 rounded-full ${COL_DOT[col]}`} />
+            {COLUMN_LABELS[col]} <span className={`${UI_META} text-muted-foreground font-normal`}>{g[col].length}</span>
             {columnHasAlert(runs, col, readMap) ? (
               <span className={`size-1.5 shrink-0 rounded-full ${unreadAlertDotClass(quietUnread)}`} data-col-alert={col} title={quietUnread ? "待处理或未读异常（免打扰）" : "待处理或未读异常"} />
             ) : null}
           </h2>
-          <div className="flex-1 overflow-y-auto flex flex-col gap-1.5 px-1.5 pb-2">
+          <div className="flex-1 overflow-y-auto flex flex-col gap-2 px-2 pb-3">
             {g[col].length === 0 && (
               <div className={`${UI_META} text-muted-foreground px-2 py-6 text-center`}>暂无</div>
             )}
             {g[col].map((r) => {
               const v = cardView(r, now);
               const chrome = cardChromeOf(r, readMap[r.id]);
-              const unread = isUnreadAlert(r, readMap[r.id]) || isUnreadNeedInput(r, readMap[r.id]);
               const editing = editingId === r.id;
               return (
-                <Card key={r.id} size="sm" className={`min-w-0 text-left gap-0 py-0 ring-0 overflow-visible ${cardChromeClass(chrome, selected === r.id)}`}>
+                <Card key={r.id} size="sm" data-state={selected === r.id ? "open" : "closed"} className={`group min-w-0 text-left gap-0 py-0 ring-0 overflow-hidden motion-safe:transition-[border-color,box-shadow] motion-safe:duration-200 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)] ${cardChromeClass(chrome, selected === r.id)}`}>
                   {editing ? (
                     <CardContent className="px-2.5 py-2">
                       <Input
@@ -99,47 +86,52 @@ export default function Board({ runs, machines, selected, onSelect, showArchived
                       />
                     </CardContent>
                   ) : (
-                    <button onClick={() => onSelect(r.id)} className="w-full min-w-0 text-left px-2.5 py-2">
-                      <div className={`${UI_TYPE} font-medium leading-snug text-foreground break-words line-clamp-2`} title={v.title}>{clipCardTitle(v.title)}</div>
-                      <div className={`${UI_META} text-muted-foreground mt-1 truncate`}>{nameOf(r.machine_id)} · {workspaceFolderName(r.workspace_root)}</div>
+                    <button onClick={() => onSelect(r.id)} className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 px-3 py-2.5 text-left">
+                      <div className={`${UI_TYPE} min-w-0 font-medium leading-snug text-foreground break-words line-clamp-2`} title={v.title}>{clipCardTitle(v.title)}</div>
+                      <span className={`inline-flex items-center gap-1 pt-0.5 text-muted-foreground whitespace-nowrap ${UI_META}`}>
+                        {col === "running" ? <CardSpinner /> : null}
+                        {v.elapsed}
+                      </span>
                       {resumeStallCopy(r.end_reason) && (
-                        <div className={`${UI_META} text-amber-600 dark:text-amber-400 mt-1 line-clamp-3`}>{resumeStallCopy(r.end_reason)}</div>
+                        <div className={`${UI_META} col-span-2 text-amber-600 dark:text-amber-400 mt-1 line-clamp-3`}>{resumeStallCopy(r.end_reason)}</div>
                       )}
                       {r.status === "binding" && (
-                        <div className={`${UI_META} text-sky-500/80 mt-1`}>已提交,正在关联会话</div>
+                        <div className={`${UI_META} col-span-2 text-muted-foreground mt-1`}>正在接上这次对话</div>
                       )}
                       {(r.status === "dispatched" || r.status === "created") && (
-                        <div className={`${UI_META} text-amber-500/80 mt-1`}>已预填,待本机回车</div>
+                        <div className={`${UI_META} col-span-2 text-muted-foreground mt-1`}>已写好，等这台电脑发出</div>
                       )}
-                      <div className={`${UI_META} text-muted-foreground mt-1 flex justify-between items-center gap-2`}>
-                        <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
-                          {unread ? <span className={`size-1.5 shrink-0 rounded-full ${chrome === "done" ? "bg-emerald-400" : unreadAlertDotClass(quietUnread)}`} title={chrome === "need" ? "待处理" : chrome === "fail" ? "异常未读" : "未读"} /> : null}
-                          {col === "running" ? <CardSpinner /> : null}
-                          <Badge variant="outline" className={BADGE_COLOR[col]}>{v.badge}</Badge>
-                        </span>
-                        <span className="text-muted-foreground whitespace-nowrap shrink-0">{v.elapsed}</span>
-                      </div>
+                      {r.status === "queued" && (
+                        <div className={`${UI_META} col-span-2 text-muted-foreground mt-1`}>排队中</div>
+                      )}
+                      {r.status === "running" && r.pending_ask ? (
+                        <div className={`${UI_META} col-span-2 mt-1 text-muted-foreground`}>待处理</div>
+                      ) : null}
                     </button>
                   )}
                   {!editing && (
-                    <div className="px-2.5 pb-1.5 flex flex-wrap gap-x-1">
-                      <Button type="button" size="xs" variant="ghost" onClick={(e) => { e.stopPropagation(); startEdit(r); }}>
-                        改标题
-                      </Button>
-                      {showArchived ? (
-                        <Button type="button" size="xs" variant="ghost" onClick={(e) => { e.stopPropagation(); onUnhide(r.id); }}>
-                          取消隐藏
-                        </Button>
-                      ) : canArchiveRun(r) ? (
-                        <Button type="button" size="xs" variant="ghost" onClick={(e) => { e.stopPropagation(); onHide(r.id); }}>
-                          隐藏
-                        </Button>
-                      ) : null}
-                      {onRetry && canRetryRun(r) ? (
-                        <Button type="button" size="xs" variant="ghost" onClick={(e) => { e.stopPropagation(); onRetry(r.id); }}>
-                          重试
-                        </Button>
-                      ) : null}
+                    <div className="grid grid-rows-[0fr] opacity-0 motion-safe:transition-[grid-template-rows,opacity] motion-safe:duration-200 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)] group-hover:grid-rows-[1fr] group-hover:opacity-100 focus-within:grid-rows-[1fr] focus-within:opacity-100 group-data-[state=open]:grid-rows-[1fr] group-data-[state=open]:opacity-100">
+                      <div className="group/actions min-h-0 overflow-hidden">
+                        <div className="flex translate-y-1 flex-wrap gap-x-1 px-1.5 pb-1 motion-safe:transition-transform motion-safe:duration-200 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)] group-hover:translate-y-0 group-focus-within/actions:translate-y-0 group-data-[state=open]:translate-y-0">
+                          <Button type="button" size="xs" variant="ghost" onClick={(e) => { e.stopPropagation(); startEdit(r); }}>
+                            改标题
+                          </Button>
+                          {showArchived ? (
+                            <Button type="button" size="xs" variant="ghost" onClick={(e) => { e.stopPropagation(); onUnhide(r.id); }}>
+                              取消隐藏
+                            </Button>
+                          ) : canArchiveRun(r) ? (
+                            <Button type="button" size="xs" variant="ghost" onClick={(e) => { e.stopPropagation(); onHide(r.id); }}>
+                              隐藏
+                            </Button>
+                          ) : null}
+                          {onRetry && canRetryRun(r) ? (
+                            <Button type="button" size="xs" variant="ghost" onClick={(e) => { e.stopPropagation(); onRetry(r.id); }}>
+                              重试
+                            </Button>
+                          ) : null}
+                        </div>
+                      </div>
                     </div>
                   )}
                 </Card>

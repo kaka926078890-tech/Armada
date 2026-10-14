@@ -10,9 +10,9 @@ describe("appearance layout stays coordinated when text scales", () => {
     const css = readFileSync(join(web, "src/index.css"), "utf8");
     expect(css).toMatch(/html\s*\{[^}]*font-size:\s*16px/);
     expect(css).not.toMatch(/html\s*\{[^}]*font-size:\s*calc\(16px \* var\(--armada-text-scale\)\)/);
-    expect(css).toMatch(/html\[data-font-scale="large"\][^{]*\{[^}]*--armada-text-scale:\s*1\.25/);
-    expect(css).toMatch(/html\[data-font-scale="xlarge"\][^{]*\{[^}]*--armada-text-scale:\s*1\.5/);
-    expect(css).not.toMatch(/data-font-scale="large"[^{]*\{[^}]*zoom\s*:/);
+    expect(css).toMatch(/html\[data-font-scale="large"\][^{]*\{[^}]*zoom:\s*1\.25/);
+    expect(css).toMatch(/html\[data-font-scale="xlarge"\][^{]*\{[^}]*zoom:\s*1\.5/);
+    expect(css).not.toMatch(/calc\(\d+px \* var\(--armada-text-scale\)\)/);
   });
 
   test("header chips cannot squeeze CJK into a glyph column", () => {
@@ -47,7 +47,7 @@ describe("appearance layout stays coordinated when text scales", () => {
     const sidebar = readFileSync(join(web, "src/components/Sidebar.tsx"), "utf8");
     const board = readFileSync(join(web, "src/components/Board.tsx"), "utf8");
     const button = readFileSync(join(web, "src/components/ui/button.tsx"), "utf8");
-    expect(sidebar).toContain("w-[224px]");
+    expect(sidebar).toContain("w-60");
     expect(button).toContain("whitespace-nowrap");
     expect(board).toContain("min-w-[240px]");
     expect(board).not.toMatch(/max-w-\[240px\]/);

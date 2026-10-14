@@ -92,14 +92,15 @@ export default function SettingsModal({
           <Button type="button" variant="outline" onClick={onClose}>完成</Button>
         </DialogHeader>
         <div>
-          <div className={`${UI_LABEL} uppercase tracking-wide mb-1.5`}>外观</div>
+          <div className={`${UI_LABEL} mb-1.5`}>外观</div>
           <div className="flex gap-1.5">
             <Button type="button" variant={theme === "dark" ? "secondary" : "outline"} onClick={() => onTheme("dark")}>黑夜</Button>
             <Button type="button" variant={theme === "light" ? "secondary" : "outline"} onClick={() => onTheme("light")}>明亮</Button>
           </div>
         </div>
         <div>
-          <div className={`${UI_LABEL} uppercase tracking-wide mb-1.5`}>字号</div>
+          <div className={`${UI_LABEL} mb-1.5`}>显示大小</div>
+          <p className={`${UI_META} text-muted-foreground mb-1.5`}>整页一起放大，字和间距保持原来的比例。</p>
           <div className="flex gap-1.5">
             <Button type="button" variant={fontScale === "normal" ? "secondary" : "outline"} onClick={() => onFontScale("normal")}>正常</Button>
             <Button type="button" variant={fontScale === "large" ? "secondary" : "outline"} onClick={() => onFontScale("large")}>大</Button>
@@ -107,7 +108,7 @@ export default function SettingsModal({
           </div>
         </div>
         <div>
-          <div className={`${UI_LABEL} uppercase tracking-wide mb-1.5`}>消息</div>
+          <div className={`${UI_LABEL} mb-1.5`}>消息</div>
           <div className="flex flex-col gap-2">
             <Button
               type="button"
@@ -124,7 +125,7 @@ export default function SettingsModal({
           </div>
         </div>
         <div>
-          <div className={`${UI_LABEL} uppercase tracking-wide mb-1.5`}>快捷提示词</div>
+          <div className={`${UI_LABEL} mb-1.5`}>快捷提示词</div>
           {snippetError && <div className={`${UI_TYPE} text-destructive mb-1.5`}>{snippetError}</div>}
           {actionError && <div className={`${UI_TYPE} text-destructive mb-1.5`}>{actionError}</div>}
           {snippets.length === 0 ? (

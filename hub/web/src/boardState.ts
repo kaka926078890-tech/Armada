@@ -65,7 +65,7 @@ const COLUMN_MAP: Record<string, ColumnKey> = {
 };
 
 export const COLUMN_LABELS: Record<ColumnKey, string> = {
-  waiting: "待本机回车", running: "运行中", completed: "已完成", cancelled: "已取消", error: "异常",
+  waiting: "待开始", running: "运行中", completed: "已完成", cancelled: "已取消", error: "异常",
 };
 
 export function groupRuns(runs: RunRow[]): Record<ColumnKey, RunRow[]> {
@@ -319,15 +319,15 @@ export function cardChromeOf(
 }
 
 export function cardChromeClass(chrome: CardChrome, selected: boolean): string {
-    const selectedRing = selected ? " ring-1 ring-primary/40" : "";
+  const box = "border bg-card shadow-sm";
+  const edge = selected ? "border-primary/80" : "border-border";
   if (chrome === "need" || chrome === "fail") {
-    return `border-border border-l-[3px] border-l-red-400 bg-card${selectedRing}`;
+    return `${box} ${edge} border-l-[3px] border-l-red-400`;
   }
   if (chrome === "done") {
-    return `border-border border-l-[3px] border-l-emerald-400 bg-card${selectedRing}`;
+    return `${box} ${edge} border-l-[3px] border-l-emerald-400`;
   }
-  if (selected) return "border-primary/80 bg-card";
-  return "border-transparent bg-card/50 hover:border-border";
+  return `${box} ${edge}`;
 }
 
 /** 列上的红点：该列有待答 Ask 或未读失败/中止。已完成未读走绿条，不算问题点。 */

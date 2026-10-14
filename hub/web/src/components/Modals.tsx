@@ -144,8 +144,8 @@ export function DispatchModal({
           }}
         />
         <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={8}
-          placeholder="提示词（Markdown 原文；Enter 派发，Shift+Enter 换行）"
-          className="w-full font-mono min-h-[8rem] max-h-[min(12rem,40vh)] overflow-y-auto resize-y field-sizing-fixed"
+          placeholder="写下要做的事。Enter 发送，Shift+Enter 换行"
+          className="w-full min-h-[8rem] max-h-[min(12rem,40vh)] overflow-y-auto resize-y field-sizing-fixed"
           style={{ fieldSizing: "fixed" }}
           onKeyDown={(e) => {
             if (!isFollowupSendEnter(e)) return;
