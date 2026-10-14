@@ -52,9 +52,13 @@ fun unreadBadgeText(count: Int): String? {
     return if (count > 99) "99+" else "$count"
 }
 
-/** iOS system colors (light / dark). App accent is systemBlue, not hub primary. */
+/**
+ * Hub shadcn tokens from `hub/web/src/index.css`.
+ * accent = primary, blue = live sky, ask = Ask stripe, orange = plan.
+ */
 data class IosPaletteArgb(
     val accent: Long,
+    val onAccent: Long,
     val green: Long,
     val red: Long,
     val blue: Long,
@@ -64,17 +68,24 @@ data class IosPaletteArgb(
     val grouped: Long,
     val cell: Long,
     val secondary: Long,
+    val foreground: Long,
+    val border: Long,
+    val ask: Long,
 )
 
 fun iosPaletteArgb(dark: Boolean) = IosPaletteArgb(
-    accent = if (dark) 0xFF0A84FFL else 0xFF007AFFL,
-    green = if (dark) 0xFF30D158L else 0xFF34C759L,
-    red = if (dark) 0xFFFF453AL else 0xFFFF3B30L,
-    blue = if (dark) 0xFF0A84FFL else 0xFF007AFFL,
-    gray = 0xFF8E8E93L,
-    orange = if (dark) 0xFFFF9F0AL else 0xFFFF9500L,
-    page = if (dark) 0xFF000000L else 0xFFFFFFFFL,
-    grouped = if (dark) 0xFF000000L else 0xFFF2F2F7L,
-    cell = if (dark) 0xFF1C1C1EL else 0xFFFFFFFFL,
-    secondary = if (dark) 0xFF1C1C1EL else 0xFFF2F2F7L,
+    accent = if (dark) 0xFFE5E5E5L else 0xFF171717L,
+    onAccent = if (dark) 0xFF171717L else 0xFFFAFAFAL,
+    green = 0xFF34D399L,
+    red = if (dark) 0xFFF87171L else 0xFFDC2626L,
+    blue = 0xFF38BDF8L,
+    gray = if (dark) 0xFFA3A3A3L else 0xFF737373L,
+    orange = if (dark) 0xFFF1B467L else 0xFFD9973AL,
+    page = if (dark) 0xFF0A0A0AL else 0xFFFFFFFFL,
+    grouped = if (dark) 0xFF0A0A0AL else 0xFFF5F5F5L,
+    cell = if (dark) 0xFF171717L else 0xFFFFFFFFL,
+    secondary = if (dark) 0xFF262626L else 0xFFF5F5F5L,
+    foreground = if (dark) 0xFFFAFAFAL else 0xFF0A0A0AL,
+    border = if (dark) 0x1AFFFFFFL else 0xFFE5E5E5L,
+    ask = if (dark) 0xFF599CE7L else 0xFF3B82C4L,
 )

@@ -41,7 +41,7 @@ class MarkdownHtmlTest {
         assertTrue(!html.contains("zoom:"))
         assertTrue(html.contains("--md-scale: 1.25") || html.contains("--md-scale:1.25"))
         assertTrue(html.contains("calc(13px * var(--md-scale))") || html.contains("calc(13px*var(--md-scale))"))
-        assertTrue(html.contains("color: #e4e4e7") || html.contains("color:#e4e4e7"))
+        assertTrue(html.contains("color: #fafafa") || html.contains("color:#fafafa"))
     }
 
     @Test

@@ -73,6 +73,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
@@ -186,8 +187,8 @@ fun BindScreen(vm: SessionVm, state: UiState) {
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             Column(Modifier.statusBarsPadding()) {
-                IosNavBar("绑定", largeTitle = true)
-                HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+                IosNavBar("绑定")
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline)
             }
         },
     ) { pad ->
@@ -305,14 +306,13 @@ fun FleetScreen(vm: SessionVm, state: UiState, onOpen: (WorkspaceDto) -> Unit, o
             Column(Modifier.statusBarsPadding()) {
                 IosNavBar(
                     title = "舰队",
-                    largeTitle = true,
                     leading = NavAction("解绑") { vm.unbind() },
                     trailing = listOf(
                         NavAction("设置", onClick = onSettings),
                         NavAction("刷新", onClick = onRefresh),
                     ),
                 )
-                HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline)
             }
         },
     ) { pad ->
@@ -349,7 +349,7 @@ fun FleetScreen(vm: SessionVm, state: UiState, onOpen: (WorkspaceDto) -> Unit, o
                             if (machineUnread > 0) {
                                 Text(
                                     "全部已读",
-                                    color = AccentBlue,
+                                    color = MaterialTheme.colorScheme.onSurface,
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     modifier = Modifier.clickable { vm.markAllRead(MarkReadScope.Machine(mid)) },
@@ -363,7 +363,7 @@ fun FleetScreen(vm: SessionVm, state: UiState, onOpen: (WorkspaceDto) -> Unit, o
                             if (index > 0) GroupedDivider()
                             SwipeActionRow(
                                 trailing = if (unread > 0) listOf(
-                                    SwipeAction("全部已读", AccentBlue) {
+                                    SwipeAction("全部已读", StatusBlue) {
                                         vm.markAllRead(MarkReadScope.Workspace(w.machineId, w.workspaceRoot))
                                     },
                                 ) else emptyList(),
@@ -376,13 +376,13 @@ fun FleetScreen(vm: SessionVm, state: UiState, onOpen: (WorkspaceDto) -> Unit, o
                                     Spacer(Modifier.width(8.dp))
                                     Column(Modifier.weight(1f)) {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Text(w.label, fontSize = 17.sp)
+                                            Text(w.label, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                                             if (live) {
                                                 Spacer(Modifier.width(6.dp))
                                                 CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp, color = StatusGray)
                                             }
                                         }
-                                        Text(w.workspaceRoot, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                                        Text(w.workspaceRoot, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                                     }
                                     if (unread > 0) {
                                         Box(Modifier.size(8.dp).clip(CircleShape).background(StatusRed))
@@ -465,7 +465,7 @@ fun WorkspaceScreen(vm: SessionVm, state: UiState, workspace: WorkspaceDto, onBa
                     leading = NavAction("‹ 舰队", onClick = onBack),
                     trailing = listOf(NavAction("派发") { showDispatch = true }),
                 )
-                HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline)
             }
         },
     ) { pad ->
@@ -487,8 +487,8 @@ fun WorkspaceScreen(vm: SessionVm, state: UiState, workspace: WorkspaceDto, onBa
                     val selected = archiveChipSelected(showArchived, tab == col)
                     val alert = columnHasAlert(openRuns, col) { vm.isUnread(it) }
                     Row(
-                        Modifier.clip(RoundedCornerShape(50))
-                            .background(if (selected) AccentBlue.copy(alpha = 0.18f) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f))
+                        Modifier.clip(RoundedCornerShape(10.dp))
+                            .background(if (selected) AccentBlue else MaterialTheme.colorScheme.surfaceVariant)
                             .clickable {
                                 showArchived = false
                                 tab = col
@@ -499,13 +499,14 @@ fun WorkspaceScreen(vm: SessionVm, state: UiState, workspace: WorkspaceDto, onBa
                     ) {
                         Text(
                             col.title,
-                            fontSize = 15.sp,
-                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = if (selected) OnAccent else MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                         )
                         if (n > 0) {
                             Spacer(Modifier.width(4.dp))
-                            Text("$n", fontSize = 11.sp)
+                            Text("$n", fontSize = 12.sp, color = if (selected) OnAccent else MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         if (alert) {
                             Spacer(Modifier.width(4.dp))
@@ -514,8 +515,8 @@ fun WorkspaceScreen(vm: SessionVm, state: UiState, workspace: WorkspaceDto, onBa
                     }
                 }
                 Row(
-                    Modifier.clip(RoundedCornerShape(50))
-                        .background(if (showArchived) AccentBlue.copy(alpha = 0.18f) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f))
+                    Modifier.clip(RoundedCornerShape(10.dp))
+                        .background(if (showArchived) AccentBlue else MaterialTheme.colorScheme.surfaceVariant)
                         .clickable { showArchived = true }
                         .heightIn(min = 36.dp)
                         .padding(horizontal = 12.dp, vertical = 7.dp),
@@ -523,13 +524,14 @@ fun WorkspaceScreen(vm: SessionVm, state: UiState, workspace: WorkspaceDto, onBa
                 ) {
                     Text(
                         "已隐藏",
-                        fontSize = 15.sp,
-                        fontWeight = if (showArchived) FontWeight.SemiBold else FontWeight.Normal,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = if (showArchived) OnAccent else MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                     )
                     if (hiddenN > 0) {
                         Spacer(Modifier.width(4.dp))
-                        Text("$hiddenN", fontSize = 11.sp)
+                        Text("$hiddenN", fontSize = 12.sp, color = if (showArchived) OnAccent else MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
@@ -555,8 +557,9 @@ fun WorkspaceScreen(vm: SessionVm, state: UiState, workspace: WorkspaceDto, onBa
                         Box(
                             Modifier
                                 .padding(horizontal = 16.dp, vertical = 4.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(MaterialTheme.colorScheme.surface),
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(MaterialTheme.colorScheme.surface)
+                                .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(10.dp)),
                         ) {
                             SwipeActionRow(
                                 trailing = listOfNotNull(
@@ -619,7 +622,7 @@ fun RunRow(run: RunDto, unread: Boolean) {
         )
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(run.displayTitle, maxLines = 3, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Text(run.displayTitle, maxLines = 3, fontSize = 14.sp, fontWeight = FontWeight.Medium)
             Row(
                 Modifier.padding(top = 8.dp).fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -643,7 +646,7 @@ fun RunRow(run: RunDto, unread: Boolean) {
                 )
                 Spacer(Modifier.weight(1f))
                 if (elapsed != null) {
-                    Text(elapsed, fontSize = 11.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f))
+                    Text(elapsed, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -939,7 +942,7 @@ fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String, onBack: () -> 
                         NavAction("续聊", enabled = slot?.canInject == true && run?.canFollowup == true) { showFollow = true },
                     ),
                 )
-                HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline)
             }
         },
         bottomBar = bar@{
@@ -950,7 +953,7 @@ fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String, onBack: () -> 
                     .background(LocalIosPalette.current.cell.copy(alpha = 0.92f))
                     .navigationBarsPadding(),
             ) {
-                HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline)
                 DetailActionBar(
                 copy = {
                     val cm = ctx.getSystemService(ClipboardManager::class.java)
@@ -1016,7 +1019,7 @@ fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String, onBack: () -> 
                 DetailReplyBlock(r.finalText, r.isLive, onOpenFile)
                 Text(
                     "查看对话记录",
-                    color = AccentBlue,
+                    color = MaterialTheme.colorScheme.onSurface,
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.clickable { onOpenChat() },
                 )
@@ -1054,7 +1057,7 @@ fun DetailPromptCard(text: String) {
     var expanded by remember(text) { mutableStateOf(false) }
     val overflows = contentH > DETAIL_PROMPT_MAX_HEIGHT
     val shown = if (expanded) maxOf(contentH, 24f) else detailPromptShownHeight(contentH)
-    val bubble = AccentBlue.copy(alpha = 0.18f)
+    val bubble = LocalIosPalette.current.secondary
     val screenWidthDp = LocalConfiguration.current.screenWidthDp
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
         Column(
@@ -1099,15 +1102,20 @@ fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend (
     val plan = isPlanAsk(ask)
     val canContinue = continueAllowed(ask)
     val typed = freeformText.trim()
-    Box(Modifier.fillMaxWidth().height(IntrinsicSize.Min).clip(RoundedCornerShape(12.dp)).background(LocalIosPalette.current.secondary)) {
+    Box(
+        Modifier.fillMaxWidth().height(IntrinsicSize.Min)
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp)),
+    ) {
         Box(
             Modifier.align(Alignment.CenterStart).padding(vertical = 10.dp, horizontal = 4.dp)
                 .width(4.dp).fillMaxHeight().clip(RoundedCornerShape(1.5.dp))
-                .background(if (plan) PlanYellow else AccentBlue),
+                .background(if (plan) LocalIosPalette.current.orange else AskBlue),
         )
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (plan) {
-                Text("Created Plan", style = MaterialTheme.typography.titleMedium)
+                Text("计划", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, fontWeight = FontWeight.Medium)
                 Text(ask.questions.firstOrNull()?.prompt.orEmpty())
                 val overview = ask.questions.firstOrNull()?.options?.firstOrNull()?.text
                 if (!overview.isNullOrEmpty() && overview != "Build") MarkdownFrame(overview)
@@ -1119,8 +1127,8 @@ fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend (
                         filled = true,
                         compact = true,
                         enabled = busy == null,
-                        fillColor = PlanYellow,
-                        textColor = Color.Black,
+                        fillColor = LocalIosPalette.current.orange,
+                        textColor = Color(0xFF1A1A1A),
                         onClick = click@{
                     val q = ask.questions.firstOrNull() ?: return@click
                     val opt = q.options.firstOrNull() ?: return@click
@@ -1142,7 +1150,7 @@ fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend (
                 }
                 }
             } else {
-                Text("需要选择", style = MaterialTheme.typography.titleMedium)
+                Text("提问", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, fontWeight = FontWeight.Medium)
                 ask.questions.forEach { q ->
                     Text(q.prompt)
                     if (!canContinue) return@forEach
@@ -1153,8 +1161,8 @@ fun AskBlock(vm: SessionVm, runId: String, ask: PendingAskDto, onDone: suspend (
                             Row(
                                 Modifier.fillMaxWidth()
                                     .clip(RoundedCornerShape(10.dp))
-                                    .background(if (selected) AccentBlue.copy(alpha = 0.12f) else Color.Transparent)
-                                    .border(if (selected) 2.dp else 1.dp, if (selected) AccentBlue else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+                                    .background(if (selected) AccentBlue.copy(alpha = 0.10f) else Color.Transparent)
+                                    .border(1.dp, if (selected) AccentBlue else MaterialTheme.colorScheme.outline, RoundedCornerShape(10.dp))
                                     .clickable(enabled = busy == null) {
                                         if (ask.questions.size > 1) {
                                             pickedByQuestion = pickedByQuestion + (q.id to o.id)
@@ -1374,7 +1382,7 @@ fun ChatHistoryScreen(vm: SessionVm, runId: String, onBack: () -> Unit) {
         topBar = {
             Column(Modifier.statusBarsPadding()) {
                 IosNavBar(title = "对话记录", leading = NavAction("返回") { onBack() })
-                HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline)
             }
         },
     ) { pad ->
@@ -1403,7 +1411,8 @@ fun ChatTurnBubble(turn: ChatTurnDto) {
             modifier = Modifier
                 .fillMaxWidth(0.78f)
                 .clip(RoundedCornerShape(18.dp))
-                .background(if (user) AccentBlue.copy(alpha = 0.18f) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f))
+                .background(if (user) LocalIosPalette.current.secondary else MaterialTheme.colorScheme.surface)
+                .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(18.dp))
                 .padding(12.dp),
             textAlign = if (user) TextAlign.End else TextAlign.Start,
         )
@@ -1437,7 +1446,7 @@ fun WorkspaceFileScreen(
         topBar = {
             Column(Modifier.statusBarsPadding()) {
                 IosNavBar(title = title, leading = NavAction("返回") { onBack() })
-                HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline)
             }
         },
     ) { pad ->
@@ -1467,7 +1476,7 @@ fun SettingsScreen(vm: SessionVm, onBack: () -> Unit) {
         topBar = {
             Column(Modifier.statusBarsPadding()) {
                 IosNavBar("设置", leading = NavAction("‹ 舰队", onClick = onBack))
-                HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline)
             }
         },
     ) { pad ->

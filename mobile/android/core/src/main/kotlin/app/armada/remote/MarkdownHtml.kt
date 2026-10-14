@@ -15,14 +15,14 @@ object MarkdownHtml {
             else -> "1"
         }
         val dark = theme == "dark"
-        val fg = if (dark) "#e4e4e7" else "#27272a"
-        val heading = if (dark) "#f4f4f5" else "#27272a"
-        val muted = if (dark) "#a1a1aa" else "#71717a"
-        val codeBg = if (dark) "#18181b" else "#f4f4f5"
-        val codeFg = if (dark) "#e4e4e7" else "#27272a"
-        val border = if (dark) "#3f3f46" else "#d4d4d8"
-        val link = if (dark) "#38bdf8" else "#0284c7"
-        val quote = if (dark) "#52525b" else "#d4d4d8"
+        val fg = if (dark) "#fafafa" else "#0a0a0a"
+        val heading = if (dark) "#fafafa" else "#0a0a0a"
+        val muted = if (dark) "#a3a3a3" else "#737373"
+        val codeBg = if (dark) "#171717" else "#f5f5f5"
+        val codeFg = if (dark) "#fafafa" else "#0a0a0a"
+        val border = if (dark) "#2a2a2a" else "#e5e5e5"
+        val link = if (dark) "#599ce7" else "#3b82c4"
+        val quote = if (dark) "#2a2a2a" else "#e5e5e5"
         val scripts = if (mermaid) """<script src="mermaid.min.js"></script><script src="mermaid-boot.js"></script>""" else ""
         return """<!doctype html><html data-theme="${if (dark) "dark" else "light"}"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">

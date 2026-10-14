@@ -56,14 +56,9 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
-val PlanYellow = Color(0xFFF1B467)
-val IosGroupedLight = Color(0xFFF2F2F7)
-val IosGroupedDark = Color(0xFF000000)
-val IosCellLight = Color(0xFFFFFFFF)
-val IosCellDark = Color(0xFF1C1C1E)
-
 data class IosPalette(
     val accent: Color,
+    val onAccent: Color,
     val green: Color,
     val red: Color,
     val blue: Color,
@@ -73,6 +68,9 @@ data class IosPalette(
     val grouped: Color,
     val cell: Color,
     val secondary: Color,
+    val foreground: Color,
+    val border: Color,
+    val ask: Color,
 )
 
 fun iosPalette(dark: Boolean): IosPalette {
@@ -80,6 +78,7 @@ fun iosPalette(dark: Boolean): IosPalette {
     fun c(v: Long) = Color(v)
     return IosPalette(
         accent = c(a.accent),
+        onAccent = c(a.onAccent),
         green = c(a.green),
         red = c(a.red),
         blue = c(a.blue),
@@ -89,6 +88,9 @@ fun iosPalette(dark: Boolean): IosPalette {
         grouped = c(a.grouped),
         cell = c(a.cell),
         secondary = c(a.secondary),
+        foreground = c(a.foreground),
+        border = c(a.border),
+        ask = c(a.ask),
     )
 }
 
@@ -96,46 +98,48 @@ val LocalIosPalette = compositionLocalOf { iosPalette(true) }
 val LocalIosFill = compositionLocalOf { Color(0x51787880) }
 
 val AccentBlue: Color @Composable get() = LocalIosPalette.current.accent
+val OnAccent: Color @Composable get() = LocalIosPalette.current.onAccent
+val AskBlue: Color @Composable get() = LocalIosPalette.current.ask
 val StatusGreen: Color @Composable get() = LocalIosPalette.current.green
 val StatusRed: Color @Composable get() = LocalIosPalette.current.red
 val StatusBlue: Color @Composable get() = LocalIosPalette.current.blue
 val StatusGray: Color @Composable get() = LocalIosPalette.current.gray
 val StatusOrange: Color @Composable get() = LocalIosPalette.current.orange
 
-fun iosFill(dark: Boolean) = if (dark) Color(0x51787880) else Color(0x33787880)
+fun iosFill(dark: Boolean) = Color(iosPaletteArgb(dark).secondary)
 
 fun armadaColorScheme(dark: Boolean): androidx.compose.material3.ColorScheme {
     val p = iosPalette(dark)
     return if (dark) {
         darkColorScheme(
             primary = p.accent,
-            onPrimary = Color.White,
-            secondary = p.accent,
-            onSecondary = Color.White,
-            tertiary = p.accent,
-            background = p.grouped,
-            onBackground = Color(0xFFF2F2F7),
+            onPrimary = p.onAccent,
+            secondary = p.secondary,
+            onSecondary = p.foreground,
+            tertiary = p.ask,
+            background = p.page,
+            onBackground = p.foreground,
             surface = p.cell,
-            onSurface = Color(0xFFF2F2F7),
-            surfaceVariant = Color(0xFF2C2C2E),
-            onSurfaceVariant = Color(0xFF8E8E93),
-            outline = Color(0xFF3A3A3C),
+            onSurface = p.foreground,
+            surfaceVariant = p.secondary,
+            onSurfaceVariant = p.gray,
+            outline = p.border,
             error = p.red,
         )
     } else {
         lightColorScheme(
             primary = p.accent,
-            onPrimary = Color.White,
-            secondary = p.accent,
-            onSecondary = Color.White,
-            tertiary = p.accent,
-            background = p.grouped,
-            onBackground = Color(0xFF000000),
+            onPrimary = p.onAccent,
+            secondary = p.secondary,
+            onSecondary = p.foreground,
+            tertiary = p.ask,
+            background = p.page,
+            onBackground = p.foreground,
             surface = p.cell,
-            onSurface = Color(0xFF000000),
-            surfaceVariant = Color(0xFFE5E5EA),
-            onSurfaceVariant = Color(0xFF8E8E93),
-            outline = Color(0xFFC6C6C8),
+            onSurface = p.foreground,
+            surfaceVariant = p.secondary,
+            onSurfaceVariant = p.gray,
+            outline = p.border,
             error = p.red,
         )
     }
@@ -175,7 +179,7 @@ fun IosNavBar(
                 if (leading != null) {
                     Text(
                         leading.title,
-                        color = if (leading.enabled) AccentBlue else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+                        color = if (leading.enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
                         modifier = Modifier
                             .clickable(enabled = leading.enabled, onClick = leading.onClick)
                             .padding(horizontal = 8.dp, vertical = 10.dp),
@@ -188,7 +192,7 @@ fun IosNavBar(
                 Text(
                     title,
                     modifier = Modifier.weight(1.6f),
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold, fontSize = 16.sp),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     textAlign = TextAlign.Center,
@@ -204,7 +208,7 @@ fun IosNavBar(
                 trailing.forEach { action ->
                     Text(
                         action.title,
-                        color = if (action.enabled) AccentBlue else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+                        color = if (action.enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
                         modifier = Modifier
                             .clickable(enabled = action.enabled, onClick = action.onClick)
                             .padding(horizontal = 8.dp, vertical = 10.dp),
@@ -217,7 +221,7 @@ fun IosNavBar(
             Text(
                 title,
                 color = MaterialTheme.colorScheme.onSurface,
-                fontSize = 34.sp,
+                fontSize = 22.sp,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
                 maxLines = 1,
@@ -248,7 +252,8 @@ fun GroupedSection(
                     Text(
                         header,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.titleSmall,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
                         modifier = Modifier.weight(1f),
                     )
                 } else {
@@ -261,7 +266,8 @@ fun GroupedSection(
             Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(10.dp))
-                .background(MaterialTheme.colorScheme.surface),
+                .background(MaterialTheme.colorScheme.surface)
+                .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(10.dp)),
             content = content,
         )
         if (footer != null) {
@@ -279,7 +285,7 @@ fun GroupedSection(
 fun GroupedDivider() {
     HorizontalDivider(
         Modifier.padding(start = 16.dp),
-        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
+        color = MaterialTheme.colorScheme.outline,
     )
 }
 
@@ -295,8 +301,8 @@ fun IosTextField(
 ) {
     val style = TextStyle(
         color = MaterialTheme.colorScheme.onSurface,
-        fontSize = 17.sp,
-        lineHeight = 22.sp,
+        fontSize = 14.sp,
+        lineHeight = 20.sp,
     )
     BasicTextField(
         value = value,
@@ -306,11 +312,11 @@ fun IosTextField(
         textStyle = style,
         minLines = minLines,
         maxLines = maxLines,
-        cursorBrush = SolidColor(AccentBlue),
+        cursorBrush = SolidColor(MaterialTheme.colorScheme.onSurface),
         decorationBox = { inner ->
             Box {
                 if (value.isEmpty()) {
-                    Text(placeholder, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 17.sp)
+                    Text(placeholder, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp)
                 }
                 inner()
             }
@@ -332,7 +338,8 @@ fun BarButton(
     onClick: () -> Unit,
 ) {
     val fg = textColor ?: when {
-        danger || filled -> Color.White
+        danger -> Color.White
+        filled -> OnAccent
         else -> MaterialTheme.colorScheme.onSurface
     }
     val bg = fillColor ?: when {
@@ -349,7 +356,7 @@ fun BarButton(
             .clip(shape)
             .background(bg)
             .then(
-                if (!filled && !danger) Modifier.border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.18f), shape)
+                if (!filled && !danger) Modifier.border(1.dp, MaterialTheme.colorScheme.outline, shape)
                 else Modifier,
             )
             .clickable(enabled = enabled, onClick = onClick)
@@ -408,8 +415,9 @@ fun ComposerBar(
             Modifier
                 .weight(1f)
                 .heightIn(min = 36.dp, max = 144.dp)
-                .clip(RoundedCornerShape(20.dp))
+                .clip(RoundedCornerShape(10.dp))
                 .background(LocalIosFill.current)
+                .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(10.dp))
                 .padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
             IosTextField(
@@ -425,12 +433,12 @@ fun ComposerBar(
         Box(
             Modifier
                 .size(32.dp)
-                .clip(CircleShape)
+                .clip(RoundedCornerShape(10.dp))
                 .background(if (canSend) AccentBlue else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f))
                 .clickable(enabled = canSend, onClick = onSend),
             contentAlignment = Alignment.Center,
         ) {
-            IosGlyph(if (sending) IosIcon.Hourglass else IosIcon.ArrowUp, Modifier.size(16.dp), Color.White)
+            IosGlyph(if (sending) IosIcon.Hourglass else IosIcon.ArrowUp, Modifier.size(16.dp), if (canSend) OnAccent else Color.White)
         }
     }
 }
@@ -538,33 +546,34 @@ fun DetailActionBar(
         Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 8.dp)
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(10.dp))
             .background(LocalIosFill.current)
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(10.dp))
             .padding(4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         items.forEachIndexed { index, (title, icon, action) ->
             if (index > 0) {
-                Box(Modifier.width(1.dp).height(28.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f)))
+                Box(Modifier.width(1.dp).height(28.dp).background(MaterialTheme.colorScheme.outline))
             }
             Column(
                 Modifier.weight(1f).heightIn(min = 52.dp).clickable(onClick = action),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center,
             ) {
-                IosGlyph(icon, Modifier.size(22.dp), AccentBlue)
+                IosGlyph(icon, Modifier.size(22.dp), MaterialTheme.colorScheme.onSurface)
                 Spacer(Modifier.height(5.dp))
-                Text(title, color = AccentBlue, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                Text(title, color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
             }
         }
     }
 }
 
 @Composable
-fun IosGlyph(icon: IosIcon, modifier: Modifier = Modifier, tint: Color = AccentBlue) {
+fun IosGlyph(icon: IosIcon, modifier: Modifier = Modifier, tint: Color = Color.Unspecified) {
+    val c = if (tint == Color.Unspecified) MaterialTheme.colorScheme.onSurface else tint
     Canvas(modifier) {
         val stroke = Stroke(width = size.minDimension * 0.08f, cap = StrokeCap.Round)
-        val c = tint
         val w = size.width
         val h = size.height
         when (icon) {

@@ -3,6 +3,85 @@ import UIKit
 import Foundation
 import PhotosUI
 
+/// Same tokens as `hub/web/src/index.css`. Dark is the hub default.
+enum Hub {
+    static let done = Color(red: 0x34 / 255, green: 0xD3 / 255, blue: 0x99 / 255)
+    static let live = Color(red: 0x38 / 255, green: 0xBD / 255, blue: 0xF8 / 255)
+    static let radius: CGFloat = 10
+
+    struct Palette {
+        var background: Color
+        var foreground: Color
+        var card: Color
+        var primary: Color
+        var onPrimary: Color
+        var muted: Color
+        var mutedForeground: Color
+        var border: Color
+        var destructive: Color
+        var ask: Color
+        var plan: Color
+    }
+
+    static func palette(dark: Bool) -> Palette {
+        if dark {
+            return Palette(
+                background: Color(red: 0x0A / 255, green: 0x0A / 255, blue: 0x0A / 255),
+                foreground: Color(red: 0xFA / 255, green: 0xFA / 255, blue: 0xFA / 255),
+                card: Color(red: 0x17 / 255, green: 0x17 / 255, blue: 0x17 / 255),
+                primary: Color(red: 0xE5 / 255, green: 0xE5 / 255, blue: 0xE5 / 255),
+                onPrimary: Color(red: 0x17 / 255, green: 0x17 / 255, blue: 0x17 / 255),
+                muted: Color(red: 0x26 / 255, green: 0x26 / 255, blue: 0x26 / 255),
+                mutedForeground: Color(red: 0xA3 / 255, green: 0xA3 / 255, blue: 0xA3 / 255),
+                border: Color.white.opacity(0.10),
+                destructive: Color(red: 0xF8 / 255, green: 0x71 / 255, blue: 0x71 / 255),
+                ask: Color(red: 0x59 / 255, green: 0x9C / 255, blue: 0xE7 / 255),
+                plan: Color(red: 0xF1 / 255, green: 0xB4 / 255, blue: 0x67 / 255)
+            )
+        }
+        return Palette(
+            background: .white,
+            foreground: Color(red: 0x0A / 255, green: 0x0A / 255, blue: 0x0A / 255),
+            card: .white,
+            primary: Color(red: 0x17 / 255, green: 0x17 / 255, blue: 0x17 / 255),
+            onPrimary: Color(red: 0xFA / 255, green: 0xFA / 255, blue: 0xFA / 255),
+            muted: Color(red: 0xF5 / 255, green: 0xF5 / 255, blue: 0xF5 / 255),
+            mutedForeground: Color(red: 0x73 / 255, green: 0x73 / 255, blue: 0x73 / 255),
+            border: Color(red: 0xE5 / 255, green: 0xE5 / 255, blue: 0xE5 / 255),
+            destructive: Color(red: 0xDC / 255, green: 0x26 / 255, blue: 0x26 / 255),
+            ask: Color(red: 0x3B / 255, green: 0x82 / 255, blue: 0xC4 / 255),
+            plan: Color(red: 0xD9 / 255, green: 0x97 / 255, blue: 0x3A / 255)
+        )
+    }
+}
+
+private struct HubPaletteKey: EnvironmentKey {
+    static let defaultValue = Hub.palette(dark: true)
+}
+
+extension EnvironmentValues {
+    var hub: Hub.Palette {
+        get { self[HubPaletteKey.self] }
+        set { self[HubPaletteKey.self] = newValue }
+    }
+}
+
+func statusColor(_ status: String, hub: Hub.Palette) -> Color {
+    switch status {
+    case "completed": return Hub.done
+    case "running", "dispatched", "binding", "queued", "created": return Hub.live
+    case "error", "aborted", "unknown": return hub.destructive
+    case "cancelled": return hub.mutedForeground
+    default: return hub.plan
+    }
+}
+
+func hubEdge(_ color: Color?, hub: Hub.Palette) -> Color {
+    if color == .red { return hub.destructive }
+    if color == .green { return Hub.done }
+    return .clear
+}
+
 enum AppRoute: Hashable {
     case workspace(WorkspaceDTO)
     case run(String)
@@ -94,16 +173,6 @@ func boardCardElapsed(updatedAt: Int?, now: Date = Date()) -> String? {
     return "\(secs / 86_400)d"
 }
 
-func statusColor(_ status: String) -> Color {
-    switch status {
-    case "completed": return .green
-    case "running", "dispatched", "binding", "queued", "created": return .blue
-    case "error", "aborted", "unknown": return .red
-    case "cancelled": return .gray
-    default: return .orange
-    }
-}
-
 let detailPromptMaxHeight: CGFloat = 180
 
 func detailPromptShownHeight(_ contentHeight: CGFloat, cap: CGFloat = detailPromptMaxHeight) -> CGFloat {
@@ -112,7 +181,7 @@ func detailPromptShownHeight(_ contentHeight: CGFloat, cap: CGFloat = detailProm
 
 /// 页内主操作。导航栏必须用系统 `Button`，塞进 `ToolbarItem` 会被 iOS 26 玻璃胶囊裁成「源发 / 查看已藏」。
 struct VolumeButton: View {
-    enum Kind { case accent, quiet, danger }
+    enum Kind { case accent, quiet, danger, plan }
     let title: String
     var kind: Kind = .accent
     var compact: Bool = false
@@ -120,23 +189,24 @@ struct VolumeButton: View {
     var enabled: Bool = true
     var busy: Bool = false
     let action: () -> Void
+    @Environment(\.hub) private var hub
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 6) {
-                if busy { ProgressView().controlSize(.small) }
+                if busy { ProgressView().controlSize(.small).tint(fg) }
                 Text(title)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.system(size: 13, weight: .medium))
                     .lineLimit(1)
             }
             .frame(maxWidth: expand ? .infinity : nil, minHeight: compact ? 32 : 36)
             .padding(.horizontal, compact ? 12 : 14)
             .foregroundStyle(fg)
-            .background(bg, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .background(bg, in: RoundedRectangle(cornerRadius: Hub.radius, style: .continuous))
             .overlay {
                 if kind == .quiet {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .strokeBorder(Color.primary.opacity(0.18), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: Hub.radius, style: .continuous)
+                        .strokeBorder(hub.border, lineWidth: 1)
                 }
             }
         }
@@ -147,23 +217,26 @@ struct VolumeButton: View {
 
     private var fg: Color {
         switch kind {
-        case .accent: return .white
-        case .quiet: return .primary
+        case .accent: return hub.onPrimary
+        case .quiet: return hub.foreground
         case .danger: return .white
+        case .plan: return Color(red: 0x1A / 255, green: 0x1A / 255, blue: 0x1A / 255)
         }
     }
 
     private var bg: Color {
         switch kind {
-        case .accent: return Color.accentColor
-        case .quiet: return Color(.secondarySystemFill)
-        case .danger: return .red
+        case .accent: return hub.primary
+        case .quiet: return hub.muted
+        case .danger: return hub.destructive
+        case .plan: return hub.plan
         }
     }
 }
 
 /// 详情页次要动作：复制 / 未读 / 隐藏。横排图标+文案，避免三个全宽描边按钮叠成表单。
 struct DetailActionBar: View {
+    @Environment(\.hub) private var hub
     struct Item: Identifiable {
         let id: String
         let title: String
@@ -194,7 +267,7 @@ struct DetailActionBar: View {
                                 .minimumScaleFactor(0.75)
                         }
                         .frame(maxWidth: .infinity, minHeight: 52)
-                        .foregroundStyle(Color.accentColor)
+                        .foregroundStyle(hub.foreground)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -203,7 +276,11 @@ struct DetailActionBar: View {
             }
             .padding(.vertical, 4)
             .padding(.horizontal, 4)
-            .background(Color(.secondarySystemFill), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .background(hub.muted, in: RoundedRectangle(cornerRadius: Hub.radius, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: Hub.radius, style: .continuous)
+                    .strokeBorder(hub.border, lineWidth: 1)
+            }
         }
     }
 }
@@ -212,25 +289,26 @@ struct RunRow: View {
     let run: RunDTO
     let unread: Bool
     var now: Date = Date()
+    @Environment(\.hub) private var hub
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
             Rectangle()
-                .fill(runRowChrome(run, unread: unread) ?? .clear)
+                .fill(hubEdge(runRowChrome(run, unread: unread), hub: hub))
                 .frame(width: 3)
             VStack(alignment: .leading, spacing: 8) {
                 Text(run.displayTitle)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.primary)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(hub.foreground)
                     .lineLimit(3)
                     .multilineTextAlignment(.leading)
                 HStack(spacing: 6) {
                     if unread {
                         Circle()
-                            .fill(run.status == "completed" && run.pendingAsk == nil ? Color.green : Color.red)
+                            .fill(run.status == "completed" && run.pendingAsk == nil ? Hub.done : hub.destructive)
                             .frame(width: 6, height: 6)
                     }
                     Text(caption)
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(badgeForeground)
                         .padding(.horizontal, 7)
                         .padding(.vertical, 3)
@@ -238,8 +316,8 @@ struct RunRow: View {
                     Spacer(minLength: 8)
                     if let elapsed = boardCardElapsed(updatedAt: run.updatedAt, now: now) {
                         Text(elapsed)
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.tertiary)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(hub.mutedForeground)
                             .monospacedDigit()
                     }
                 }
@@ -256,15 +334,16 @@ struct RunRow: View {
     }
 
     private var badgeForeground: Color {
-        if run.pendingAsk != nil { return .red }
-        if unread && run.status == "completed" { return .green }
-        if unread && ["error", "aborted", "unknown"].contains(run.status) { return .red }
-        return statusColor(run.status)
+        if run.pendingAsk != nil { return hub.destructive }
+        if unread && run.status == "completed" { return Hub.done }
+        if unread && ["error", "aborted", "unknown"].contains(run.status) { return hub.destructive }
+        return statusColor(run.status, hub: hub)
     }
 }
 
 struct BindView: View {
     @EnvironmentObject var session: Session
+    @Environment(\.hub) private var hub
     @State private var paste = ""
     var body: some View {
         NavigationStack {
@@ -289,12 +368,18 @@ struct BindView: View {
                 }
             }
             .navigationTitle("绑定")
+            .navigationBarTitleDisplayMode(.inline)
+            .scrollContentBackground(.hidden)
+            .background(hub.background)
+            .toolbarBackground(hub.background, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
         }
     }
 }
 
 struct WorkspaceListView: View {
     @EnvironmentObject var session: Session
+    @Environment(\.hub) private var hub
     @State private var path = NavigationPath()
     var body: some View {
         NavigationStack(path: $path) {
@@ -326,18 +411,19 @@ struct WorkspaceListView: View {
                                     Spacer(minLength: 8)
                                     if session.unreadCount(in: w) > 0 {
                                         Circle()
-                                            .fill(Color.red)
+                                            .fill(hub.destructive)
                                             .frame(width: 8, height: 8)
                                             .accessibilityLabel("未读")
                                     }
                                 }
                             }
+                            .listRowBackground(hub.card)
                             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                 if session.unreadCount(in: w) > 0 {
                                     Button("全部已读") {
                                         session.markAllRead(.workspace(machineId: w.machineId, workspaceRoot: w.workspaceRoot))
                                     }
-                                    .tint(.blue)
+                                    .tint(hub.primary)
                                 }
                             }
                         }
@@ -377,7 +463,7 @@ struct WorkspaceListView: View {
                         let n = session.unreadCount(machineId: group.id)
                         HStack(spacing: 6) {
                             Circle()
-                                .fill(group.slots.contains(where: \.online) ? Color.green : Color.gray)
+                                .fill(group.slots.contains(where: \.online) ? Hub.done : hub.mutedForeground)
                                 .frame(width: 8, height: 8)
                             Text(group.name)
                             Spacer(minLength: 8)
@@ -394,6 +480,10 @@ struct WorkspaceListView: View {
             }
             .navigationTitle("舰队")
             .navigationBarTitleDisplayMode(.inline)
+            .scrollContentBackground(.hidden)
+            .background(hub.background)
+            .toolbarBackground(hub.background, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .navigationDestination(for: AppRoute.self) { route in
                 switch route {
                 case .workspace(let w):
@@ -434,6 +524,7 @@ struct WorkspaceListView: View {
 
 struct WorkspaceHome: View {
     @EnvironmentObject var session: Session
+    @Environment(\.hub) private var hub
     let workspace: WorkspaceDTO
     @State private var tab: BoardColumn = .completed
     @State private var showDispatch = false
@@ -473,18 +564,19 @@ struct WorkspaceHome: View {
                         } label: {
                             HStack(spacing: 4) {
                                 Text(col.title)
-                                if n > 0 { Text("\(n)").font(.caption2) }
+                                if n > 0 { Text("\(n)").font(.system(size: 12)) }
                                 if columnHasAlert(openRuns, column: col, isUnread: session.isUnread) {
-                                    Circle().fill(Color.red).frame(width: 7, height: 7)
+                                    Circle().fill(hub.destructive).frame(width: 7, height: 7)
                                 }
                             }
-                            .font(.subheadline.weight(selected ? .semibold : .regular))
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(selected ? hub.onPrimary : hub.mutedForeground)
                             .lineLimit(1)
                             .fixedSize(horizontal: true, vertical: false)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 7)
-                            .background(selected ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.12))
-                            .clipShape(Capsule())
+                            .background(selected ? hub.primary : hub.muted)
+                            .clipShape(RoundedRectangle(cornerRadius: Hub.radius, style: .continuous))
                         }
                         .buttonStyle(.plain)
                     }
@@ -493,15 +585,16 @@ struct WorkspaceHome: View {
                     } label: {
                         HStack(spacing: 4) {
                             Text("已隐藏")
-                            if hiddenN > 0 { Text("\(hiddenN)").font(.caption2) }
+                            if hiddenN > 0 { Text("\(hiddenN)").font(.system(size: 12)) }
                         }
-                        .font(.subheadline.weight(showArchived ? .semibold : .regular))
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(showArchived ? hub.onPrimary : hub.mutedForeground)
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 7)
-                        .background(showArchived ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.12))
-                        .clipShape(Capsule())
+                        .background(showArchived ? hub.primary : hub.muted)
+                        .clipShape(RoundedRectangle(cornerRadius: Hub.radius, style: .continuous))
                     }
                     .buttonStyle(.plain)
                 }
@@ -530,8 +623,12 @@ struct WorkspaceHome: View {
                             .padding(.vertical, 10)
                             .padding(.trailing, 12)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color(.secondarySystemGroupedBackground))
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .background(hub.card)
+                            .clipShape(RoundedRectangle(cornerRadius: Hub.radius, style: .continuous))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: Hub.radius, style: .continuous)
+                                    .strokeBorder(hub.border, lineWidth: 1)
+                            }
                     }
                     .navigationLinkIndicatorVisibility(.hidden)
                     .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
@@ -553,16 +650,18 @@ struct WorkspaceHome: View {
                             Button("标为未读") {
                                 session.markUnread(run.runId, hold: false)
                             }
-                            .tint(.orange)
+                            .tint(hub.plan)
                         }
                     }
                 }
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
-            .background(Color(.systemGroupedBackground))
+            .background(hub.background)
         }
         .navigationTitle(live.label)
+        .toolbarBackground(hub.background, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
         .safeAreaInset(edge: .top) {
             if !live.canInject {
                 Text(RelayAPIError.operatorMessage("CDP_NOT_READY"))
@@ -571,7 +670,7 @@ struct WorkspaceHome: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
-                    .background(Color.red.opacity(0.08))
+                    .background(hub.destructive.opacity(0.10))
             }
         }
         .toolbar {
@@ -669,6 +768,7 @@ struct ChipFlowLayout: Layout {
 struct PromptSnippetChips: View {
     let snippets: [PromptSnippet]
     let onAppend: (String) -> Void
+    @Environment(\.hub) private var hub
 
     var body: some View {
         Group {
@@ -676,9 +776,13 @@ struct PromptSnippetChips: View {
                 ChipFlowLayout(spacing: 6) {
                     ForEach(snippets) { snippet in
                         Button(snippet.title) { onAppend(snippet.body) }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                            .clipShape(Capsule())
+                            .buttonStyle(.plain)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(hub.foreground)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(hub.muted, in: Capsule())
+                            .overlay(Capsule().strokeBorder(hub.border, lineWidth: 1))
                             .fixedSize()
                     }
                 }
@@ -720,6 +824,7 @@ private func nameFor(_ raw: String, mime: String) -> String {
 
 /// 豆包 / GPT 底栏：胶囊输入 + 32pt 圆发送。语音是现网能力，收成图标，不抽独立通栏大钮。
 struct ComposerBar: View {
+    @Environment(\.hub) private var hub
     @Binding var text: String
     @Binding var pickerItems: [PhotosPickerItem]
     var sending: Bool
@@ -765,13 +870,17 @@ struct ComposerBar: View {
                 .padding(.horizontal, 8)
                 .frame(minHeight: 36, maxHeight: 132)
                 .fixedSize(horizontal: false, vertical: true)
-                .background(Color(.secondarySystemFill), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .background(hub.muted, in: RoundedRectangle(cornerRadius: Hub.radius, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: Hub.radius, style: .continuous)
+                        .strokeBorder(hub.border, lineWidth: 1)
+                }
             Button(action: onSend) {
                 Image(systemName: sending ? "hourglass" : "arrow.up")
                     .font(.subheadline.weight(.bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(canSend ? hub.onPrimary : .white)
                     .frame(width: 32, height: 32)
-                    .background(canSend ? Color.accentColor : Color.secondary.opacity(0.35), in: Circle())
+                    .background(canSend ? hub.primary : Color.secondary.opacity(0.35), in: RoundedRectangle(cornerRadius: Hub.radius, style: .continuous))
             }
             .buttonStyle(.plain)
             .disabled(!canSend)
@@ -1016,6 +1125,7 @@ struct DetailPromptCard: View {
     let text: String
     @Binding var contentHeight: CGFloat
     @State private var expanded = false
+    @Environment(\.hub) private var hub
 
     private var overflows: Bool { contentHeight > detailPromptMaxHeight }
     private var shownHeight: CGFloat {
@@ -1039,8 +1149,8 @@ struct DetailPromptCard: View {
                         if overflows && !expanded {
                             LinearGradient(
                                 colors: [
-                                    Color.accentColor.opacity(0.0),
-                                    Color.accentColor.opacity(0.18),
+                                    hub.muted.opacity(0.0),
+                                    hub.muted,
                                 ],
                                 startPoint: .top,
                                 endPoint: .bottom
@@ -1051,7 +1161,7 @@ struct DetailPromptCard: View {
                     }
             }
             .padding(12)
-            .background(Color.accentColor.opacity(0.18), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .background(hub.muted, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             .containerRelativeFrame(.horizontal) { width, _ in width * 0.78 }
         }
         .onChange(of: text) { _, _ in expanded = false }
@@ -1081,6 +1191,7 @@ struct DetailReplyBlock: View {
 
 struct RunDetailView: View {
     @EnvironmentObject var session: Session
+    @Environment(\.hub) private var hub
     let runId: String
     @State private var run: RunDTO?
     @State private var err: String?
@@ -1107,7 +1218,7 @@ struct RunDetailView: View {
                 if let run {
                     if let err { Text(err).foregroundStyle(.red) }
                     HStack {
-                        Circle().fill(statusColor(run.status)).frame(width: 10, height: 10)
+                        Circle().fill(statusColor(run.status, hub: hub)).frame(width: 10, height: 10)
                         Text(statusLabel(run.status)).font(.headline)
                     }
                     Text("\(run.workspace(from: session.workspaces).machineName) · \(run.workspace(from: session.workspaces).label)")
@@ -1338,18 +1449,21 @@ struct RunDetailView: View {
 
 struct ChatTurnBubble: View {
     let turn: ChatTurnDTO
+    @Environment(\.hub) private var hub
     private var isUser: Bool { turn.role == "user" }
 
     var body: some View {
         HStack {
             if isUser { Spacer(minLength: 0) }
             Text(turn.text)
+                .foregroundStyle(hub.foreground)
                 .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
                 .padding(12)
-                .background(
-                    isUser ? Color.accentColor.opacity(0.18) : Color.primary.opacity(0.06),
-                    in: RoundedRectangle(cornerRadius: 18, style: .continuous)
-                )
+                .background(isUser ? hub.muted : hub.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .strokeBorder(hub.border, lineWidth: 1)
+                }
                 .containerRelativeFrame(.horizontal) { width, _ in width * 0.78 }
             if !isUser { Spacer(minLength: 0) }
         }
@@ -1473,6 +1587,7 @@ struct AskView: View {
     let ask: PendingAskDTO
     var onDone: () async -> Void
     @EnvironmentObject var session: Session
+    @Environment(\.hub) private var hub
     @State private var optionId: String?
     @State private var pickedByQuestion: [String: String] = [:]
     @State private var freeformText = ""
@@ -1481,13 +1596,10 @@ struct AskView: View {
     @State private var busyAction: String?
     @State private var planHeight: CGFloat = 80
 
-    private static let planYellow = Color(red: 241 / 255, green: 180 / 255, blue: 103 / 255)
-    private static let accentBlue = Color(red: 89 / 255, green: 156 / 255, blue: 231 / 255)
-
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             if isPlan {
-                Text("Created Plan").font(.headline)
+                Text("计划").font(.system(size: 12, weight: .medium)).foregroundStyle(hub.mutedForeground)
                 Text(ask.questions.first?.prompt ?? "")
                     .font(.body)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1500,26 +1612,20 @@ struct AskView: View {
                 if canContinue {
                 HStack {
                     Spacer(minLength: 0)
-                    Button {
+                    VolumeButton(
+                        title: busyAction == "continue" ? "Building..." : "Build",
+                        kind: .plan,
+                        compact: true,
+                        expand: false,
+                        enabled: busyAction == nil,
+                        busy: busyAction == "continue"
+                    ) {
                         Task { await submitBuild() }
-                    } label: {
-                        HStack(spacing: 8) {
-                            if busyAction == "continue" { ProgressView().tint(.black) }
-                            Text(busyAction == "continue" ? "Building..." : "Build")
-                                .font(.subheadline.weight(.semibold))
-                        }
-                        .frame(minWidth: 88, minHeight: 36)
-                        .padding(.horizontal, 14)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.regular)
-                    .tint(Self.planYellow)
-                    .foregroundStyle(.black)
-                    .disabled(busyAction != nil)
                 }
                 }
             } else {
-                Text("需要选择").font(.headline)
+                Text("提问").font(.system(size: 12, weight: .medium)).foregroundStyle(hub.mutedForeground)
                 ForEach(ask.questions) { q in
                     Text(q.prompt)
                         .font(.body)
@@ -1555,11 +1661,11 @@ struct AskView: View {
                         .frame(minHeight: 36)
                         .background(
                             RoundedRectangle(cornerRadius: 10)
-                                .fill((ask.questions.count > 1 ? pickedByQuestion[q.id] == o.id : optionId == o.id) ? Self.accentBlue.opacity(0.12) : Color.clear)
+                                .fill((ask.questions.count > 1 ? pickedByQuestion[q.id] == o.id : optionId == o.id) ? hub.primary.opacity(0.10) : Color.clear)
                         )
                         .overlay(
                             RoundedRectangle(cornerRadius: 10)
-                                .stroke((ask.questions.count > 1 ? pickedByQuestion[q.id] == o.id : optionId == o.id) ? Self.accentBlue : Color.secondary.opacity(0.35), lineWidth: (ask.questions.count > 1 ? pickedByQuestion[q.id] == o.id : optionId == o.id) ? 2 : 1)
+                                .stroke((ask.questions.count > 1 ? pickedByQuestion[q.id] == o.id : optionId == o.id) ? hub.primary : hub.border, lineWidth: 1)
                         )
                         if (ask.questions.count > 1 ? pickedByQuestion[q.id] == o.id : optionId == o.id) && o.freeform == true {
                             TextField("Other...", text: Binding(
@@ -1589,50 +1695,43 @@ struct AskView: View {
                 if let err { Text(err).foregroundStyle(.red) }
                 HStack(spacing: 8) {
                     Spacer(minLength: 0)
-                    Button {
+                    VolumeButton(
+                        title: busyAction == "skip" ? "Skipping..." : "Skip",
+                        kind: .quiet,
+                        compact: true,
+                        expand: false,
+                        enabled: busyAction == nil,
+                        busy: busyAction == "skip"
+                    ) {
                         Task { await submit(action: "skip") }
-                    } label: {
-                        HStack(spacing: 8) {
-                            if busyAction == "skip" { ProgressView() }
-                            Text(busyAction == "skip" ? "Skipping..." : "Skip")
-                                .font(.subheadline.weight(.medium))
-                        }
-                        .frame(minWidth: 72, minHeight: 36)
-                        .padding(.horizontal, 12)
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.regular)
-                    .disabled(busyAction != nil)
                     if canContinue {
-                    Button {
+                    VolumeButton(
+                        title: (busyAction == "continue" || busyAction == "freeform") ? "Continuing..." : "Continue",
+                        compact: true,
+                        expand: false,
+                        enabled: canSubmitChoice && busyAction == nil,
+                        busy: busyAction == "continue" || busyAction == "freeform"
+                    ) {
                         Task { await submit(action: pickedFreeform ? "freeform" : "continue") }
-                    } label: {
-                        HStack(spacing: 8) {
-                            if busyAction == "continue" || busyAction == "freeform" { ProgressView().tint(.white) }
-                            Text((busyAction == "continue" || busyAction == "freeform") ? "Continuing..." : "Continue")
-                                .font(.subheadline.weight(.semibold))
-                        }
-                        .frame(minWidth: 72, minHeight: 36)
-                        .padding(.horizontal, 12)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.regular)
-                    .tint(Self.accentBlue)
-                    .disabled(!canSubmitChoice || busyAction != nil)
                     }
                 }
             }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(uiColor: .secondarySystemBackground))
+        .background(hub.card)
         .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(hub.border, lineWidth: 1)
+        }
         .overlay(alignment: .leading) {
             RoundedRectangle(cornerRadius: 1.5)
-                .fill(isPlan ? Self.planYellow : Self.accentBlue)
-                .frame(width: 4)
+                .fill(isPlan ? hub.plan : hub.ask)
+                .frame(width: 3)
                 .padding(.vertical, 10)
-                .padding(.leading, 4)
         }
     }
 
@@ -1709,20 +1808,25 @@ struct SnippetSettingChip: View {
     let snippet: PromptSnippet
     let onEdit: () -> Void
     let onDelete: () -> Void
+    @Environment(\.hub) private var hub
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
             Button(snippet.title, action: onEdit)
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .clipShape(Capsule())
+                .buttonStyle(.plain)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(hub.foreground)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(hub.muted, in: Capsule())
+                .overlay(Capsule().strokeBorder(hub.border, lineWidth: 1))
             Button(action: onDelete) {
                 Image(systemName: "xmark")
                     .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(hub.mutedForeground)
                     .frame(width: 16, height: 16)
-                    .background(Circle().fill(Color(.systemBackground)))
-                    .overlay(Circle().strokeBorder(Color.primary.opacity(0.15), lineWidth: 1))
+                    .background(Circle().fill(hub.card))
+                    .overlay(Circle().strokeBorder(hub.border, lineWidth: 1))
             }
             .buttonStyle(.plain)
             .accessibilityLabel("删除 \(snippet.title)")
@@ -1808,6 +1912,7 @@ struct SnippetEditSheet: View {
 struct SettingsView: View {
     @EnvironmentObject var appearance: Appearance
     @EnvironmentObject var session: Session
+    @Environment(\.hub) private var hub
     @State private var editingSnippet: PromptSnippet?
 
     var body: some View {
@@ -1866,6 +1971,10 @@ struct SettingsView: View {
             }
         }
         .navigationTitle("设置")
+        .scrollContentBackground(.hidden)
+        .background(hub.background)
+        .toolbarBackground(hub.background, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
         .sheet(item: $editingSnippet) { snippet in
             SnippetEditSheet(
                 snippet: snippet,

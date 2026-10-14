@@ -17,14 +17,14 @@ enum MarkdownHTML {
         default: scale = "1"
         }
         let dark = theme == "dark"
-        let fg = dark ? "#e4e4e7" : "#27272a"
-        let heading = dark ? "#f4f4f5" : "#27272a"
-        let muted = dark ? "#a1a1aa" : "#71717a"
-        let codeBg = dark ? "#18181b" : "#f4f4f5"
-        let codeFg = dark ? "#e4e4e7" : "#27272a"
-        let border = dark ? "#3f3f46" : "#d4d4d8"
-        let link = dark ? "#38bdf8" : "#0284c7"
-        let quote = dark ? "#52525b" : "#d4d4d8"
+        let fg = dark ? "#fafafa" : "#0a0a0a"
+        let heading = dark ? "#fafafa" : "#0a0a0a"
+        let muted = dark ? "#a3a3a3" : "#737373"
+        let codeBg = dark ? "#171717" : "#f5f5f5"
+        let codeFg = dark ? "#fafafa" : "#0a0a0a"
+        let border = dark ? "#2a2a2a" : "#e5e5e5"
+        let link = dark ? "#599ce7" : "#3b82c4"
+        let quote = dark ? "#2a2a2a" : "#e5e5e5"
         return """
         <!doctype html><html data-theme="\(dark ? "dark" : "light")"><head><meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">

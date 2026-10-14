@@ -120,7 +120,7 @@ describe("App UI density is one scale", () => {
     expect(ios).not.toContain("struct UnreadBadge");
     expect(iosList).toContain("全部已读");
     expect(iosList).not.toContain("UnreadBadge");
-    expect(iosList).toContain(".fill(Color.red)");
+    expect(iosList).toContain(".fill(hub.destructive)");
     expect(iosList).toContain("markAllRead(.machine");
     expect(iosList).toContain("markAllRead(.workspace");
     expect(iosHome).not.toContain("本列已读");
@@ -162,7 +162,7 @@ describe("App UI density is one scale", () => {
     expect(iosHome).toContain("RoundedRectangle");
     expect(workspace).not.toContain("GroupedSection");
     expect(workspace).not.toContain("GroupedDivider");
-    expect(workspace).toContain("RoundedCornerShape(12.dp)");
+    expect(workspace).toContain("RoundedCornerShape(10.dp)");
     expect(workspace).not.toContain("Text(\"›\"");
     expect(iosHome).toContain("navigationLinkIndicatorVisibility(.hidden)");
   });
@@ -206,14 +206,14 @@ describe("App UI density is one scale", () => {
     expect(iosHome).toContain("已隐藏");
   });
 
-  test("Android chrome matches iOS grouped list, capsule composer, swipe, icon action bar", () => {
+  test("Android chrome matches hub surfaces, composer, swipe, icon action bar", () => {
     const android = androidUi();
     const composer = android.slice(android.indexOf("fun ComposerBar"), android.indexOf("fun UnreadBadge"));
     const workspace = android.slice(android.indexOf("fun WorkspaceScreen"), android.indexOf("fun RunRow"));
     const actionBar = android.slice(android.indexOf("fun DetailActionBar"), android.indexOf("fun AskBlock"));
     expect(android).toContain("已隐藏");
-    expect(android).toContain("F2F2F7");
-    expect(android).toContain("1C1C1E");
+    expect(android).toContain("0A0A0A");
+    expect(android).toContain("171717");
     expect(composer).toContain("IosTextField");
     expect(composer).not.toContain("OutlinedTextField");
     expect(composer).toContain("IosIcon.Mic");
@@ -225,15 +225,16 @@ describe("App UI density is one scale", () => {
     expect(android).toContain("\"–\"");
   });
 
-  test("Android uses iOS system accent/status colors, not hub #599CE7", () => {
+  test("Android uses hub neutral, ask, and plan colors", () => {
     const android = androidUi();
-    expect(android).toContain("007AFF");
-    expect(android).toContain("0A84FF");
-    expect(android).toContain("34C759");
-    expect(android).toContain("FF3B30");
-    expect(android).not.toContain("599CE7");
-    expect(android).not.toContain("22C55E");
-    expect(android).not.toContain("DC2626");
+    expect(android).toContain("E5E5E5");
+    expect(android).toContain("599CE7");
+    expect(android).toContain("34D399");
+    expect(android).toContain("F1B467");
+    expect(android).toContain("F87171");
+    expect(android).not.toContain("007AFF");
+    expect(android).not.toContain("0A84FF");
+    expect(android).not.toContain("F2F2F7");
   });
 
   test("settings snippets are chips; edit sheet saves, corner mark deletes", () => {

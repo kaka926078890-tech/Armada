@@ -593,6 +593,8 @@ struct ArmadaRemoteApp: App {
             RootView()
                 .environmentObject(session)
                 .environmentObject(appearance)
+                .environment(\.hub, Hub.palette(dark: appearance.theme != "light"))
+                .tint(Hub.palette(dark: appearance.theme != "light").primary)
                 .preferredColorScheme(appearance.theme == "light" ? .light : .dark)
                 .environment(\.dynamicTypeSize, appearance.dynamicTypeSize)
                 .onOpenURL { session.bind(uri: $0.absoluteString) }
