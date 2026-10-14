@@ -107,7 +107,7 @@ describe("App UI density is one scale", () => {
     const api = readFileSync(join(repoRoot, "mobile/ios/ArmadaRemote/RelayAPI.swift"), "utf8");
     const android = androidUi();
     const models = readFileSync(join(repoRoot, "mobile/android/core/src/main/kotlin/app/armada/remote/Models.kt"), "utf8");
-    const iosList = ios.slice(ios.indexOf("struct WorkspaceListView"), ios.indexOf("struct WorkspaceHome"));
+    const iosList = ios.slice(ios.indexOf("struct FleetSlotRow"), ios.indexOf("struct WorkspaceHome"));
     const iosHome = ios.slice(ios.indexOf("struct WorkspaceHome"), ios.indexOf("struct PromptSnippetChips"));
     const fleet = android.slice(android.indexOf("fun FleetScreen"), android.indexOf("fun WorkspaceScreen"));
     const workspace = android.slice(android.indexOf("fun WorkspaceScreen"), android.indexOf("fun RunRow"));
@@ -222,7 +222,8 @@ describe("App UI density is one scale", () => {
     expect(workspace).not.toContain("TextButton");
     expect(actionBar).toContain("IosIcon.Copy");
     expect(actionBar).toContain("IosIcon.Unread");
-    expect(android).toContain("\"–\"");
+    expect(android).toContain("\"ChatGPT\"");
+    expect(android).toContain("fleetClusters");
   });
 
   test("Android uses hub neutral, ask, and plan colors", () => {

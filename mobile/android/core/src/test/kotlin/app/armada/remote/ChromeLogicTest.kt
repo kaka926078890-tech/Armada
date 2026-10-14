@@ -75,6 +75,21 @@ class ChromeLogicTest {
     }
 
     @Test
+    fun fleetBoxesCursorAndChatGptTogether() {
+        val slots = listOf("/ws/a", "chatgpt:", "chatgpt:desk")
+        val both = fleetClusters(slots) { it }
+        assertEquals(listOf("Cursor", "ChatGPT"), both.map { it.label })
+        assertTrue(both.all { it.boxed })
+        assertEquals(FleetTone.Cursor, both[0].tone)
+        assertEquals(FleetTone.ChatGpt, both[1].tone)
+        assertEquals(listOf("chatgpt:", "chatgpt:desk"), both[1].slots)
+        val cursorOnly = fleetClusters(listOf("/ws/a")) { it }
+        assertEquals(1, cursorOnly.size)
+        assertFalse(cursorOnly[0].boxed)
+        assertTrue(fleetClusters(emptyList<String>()) { it }.isEmpty())
+    }
+
+    @Test
     fun paletteMatchesHubTokens() {
         val light = iosPaletteArgb(false)
         val dark = iosPaletteArgb(true)

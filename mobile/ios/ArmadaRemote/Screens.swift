@@ -76,6 +76,30 @@ func statusColor(_ status: String, hub: Hub.Palette) -> Color {
     }
 }
 
+struct FleetCluster: Identifiable {
+    var label: String
+    var chatgpt: Bool
+    var boxed: Bool
+    var slots: [WorkspaceDTO]
+    var id: String { label }
+}
+
+func fleetClusters(_ slots: [WorkspaceDTO]) -> [FleetCluster] {
+    let cursor = slots.filter { !$0.workspaceRoot.hasPrefix("chatgpt:") }
+    let gpt = slots.filter { $0.workspaceRoot.hasPrefix("chatgpt:") }
+    let boxed = !gpt.isEmpty
+    var out: [FleetCluster] = []
+    if !cursor.isEmpty { out.append(FleetCluster(label: "Cursor", chatgpt: false, boxed: boxed, slots: cursor)) }
+    if !gpt.isEmpty { out.append(FleetCluster(label: "ChatGPT", chatgpt: true, boxed: boxed, slots: gpt)) }
+    return out
+}
+
+func fleetSlotTitle(_ slot: WorkspaceDTO) -> String {
+    let label = slot.label.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !label.isEmpty { return label }
+    return slot.workspaceRoot.split { $0 == "/" || $0 == "\\" }.map(String.init).last ?? slot.workspaceRoot
+}
+
 func hubEdge(_ color: Color?, hub: Hub.Palette) -> Color {
     if color == .red { return hub.destructive }
     if color == .green { return Hub.done }
@@ -377,6 +401,154 @@ struct BindView: View {
     }
 }
 
+struct FleetClusterCard: View {
+    @EnvironmentObject var session: Session
+    @Environment(\.hub) private var hub
+    let cluster: FleetCluster
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if cluster.boxed {
+                Text(cluster.label)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(cluster.chatgpt ? hub.background : hub.foreground)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(cluster.chatgpt ? hub.foreground : hub.muted)
+            }
+            ForEach(cluster.slots) { slot in
+                FleetSlotRow(slot: slot)
+            }
+        }
+        .background(cluster.boxed ? hub.card : Color.clear)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            if cluster.boxed {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(hub.border, lineWidth: 1)
+            }
+        }
+    }
+}
+
+struct FleetSlotRow: View {
+    @EnvironmentObject var session: Session
+    @Environment(\.hub) private var hub
+    let slot: WorkspaceDTO
+
+    var body: some View {
+        if slot.workspaceRoot == "chatgpt:monitor" {
+            Text("需要用监控启动")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(hub.plan)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+        } else {
+            HStack(spacing: 8) {
+                NavigationLink(value: AppRoute.workspace(slot)) {
+                    HStack(spacing: 6) {
+                        Text(fleetSlotTitle(slot))
+                            .font(.system(size: 13, weight: .medium))
+                            .lineLimit(1)
+                        if session.hasLive(slot) {
+                            ProgressView().controlSize(.small)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                if session.unreadCount(in: slot) > 0 {
+                    Circle()
+                        .fill(hub.destructive)
+                        .frame(width: 8, height: 8)
+                        .accessibilityLabel("未读")
+                    Button("全部已读") {
+                        session.markAllRead(.workspace(machineId: slot.machineId, workspaceRoot: slot.workspaceRoot))
+                    }
+                    .font(.system(size: 12, weight: .semibold))
+                    .buttonStyle(.borderless)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+        }
+    }
+}
+
+struct FleetReloadBanner: View {
+    @EnvironmentObject var session: Session
+    @Environment(\.hub) private var hub
+    let machineId: String
+
+    var body: some View {
+        let pending = session.machineReloadPending(machineId)
+        Group {
+            if let pending {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small).tint(Hub.live)
+                    Text(pending == "skip" ? "正在跳过…" : pending == "now" ? "正在 Reload…" : "空闲后 Reload…")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Hub.live)
+                    Spacer(minLength: 8)
+                    if pending != "skip" {
+                        Button("取消") {
+                            Task { await session.setCursorReload(action: "skip", machineId: machineId) }
+                        }
+                        .font(.system(size: 12, weight: .medium))
+                        .buttonStyle(.borderless)
+                        .disabled(session.reloadBusy[machineId] != nil)
+                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(Hub.live.opacity(0.10), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(Hub.live.opacity(0.25), lineWidth: 1)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("扩展待 Reload")
+                        .font(.system(size: 12))
+                        .foregroundStyle(hub.plan)
+                    HStack(spacing: 4) {
+                        reloadButton("立即", action: "now", label: "现在 Reload", fill: true)
+                        reloadButton("空闲后", action: "when-idle", label: "空闲后自动", fill: false)
+                        reloadButton("跳过", action: "skip", label: "这次跳过", fill: false)
+                    }
+                }
+                .padding(8)
+                .background(hub.plan.opacity(0.10), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(hub.plan.opacity(0.25), lineWidth: 1)
+                }
+            }
+        }
+    }
+
+    private func reloadButton(_ title: String, action: String, label: String, fill: Bool) -> some View {
+        Button(title) {
+            Task { await session.setCursorReload(action: action, machineId: machineId) }
+        }
+        .accessibilityLabel(label)
+        .font(.system(size: 12, weight: .medium))
+        .foregroundStyle(fill ? hub.onPrimary : hub.foreground)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 6)
+        .background {
+            if fill {
+                RoundedRectangle(cornerRadius: 8, style: .continuous).fill(hub.primary)
+            } else if action == "when-idle" {
+                RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(hub.border, lineWidth: 1)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 struct WorkspaceListView: View {
     @EnvironmentObject var session: Session
     @Environment(\.hub) private var hub
@@ -392,72 +564,17 @@ struct WorkspaceListView: View {
                 }
                 ForEach(session.machineGroups, id: \.id) { group in
                     Section {
-                        ForEach(group.slots) { w in
-                            NavigationLink(value: AppRoute.workspace(w)) {
-                                HStack(spacing: 8) {
-                                    Text("–").foregroundStyle(.secondary)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        HStack(spacing: 6) {
-                                            Text(w.label)
-                                            if session.hasLive(w) {
-                                                ProgressView().scaleEffect(0.7)
-                                            }
-                                        }
-                                        Text(w.workspaceRoot)
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(1)
-                                    }
-                                    Spacer(minLength: 8)
-                                    if session.unreadCount(in: w) > 0 {
-                                        Circle()
-                                            .fill(hub.destructive)
-                                            .frame(width: 8, height: 8)
-                                            .accessibilityLabel("未读")
-                                    }
-                                }
-                            }
-                            .listRowBackground(hub.card)
-                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                if session.unreadCount(in: w) > 0 {
-                                    Button("全部已读") {
-                                        session.markAllRead(.workspace(machineId: w.machineId, workspaceRoot: w.workspaceRoot))
-                                    }
-                                    .tint(hub.primary)
-                                }
-                            }
+                        ForEach(fleetClusters(group.slots)) { cluster in
+                            FleetClusterCard(cluster: cluster)
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
+                                .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
                         }
                         if session.machineNeedsReload(group.id), group.slots.contains(where: \.online) {
-                            let pending = session.machineReloadPending(group.id)
-                            if let pending {
-                                HStack(spacing: 8) {
-                                    ProgressView().scaleEffect(0.8)
-                                    Text(pending == "skip" ? "正在跳过…" : pending == "now" ? "正在 Reload…" : "空闲后 Reload…")
-                                        .foregroundStyle(.secondary)
-                                    Spacer(minLength: 8)
-                                    if pending != "skip" {
-                                        Button("取消") {
-                                            Task { await session.setCursorReload(action: "skip", machineId: group.id) }
-                                        }
-                                        .disabled(session.reloadBusy[group.id] != nil)
-                                    }
-                                }
-                            } else {
-                                HStack(spacing: 8) {
-                                    Button("立即") {
-                                        Task { await session.setCursorReload(action: "now", machineId: group.id) }
-                                    }
-                                    .accessibilityLabel("现在 Reload")
-                                    Button("空闲后") {
-                                        Task { await session.setCursorReload(action: "when-idle", machineId: group.id) }
-                                    }
-                                    .accessibilityLabel("空闲后自动")
-                                    Button("跳过") {
-                                        Task { await session.setCursorReload(action: "skip", machineId: group.id) }
-                                    }
-                                    .accessibilityLabel("这次跳过")
-                                }
-                            }
+                            FleetReloadBanner(machineId: group.id)
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
+                                .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 12))
                         }
                     } header: {
                         let n = session.unreadCount(machineId: group.id)
@@ -466,20 +583,24 @@ struct WorkspaceListView: View {
                                 .fill(group.slots.contains(where: \.online) ? Hub.done : hub.mutedForeground)
                                 .frame(width: 8, height: 8)
                             Text(group.name)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(hub.foreground)
                             Spacer(minLength: 8)
                             if n > 0 {
                                 Button("全部已读") {
                                     session.markAllRead(.machine(group.id))
                                 }
-                                .font(.caption.weight(.semibold))
+                                .font(.system(size: 12, weight: .semibold))
                                 .buttonStyle(.borderless)
                             }
                         }
+                        .textCase(nil)
                     }
                 }
             }
             .navigationTitle("舰队")
             .navigationBarTitleDisplayMode(.inline)
+            .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .background(hub.background)
             .toolbarBackground(hub.background, for: .navigationBar)
@@ -1161,7 +1282,7 @@ struct DetailPromptCard: View {
                     }
             }
             .padding(12)
-            .background(hub.muted, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .background(hub.muted, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .containerRelativeFrame(.horizontal) { width, _ in width * 0.78 }
         }
         .onChange(of: text) { _, _ in expanded = false }
@@ -1216,31 +1337,51 @@ struct RunDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 if let run {
-                    if let err { Text(err).foregroundStyle(.red) }
-                    HStack {
-                        Circle().fill(statusColor(run.status, hub: hub)).frame(width: 10, height: 10)
-                        Text(statusLabel(run.status)).font(.headline)
+                    if let err { Text(err).foregroundStyle(hub.destructive) }
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(run.displayTitle)
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(hub.foreground)
+                            .lineLimit(2)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Text(statusLabel(run.status))
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(run.isLive ? Hub.live : hub.mutedForeground)
                     }
                     Text("\(run.workspace(from: session.workspaces).machineName) · \(run.workspace(from: session.workspaces).label)")
-                        .font(.subheadline)
-                    Text(run.workspaceRoot).font(.caption).foregroundStyle(.secondary)
-                    if let e = run.displayError { Text(RelayAPIError.operatorMessage(e)).foregroundStyle(.red) }
+                        .font(.system(size: 12))
+                        .foregroundStyle(hub.mutedForeground)
+                        .lineLimit(1)
+                    if let e = run.displayError { Text(RelayAPIError.operatorMessage(e)).foregroundStyle(hub.destructive) }
                     if slot?.canInject == false, run.displayError != "CDP_NOT_READY" {
-                        Text(RelayAPIError.operatorMessage("CDP_NOT_READY")).foregroundStyle(.red)
+                        Text(RelayAPIError.operatorMessage("CDP_NOT_READY")).foregroundStyle(hub.destructive)
                     }
                     DetailPromptCard(text: run.prompt, contentHeight: $promptHeight)
                     DetailReplyBlock(text: run.finalText, isLive: run.isLive, height: $mdHeight, onWorkspaceFile: { filePath = $0 })
                     Button("查看对话记录") { showChat = true }
-                        .font(.subheadline)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(hub.mutedForeground)
+                        .buttonStyle(.plain)
                     if let ask = run.pendingAsk {
                         AskView(runId: runId, ask: ask) { await reload() }
                     }
                     if !run.queuedOutbound.isEmpty {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("\(run.queuedOutbound.count) 条排队消息").font(.caption).foregroundStyle(.secondary)
+                            Text("\(run.queuedOutbound.count) 条还在排队")
+                                .font(.system(size: 12))
+                                .foregroundStyle(hub.mutedForeground)
                             ForEach(run.queuedOutbound) { q in
-                                Text(q.prompt).font(.subheadline)
+                                Text(q.prompt)
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(hub.foreground)
                             }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                        .background(hub.card, in: RoundedRectangle(cornerRadius: Hub.radius, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: Hub.radius, style: .continuous)
+                                .strokeBorder(hub.border, lineWidth: 1)
                         }
                     }
                     if run.isLive || run.showsRetry {
@@ -1272,7 +1413,7 @@ struct RunDetailView: View {
                         }
                     }
                 } else if let err {
-                    Text(err).foregroundStyle(.red)
+                    Text(err).foregroundStyle(hub.destructive)
                 } else {
                     ProgressView()
                 }
@@ -1286,15 +1427,16 @@ struct RunDetailView: View {
                     .padding(.top, 10)
                     .padding(.bottom, 6)
                     .frame(maxWidth: .infinity)
-                    .background {
-                        Rectangle()
-                            .fill(.ultraThinMaterial)
-                            .ignoresSafeArea(edges: .bottom)
-                            .overlay(alignment: .top) { Divider() }
+                    .background(hub.card)
+                    .overlay(alignment: .top) {
+                        Rectangle().fill(hub.border).frame(height: 1)
                     }
             }
         }
+        .background(hub.background)
         .navigationTitle("详情")
+        .toolbarBackground(hub.background, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("续聊") { showDispatch = true }
@@ -1450,28 +1592,29 @@ struct RunDetailView: View {
 struct ChatTurnBubble: View {
     let turn: ChatTurnDTO
     @Environment(\.hub) private var hub
+    @State private var height: CGFloat = 20
     private var isUser: Bool { turn.role == "user" }
 
     var body: some View {
-        HStack {
-            if isUser { Spacer(minLength: 0) }
-            Text(turn.text)
-                .foregroundStyle(hub.foreground)
-                .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
-                .padding(12)
-                .background(isUser ? hub.muted : hub.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .strokeBorder(hub.border, lineWidth: 1)
+        MarkdownWebView(text: turn.text, height: $height)
+            .frame(height: max(height, 20), alignment: .topLeading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, isUser ? 14 : 2)
+            .padding(.vertical, isUser ? 8 : 0)
+            .background {
+                if isUser {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous).fill(hub.muted)
                 }
-                .containerRelativeFrame(.horizontal) { width, _ in width * 0.78 }
-            if !isUser { Spacer(minLength: 0) }
-        }
+            }
+            .containerRelativeFrame(.horizontal, alignment: isUser ? .trailing : .leading) { width, _ in
+                isUser ? width * 0.78 : width
+            }
     }
 }
 
 struct ChatHistoryView: View {
     @EnvironmentObject var session: Session
+    @Environment(\.hub) private var hub
     @Environment(\.dismiss) private var dismiss
     let runId: String
     @State private var turns: [ChatTurnDTO] = []
@@ -1481,24 +1624,32 @@ struct ChatHistoryView: View {
     var body: some View {
         Group {
             if let err {
-                Text(err).foregroundStyle(.red).padding()
+                Text(err).foregroundStyle(hub.destructive).padding()
             } else if !loaded {
                 ProgressView()
             } else if turns.isEmpty {
-                Text("还没有对话").foregroundStyle(.secondary)
+                Text("还没有对话")
+                    .font(.system(size: 13))
+                    .foregroundStyle(hub.mutedForeground)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 32)
             } else {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 10) {
+                    LazyVStack(alignment: .leading, spacing: 16) {
                         ForEach(Array(turns.enumerated()), id: \.offset) { _, turn in
                             ChatTurnBubble(turn: turn)
                         }
                     }
-                    .padding()
+                    .padding(16)
                 }
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(hub.background)
         .navigationTitle("对话记录")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(hub.background, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button("关闭") { dismiss() }

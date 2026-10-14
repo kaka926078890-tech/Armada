@@ -47,6 +47,26 @@ fun boardCardElapsed(updatedAt: Long?, nowMs: Long): String? {
     }
 }
 
+enum class FleetTone { Cursor, ChatGpt }
+
+data class FleetCluster<T>(
+    val label: String,
+    val tone: FleetTone,
+    val boxed: Boolean,
+    val slots: List<T>,
+)
+
+/** Hub sidebar: a ChatGPT group boxes both products. Cursor alone stays a plain stack. */
+fun <T> fleetClusters(slots: List<T>, root: (T) -> String): List<FleetCluster<T>> {
+    val cursor = slots.filter { !root(it).startsWith("chatgpt:") }
+    val gpt = slots.filter { root(it).startsWith("chatgpt:") }
+    val boxed = gpt.isNotEmpty()
+    return buildList {
+        if (cursor.isNotEmpty()) add(FleetCluster("Cursor", FleetTone.Cursor, boxed, cursor))
+        if (gpt.isNotEmpty()) add(FleetCluster("ChatGPT", FleetTone.ChatGpt, boxed, gpt))
+    }
+}
+
 fun unreadBadgeText(count: Int): String? {
     if (count <= 0) return null
     return if (count > 99) "99+" else "$count"

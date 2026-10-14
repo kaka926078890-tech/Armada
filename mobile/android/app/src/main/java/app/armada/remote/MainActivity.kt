@@ -73,6 +73,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -340,12 +341,14 @@ fun FleetScreen(vm: SessionVm, state: UiState, onOpen: (WorkspaceDto) -> Unit, o
                     val name = slots.firstOrNull { it.machineName.isNotEmpty() }?.machineName ?: mid
                     val online = slots.any { it.online }
                     val machineUnread = vm.unreadCount(MarkReadScope.Machine(mid))
-                    GroupedSection(
-                        header = name,
-                        headerLeading = {
+                    Column(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
                             Box(Modifier.size(8.dp).clip(CircleShape).background(if (online) StatusGreen else StatusGray))
-                        },
-                        headerTrailing = {
+                            Spacer(Modifier.width(6.dp))
+                            Text(name, fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
                             if (machineUnread > 0) {
                                 Text(
                                     "全部已读",
@@ -355,51 +358,22 @@ fun FleetScreen(vm: SessionVm, state: UiState, onOpen: (WorkspaceDto) -> Unit, o
                                     modifier = Modifier.clickable { vm.markAllRead(MarkReadScope.Machine(mid)) },
                                 )
                             }
-                        },
-                    ) {
-                        slots.forEachIndexed { index, w ->
-                            val unread = vm.unreadCount(MarkReadScope.Workspace(w.machineId, w.workspaceRoot))
-                            val live = state.board.runs.any { it.machineId == w.machineId && it.workspaceRoot == w.workspaceRoot && it.isLive }
-                            if (index > 0) GroupedDivider()
-                            SwipeActionRow(
-                                trailing = if (unread > 0) listOf(
-                                    SwipeAction("全部已读", StatusBlue) {
-                                        vm.markAllRead(MarkReadScope.Workspace(w.machineId, w.workspaceRoot))
-                                    },
-                                ) else emptyList(),
-                            ) {
-                                Row(
-                                    Modifier.fillMaxWidth().clickable { onOpen(w) }.padding(horizontal = 16.dp, vertical = 10.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Text("–", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    Spacer(Modifier.width(8.dp))
-                                    Column(Modifier.weight(1f)) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Text(w.label, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                                            if (live) {
-                                                Spacer(Modifier.width(6.dp))
-                                                CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp, color = StatusGray)
-                                            }
-                                        }
-                                        Text(w.workspaceRoot, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
-                                    }
-                                    if (unread > 0) {
-                                        Box(Modifier.size(8.dp).clip(CircleShape).background(StatusRed))
-                                    }
-                                    Text("›", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 8.dp))
-                                }
-                            }
                         }
                         if (vm.machineNeedsReload(mid) && online) {
-                            GroupedDivider()
                             val pending = vm.machineReloadPending(mid)
+                            val banner = RoundedCornerShape(8.dp)
                             if (pending != null) {
                                 Row(
-                                    Modifier.padding(horizontal = 16.dp, vertical = 10.dp).fillMaxWidth(),
+                                    Modifier
+                                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                                        .fillMaxWidth()
+                                        .clip(banner)
+                                        .background(StatusBlue.copy(alpha = 0.10f))
+                                        .border(1.dp, StatusBlue.copy(alpha = 0.25f), banner)
+                                        .padding(horizontal = 8.dp, vertical = 6.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp, color = StatusGray)
+                                    CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp, color = StatusBlue)
                                     Spacer(Modifier.width(8.dp))
                                     Text(
                                         when (pending) {
@@ -407,24 +381,140 @@ fun FleetScreen(vm: SessionVm, state: UiState, onOpen: (WorkspaceDto) -> Unit, o
                                             "now" -> "正在 Reload…"
                                             else -> "空闲后 Reload…"
                                         },
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        color = StatusBlue,
+                                        fontSize = 12.sp,
                                         modifier = Modifier.weight(1f),
                                     )
                                     if (pending != "skip") {
-                                        TextButton(
-                                            onClick = { vm.setCursorReload("skip", machineId = mid) },
-                                            enabled = state.reloadBusy[mid] == null,
-                                        ) { Text("取消") }
+                                        Text(
+                                            "取消",
+                                            fontSize = 12.sp,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.clickable(enabled = state.reloadBusy[mid] == null) {
+                                                vm.setCursorReload("skip", machineId = mid)
+                                            },
+                                        )
                                     }
                                 }
                             } else {
-                                Row(Modifier.padding(horizontal = 8.dp).fillMaxWidth()) {
-                                    TextButton(onClick = { vm.setCursorReload("now", machineId = mid) }) { Text("立即") } // 现在 Reload
-                                    TextButton(onClick = { vm.setCursorReload("when-idle", machineId = mid) }) { Text("空闲后") } // 空闲后自动
-                                    TextButton(onClick = { vm.setCursorReload("skip", machineId = mid) }) { Text("跳过") } // 这次跳过
+                                Column(
+                                    Modifier
+                                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                                        .fillMaxWidth()
+                                        .clip(banner)
+                                        .background(LocalIosPalette.current.orange.copy(alpha = 0.10f))
+                                        .border(1.dp, LocalIosPalette.current.orange.copy(alpha = 0.25f), banner)
+                                        .padding(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                                ) {
+                                    Text("扩展待 Reload", fontSize = 12.sp, color = LocalIosPalette.current.orange)
+                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        listOf(
+                                            "now" to "立即",
+                                            "when-idle" to "空闲后",
+                                            "skip" to "跳过",
+                                        ).forEach { (action, label) ->
+                                            val filled = action == "now"
+                                            val shape = RoundedCornerShape(8.dp)
+                                            Text(
+                                                label,
+                                                fontSize = 12.sp,
+                                                color = if (filled) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+                                                textAlign = TextAlign.Center,
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .clip(shape)
+                                                    .background(if (filled) MaterialTheme.colorScheme.primary else Color.Transparent)
+                                                    .then(if (action == "when-idle") Modifier.border(1.dp, MaterialTheme.colorScheme.outline, shape) else Modifier)
+                                                    .clickable { vm.setCursorReload(action, machineId = mid) }
+                                                    .padding(vertical = 6.dp),
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
+                        fleetClusters(slots) { it.workspaceRoot }.forEach { cluster ->
+                            FleetClusterBlock(cluster, vm, state, onOpen)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun FleetClusterBlock(
+    cluster: FleetCluster<WorkspaceDto>,
+    vm: SessionVm,
+    state: UiState,
+    onOpen: (WorkspaceDto) -> Unit,
+) {
+    val shape = RoundedCornerShape(12.dp)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .then(
+                if (cluster.boxed) {
+                    Modifier.clip(shape).background(MaterialTheme.colorScheme.surface).border(1.dp, MaterialTheme.colorScheme.outline, shape)
+                } else {
+                    Modifier
+                },
+            ),
+    ) {
+        if (cluster.boxed) {
+            val inverted = cluster.tone == FleetTone.ChatGpt
+            Text(
+                cluster.label,
+                color = if (inverted) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.onSurface,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(if (inverted) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.surfaceVariant)
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+            )
+        }
+        cluster.slots.forEach { w ->
+            val unread = vm.unreadCount(MarkReadScope.Workspace(w.machineId, w.workspaceRoot))
+            val live = state.board.runs.any { it.machineId == w.machineId && it.workspaceRoot == w.workspaceRoot && it.isLive }
+            if (w.workspaceRoot == "chatgpt:monitor") {
+                Text(
+                    "需要用监控启动",
+                    color = LocalIosPalette.current.orange,
+                    fontSize = 13.sp,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                )
+                return@forEach
+            }
+            SwipeActionRow(
+                trailing = if (unread > 0) listOf(
+                    SwipeAction("全部已读", StatusBlue) {
+                        vm.markAllRead(MarkReadScope.Workspace(w.machineId, w.workspaceRoot))
+                    },
+                ) else emptyList(),
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().clickable { onOpen(w) }.padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        w.label.ifBlank { w.workspaceRoot.substringAfterLast('/').substringAfterLast('\\') },
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (live) {
+                        Spacer(Modifier.width(6.dp))
+                        CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp, color = StatusBlue)
+                    }
+                    if (unread > 0) {
+                        Spacer(Modifier.width(8.dp))
+                        Box(Modifier.size(8.dp).clip(CircleShape).background(StatusRed))
                     }
                 }
             }
@@ -950,7 +1040,7 @@ fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String, onBack: () -> 
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .background(LocalIosPalette.current.cell.copy(alpha = 0.92f))
+                    .background(MaterialTheme.colorScheme.surface)
                     .navigationBarsPadding(),
             ) {
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline)
@@ -1006,27 +1096,41 @@ fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String, onBack: () -> 
             else {
                 err?.let { Text(it, color = StatusRed) }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(10.dp).clip(CircleShape).background(statusColor(r.status)))
+                    Text(r.displayTitle, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 2, modifier = Modifier.weight(1f))
                     Spacer(Modifier.width(8.dp))
-                    Text(statusLabel(r.status), style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        statusLabel(r.status),
+                        fontSize = 12.sp,
+                        color = if (r.isLive) StatusBlue else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
                 val ws = r.let { runDto -> state.workspaces.firstOrNull { it.machineId == runDto.machineId && it.workspaceRoot == runDto.workspaceRoot } }
-                Text("${ws?.machineName.orEmpty()} · ${ws?.label ?: r.workspaceRoot}", style = MaterialTheme.typography.bodyMedium)
-                Text(r.workspaceRoot, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                Text(
+                    "${ws?.machineName.orEmpty()} · ${ws?.label ?: r.workspaceRoot}",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
                 r.displayError?.let { Text(operatorMessage(it), color = StatusRed) }
                 if (slot?.canInject == false && r.displayError != "CDP_NOT_READY") Text(operatorMessage("CDP_NOT_READY"), color = StatusRed)
                 DetailPromptCard(r.prompt)
                 DetailReplyBlock(r.finalText, r.isLive, onOpenFile)
                 Text(
                     "查看对话记录",
-                    color = MaterialTheme.colorScheme.onSurface,
-                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 13.sp,
                     modifier = Modifier.clickable { onOpenChat() },
                 )
                 r.pendingAsk?.let { AskBlock(vm, runId, it) { runCatching { adopt(vm.api().run(runId)) } } }
                 if (r.queuedOutbound.isNotEmpty()) {
-                    Text("${r.queuedOutbound.size} 条排队消息", style = MaterialTheme.typography.bodySmall)
-                    r.queuedOutbound.forEach { Text(it.prompt) }
+                    Column(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surface).border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(10.dp)).padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text("${r.queuedOutbound.size} 条还在排队", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        r.queuedOutbound.forEach { Text(it.prompt, fontSize = 13.sp) }
+                    }
                 }
                 if (r.isLive || r.showsRetry) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1061,7 +1165,7 @@ fun DetailPromptCard(text: String) {
     val screenWidthDp = LocalConfiguration.current.screenWidthDp
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
         Column(
-            Modifier.width(screenWidthDp.dp * 0.78f).clip(RoundedCornerShape(18.dp)).background(bubble).padding(12.dp),
+            Modifier.width(screenWidthDp.dp * 0.78f).clip(RoundedCornerShape(16.dp)).background(bubble).padding(horizontal = 14.dp, vertical = 8.dp),
             horizontalAlignment = Alignment.End,
         ) {
             if (overflows) BarButton(if (expanded) "收起" else "展开", compact = true) { expanded = !expanded }
@@ -1388,13 +1492,19 @@ fun ChatHistoryScreen(vm: SessionVm, runId: String, onBack: () -> Unit) {
     ) { pad ->
         Column(
             Modifier.padding(pad).padding(16.dp).verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             err?.let { Text(it, color = StatusRed) }
             val rows = turns
             if (rows == null && err == null) CircularProgressIndicator()
             else if (rows.isNullOrEmpty() && err == null) {
-                Text("还没有对话", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                Text(
+                    "还没有对话",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 13.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp),
+                )
             } else {
                 rows.orEmpty().forEach { ChatTurnBubble(it) }
             }
@@ -1405,17 +1515,21 @@ fun ChatHistoryScreen(vm: SessionVm, runId: String, onBack: () -> Unit) {
 @Composable
 fun ChatTurnBubble(turn: ChatTurnDto) {
     val user = turn.role == "user"
+    var height by remember(turn.text) { mutableFloatStateOf(24f) }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (user) Arrangement.End else Arrangement.Start) {
-        Text(
-            turn.text,
-            modifier = Modifier
-                .fillMaxWidth(0.78f)
-                .clip(RoundedCornerShape(18.dp))
-                .background(if (user) LocalIosPalette.current.secondary else MaterialTheme.colorScheme.surface)
-                .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(18.dp))
-                .padding(12.dp),
-            textAlign = if (user) TextAlign.End else TextAlign.Start,
-        )
+        Box(
+            Modifier
+                .fillMaxWidth(if (user) 0.78f else 1f)
+                .then(
+                    if (user) {
+                        Modifier.clip(RoundedCornerShape(16.dp)).background(LocalIosPalette.current.secondary).padding(horizontal = 14.dp, vertical = 8.dp)
+                    } else {
+                        Modifier
+                    },
+                ),
+        ) {
+            MarkdownFrame(turn.text, heightDp = height, onHeight = { height = it })
+        }
     }
 }
 
