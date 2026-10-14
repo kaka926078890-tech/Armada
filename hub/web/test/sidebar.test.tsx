@@ -12,6 +12,39 @@ const slot: WorkspaceSlot = {
   cdpReady: true,
 };
 
+describe("Sidebar footer", () => {
+  test("archived toggle, settings, and leave sit under the machine list", () => {
+    const html = renderToStaticMarkup(
+      <Sidebar
+        slots={[slot]}
+        machines={[{
+          id: "m-win", name: "PF39WTSM", os: "win32", cursor_version: "1.128.0",
+          extension_version: REQUIRED_EXTENSION_VERSION, open_workspaces: "[]", status: "online", last_seen_at: 1,
+          display_name: "Win Destop",
+        }]}
+        allRuns={[]}
+        selectedKey={null}
+        onSelectWorkspace={() => {}}
+        readMap={{}}
+        onDispatch={() => {}}
+        onRename={() => {}}
+        showArchived
+        onlineCount={1}
+        machineCount={2}
+        onToggleArchived={() => {}}
+        onOpenSettings={() => {}}
+        onLeave={() => {}}
+      />,
+    );
+    expect(html.indexOf("machine-list")).toBeLessThan(html.indexOf("返回看板"));
+    expect(html).toContain("在线 1/2");
+    expect(html).toContain("返回看板");
+    expect(html).toContain("设置");
+    expect(html).toContain("退出");
+    expect(html).not.toContain(">已隐藏<");
+  });
+});
+
 describe("Sidebar unread quiet", () => {
   test("quiet mode grays the workspace unread count", () => {
     const html = renderToStaticMarkup(

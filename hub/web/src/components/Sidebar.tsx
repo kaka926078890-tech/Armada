@@ -84,6 +84,8 @@ export default function Sidebar({
   slots, machines, allRuns, selectedKey, onSelectWorkspace, readMap, onDispatch, onRename, onMonitorChatgpt,
   showDesktopActions, onOpenWorkspace, onRepairCdp, onGetShareLink, onReloadMachine, reloadMachineIds,
   reloadPending, reloadBusy, requiredVsix, packNotice, quietUnread = false,
+  showArchived = false, onlineCount = 0, machineCount = 0,
+  onToggleArchived, onOpenSettings, onLeave,
 }: {
   slots: WorkspaceSlot[];
   machines: Machine[];
@@ -105,6 +107,12 @@ export default function Sidebar({
   requiredVsix?: string;
   packNotice?: string | null;
   quietUnread?: boolean;
+  showArchived?: boolean;
+  onlineCount?: number;
+  machineCount?: number;
+  onToggleArchived?: () => void;
+  onOpenSettings?: () => void;
+  onLeave?: () => void;
 }) {
   const groups = groupSlotsByMachine(slots);
   const selected = slots.find((s) => encodeWorkspaceKey(s.machineId, s.root) === selectedKey);
@@ -278,6 +286,22 @@ export default function Sidebar({
           );
         })}
       </div>
+      {onToggleArchived && onOpenSettings && onLeave ? (
+        <div className="shrink-0 border-t border-border px-2 py-2">
+          <div className={`${UI_META} text-muted-foreground px-2 pb-1 whitespace-nowrap`}>在线 {onlineCount}/{machineCount}</div>
+          <div className="grid grid-cols-3 gap-1">
+            <button type="button" className={`min-w-0 rounded-lg px-1 py-1.5 ${UI_TYPE} whitespace-nowrap text-muted-foreground hover:bg-background hover:text-foreground`} onClick={onToggleArchived}>
+              {showArchived ? "返回看板" : "已隐藏"}
+            </button>
+            <button type="button" className={`min-w-0 rounded-lg px-1 py-1.5 ${UI_TYPE} whitespace-nowrap text-muted-foreground hover:bg-background hover:text-foreground`} onClick={onOpenSettings}>
+              设置
+            </button>
+            <button type="button" className={`min-w-0 rounded-lg px-1 py-1.5 ${UI_TYPE} whitespace-nowrap text-muted-foreground hover:bg-background hover:text-foreground`} onClick={onLeave}>
+              退出
+            </button>
+          </div>
+        </div>
+      ) : null}
     </aside>
   );
 }

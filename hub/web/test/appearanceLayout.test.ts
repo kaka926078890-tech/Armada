@@ -16,18 +16,30 @@ describe("appearance layout stays coordinated when text scales", () => {
     expect(css).not.toMatch(/calc\(\d+px \* var\(--armada-text-scale\)\)/);
   });
 
-  test("header chips cannot squeeze CJK into a glyph column", () => {
-    const app = readFileSync(join(web, "src/App.tsx"), "utf8");
-    const header = app.slice(app.indexOf("<header"), app.indexOf("</header>"));
-    expect(header).toContain("flex-wrap");
-    expect(header).toContain("whitespace-nowrap");
-    expect(header).toContain("shrink-0");
-  });
-
-  test("run detail overlay covers the machine sidebar below the header", () => {
+  test("board actions sit in the sidebar footer, not a full-width header", () => {
     const app = readFileSync(join(web, "src/App.tsx"), "utf8");
     const sidebar = readFileSync(join(web, "src/components/Sidebar.tsx"), "utf8");
-    const body = app.slice(app.indexOf("</header>"));
+    expect(app).not.toContain("<header");
+    expect(app).toContain("onLeave={leaveFleet}");
+    expect(app).toContain("onOpenSettings=");
+    expect(app).toContain("onToggleArchived=");
+    const listAt = sidebar.indexOf("machine-list");
+    const footAt = sidebar.indexOf("shrink-0 border-t border-border");
+    expect(listAt).toBeGreaterThan(0);
+    expect(footAt).toBeGreaterThan(listAt);
+    const footer = sidebar.slice(footAt);
+    expect(footer).toContain("whitespace-nowrap");
+    expect(footer).toContain("已隐藏");
+    expect(footer).toContain("返回看板");
+    expect(footer).toContain("设置");
+    expect(footer).toContain("退出");
+    expect(footer).toContain("在线");
+  });
+
+  test("run detail overlay covers the machine sidebar", () => {
+    const app = readFileSync(join(web, "src/App.tsx"), "utf8");
+    const sidebar = readFileSync(join(web, "src/components/Sidebar.tsx"), "utf8");
+    const body = app.slice(app.indexOf("flex flex-1 min-h-0 relative"));
     expect(sidebar).not.toContain("relative z-50");
     expect(body).toMatch(/flex flex-1 min-h-0 relative[\s\S]*<Sidebar[\s\S]*absolute inset-0 z-40/);
     expect(body).not.toMatch(/<Sidebar[\s\S]*flex-col relative[\s\S]*absolute inset-0 z-40/);

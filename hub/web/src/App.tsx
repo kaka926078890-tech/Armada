@@ -464,30 +464,6 @@ export default function App() {
       {loadError && (
         <div className={`px-4 py-2 ${UI_TYPE} text-destructive bg-destructive/10 border-b border-destructive/30`}>{loadError}</div>
       )}
-      <header className="flex items-center gap-x-3 gap-y-1.5 px-5 py-2.5 border-b border-border flex-wrap">
-        <span className={`min-w-0 font-medium tracking-tight shrink-0 whitespace-nowrap ${UI_TYPE}`}>
-          {showArchived ? "已隐藏" : (presetSlot?.label || (preset ? workspaceFolderName(preset.workspaceRoot) : "看板"))}
-        </span>
-        <span className="ml-auto flex items-center gap-1 flex-wrap shrink-0">
-          <span className={`${UI_META} text-muted-foreground whitespace-nowrap px-2`}>
-            在线 {machines.filter((m) => m.status === "online").length}/{machines.length}
-          </span>
-          <Button
-            type="button"
-            variant="ghost"
-            className="shrink-0"
-            onClick={() => { setShowArchived((v) => !v); setSelectedRun(null); }}
-          >
-            {showArchived ? "返回看板" : "已隐藏"}
-          </Button>
-          <Button type="button" variant="ghost" className="shrink-0" onClick={() => { reloadSnippets(); setSettingsOpen(true); }}>
-            设置
-          </Button>
-          <Button type="button" variant="ghost" className="shrink-0" onClick={leaveFleet}>
-            退出
-          </Button>
-        </span>
-      </header>
       <div className="flex flex-1 min-h-0 relative">
         <Sidebar
           slots={slots}
@@ -541,6 +517,12 @@ export default function App() {
           requiredVsix={cursorReload.required}
           packNotice={cursorReload.notice}
           quietUnread={quietUnread}
+          showArchived={showArchived}
+          onlineCount={machines.filter((m) => m.status === "online").length}
+          machineCount={machines.length}
+          onToggleArchived={() => { setShowArchived((v) => !v); setSelectedRun(null); }}
+          onOpenSettings={() => { reloadSnippets(); setSettingsOpen(true); }}
+          onLeave={leaveFleet}
         />
         <div className="flex-1 min-w-0 min-h-0 flex flex-col">
           {showArchived && (

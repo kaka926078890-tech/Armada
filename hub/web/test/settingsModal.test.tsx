@@ -7,9 +7,11 @@ import SettingsModal from "../src/components/SettingsModal";
 const root = join(import.meta.dir, "..");
 
 describe("settings chrome", () => {
-  test("header opens a settings control instead of an inline theme toggle", () => {
+  test("sidebar footer opens settings instead of an inline theme toggle", () => {
     const app = readFileSync(join(root, "src/App.tsx"), "utf8");
-    expect(app).toContain("设置");
+    const sidebar = readFileSync(join(root, "src/components/Sidebar.tsx"), "utf8");
+    expect(sidebar).toContain("设置");
+    expect(app).toContain("setSettingsOpen(true)");
     expect(app).not.toContain('aria-label="切换明亮/黑夜"');
   });
 
