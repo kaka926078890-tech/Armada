@@ -23,6 +23,12 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
 }
+html[data-theme="light"] {
+  color-scheme: light;
+  --bg: #ffffff;
+  --text: #18181b;
+  background: #ffffff;
+}
 
 *,
 *::before,
@@ -38,6 +44,9 @@ body {
   background:
     radial-gradient(1200px 500px at 50% -10%, rgba(14, 165, 233, 0.12), transparent 55%),
     var(--bg);
+}
+html[data-theme="light"] body {
+  background: #ffffff;
 }
 
 .shell {

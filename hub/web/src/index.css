@@ -15,18 +15,12 @@ body,
   height: 100%;
   overflow: hidden;
 }
-/* 整页一起放大。布局框按同样倍数缩小，再用 scale 画回窗口，避免 zoom 把页面撑出滚动条。 */
-html[data-font-scale="large"] body {
-  width: calc(100% / 1.25);
-  height: calc(100% / 1.25);
-  transform: scale(1.25);
-  transform-origin: 0 0;
+/* 布局缩放：按最终像素重画字形。页面高度跟窗口走，不再先画小图再拉大。 */
+html[data-font-scale="large"] {
+  zoom: 1.25;
 }
-html[data-font-scale="xlarge"] body {
-  width: calc(100% / 1.5);
-  height: calc(100% / 1.5);
-  transform: scale(1.5);
-  transform-origin: 0 0;
+html[data-font-scale="xlarge"] {
+  zoom: 1.5;
 }
 
 @theme inline {

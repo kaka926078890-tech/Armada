@@ -28,6 +28,7 @@ export type DesktopRunAlert = {
 
 export type DesktopBoardRequest =
   | { type: DesktopBoardCommand }
+  | { type: "theme"; theme: "light" | "dark" }
   | DesktopRunAlert;
 
 export type LandingMode = "create" | "join";
@@ -128,6 +129,9 @@ export function parseDesktopBoardRequest(data: unknown): DesktopBoardRequest | n
   if (o.source !== DESKTOP_BOARD_SOURCE) return null;
   if (o.type === "open-workspace" || o.type === "repair-cdp" || o.type === "get-share-link" || o.type === "leave-fleet" || o.type === "need-token") {
     return { type: o.type };
+  }
+  if (o.type === "theme" && (o.theme === "light" || o.theme === "dark")) {
+    return { type: "theme", theme: o.theme };
   }
   if (o.type !== "run.alert") return null;
   if (

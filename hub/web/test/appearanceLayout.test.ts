@@ -10,11 +10,9 @@ describe("appearance layout stays coordinated when text scales", () => {
     const css = readFileSync(join(web, "src/index.css"), "utf8");
     expect(css).toMatch(/html\s*\{[^}]*font-size:\s*16px/);
     expect(css).not.toMatch(/html\s*\{[^}]*font-size:\s*calc\(16px \* var\(--armada-text-scale\)\)/);
-    expect(css).toMatch(/html\[data-font-scale="large"\][^{]*\{[^}]*transform:\s*scale\(1\.25\)/);
-    expect(css).toMatch(/html\[data-font-scale="large"\][^{]*\{[^}]*width:\s*calc\(100% \/ 1\.25\)/);
-    expect(css).toMatch(/html\[data-font-scale="xlarge"\][^{]*\{[^}]*transform:\s*scale\(1\.5\)/);
-    expect(css).toMatch(/html\[data-font-scale="xlarge"\][^{]*\{[^}]*height:\s*calc\(100% \/ 1\.5\)/);
-    expect(css).not.toMatch(/html\[data-font-scale="large"\][^{]*\{[^}]*zoom:/);
+    expect(css).toMatch(/html\[data-font-scale="large"\][^{]*\{[^}]*zoom:\s*1\.25/);
+    expect(css).toMatch(/html\[data-font-scale="xlarge"\][^{]*\{[^}]*zoom:\s*1\.5/);
+    expect(css).not.toMatch(/transform:\s*scale\(/);
     expect(css).not.toMatch(/calc\(\d+px \* var\(--armada-text-scale\)\)/);
   });
 

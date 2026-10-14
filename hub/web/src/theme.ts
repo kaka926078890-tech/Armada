@@ -18,6 +18,10 @@ export function saveTheme(theme: ThemeName): void {
 export function applyTheme(theme: ThemeName): void {
   if (typeof document === "undefined") return;
   document.documentElement.dataset.theme = theme;
+  document.documentElement.style.colorScheme = theme;
+  if (typeof window !== "undefined" && window.parent !== window) {
+    window.parent.postMessage({ source: "armada-desktop", type: "theme", theme }, "*");
+  }
 }
 
 export function otherTheme(theme: ThemeName): ThemeName {

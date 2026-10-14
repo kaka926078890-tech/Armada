@@ -478,7 +478,7 @@ export default function App() {
             className="shrink-0"
             onClick={() => { setShowArchived((v) => !v); setSelectedRun(null); }}
           >
-            {showArchived ? "返回看板" : `已隐藏${hiddenRuns.length ? ` ${hiddenRuns.length}` : ""}`}
+            {showArchived ? "返回看板" : "已隐藏"}
           </Button>
           <Button type="button" variant="ghost" className="shrink-0" onClick={() => { reloadSnippets(); setSettingsOpen(true); }}>
             设置

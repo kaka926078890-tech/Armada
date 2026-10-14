@@ -377,6 +377,18 @@ function wireRunAlertClick() {
     });
 }
 
+function applyWindowTheme(theme: "light" | "dark") {
+  document.documentElement.dataset.theme = theme;
+  document.documentElement.style.colorScheme = theme;
+  const board = document.getElementById("board");
+  if (board instanceof HTMLElement) {
+    board.style.background = theme === "light" ? "#ffffff" : "#09090b";
+  }
+  void import("@tauri-apps/api/window")
+    .then(({ getCurrentWindow }) => getCurrentWindow().setTheme(theme))
+    .catch(() => { /* browser preview has no window theme */ });
+}
+
 function leaveBoard() {
   clearBoardSession();
   currentBoardOrigin = null;
@@ -575,6 +587,10 @@ window.addEventListener("DOMContentLoaded", () => {
     }
     if (req.type === "open-workspace" || req.type === "repair-cdp") {
       void openWorkspaceFromBoard();
+      return;
+    }
+    if (req.type === "theme") {
+      applyWindowTheme(req.theme);
       return;
     }
     if (req.type === "run.alert") {

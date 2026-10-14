@@ -61,6 +61,8 @@ describe("parseDesktopBoardRequest", () => {
     expect(parseDesktopBoardRequest({ source: "armada-desktop", type: "get-share-link" })).toEqual({ type: "get-share-link" });
     expect(parseDesktopBoardRequest({ source: "armada-desktop", type: "leave-fleet" })).toEqual({ type: "leave-fleet" });
     expect(parseDesktopBoardRequest({ source: "armada-desktop", type: "need-token" })).toEqual({ type: "need-token" });
+    expect(parseDesktopBoardRequest({ source: "armada-desktop", type: "theme", theme: "light" })).toEqual({ type: "theme", theme: "light" });
+    expect(parseDesktopBoardRequest({ source: "armada-desktop", type: "theme", theme: "sepia" })).toBeNull();
   });
 
   test("parses run.alert with three ids", () => {
