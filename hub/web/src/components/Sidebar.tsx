@@ -210,7 +210,6 @@ export default function Sidebar({
             {(() => {
               const cursorSlots = g.workspaces.filter((s) => !s.root.startsWith("chatgpt:"));
               const gptSlots = g.workspaces.filter((s) => s.root.startsWith("chatgpt:"));
-              const split = cursorSlots.length > 0 && gptSlots.length > 0;
               const row = (s: WorkspaceSlot) => {
                 const key = encodeWorkspaceKey(s.machineId, s.root);
                 const wsRuns = filterRunsByWorkspace(allRuns, s.machineId, s.root);
@@ -258,7 +257,7 @@ export default function Sidebar({
               );
               const cluster = (label: string, slots: WorkspaceSlot[], tone: "cursor" | "gpt") => {
                 if (!slots.length) return null;
-                if (!split) return <div key={label} className="px-1">{stack(slots)}</div>;
+                if (tone === "cursor" && gptSlots.length === 0) return <div key={label} className="px-1">{stack(slots)}</div>;
                 const head = tone === "cursor"
                   ? "bg-muted text-foreground"
                   : "bg-foreground text-background";

@@ -41,6 +41,32 @@ describe("Sidebar unread quiet", () => {
   });
 });
 
+describe("Sidebar ChatGPT zone", () => {
+  test("ChatGPT stays a block when Cursor workspaces have not arrived", () => {
+    const html = renderToStaticMarkup(
+      <Sidebar
+        slots={[
+          { machineId: "m-mac", machineName: "appledeMacBook-Pro.local", os: "darwin", root: "chatgpt:", label: "普通区", online: true, cdpReady: true },
+          { machineId: "m-mac", machineName: "appledeMacBook-Pro.local", os: "darwin", root: "chatgpt:desk", label: "desk", online: true, cdpReady: true },
+        ]}
+        machines={[{
+          id: "m-mac", name: "appledeMacBook-Pro.local", os: "darwin", cursor_version: null,
+          extension_version: null, open_workspaces: "[]", status: "online", last_seen_at: 1,
+        }]}
+        allRuns={[]}
+        selectedKey={encodeWorkspaceKey("m-mac", "chatgpt:")}
+        onSelectWorkspace={() => {}}
+        readMap={{}}
+        onDispatch={() => {}}
+        onRename={() => {}}
+      />,
+    );
+    expect(html).toContain(">ChatGPT<");
+    expect(html).toContain("bg-foreground text-background");
+    expect(html).not.toContain(">Cursor<");
+  });
+});
+
 describe("Sidebar extension lag", () => {
   test("stale vsix shows under the machine name", () => {
     const html = renderToStaticMarkup(
