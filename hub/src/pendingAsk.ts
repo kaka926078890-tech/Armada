@@ -102,6 +102,9 @@ export function choiceOptions(ask: PendingAsk): PendingAskOption[] {
 
 export const ASK_TEXT_MAX = 4000;
 
+/** No askQuestionResolved within this window after answer-ask → hub broadcasts submit_failed. */
+export const ASK_SUBMIT_TIMEOUT_MS = 15_000;
+
 export function mergePendingAskRecord(existing: PendingAsk | null, incoming: PendingAsk): PendingAsk {
   if (!existing || existing.request_id !== incoming.request_id) return incoming;
   const takeQuestions = isPlanAsk(incoming) && incoming.detected_at >= existing.detected_at;

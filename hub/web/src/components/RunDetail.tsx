@@ -124,6 +124,7 @@ export default function RunDetail({
   const [titleDraft, setTitleDraft] = useState("");
   const [titleError, setTitleError] = useState("");
   const [askError, setAskError] = useState("");
+  const [askFailSeq, setAskFailSeq] = useState(0);
   const [filePath, setFilePath] = useState<string | null>(null);
   const [hiddenPrefixTurns, setHiddenPrefixTurns] = useState(0);
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -224,8 +225,12 @@ export default function RunDetail({
     const es = new EventSource(api.streamUrl(runId));
     es.onmessage = (e) => {
       if (aborted) return;
-      let data: { type?: string };
+      let data: { type?: string; state?: string };
       try { data = JSON.parse(e.data); } catch { return; }
+      if (data.type === "run.ask" && data.state === "submit_failed") {
+        setAskError("提交失败，请到本机点 Continue / Skip");
+        setAskFailSeq((n) => n + 1);
+      }
       if (data.type === "run.event") {
         if (!tailReady.current) return;
         fetchForward(seqRef.current);
@@ -564,6 +569,7 @@ export default function RunDetail({
         <ChatThread
           blocks={chat}
           onOpenFile={setFilePath}
+          askFailSeq={askFailSeq}
           onAnswerAsk={run.pending_ask ? async (body) => {
             setAskError("");
             const r = await api.answerAsk(run.id, body);

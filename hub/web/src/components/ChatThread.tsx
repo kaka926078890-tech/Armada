@@ -266,6 +266,9 @@ export function askContinueLabel(plan: boolean, busy: boolean): string {
   return busy ? "Continuing..." : "Continue";
 }
 
+/** Fallback only: the card normally unlocks on askQuestionResolved or on the hub's submit_failed. */
+export const ASK_LOCK_MS = 20_000;
+
 export function askSkipLabel(busy: boolean): string {
   return busy ? "Skipping..." : "Skip";
 }
@@ -296,9 +299,10 @@ function AskSpinner() {
   );
 }
 
-function AskCard({ block, onAnswerAsk }: {
+function AskCard({ block, onAnswerAsk, askFailSeq }: {
   block: Extract<ChatBlock, { kind: "ask" }>;
   onAnswerAsk?: (body: AnswerAskBody) => Promise<boolean | void> | boolean | void;
+  askFailSeq?: number;
 }) {
   const [picked, setPicked] = useState("");
   const [pickedByQuestion, setPickedByQuestion] = useState<Record<string, string>>({});
@@ -331,9 +335,12 @@ function AskCard({ block, onAnswerAsk }: {
     : (pickedFreeform ? !!typed : !!picked));
   useEffect(() => {
     if (!busyAction) return;
-    const t = window.setTimeout(() => setBusyAction(null), 8000);
+    const t = window.setTimeout(() => setBusyAction(null), ASK_LOCK_MS);
     return () => window.clearTimeout(t);
   }, [busyAction]);
+  useEffect(() => {
+    if (askFailSeq) setBusyAction(null);
+  }, [askFailSeq]);
   const submit = async (action: "continue" | "skip" | "freeform") => {
     if (!onAnswerAsk || wait) return;
     setBusyAction(action);
@@ -495,10 +502,12 @@ function AskCard({ block, onAnswerAsk }: {
   );
 }
 
-export default function ChatThread({ blocks, onAnswerAsk, onOpenFile }: {
+export default function ChatThread({ blocks, onAnswerAsk, onOpenFile, askFailSeq }: {
   blocks: ChatBlock[];
   onAnswerAsk?: (body: AnswerAskBody) => Promise<boolean | void> | boolean | void;
   onOpenFile?: (path: string) => void;
+  /** Bumped when the hub reports submit_failed, so a locked card re-arms. */
+  askFailSeq?: number;
 }) {
   if (blocks.length === 0) {
     return <div className={`${UI_TYPE} text-muted-foreground px-1 py-8 text-center`}>等待对话内容…</div>;
@@ -536,7 +545,7 @@ export default function ChatThread({ blocks, onAnswerAsk, onOpenFile }: {
           );
         }
         if (s.kind === "ask") {
-          return <AskCard key={key} block={s} onAnswerAsk={onAnswerAsk} />;
+          return <AskCard key={key} block={s} onAnswerAsk={onAnswerAsk} askFailSeq={askFailSeq} />;
         }
         return <ProcessStep key={key} block={s} onOpenFile={onOpenFile} />;
       })}

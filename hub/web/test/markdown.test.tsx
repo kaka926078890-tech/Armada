@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import ChatThread, { AssistantMarkdown, markdownComponentsFor, askContinueAnswers, askContinueLabel, askSkipLabel, continueAllowed, isPlanAsk, planOverviewOf } from "../src/components/ChatThread";
+import ChatThread, { AssistantMarkdown, markdownComponentsFor, askContinueAnswers, askContinueLabel, askSkipLabel, continueAllowed, isPlanAsk, planOverviewOf, ASK_LOCK_MS } from "../src/components/ChatThread";
+import { ASK_SUBMIT_TIMEOUT_MS } from "../../src/pendingAsk";
 import { MERMAID_RENDER_HOST_STYLE } from "../src/components/MermaidChart";
 import type { ChatBlock } from "../src/chatView";
 
@@ -188,6 +189,10 @@ describe("ask / plan action buttons", () => {
     expect(askContinueLabel(false, true)).toBe("Continuing...");
     expect(askSkipLabel(false)).toBe("Skip");
     expect(askSkipLabel(true)).toBe("Skipping...");
+  });
+
+  test("a submitted answer stays locked until the hub gives up on it", () => {
+    expect(ASK_LOCK_MS).toBeGreaterThan(ASK_SUBMIT_TIMEOUT_MS);
   });
 
   test("single option id=build without kind is not plan", () => {

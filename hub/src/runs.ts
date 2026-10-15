@@ -22,7 +22,7 @@ import { BIND_TIMEOUT_MS, WINDOWS_BIND_TIMEOUT_MS } from "../../extension/src/tr
 import { collisionKey, hasImageMarkers, stripImageMarkers } from "../../extension/src/imageMarkers";
 import { BlobStore, parseAttachmentIds, type BlobMeta } from "./blobs";
 import { appendRetired, decideArm, decideStop, parseRetiredIds, isWindowsMachineOs, genOf, stopFromCursorSessionEnd, isResumeStallError } from "./generationOwnership";
-import { parsePendingAsk, continueAllowed, optionInAsk, isPlanAsk, mergePendingAskRecord, ASK_TEXT_MAX } from "./pendingAsk";
+import { parsePendingAsk, continueAllowed, optionInAsk, isPlanAsk, mergePendingAskRecord, ASK_TEXT_MAX, ASK_SUBMIT_TIMEOUT_MS } from "./pendingAsk";
 import {
   OUTBOUND_LIMIT, QUEUE_DRAIN_MS, queueModeOf, statusUserPrompt,
 } from "./outboundClaim";
@@ -1221,7 +1221,7 @@ export class RunService {
       if (!this.askInFlight.has(runId)) return;
       this.clearAskInFlight(runId);
       this.sse.broadcast(runId, { type: "run.ask", runId, state: "submit_failed", error: "ASK_SUBMIT_FAILED" });
-    }, 15_000);
+    }, ASK_SUBMIT_TIMEOUT_MS);
     if (typeof (t as any).unref === "function") (t as any).unref();
     this.askTimers.set(runId, t);
 
