@@ -168,7 +168,7 @@ html[data-theme="light"] {
   field-sizing: fixed;
   min-width: 0;
   overflow-x: hidden;
-  overflow-y: hidden;
+  overflow-y: auto;
   scrollbar-width: none;
 }
 .followup-input::-webkit-scrollbar {

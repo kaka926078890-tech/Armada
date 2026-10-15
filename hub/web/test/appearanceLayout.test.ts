@@ -68,7 +68,9 @@ describe("appearance layout stays coordinated when text scales", () => {
     expect(sidebar).not.toContain("ScrollArea");
     expect(css).toMatch(/\.machine-list\s*\{[^}]*scrollbar-width:\s*none/);
     expect(css).toMatch(/\.followup-input\s*\{[^}]*overflow-x:\s*hidden/);
+    expect(css).toMatch(/\.followup-input\s*\{[^}]*overflow-y:\s*auto/);
     expect(css).toMatch(/\.followup-input\s*\{[^}]*scrollbar-width:\s*none/);
+    expect(detail).not.toContain("style.overflowY");
     expect(detail).toContain("min-w-0");
     expect(button).toContain("whitespace-nowrap");
     expect(board).toContain("min-w-0");

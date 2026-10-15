@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { mergeAttachmentFiles, isConsoleAttachment } from "../attachments";
 import { ConsoleFilePicker } from "./ConsoleFilePicker";
+import { focusParkedOnDialogShell } from "../composerFocus";
 import { endFollowupSend, isFollowupSendEnter, tryBeginFollowupSend } from "../followupSend";
 import { CDP_NOT_READY_COPY } from "../boardState";
 import { appendSnippetBody } from "../promptSnippets";
@@ -147,6 +148,13 @@ export function DispatchModal({
           placeholder="写下要做的事。Enter 发送，Shift+Enter 换行"
           className="w-full min-h-[8rem] max-h-[min(12rem,40vh)] overflow-y-auto resize-y field-sizing-fixed"
           style={{ fieldSizing: "fixed" }}
+          onBlur={(e) => {
+            const el = e.currentTarget;
+            requestAnimationFrame(() => {
+              if (!el.isConnected) return;
+              if (focusParkedOnDialogShell(el.ownerDocument.activeElement)) el.focus();
+            });
+          }}
           onKeyDown={(e) => {
             if (!isFollowupSendEnter(e)) return;
             e.preventDefault();

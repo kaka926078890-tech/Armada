@@ -101,19 +101,6 @@ export default function RunDetail({
   const [run, setRun] = useState<RunRow | null>(null);
   const [events, setEvents] = useState<RunEvent[]>([]);
   const [followup, setFollowup] = useState("");
-  const followupRef = useRef<HTMLTextAreaElement>(null);
-  useLayoutEffect(() => {
-    const el = followupRef.current;
-    if (!el) return;
-    const sync = () => {
-      el.style.overflowY = "hidden";
-      el.style.overflowY = el.scrollHeight - el.clientHeight > 4 ? "auto" : "hidden";
-    };
-    sync();
-    const ro = new ResizeObserver(sync);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [followup]);
   const [followupFiles, setFollowupFiles] = useState<File[]>([]);
   const [followupError, setFollowupError] = useState("");
   const [cancelError, setCancelError] = useState("");
@@ -617,7 +604,6 @@ export default function RunDetail({
           ) : null}
           <div className="flex gap-2 items-end">
             <Textarea
-              ref={followupRef}
               value={followup}
               onChange={(e) => setFollowup(e.target.value)}
               onPaste={(e) => {
