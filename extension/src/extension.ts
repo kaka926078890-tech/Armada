@@ -18,12 +18,13 @@ import { TranscriptDirWatcher, debounceLeading, watchTranscriptDir, watchFileSiz
 import { createExtSeq } from "./extSeq";
 import { hubRunsNeedingTranscriptFollow, shouldArmFollowupStopOnAdopt } from "./adoptRuns";
 import { noteOwnerBsp, clearGeneration, synthesizedStopPayload, noteHubGeneration, onFollowupBindGeneration } from "./generationStamp";
-import { parseAskInspect, askPollActions, askQuestionsKey, coalesceAskInspect, isAskUnknown } from "./askDetect";
+import { parseAskInspect, askPollMany, askQuestionsKey, coalesceAskInspect, isAskUnknown, ASK_MISS_LIMIT } from "./askDetect";
+import { mergeVisibleAndStoredAsks, readStoredAsks } from "./askStore";
 import { enrichPlanAsk, planDirsFor } from "./planFile";
 import { PENDING_RELOAD_ATTEMPT_NAME, PENDING_RELOAD_NAME, decideReloadFire, decideWindowReload, highestInstalledArmadaAgent, highestInstalledVsix, mergeReloadAttempt, noteReloadCommandSettled, parsePendingReload, parseReloadAttempt, reloadAttemptBlocksWindow, windowHasInFlightArmadaRun, windowHasOpenComposerTurn, windowHasRecentSettle, type ReloadFireState } from "../../desktop-core/src/cursorReload";
 import { readWorkspaceFile } from "./workspaceFileRead";
 
-const EXTENSION_VERSION = "0.4.49";
+const EXTENSION_VERSION = "0.4.50";
 
 let client: { dispose: () => void } | null = null;
 
@@ -478,12 +479,15 @@ export function activate(context: vscode.ExtensionContext): void {
       if (boundRuns.size === 0) return;
       const roots = workspaces();
       if (roots.length === 0) return;
+      const cids = [...new Set([...boundRuns.values()].map((v) => v.conversationId).filter((id) => id))];
+      const storedPromise = readStoredAsks(cids);
       const hits: { root: string; inspect: AskCdpInspect }[] = [];
       for (const root of roots) {
         const hit = await askDriver.inspect(root);
         hits.push({ root, inspect: hit });
         if (hit.present) break;
       }
+      const stored = await storedPromise;
       const inspectRaw: unknown = coalesceAskInspect(hits.map((h) => h.inspect));
       const inspectRoot = hits.find((h) => h.inspect.present)?.root ?? "";
       let inspect = parseAskInspect(inspectRaw);
@@ -494,13 +498,15 @@ export function activate(context: vscode.ExtensionContext): void {
         if (inspect.present) askMisses = 0;
         else askMisses += 1;
       }
-      const absentStreak = !isAskUnknown(inspect) && !inspect.present ? askMisses - 1 : undefined;
-      const acts = askPollActions(
-        boundRuns, askLastByRun, inspect,
+      const cdpGoneConfirmed = !isAskUnknown(inspect) && !inspect.present && askMisses >= ASK_MISS_LIMIT;
+      const merged = mergeVisibleAndStoredAsks(isAskUnknown(inspect) ? { present: false } : inspect, stored ?? []);
+      const acts = askPollMany(
+        boundRuns, askLastByRun, merged.presents, merged.submittedCids,
         (runId) => `ask-${runId}-${nextExtSeq()}`, Date.now(), stopSent,
         askPlanTextByRun, cancelledRuns,
-        absentStreak,
         askRecent,
+        cdpGoneConfirmed,
+        merged.loadingCids,
       );
       for (const act of acts) {
         if (act.type === "askQuestion") {

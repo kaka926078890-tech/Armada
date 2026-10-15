@@ -455,6 +455,20 @@ function applyCursorGenerations(blocks: ChatBlock[]): ChatBlock[] {
   return out;
 }
 
+/** Cursor 把当轮思考接在 jsonl 助手正文后面。hook 的 afterAgentResponse 才是正文。 */
+export function stripAppendedThought(text: string, replies: readonly string[]): string {
+  let best: string | null = null;
+  for (const raw of replies) {
+    const reply = raw.trim();
+    if (reply.length < 40) continue;
+    if (best && reply.length <= best.length) continue;
+    if (!text.startsWith(reply)) continue;
+    if (!text.slice(reply.length).startsWith("\n\n")) continue;
+    best = reply;
+  }
+  return best ?? text;
+}
+
 function finish(blocks: ChatBlock[]): ChatBlock[] {
   const hasSub = blocks.some((b) => b.kind === "subagent");
   const filtered = hasSub ? blocks.filter((b) => !(b.kind === "tool" && b.name === "Task")) : blocks;
@@ -538,6 +552,7 @@ export function eventsToChat(events: RunEvent[]): ChatBlock[] {
   const liveHooks: ChatBlock[] = [];
   const subFromHooks: ChatBlock[] = [];
   const children = new Map<string, ChildAcc>();
+  const hookReplies: string[] = [];
 
   for (const ev of sorted) {
     const p = parsePayload(ev.payload);
@@ -555,6 +570,9 @@ export function eventsToChat(events: RunEvent[]): ChatBlock[] {
       fromTx.push(...transcriptBlocks(ev, p));
       continue;
     }
+    if (ev.hook_event_name === "afterAgentResponse" && typeof p?.text === "string" && p.text.trim()) {
+      hookReplies.push(p.text);
+    }
     const hb = hookBlocks(ev, p);
     fromHooks.push(...hb);
     for (const b of hb) if (b.kind === "subagent") subFromHooks.push(b);
@@ -571,8 +589,12 @@ export function eventsToChat(events: RunEvent[]): ChatBlock[] {
     if (ev.seq > lastTx) liveHooks.push(...hb);
   }
 
-  const txUser = new Set(fromTx.filter((b) => b.kind === "user").map((b) => b.kind === "user" ? b.text : ""));
-  const txAsst = new Set(fromTx.filter((b) => b.kind === "assistant").map((b) => b.kind === "assistant" ? b.text : ""));
+  const clipReply = (b: ChatBlock): ChatBlock =>
+    b.kind === "assistant" ? { ...b, text: stripAppendedThought(b.text, hookReplies) } : b;
+  const txBlocks = fromTx.map(clipReply);
+  const liveBlocks = liveHooks.map(clipReply);
+  const txUser = new Set(txBlocks.filter((b) => b.kind === "user").map((b) => b.kind === "user" ? b.text : ""));
+  const txAsst = new Set(txBlocks.filter((b) => b.kind === "assistant").map((b) => b.kind === "assistant" ? b.text : ""));
   const dropTxDup = (b: ChatBlock) => {
     if (b.kind === "user" && txUser.has(b.text)) return false;
     if (b.kind === "assistant" && txAsst.has(b.text)) return false;
@@ -580,13 +602,13 @@ export function eventsToChat(events: RunEvent[]): ChatBlock[] {
   };
   // 前缀只留助手/过程；用户句走 extraUsers，避免 fromEnd 下 hub+hook 同文案在 prefix 里各画一条。
   const prefixHooks = Number.isFinite(firstTx)
-    ? fromHooks.filter((b) => b.seq < firstTx && b.kind !== "user").filter(dropTxDup)
+    ? fromHooks.filter((b) => b.seq < firstTx && b.kind !== "user").map(clipReply).filter(dropTxDup)
     : [];
-  const live = liveHooks.filter(dropTxDup);
+  const live = liveBlocks.filter(dropTxDup);
   const extraUsers = uniqueUserText(
     pendingUsers.filter((b) => b.kind === "user" && !txUser.has(b.text)),
   );
-  const skeleton = [...prefixHooks, ...fromTx];
+  const skeleton = [...prefixHooks, ...txBlocks];
   return attachChildText(
     finish(orderBySeq(stampUserImageIds([...skeleton, ...extraUsers, ...live, ...subFromHooks], pendingUsers))),
     children,

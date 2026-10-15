@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { assistantBodyForPrompt, assistantBodyText, lastTurnAssistantBody, operatorChatTurns, eventsToChat, extractUserText, segmentChat, INITIAL_VISIBLE_TURNS, initialHiddenPrefixTurns, recentTurnsWindow, mergeOutboundChat, mergePendingAsk, queuedOutbound, collapseRepeatedTools, processFoldLabel, CURSOR_PROTOCOL_USER_PREFIXES, userMessageCaption, stampFallbackImageIds } from "../src/chatView";
+import { assistantBodyForPrompt, assistantBodyText, lastTurnAssistantBody, operatorChatTurns, eventsToChat, extractUserText, segmentChat, INITIAL_VISIBLE_TURNS, initialHiddenPrefixTurns, recentTurnsWindow, mergeOutboundChat, mergePendingAsk, queuedOutbound, collapseRepeatedTools, processFoldLabel, CURSOR_PROTOCOL_USER_PREFIXES, userMessageCaption, stampFallbackImageIds, stripAppendedThought } from "../src/chatView";
 import type { ChatBlock } from "../src/chatView";
 import type { RunEvent } from "../src/types";
 
@@ -142,6 +142,25 @@ describe("eventsToChat", () => {
     ]);
     expect(blocks.map((b) => b.kind)).toEqual(["user", "thought", "assistant"]);
     expect(blocks[2]).toMatchObject({ kind: "assistant", text: "你好" });
+  });
+
+  test("jsonl reply keeps the hook text and drops the thought Cursor appends", () => {
+    const reply = "用一个具体例子来说明。用户每发一句话，claw 都会拿这句话去对照几张关键词表。";
+    const thought = "The user is still confused, so I should explain more simply with concrete before/after examples.";
+    const blocks = eventsToChat([
+      ev({ seq: 1, source: "transcript", payload: JSON.stringify({
+        role: "user", message: { content: [{ type: "text", text: "<user_query>\n问\n</user_query>" }] },
+      }) }),
+      ev({ seq: 2, source: "transcript", payload: JSON.stringify({
+        role: "assistant", message: { content: [{ type: "text", text: `${reply}\n\n${thought}` }] },
+      }) }),
+      ev({ seq: 3, hook_event_name: "afterAgentResponse", payload: JSON.stringify({ text: reply }) }),
+    ]);
+    const asst = blocks.filter((b) => b.kind === "assistant");
+    expect(asst).toHaveLength(1);
+    expect(asst[0]).toMatchObject({ text: reply });
+    expect(stripAppendedThought(`${reply}\n\n${thought}`, [reply])).toBe(reply);
+    expect(stripAppendedThought(reply, [reply])).toBe(reply);
   });
 
   test("does not repeat transcript reply when hook afterAgentResponse duplicates it", () => {

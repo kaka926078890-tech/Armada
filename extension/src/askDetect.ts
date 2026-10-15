@@ -246,3 +246,64 @@ export function askPollActions(
   }
   return out;
 }
+
+/**
+ * One poll can see several questions: the widget on screen, plus asks stored for other bound conversations.
+ * A stored "submitted" clears that conversation immediately. Loading does not.
+ * cdpGoneConfirmed is the old 3-miss rule, used when the store has no row for that conversation.
+ */
+export function askPollMany(
+  bound: Iterable<[string, { conversationId: string }]>,
+  prevByRun: Iterable<[string, string]>,
+  presents: AskInspect[],
+  submittedCids: Iterable<string>,
+  makeId: (runId: string) => string,
+  now = Date.now(),
+  stopped: Iterable<string> = [],
+  prevPlanTextByRun: Iterable<[string, string]> = [],
+  cancelled: Iterable<string> = [],
+  recentByRun: Iterable<[string, { requestId: string; key: string }]> = [],
+  cdpGoneConfirmed = false,
+  loadingCids: Iterable<string> = [],
+): AskPollAct[] {
+  const submitted = new Set(submittedCids);
+  const loading = new Set(loadingCids);
+  const prev = new Map(prevByRun);
+  const prevText = new Map(prevPlanTextByRun);
+  const recent = new Map(recentByRun ?? []);
+  const cancelledIds = new Set(cancelled);
+  const stoppedIds = new Set(stopped);
+  const owners = new Set<string>();
+  const out: AskPollAct[] = [];
+  for (const inspect of presents) {
+    if (isAskUnknown(inspect) || !inspect.present || inspect.options.length === 0) continue;
+    const dead = inspect.kind === "plan" ? cancelledIds : new Set([...stoppedIds, ...cancelledIds]);
+    const live = [...bound].filter(([id]) => !dead.has(id));
+    const owner = latestRunIdForConversation(live, inspect.conversation_id)
+      ?? (!inspect.conversation_id ? uniqueBoundRunId(live) : undefined);
+    if (!owner || owners.has(owner)) continue;
+    owners.add(owner);
+    const act = nextAskAction(prev.get(owner) ?? null, inspect, () => makeId(owner), now, prevText.get(owner));
+    if (act?.type !== "askQuestion") continue;
+    const key = askQuestionsKey(act.payload.questions);
+    const remembered = recent.get(owner);
+    if (!prev.get(owner) && remembered && remembered.key === key) {
+      act.payload.request_id = remembered.requestId;
+    }
+    const conversation_id = act.payload.conversation_id || boundConversationId(live, owner) || "";
+    out.push({ type: "askQuestion", runId: owner, payload: { ...act.payload, conversation_id } });
+  }
+  for (const [runId, requestId] of prev) {
+    if (owners.has(runId)) continue;
+    if (prevText.has(runId)) {
+      if (cdpGoneConfirmed) out.push({ type: "askQuestionResolved", runId, request_id: requestId });
+      continue;
+    }
+    const cid = boundConversationId(bound, runId) ?? "";
+    if (cid && loading.has(cid)) continue;
+    if ((cid && submitted.has(cid)) || cdpGoneConfirmed) {
+      out.push({ type: "askQuestionResolved", runId, request_id: requestId });
+    }
+  }
+  return out;
+}
