@@ -56,6 +56,8 @@ describe("DispatchModal prompt", () => {
     expect(html).toContain("overflow-y-auto");
     expect(html).toContain("max-h-[min(12rem,40vh)]");
     expect(html).toContain("field-sizing-fixed");
+    expect(html).toContain("items-center");
+    expect(html).not.toContain("-translate-");
   });
 
   test("hides the native file control so a long filename cannot open a horizontal scrollbar", () => {

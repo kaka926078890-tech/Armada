@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { mergeAttachmentFiles, isConsoleAttachment } from "../attachments";
 import { ConsoleFilePicker } from "./ConsoleFilePicker";
-import { focusParkedOnDialogShell } from "../composerFocus";
+import { shouldRestoreComposerFocus } from "../composerFocus";
 import { endFollowupSend, isFollowupSendEnter, tryBeginFollowupSend } from "../followupSend";
 import { CDP_NOT_READY_COPY } from "../boardState";
 import { appendSnippetBody } from "../promptSnippets";
@@ -57,6 +57,7 @@ export function DispatchModal({
   const [machineId, setMachineId] = useState(preset?.machineId ?? online[0]?.id ?? "");
   const [workspace, setWorkspace] = useState(preset?.workspaceRoot ?? "");
   const [prompt, setPrompt] = useState("");
+  const promptRef = useRef<HTMLTextAreaElement>(null);
   const [files, setFiles] = useState<File[]>([]);
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
@@ -72,7 +73,8 @@ export function DispatchModal({
   const canDispatch = !!machineId && !!workspace && (!!prompt.trim() || files.length > 0) && !sending && injectReady && (!chatgpt || files.length === 0);
 
   const submitDispatch = () => {
-    if (!machineId || !workspace || (!prompt.trim() && files.length === 0)) return;
+    const text = promptRef.current?.value ?? prompt;
+    if (!machineId || !workspace || (!text.trim() && files.length === 0)) return;
     if (!injectReady) return;
     if (!tryBeginFollowupSend(sendingLock)) return;
     setSending(true);
@@ -85,7 +87,7 @@ export function DispatchModal({
           if (r.error || !r.blob) { setError(r.error ?? "上传失败"); return; }
           ids.push(r.blob.id);
         }
-        const r = await api.dispatch(machineId, workspace, prompt.trim(), ids);
+        const r = await api.dispatch(machineId, workspace, text.trim(), ids);
         if (r.error) setError(ERR[r.error] ?? r.error); else onDone();
       } catch (err) { setError(String(err)); }
       finally {
@@ -138,13 +140,18 @@ export function DispatchModal({
         )}
         <PromptSnippetBar
           snippets={snippets}
-          onAppend={(body) => setPrompt(appendSnippetBody(prompt, body))}
+          onAppend={(body) => {
+            const el = promptRef.current;
+            const next = appendSnippetBody(el?.value ?? prompt, body);
+            if (el) el.value = next;
+            setPrompt(next);
+          }}
           onAdd={async (title, body) => {
             if (!saveSnippets) return;
             await saveSnippets([...snippets, { id: crypto.randomUUID(), title, body }]);
           }}
         />
-        <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={8}
+        <Textarea ref={promptRef} defaultValue="" onChange={(e) => setPrompt(e.target.value)} rows={8}
           placeholder="写下要做的事。Enter 发送，Shift+Enter 换行"
           className="w-full min-h-[8rem] max-h-[min(12rem,40vh)] overflow-y-auto resize-y field-sizing-fixed"
           style={{ fieldSizing: "fixed" }}
@@ -152,7 +159,9 @@ export function DispatchModal({
             const el = e.currentTarget;
             requestAnimationFrame(() => {
               if (!el.isConnected) return;
-              if (focusParkedOnDialogShell(el.ownerDocument.activeElement)) el.focus();
+              const active = el.ownerDocument.activeElement;
+              if (active === el) return;
+              if (shouldRestoreComposerFocus(active instanceof Element ? active : null)) el.focus();
             });
           }}
           onKeyDown={(e) => {

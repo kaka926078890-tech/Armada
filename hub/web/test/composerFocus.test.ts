@@ -1,14 +1,16 @@
 import { describe, expect, test } from "bun:test";
-import { focusParkedOnDialogShell } from "../src/composerFocus";
+import { shouldRestoreComposerFocus } from "../src/composerFocus";
 
-describe("focusParkedOnDialogShell", () => {
-  test("dialog shell is the WKWebView IME parking spot", () => {
-    expect(focusParkedOnDialogShell({ getAttribute: (name) => name === "data-slot" ? "dialog-content" : null })).toBe(true);
+const shell = { closest: () => null };
+const button = { closest: (sel: string) => sel.includes("button") ? {} : null };
+
+describe("shouldRestoreComposerFocus", () => {
+  test("body and the dialog shell get the caret back", () => {
+    expect(shouldRestoreComposerFocus(null)).toBe(true);
+    expect(shouldRestoreComposerFocus(shell)).toBe(true);
   });
 
-  test("a button or an empty blur is not pulled back", () => {
-    expect(focusParkedOnDialogShell(null)).toBe(false);
-    expect(focusParkedOnDialogShell({ getAttribute: () => null })).toBe(false);
-    expect(focusParkedOnDialogShell({ getAttribute: () => "button" })).toBe(false);
+  test("a button or field is left alone", () => {
+    expect(shouldRestoreComposerFocus(button)).toBe(false);
   });
 });

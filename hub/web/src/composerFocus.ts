@@ -1,6 +1,9 @@
-/** Radix Dialog parks a WKWebView IME blur on the dialog shell, not on a control. */
-export function focusParkedOnDialogShell(
-  active: { getAttribute(name: string): string | null } | null,
+const CONTROL = "button, a, input, textarea, select, [contenteditable='true']";
+
+/** WKWebView drops the caret onto body or the dialog shell. A real control is a deliberate move. */
+export function shouldRestoreComposerFocus(
+  active: { closest(selector: string): unknown } | null,
 ): boolean {
-  return active?.getAttribute("data-slot") === "dialog-content";
+  if (!active) return true;
+  return active.closest(CONTROL) == null;
 }
