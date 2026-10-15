@@ -301,10 +301,11 @@ fun FleetNav(vm: SessionVm, state: UiState) {
 @Composable
 fun FleetScreen(vm: SessionVm, state: UiState, onOpen: (WorkspaceDto) -> Unit, onRefresh: () -> Unit, onSettings: () -> Unit) {
     val groups = state.workspaces.groupBy { it.machineId }
+    val canvas = if (LocalAppTheme.current == "dark") MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.surfaceVariant
     Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
+        containerColor = canvas,
         topBar = {
-            Column(Modifier.statusBarsPadding()) {
+            Column(Modifier.statusBarsPadding().background(MaterialTheme.colorScheme.background)) {
                 IosNavBar(
                     title = "舰队",
                     leading = NavAction("解绑") { vm.unbind() },
@@ -455,19 +456,14 @@ fun FleetClusterBlock(
 ) {
     val dark = LocalAppTheme.current == "dark"
     val shape = RoundedCornerShape(14.dp)
-    val bodyColor = if (dark) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surfaceVariant
     val cursorHeader = if (dark) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.outline
     Column(
         Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 6.dp)
-            .then(
-                if (cluster.boxed) {
-                    Modifier.clip(shape).background(bodyColor)
-                } else {
-                    Modifier
-                },
-            ),
+            .clip(shape)
+            .background(MaterialTheme.colorScheme.surface)
+            .border(1.dp, MaterialTheme.colorScheme.outline, shape),
     ) {
         if (cluster.boxed) {
             val inverted = cluster.tone == FleetTone.ChatGpt
@@ -479,14 +475,14 @@ fun FleetClusterBlock(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(if (inverted) MaterialTheme.colorScheme.onSurface else cursorHeader)
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
             )
         }
         cluster.slots.forEachIndexed { index, w ->
             val unread = vm.unreadCount(MarkReadScope.Workspace(w.machineId, w.workspaceRoot))
             val live = state.board.runs.any { it.machineId == w.machineId && it.workspaceRoot == w.workspaceRoot && it.isLive }
-            if (index > 0 && cluster.boxed) {
-                HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+            if (index > 0 || cluster.boxed) {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(start = if (cluster.boxed && index == 0) 0.dp else 16.dp))
             }
             if (w.workspaceRoot == "chatgpt:monitor") {
                 Box(
@@ -529,6 +525,8 @@ fun FleetClusterBlock(
                         Spacer(Modifier.width(12.dp))
                         Box(Modifier.size(8.dp).clip(CircleShape).background(StatusRed))
                     }
+                    Spacer(Modifier.width(10.dp))
+                    Text("›", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 20.sp)
                 }
             }
         }
