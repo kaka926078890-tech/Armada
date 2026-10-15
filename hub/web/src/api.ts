@@ -71,6 +71,15 @@ export const api = {
       if (!r.ok) throw new Error(`ui-prefs put ${r.status}`);
       return r.json();
     }),
+  getReadRuns: () => req("/api/read-runs").then(async (r) => {
+    if (!r.ok) throw new Error(`read-runs ${r.status}`);
+    return r.json() as Promise<{ seq: number; readRuns: Record<string, number> }>;
+  }),
+  postReadRuns: (body: { baseSeq: number; ops: { op: "stamp" | "clear"; runId: string; at?: number }[] }) =>
+    req("/api/read-runs", { method: "POST", body: JSON.stringify(body) }).then(async (r) => {
+      if (!r.ok) throw new Error(`read-runs post ${r.status}`);
+      return r.json() as Promise<{ seq: number; readRuns: Record<string, number> }>;
+    }),
   getPromptSnippets: () => req("/api/prompt-snippets").then(async (r) => {
     if (r.status === 503) throw new Error("READ_FAIL");
     if (!r.ok) throw new Error(`prompt-snippets ${r.status}`);

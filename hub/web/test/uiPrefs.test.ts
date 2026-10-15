@@ -65,9 +65,10 @@ describe("quiet unread stays on this board", () => {
 
 describe("shouldSeedReadRuns", () => {
   test("seed only when prefsReady and not seeded and runs>0", () => {
-    expect(shouldSeedReadRuns({ prefsReady: false, readRunsSeeded: false, runsLength: 3 })).toBe(false);
-    expect(shouldSeedReadRuns({ prefsReady: true, readRunsSeeded: false, runsLength: 3 })).toBe(true);
-    expect(shouldSeedReadRuns({ prefsReady: true, readRunsSeeded: true, runsLength: 3 })).toBe(false);
-    expect(shouldSeedReadRuns({ prefsReady: true, readRunsSeeded: false, runsLength: 0 })).toBe(false);
+    expect(shouldSeedReadRuns({ prefsReady: false, readRunsSeeded: false, runsLength: 3, readSeq: 0 })).toBe(false);
+    expect(shouldSeedReadRuns({ prefsReady: true, readRunsSeeded: false, runsLength: 3, readSeq: 0 })).toBe(true);
+    expect(shouldSeedReadRuns({ prefsReady: true, readRunsSeeded: true, runsLength: 3, readSeq: 0 })).toBe(false);
+    expect(shouldSeedReadRuns({ prefsReady: true, readRunsSeeded: false, runsLength: 0, readSeq: 0 })).toBe(false);
+    expect(shouldSeedReadRuns({ prefsReady: true, readRunsSeeded: false, runsLength: 3, readSeq: 2 })).toBe(false);
   });
 });

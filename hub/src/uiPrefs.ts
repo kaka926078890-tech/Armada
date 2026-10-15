@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
+import { normalizeReadState, readViewOf, type ReadMark } from "./readSync";
 import { writeFileAtomic } from "./writeFileAtomic";
 
 export type ThemeName = "dark" | "light";
@@ -18,6 +19,8 @@ export type UiPrefs = {
   selectedWorkspace: string | null;
   readRuns: Record<string, number>;
   readRunsSeeded: boolean;
+  readSeq: number;
+  readMarks: Record<string, ReadMark>;
   detailWidth: number;
   promptSnippets: PromptSnippet[];
 };
@@ -31,6 +34,8 @@ export const UI_PREFS_DEFAULTS: UiPrefs = {
   selectedWorkspace: null,
   readRuns: {},
   readRunsSeeded: false,
+  readSeq: 0,
+  readMarks: {},
   detailWidth: 0.4,
   promptSnippets: [],
 };
@@ -130,13 +135,17 @@ export function normalizeUiPrefs(raw: unknown): UiPrefs {
     : "normal";
   const selectedWorkspace = isWorkspaceKey(o.selectedWorkspace) ? o.selectedWorkspace : null;
   const detailWidth = normalizeDetailWidth(o.detailWidth);
+  const read = normalizeReadState(o, clampReadRuns(o.readRuns));
+  const view = readViewOf(read);
   return {
     version: 1,
     theme,
     fontScale,
     selectedWorkspace,
-    readRuns: clampReadRuns(o.readRuns),
+    readRuns: view.readRuns,
     readRunsSeeded: o.readRunsSeeded === true,
+    readSeq: view.seq,
+    readMarks: read.marks,
     detailWidth,
     promptSnippets: normalizePromptSnippets(o.promptSnippets),
   };
@@ -167,7 +176,7 @@ export function writeUiPrefs(home: string, prefs: UiPrefs): void {
 }
 
 export function mergeUiPrefs(base: UiPrefs, patch: Record<string, unknown>): UiPrefs {
-  const known = ["theme", "fontScale", "selectedWorkspace", "readRuns", "readRunsSeeded", "detailWidth", "promptSnippets"] as const;
+  const known = ["theme", "fontScale", "selectedWorkspace", "readRunsSeeded", "detailWidth", "promptSnippets"] as const;
   const next: Record<string, unknown> = { ...base };
   for (const k of known) {
     if (Object.prototype.hasOwnProperty.call(patch, k)) next[k] = patch[k];

@@ -58,6 +58,23 @@ export function createRelayCommandHandler(deps: RelayCommandDeps): (msg: any) =>
         deps.send({ type: "cmd.result", requestId, ok: true, cursorReload: body });
         return;
       }
+      if (msg.type === "cmd.readRunsGet") {
+        const r = await deps.hubFetch("/api/read-runs");
+        const body = await r.json().catch(() => ({})) as any;
+        if (!r.ok) return fail(body.error ?? "HUB_ERROR");
+        deps.send({ type: "cmd.result", requestId, ok: true, read: body });
+        return;
+      }
+      if (msg.type === "cmd.readRunsPost") {
+        const r = await deps.hubFetch("/api/read-runs", {
+          method: "POST",
+          body: JSON.stringify({ baseSeq: msg.baseSeq, ops: msg.ops }),
+        });
+        const body = await r.json().catch(() => ({})) as any;
+        if (!r.ok) return fail(body.error ?? "HUB_ERROR");
+        deps.send({ type: "cmd.result", requestId, ok: true, read: body });
+        return;
+      }
       if (msg.type === "cmd.promptSnippetsGet") {
         const r = await deps.hubFetch("/api/prompt-snippets");
         const body = await r.json().catch(() => ({})) as any;

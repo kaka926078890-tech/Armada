@@ -47,6 +47,41 @@ describe("GET/PUT /api/ui-prefs", () => {
     expect(await get.json()).toMatchObject({ theme: "light", source: "file", readRuns: { r1: 42 } });
   });
 
+  test("POST read ops sync both ways and a stale stamp does not revive a clear", async () => {
+    const { base, tok } = start();
+    const headers = { Authorization: `Bearer ${tok}`, "content-type": "application/json" };
+    const stamp = await fetch(`${base}/api/read-runs`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ baseSeq: 0, ops: [{ op: "stamp", runId: "a", at: 10 }] }),
+    });
+    expect(stamp.status).toBe(200);
+    const stamped = await stamp.json() as { seq: number; readRuns: Record<string, number> };
+    expect(stamped.readRuns).toEqual({ a: 10 });
+    const cleared = await fetch(`${base}/api/read-runs`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ baseSeq: stamped.seq, ops: [{ op: "clear", runId: "a" }] }),
+    });
+    const afterClear = await cleared.json() as { seq: number; readRuns: Record<string, number> };
+    expect(afterClear.readRuns).toEqual({});
+    const stale = await fetch(`${base}/api/read-runs`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ baseSeq: 0, ops: [{ op: "stamp", runId: "a", at: 99 }] }),
+    });
+    expect(await stale.json()).toMatchObject({ seq: afterClear.seq, readRuns: {} });
+    const put = await fetch(`${base}/api/ui-prefs`, {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ readRuns: { a: 99 }, theme: "light" }),
+    });
+    expect(put.status).toBe(200);
+    expect(await put.json()).toMatchObject({ theme: "light", readRuns: {}, readSeq: afterClear.seq });
+    const got = await fetch(`${base}/api/read-runs`, { headers: { Authorization: `Bearer ${tok}` } });
+    expect(await got.json()).toEqual({ seq: afterClear.seq, readRuns: {} });
+  });
+
   test("PUT non-object → 400", async () => {
     const { base, tok } = start();
     const r = await fetch(`${base}/api/ui-prefs`, {

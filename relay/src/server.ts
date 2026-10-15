@@ -94,6 +94,7 @@ export type RunSnap = {
   attachments?: { id: string; mime: string; name: string; size: number }[];
   chatgptThreadId?: string | null;
   updatedAt?: number;
+  readBasis?: number;
 };
 
 type PromptSnippet = { id: string; title: string; body: string };
@@ -102,7 +103,7 @@ type BlobSnap = { id: string; sha256: string; mime: string; name: string; size: 
 type ChatTurnSnap = { role: "user" | "assistant"; text: string };
 
 type Pending = {
-  resolve: (v: { ok: boolean; error?: string; run?: RunSnap; snippets?: PromptSnippet[]; cursorReload?: unknown; blob?: BlobSnap; file?: { path: string; name: string; mime: string; text: string }; turns?: ChatTurnSnap[] }) => void;
+  resolve: (v: { ok: boolean; error?: string; run?: RunSnap; snippets?: PromptSnippet[]; cursorReload?: unknown; blob?: BlobSnap; file?: { path: string; name: string; mime: string; text: string }; turns?: ChatTurnSnap[]; read?: { seq: number; readRuns: Record<string, number> } }) => void;
 };
 
 export function chatTurnsOf(raw: unknown): ChatTurnSnap[] {
@@ -356,6 +357,7 @@ export function createRelayServer(opts: {
     conversationId: string;
     chatgptThreadId: string;
     attachments: unknown;
+    readBasis: number | null;
   }): string {
     return JSON.stringify({
       status: input.status,
@@ -370,6 +372,7 @@ export function createRelayServer(opts: {
       conversationId: input.conversationId,
       chatgptThreadId: input.chatgptThreadId,
       attachments: input.attachments ?? [],
+      readBasis: input.readBasis,
     });
   }
 
@@ -422,6 +425,7 @@ export function createRelayServer(opts: {
       ? JSON.stringify(snap.attachments)
       : (existing?.attachments ?? null);
     const attachmentsFp = attachmentsJson ? JSON.parse(attachmentsJson) : [];
+    const readBasis = typeof snap.readBasis === "number" && Number.isFinite(snap.readBasis) ? snap.readBasis : null;
     const nextFp = runContentFp({
       status,
       prompt: snap.prompt,
@@ -435,6 +439,7 @@ export function createRelayServer(opts: {
       conversationId: conversationId ?? "",
       chatgptThreadId: chatgptThreadId ?? "",
       attachments: attachmentsFp,
+      readBasis,
     });
     if (existing) {
       const prevFp = runContentFp({
@@ -450,6 +455,7 @@ export function createRelayServer(opts: {
         conversationId: existing.conversation_id ?? "",
         chatgptThreadId: existing.chatgpt_thread_id ?? "",
         attachments: existing.attachments ? JSON.parse(existing.attachments) : [],
+        readBasis: (existing as { read_basis?: number | null }).read_basis ?? null,
       });
       if (prevFp === nextFp) return existing;
     }
@@ -459,12 +465,12 @@ export function createRelayServer(opts: {
     };
     if (existing) {
       db.query(`UPDATE runs SET machine_id=?3, workspace_root=?4, prompt=?5, status=?6,
-        final_text=?7, error=?8, pending_ask=?9, outbound=?11, queue_message_default_behavior=?12, archived_at=?13, updated_at=?10, title=?14, conversation_id=?15, chatgpt_thread_id=?16, attachments=?17 WHERE id=?1 AND fleet_id=?2`)
-        .run(snap.runId, fleetId, snap.machineId, snap.workspaceRoot, snap.prompt, status, finalText, error, pendingAsk, now, outbound, queueMode, archivedAt, title, conversationId, chatgptThreadId, attachmentsJson);
+        final_text=?7, error=?8, pending_ask=?9, outbound=?11, queue_message_default_behavior=?12, archived_at=?13, updated_at=?10, title=?14, conversation_id=?15, chatgpt_thread_id=?16, attachments=?17, read_basis=?18 WHERE id=?1 AND fleet_id=?2`)
+        .run(snap.runId, fleetId, snap.machineId, snap.workspaceRoot, snap.prompt, status, finalText, error, pendingAsk, now, outbound, queueMode, archivedAt, title, conversationId, chatgptThreadId, attachmentsJson, readBasis);
     } else {
-      db.query(`INSERT INTO runs (id, fleet_id, machine_id, workspace_root, prompt, status, final_text, error, pending_ask, outbound, queue_message_default_behavior, archived_at, updated_at, created_at, title, conversation_id, chatgpt_thread_id, attachments)
-        VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?11,?12,?13,?10,?10,?14,?15,?16,?17)`)
-        .run(snap.runId, fleetId, snap.machineId, snap.workspaceRoot, snap.prompt, status, finalText, error, pendingAsk, now, outbound, queueMode, archivedAt, title, conversationId, chatgptThreadId, attachmentsJson);
+      db.query(`INSERT INTO runs (id, fleet_id, machine_id, workspace_root, prompt, status, final_text, error, pending_ask, outbound, queue_message_default_behavior, archived_at, updated_at, created_at, title, conversation_id, chatgpt_thread_id, attachments, read_basis)
+        VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?11,?12,?13,?10,?10,?14,?15,?16,?17,?18)`)
+        .run(snap.runId, fleetId, snap.machineId, snap.workspaceRoot, snap.prompt, status, finalText, error, pendingAsk, now, outbound, queueMode, archivedAt, title, conversationId, chatgptThreadId, attachmentsJson, readBasis);
     }
     const decided = notifyEdges(prev, {
       prompt: snap.prompt,
@@ -499,6 +505,7 @@ export function createRelayServer(opts: {
       archived: Number(row.archived_at) > 0,
       attachments: row.attachments ? JSON.parse(row.attachments) : [],
       updatedAt: row.updated_at,
+      ...(typeof row.read_basis === "number" ? { readBasis: row.read_basis } : {}),
     };
   }
 
@@ -554,7 +561,7 @@ export function createRelayServer(opts: {
     return true;
   }
 
-  function waitHub(requestId: string): Promise<{ ok: boolean; error?: string; run?: RunSnap; snippets?: PromptSnippet[]; cursorReload?: unknown; blob?: BlobSnap; file?: { path: string; name: string; mime: string; text: string }; turns?: ChatTurnSnap[] }> {
+  function waitHub(requestId: string): Promise<{ ok: boolean; error?: string; run?: RunSnap; snippets?: PromptSnippet[]; cursorReload?: unknown; blob?: BlobSnap; file?: { path: string; name: string; mime: string; text: string }; turns?: ChatTurnSnap[]; read?: { seq: number; readRuns: Record<string, number> } }> {
     return new Promise((resolve) => {
       const t = setTimeout(() => {
         pending.delete(requestId);
@@ -711,6 +718,41 @@ export function createRelayServer(opts: {
       return c.json({ error: err }, hubCmdStatus(err) as 400);
     }
     return c.json({ snippets: result.snippets ?? [] });
+  });
+
+  app.get("/mobile/read-runs", async (c) => {
+    const fleet = (c as any).get("fleet") as { id: string; hub_online: number };
+    if (fleet.hub_online !== 1) return c.json({ error: "HUB_OFFLINE" }, 503);
+    const requestId = `r${++reqSeq}`;
+    if (!sendHub(fleet.id, { type: "cmd.readRunsGet", requestId })) {
+      return c.json({ error: "HUB_OFFLINE" }, 503);
+    }
+    const result = await waitHub(requestId);
+    if (!result.ok) {
+      const err = result.error ?? "HUB_TIMEOUT";
+      return c.json({ error: err }, hubCmdStatus(err) as 400);
+    }
+    return c.json(result.read ?? { seq: 0, readRuns: {} });
+  });
+
+  app.post("/mobile/read-runs", async (c) => {
+    const blocked = rejectPayload(c);
+    if (blocked) return blocked;
+    const tok = (c as any).get("opToken") as string;
+    const fleet = (c as any).get("fleet") as { id: string; hub_online: number };
+    if (!checkRate(tok)) return c.json({ error: "RATE_LIMIT" }, 429);
+    if (fleet.hub_online !== 1) return c.json({ error: "HUB_OFFLINE" }, 503);
+    const body = await c.req.json().catch(() => ({})) as { baseSeq?: unknown; ops?: unknown };
+    const requestId = `r${++reqSeq}`;
+    if (!sendHub(fleet.id, { type: "cmd.readRunsPost", requestId, baseSeq: body.baseSeq, ops: body.ops })) {
+      return c.json({ error: "HUB_OFFLINE" }, 503);
+    }
+    const result = await waitHub(requestId);
+    if (!result.ok) {
+      const err = result.error ?? "HUB_TIMEOUT";
+      return c.json({ error: err }, hubCmdStatus(err) as 400);
+    }
+    return c.json(result.read ?? { seq: 0, readRuns: {} });
   });
 
   app.get("/mobile/cursor-reload", async (c) => {
@@ -1211,11 +1253,13 @@ export function createRelayServer(opts: {
           emitWorkspaces(fleetId);
         } else if (msg.type === "snap.run" && msg.run) {
           applyRunSnap(fleetId, msg.run);
+        } else if (msg.type === "read.updated" && typeof msg.seq === "number") {
+          sseBroadcast(fleetId, sseEvent({ type: "read", seq: msg.seq }));
         } else if (msg.type === "cmd.result" && msg.requestId) {
           const p = pending.get(msg.requestId);
           if (p) {
             pending.delete(msg.requestId);
-            p.resolve({ ok: !!msg.ok, error: msg.error, run: msg.run, snippets: msg.snippets, cursorReload: msg.cursorReload, blob: msg.blob, file: msg.file, turns: chatTurnsOf(msg.turns) });
+            p.resolve({ ok: !!msg.ok, error: msg.error, run: msg.run, snippets: msg.snippets, cursorReload: msg.cursorReload, blob: msg.blob, file: msg.file, turns: chatTurnsOf(msg.turns), read: msg.read });
           }
         }
       },

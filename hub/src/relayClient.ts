@@ -56,6 +56,8 @@ export type RunSnap = {
   /** Codex 桌面线程。有值时手机可以续聊；不写入 conversationId。 */
   chatgptThreadId?: string | null;
   updatedAt: number;
+  /** Hub activity time both clients compare against the read watermark. */
+  readBasis?: number;
 };
 
 export function snapAttachmentsOf(run: any): SnapAttachment[] {
@@ -167,6 +169,16 @@ export function runIdsForRelayDump(rows: RelayDumpRow[], limit = RELAY_DUMP_LIMI
   return ids;
 }
 
+export function snapReadBasis(run: any): number {
+  const activity = Number(run.ended_at ?? run.started_at ?? run.created_at ?? 0) || 0;
+  const ask = run.pending_ask ?? null;
+  const askAt = ask && typeof ask === "object" ? Number(ask.detected_at ?? 0) || 0 : 0;
+  const terminal = ["completed", "error", "unknown", "aborted"].includes(String(run.status ?? ""));
+  if (ask && !terminal) return askAt || activity;
+  if (ask && terminal) return Math.max(activity, askAt);
+  return activity;
+}
+
 export function runToSnap(run: any, events: RunEvent[]): RunSnap {
   const body = lastTurnAssistantBody(eventsToChat(events));
   const status = String(run.status ?? "unknown");
@@ -201,6 +213,7 @@ export function runToSnap(run: any, events: RunEvent[]): RunSnap {
     ...(attachments.length ? { attachments } : {}),
     ...(chatgptThreadId ? { chatgptThreadId } : {}),
     updatedAt: Number(run.ended_at ?? run.started_at ?? run.created_at ?? Date.now()),
+    readBasis: snapReadBasis(run),
   };
 }
 
@@ -279,6 +292,10 @@ export function startRelayClient(opts: {
     prevEvent?.(runId, event);
     const t = (event as { type?: string }).type;
     if (t === "machine.updated") pushWorkspaces();
+    if (t === "read.updated") {
+      const seq = (event as { seq?: unknown }).seq;
+      if (typeof seq === "number") send({ type: "read.updated", seq });
+    }
     if (t === "run.status" || t === "run.ask" || t === "run.outbound" || t === "run.archived") pushRun(runId);
     if (t === "run.event") {
       const run = opts.runs.get(runId);

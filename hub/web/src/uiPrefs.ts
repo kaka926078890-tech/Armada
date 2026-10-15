@@ -10,6 +10,7 @@ export type UiPrefs = {
   selectedWorkspace: string | null;
   readRuns: Record<string, number>;
   readRunsSeeded: boolean;
+  readSeq: number;
   detailWidth: number;
   promptSnippets: PromptSnippet[];
 };
@@ -23,6 +24,7 @@ export const UI_PREFS_DEFAULTS: UiPrefs = {
   selectedWorkspace: null,
   readRuns: {},
   readRunsSeeded: false,
+  readSeq: 0,
   detailWidth: 0.4,
   promptSnippets: [],
 };
@@ -64,6 +66,7 @@ export function loadLocalUiPrefsMirror(): UiPrefs {
     selectedWorkspace,
     readRuns,
     readRunsSeeded,
+    readSeq: 0,
     detailWidth,
     promptSnippets: [],
   };
@@ -106,6 +109,7 @@ export function shouldSeedReadRuns(opts: {
   prefsReady: boolean;
   readRunsSeeded: boolean;
   runsLength: number;
+  readSeq: number;
 }): boolean {
-  return opts.prefsReady && !opts.readRunsSeeded && opts.runsLength > 0;
+  return opts.prefsReady && !opts.readRunsSeeded && opts.runsLength > 0 && opts.readSeq === 0;
 }

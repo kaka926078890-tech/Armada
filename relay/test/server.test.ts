@@ -246,6 +246,54 @@ describe("relay serve", () => {
     expect(await put.json()).toEqual({ error: "HUB_OFFLINE" });
   });
 
+  test("read-runs hub offline → 503", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const headers = { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" };
+    expect((await fetch(url(s, "/mobile/read-runs"), { headers })).status).toBe(503);
+    const post = await fetch(url(s, "/mobile/read-runs"), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ baseSeq: 0, ops: [] }),
+    });
+    expect(post.status).toBe(503);
+    expect(await post.json()).toEqual({ error: "HUB_OFFLINE" });
+  });
+
+  test("read-runs get/post round-trip and read.updated reaches the phone stream", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    ws.addEventListener("message", (e) => {
+      const msg = JSON.parse(String(e.data));
+      if (msg.type === "cmd.readRunsGet") {
+        ws.send(JSON.stringify({ type: "cmd.result", requestId: msg.requestId, ok: true, read: { seq: 1, readRuns: { a: 5 } } }));
+      }
+      if (msg.type === "cmd.readRunsPost") {
+        ws.send(JSON.stringify({ type: "cmd.result", requestId: msg.requestId, ok: true, read: { seq: 2, readRuns: msg.ops?.[0]?.runId ? { [msg.ops[0].runId]: msg.ops[0].at } : {} } }));
+      }
+    });
+    await Bun.sleep(50);
+    const headers = { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" };
+    const get = await fetch(url(s, "/mobile/read-runs"), { headers });
+    expect(await get.json()).toEqual({ seq: 1, readRuns: { a: 5 } });
+    const post = await fetch(url(s, "/mobile/read-runs"), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ baseSeq: 1, ops: [{ op: "stamp", runId: "b", at: 9 }] }),
+    });
+    expect(await post.json()).toEqual({ seq: 2, readRuns: { b: 9 } });
+    const ac = new AbortController();
+    const res = await fetch(url(s, "/mobile/stream"), { headers, signal: ac.signal });
+    const sse = openSse(res);
+    ws.send(JSON.stringify({ type: "read.updated", seq: 3 }));
+    await sse.waitUntil((ev) => ev.some((e) => (e as { type?: string }).type === "read"));
+    expect(sse.events.find((e) => (e as { type?: string }).type === "read")).toMatchObject({ type: "read", seq: 3 });
+    ac.abort();
+    await sse.cancel();
+    ws.close();
+  });
+
   test("prompt-snippets get/put round-trip via fake hub", async () => {
     const s = start();
     const fleet = s.createFleet();

@@ -10,6 +10,7 @@ import {
   workspaceFolderName, resolveSelectedWorkspace, applyMarkAllRead, isBoardUnread,
   BOARD_SSE_DEBOUNCE_MS, boardSseShouldRefresh,
 } from "./boardState";
+import { applyPendingReads, localStampsToUpload, readSseShouldPull, takeReadBatches, type PendingRead } from "./readSync";
 import { applyAlertOpen } from "./alertOpen";
 import Sidebar from "./components/Sidebar";
 import Board from "./components/Board";
@@ -83,6 +84,7 @@ export default function App() {
     try { return localStorage.getItem(WS_KEY); } catch { return null; }
   });
   const [readMap, setReadMap] = useState<Record<string, number>>(loadReadMap);
+  const [readSeq, setReadSeq] = useState(0);
   const [readRunsSeeded, setReadRunsSeeded] = useState(() => {
     try { return localStorage.getItem(READ_SEEDED) === "1"; } catch { return false; }
   });
@@ -108,6 +110,9 @@ export default function App() {
   const askedHost = useRef(false);
   const readMapRef = useRef(readMap);
   readMapRef.current = readMap;
+  const readSeqRef = useRef(0);
+  const readQueue = useRef<PendingRead[]>([]);
+  const readSending = useRef(false);
   const readPatchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const slots = useMemo(() => listWorkspaceSlots(machines), [machines]);
@@ -132,30 +137,73 @@ export default function App() {
     [runs, hiddenRuns, readMap],
   );
 
+  const showRead = useCallback((server: Record<string, number>, seq: number) => {
+    readSeqRef.current = seq;
+    setReadSeq(seq);
+    const next = applyPendingReads(server, readQueue.current);
+    try { localStorage.setItem(READ_KEY, JSON.stringify(next)); } catch { /* quota / private */ }
+    readMapRef.current = next;
+    setReadMap(next);
+  }, []);
+
+  const flushReads = useCallback(async () => {
+    if (readSending.current) return;
+    readSending.current = true;
+    let failed = false;
+    try {
+      while (readQueue.current.length && !failed) {
+        const before = readQueue.current.slice();
+        const batch = takeReadBatches(before)[0];
+        if (!batch || batch.ops.length === 0) {
+          readQueue.current = [];
+          break;
+        }
+        try {
+          const view = await api.postReadRuns(batch);
+          const sentIds = new Set(batch.ops.map((op) => op.runId));
+          const sent = new Set(before.filter((op) => sentIds.has(op.runId)));
+          readQueue.current = readQueue.current.filter((op) => !sent.has(op));
+          showRead(view.readRuns, view.seq);
+        } catch {
+          failed = true;
+        }
+      }
+    } finally {
+      readSending.current = false;
+    }
+  }, [showRead]);
+
+  const enqueueReads = useCallback((ops: PendingRead[]) => {
+    if (ops.length === 0) return;
+    readQueue.current = [...readQueue.current, ...ops];
+    if (readPatchTimer.current) clearTimeout(readPatchTimer.current);
+    readPatchTimer.current = setTimeout(() => {
+      readPatchTimer.current = null;
+      void flushReads();
+    }, 300);
+  }, [flushReads]);
+
   const markAllRead = useCallback(() => {
-    const result = applyMarkAllRead(readMapRef.current, [...runs, ...hiddenRuns], Date.now());
+    const now = Date.now();
+    const result = applyMarkAllRead(readMapRef.current, [...runs, ...hiddenRuns], now);
     if (result.stampedIds.length === 0) return;
     try { localStorage.setItem(READ_KEY, JSON.stringify(result.readAt)); } catch { /* quota / private */ }
     readMapRef.current = result.readAt;
     setReadMap(result.readAt);
-    if (readPatchTimer.current) clearTimeout(readPatchTimer.current);
-    readPatchTimer.current = setTimeout(() => {
-      void api.putUiPrefs({ readRuns: readMapRef.current }).catch(() => {});
-    }, 300);
-  }, [runs, hiddenRuns]);
+    const baseSeq = readSeqRef.current;
+    enqueueReads(result.stampedIds.map((runId) => ({ baseSeq, op: "stamp" as const, runId, at: result.readAt[runId] ?? now })));
+  }, [runs, hiddenRuns, enqueueReads]);
 
   const persistRead = useCallback((runId: string) => {
+    const at = Date.now();
     setReadMap((prev) => {
-      const next = { ...prev, [runId]: Date.now() };
+      const next = { ...prev, [runId]: at };
       try { localStorage.setItem(READ_KEY, JSON.stringify(next)); } catch { /* quota / private */ }
       readMapRef.current = next;
       return next;
     });
-    if (readPatchTimer.current) clearTimeout(readPatchTimer.current);
-    readPatchTimer.current = setTimeout(() => {
-      void api.putUiPrefs({ readRuns: readMapRef.current }).catch(() => {});
-    }, 300);
-  }, []);
+    enqueueReads([{ baseSeq: readSeqRef.current, op: "stamp", runId, at }]);
+  }, [enqueueReads]);
 
   const reloadSnippets = useCallback(() => {
     void api.getPromptSnippets()
@@ -267,15 +315,21 @@ export default function App() {
         setTheme(prefs.theme);
         setFontScale(loadFontScale());
         setSelectedWs(prefs.selectedWorkspace);
+        readSeqRef.current = prefs.readSeq ?? 0;
+        setReadSeq(prefs.readSeq ?? 0);
+        readMapRef.current = prefs.readRuns;
         setReadMap(prefs.readRuns);
         setReadRunsSeeded(prefs.readRunsSeeded);
+        const pending = localStampsToUpload(local.readRuns, prefs.readRuns).map((op) => ({
+          baseSeq: prefs.readSeq ?? 0,
+          ...op,
+        }));
         if (shouldMigrateLocal(source, local)) {
           try {
             const migrated = await api.putUiPrefs({
               theme: local.theme,
               fontScale: local.fontScale,
               selectedWorkspace: local.selectedWorkspace,
-              readRuns: local.readRuns,
               readRunsSeeded: local.readRunsSeeded,
               detailWidth: local.detailWidth,
             }) as UiPrefs;
@@ -284,9 +338,13 @@ export default function App() {
             setTheme(migrated.theme);
             setFontScale(loadFontScale());
             setSelectedWs(migrated.selectedWorkspace);
-            setReadMap(migrated.readRuns);
             setReadRunsSeeded(migrated.readRunsSeeded);
           } catch { /* keep hub defaults already applied */ }
+        }
+        if (pending.length) {
+          readQueue.current.push(...pending);
+          showRead(prefs.readRuns, prefs.readSeq ?? 0);
+          void flushReads();
         }
       } catch {
         // READ_FAIL / network: keep localStorage state; do not invent hub file
@@ -295,13 +353,20 @@ export default function App() {
       }
     })();
     return () => { cancelled = true; };
-  }, [authed]);
+  }, [authed, flushReads, showRead]);
 
   useEffect(() => {
     if (!authed) return;
     const es = new EventSource(`/api/events?token=${encodeURIComponent(getToken())}`);
     let t: ReturnType<typeof setTimeout> | null = null;
     es.onmessage = (e) => {
+      if (readSseShouldPull(e.data)) {
+        void api.getReadRuns().then((view) => {
+          if (view.seq < readSeqRef.current) return;
+          showRead(view.readRuns, view.seq);
+        }).catch(() => {});
+        return;
+      }
       if (!boardSseShouldRefresh(e.data)) return;
       if (t) clearTimeout(t);
       t = setTimeout(() => {
@@ -313,20 +378,24 @@ export default function App() {
       if (t) clearTimeout(t);
       es.close();
     };
-  }, [authed, refresh]);
+  }, [authed, refresh, showRead]);
 
   useEffect(() => {
-    if (!shouldSeedReadRuns({ prefsReady, readRunsSeeded, runsLength: runs.length })) return;
+    if (!shouldSeedReadRuns({ prefsReady, readRunsSeeded, runsLength: runs.length, readSeq })) return;
+    const now = Date.now();
     const seed: Record<string, number> = {};
-    for (const r of runs) seed[r.id] = Date.now();
+    for (const r of runs) seed[r.id] = now;
     try {
       localStorage.setItem(READ_KEY, JSON.stringify(seed));
       localStorage.setItem(READ_SEEDED, "1");
     } catch { /* ignore */ }
+    readMapRef.current = seed;
     setReadMap(seed);
     setReadRunsSeeded(true);
-    void api.putUiPrefs({ readRuns: seed, readRunsSeeded: true }).catch(() => {});
-  }, [runs, prefsReady, readRunsSeeded]);
+    const baseSeq = readSeqRef.current;
+    enqueueReads(runs.map((r) => ({ baseSeq, op: "stamp" as const, runId: r.id, at: now })));
+    void api.putUiPrefs({ readRunsSeeded: true }).catch(() => {});
+  }, [runs, prefsReady, readRunsSeeded, readSeq, enqueueReads]);
 
   useEffect(() => {
     if (!resolvedWs || resolvedWs === selectedWs) return;

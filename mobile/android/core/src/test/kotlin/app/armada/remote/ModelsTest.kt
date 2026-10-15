@@ -191,6 +191,13 @@ class ModelsTest {
         val done = run("completed")
         assertTrue(isUnread(done, emptyMap()))
         assertFalse(isUnread(done, mapOf("r1" to 20.0)))
+        val basis = done.copy(readBasis = 30, updatedAt = 10)
+        assertTrue(isUnread(basis, mapOf("r1" to 20.0)))
+        assertFalse(isUnread(basis, mapOf("r1" to 30.0)))
+        val uploaded = localStampsToUpload(mapOf("a" to 5.0, "b" to 1.0), mapOf("a" to 5.0, "c" to 9.0), 4)
+        assertEquals(listOf(ReadOp("stamp", "b", 1.0, 4)), uploaded)
+        val pending = applyPendingReads(mapOf("a" to 5.0, "c" to 9.0), listOf(ReadOp("clear", "c", null, 4)))
+        assertEquals(mapOf("a" to 5.0), pending)
     }
 
     @Test

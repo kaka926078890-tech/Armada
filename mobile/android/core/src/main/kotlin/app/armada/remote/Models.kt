@@ -133,6 +133,7 @@ data class RunDto(
     val canRetry: Boolean? = null,
     val archived: Boolean? = null,
     val updatedAt: Long? = null,
+    val readBasis: Long? = null,
     val title: String? = null,
     val conversationId: String? = null,
     val chatgptThreadId: String? = null,
@@ -233,6 +234,28 @@ fun detailShouldReload(local: RunDto?, streamed: RunDto): Boolean {
     return local.isLive && !streamed.isLive
 }
 
+fun unreadBasis(run: RunDto): Long = run.readBasis ?: run.activityTs
+
+data class ReadOp(val op: String, val runId: String, val at: Double?, val baseSeq: Long)
+
+fun localStampsToUpload(local: Map<String, Double>, server: Map<String, Double>, baseSeq: Long): List<ReadOp> {
+    return local.mapNotNull { (id, at) ->
+        val seen = server[id]
+        if (seen == null || at > seen) ReadOp("stamp", id, at, baseSeq) else null
+    }
+}
+
+fun applyPendingReads(server: Map<String, Double>, pending: List<ReadOp>): Map<String, Double> {
+    val next = server.toMutableMap()
+    val last = linkedMapOf<String, ReadOp>()
+    for (op in pending) last[op.runId] = op
+    for (op in last.values) {
+        if (op.op == "clear") next.remove(op.runId)
+        else if (op.at != null) next[op.runId] = maxOf(next[op.runId] ?: 0.0, op.at)
+    }
+    return next
+}
+
 fun stampReadAt(nowMs: Double, activityTs: Long?): Double {
     return maxOf(nowMs, (activityTs ?: 0L).toDouble())
 }
@@ -244,12 +267,13 @@ fun shouldStampReadAt(seen: Double?, activityTs: Long?): Boolean {
 
 fun isUnread(run: RunDto, readAt: Map<String, Double>): Boolean {
     val seen = readAt[run.runId]
+    val basis = unreadBasis(run).toDouble()
     if (run.pendingAsk != null) {
         if (seen == null) return true
-        if (run.activityTs.toDouble() > seen) return true
+        if (basis > seen) return true
     }
     if (run.status in setOf("completed", "error", "unknown", "aborted")) {
-        return seen == null || run.activityTs.toDouble() > seen
+        return seen == null || basis > seen
     }
     return false
 }
@@ -302,8 +326,8 @@ fun applyMarkAllRead(
     val stamped = mutableSetOf<String>()
     for (run in runs) {
         if (!runMatchesMarkReadScope(run, scope) || !isUnread(run, readAt)) continue
-        if (!shouldStampReadAt(next[run.runId], run.activityTs)) continue
-        next[run.runId] = stampReadAt(nowMs, run.activityTs)
+        if (!shouldStampReadAt(next[run.runId], unreadBasis(run))) continue
+        next[run.runId] = stampReadAt(nowMs, unreadBasis(run))
         stamped.add(run.runId)
     }
     return MarkAllReadResult(if (stamped.isEmpty()) readAt else next, stamped)

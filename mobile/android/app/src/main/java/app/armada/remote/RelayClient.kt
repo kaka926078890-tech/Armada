@@ -236,6 +236,11 @@ class RelayClient(base: String, private val token: String) {
         send("/mobile/push-token", "DELETE", body.toString(), listOf(204), allowEmpty = true)
     }
 
+    suspend fun readRuns(): JSONObject = JSONObject(get("/mobile/read-runs"))
+
+    suspend fun postReadRuns(baseSeq: Long, ops: org.json.JSONArray): JSONObject =
+        JSONObject(send("/mobile/read-runs", "POST", org.json.JSONObject().put("baseSeq", baseSeq).put("ops", ops).toString(), listOf(200)))
+
     suspend fun promptSnippets(): List<PromptSnippet> =
         parsePromptSnippets(JSONObject(get("/mobile/prompt-snippets")))
 
@@ -347,6 +352,7 @@ fun parseRun(o: JSONObject) = RunDto(
     canRetry = if (o.has("canRetry")) o.optBoolean("canRetry") else null,
     archived = if (o.has("archived")) o.optBoolean("archived") else null,
     updatedAt = if (o.has("updatedAt")) o.optLong("updatedAt") else null,
+    readBasis = if (o.has("readBasis")) o.optLong("readBasis") else null,
     title = o.optNullableString("title"),
     conversationId = o.optNullableString("conversationId"),
     chatgptThreadId = o.optNullableString("chatgptThreadId"),

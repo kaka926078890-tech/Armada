@@ -71,6 +71,11 @@ final class Session: ObservableObject {
     private var unreadHold = Set<String>()
     private var lastBadge = -1
     private let readKey = "armada.readAt"
+    private let readOpsKey = "armada.readOps"
+    private let readBootKey = "armada.readBootstrapped"
+    private var readSeq: Double = 0
+    private var readOps: [ReadOp] = []
+    private var readFlush: Task<Void, Never>?
     private let pushTokenKey = "armada.pushToken"
 
     var bound: Bool { !relay.isEmpty && !token.isEmpty }
@@ -91,6 +96,15 @@ final class Session: ObservableObject {
         if let data = UserDefaults.standard.data(forKey: readKey),
            let map = try? JSONDecoder().decode([String: Double].self, from: data) {
             readAt = map
+        }
+        if let data = UserDefaults.standard.data(forKey: readOpsKey),
+           let rows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+            readOps = rows.compactMap { row in
+                guard let op = row["op"] as? String, let runId = row["runId"] as? String else { return nil }
+                let at = (row["at"] as? NSNumber)?.doubleValue
+                let base = (row["baseSeq"] as? NSNumber)?.doubleValue ?? 0
+                return ReadOp(op: op, runId: runId, at: at, baseSeq: base)
+            }
         }
         if bound { startLive() }
     }
@@ -375,6 +389,8 @@ final class Session: ObservableObject {
 
     private func runLive() async {
         await refresh()
+        await syncReads()
+        if let watchingId { markOpened(watchingId) }
         var backoff: UInt64 = 2_000_000_000
         while !Task.isCancelled && bound && foreground {
             do {
@@ -424,6 +440,10 @@ final class Session: ObservableObject {
             applyBadge()
             return
         }
+        if frame.type == "read", let seq = frame.seq, seq > readSeq {
+            Task { await syncReads() }
+            return
+        }
         if frame.type == "run", let run = frame.run {
             applyStreamRun(run)
             if optionalChanged(lastError, nil) { lastError = nil }
@@ -469,22 +489,21 @@ final class Session: ObservableObject {
             applyBadge()
             return
         }
-        let activity = runs.first { $0.runId == runId }?.activityTs
-            ?? hiddenRuns.first { $0.runId == runId }?.activityTs
-        guard shouldStampReadAt(seen: readAt[runId], activityTs: activity) else {
+        let basis = runs.first { $0.runId == runId }?.unreadBasis
+            ?? hiddenRuns.first { $0.runId == runId }?.unreadBasis
+        guard shouldStampReadAt(seen: readAt[runId], activityTs: basis) else {
             applyBadge()
             return
         }
-        readAt[runId] = stampReadAt(nowMs: Date().timeIntervalSince1970 * 1000, activityTs: activity)
-        persistRead()
-        applyBadge()
+        let at = stampReadAt(nowMs: Date().timeIntervalSince1970 * 1000, activityTs: basis)
+        readAt[runId] = at
+        enqueueReads([ReadOp(op: "stamp", runId: runId, at: at, baseSeq: readSeq)])
     }
 
     func markUnread(_ runId: String, hold: Bool) {
         readAt.removeValue(forKey: runId)
         if hold { unreadHold.insert(runId) } else { unreadHold.remove(runId) }
-        persistRead()
-        applyBadge()
+        enqueueReads([ReadOp(op: "clear", runId: runId, at: nil, baseSeq: readSeq)])
     }
 
     func markAllRead(_ scope: MarkReadScope) {
@@ -497,8 +516,9 @@ final class Session: ObservableObject {
         guard !result.stampedIds.isEmpty else { return }
         readAt = result.readAt
         unreadHold.subtract(result.stampedIds)
-        persistRead()
-        applyBadge()
+        enqueueReads(result.stampedIds.map { id in
+            ReadOp(op: "stamp", runId: id, at: result.readAt[id], baseSeq: readSeq)
+        })
     }
 
     func clearUnreadHold(_ runId: String) {
@@ -578,6 +598,61 @@ final class Session: ObservableObject {
     private func persistRead() {
         if let data = try? JSONEncoder().encode(readAt) {
             UserDefaults.standard.set(data, forKey: readKey)
+        }
+        let rows: [[String: Any]] = readOps.map { op in
+            var row: [String: Any] = ["op": op.op, "runId": op.runId, "baseSeq": op.baseSeq]
+            if let at = op.at { row["at"] = at }
+            return row
+        }
+        if let data = try? JSONSerialization.data(withJSONObject: rows) {
+            UserDefaults.standard.set(data, forKey: readOpsKey)
+        }
+        applyBadge()
+    }
+
+    private func enqueueReads(_ ops: [ReadOp]) {
+        for op in ops {
+            readOps.removeAll { $0.runId == op.runId }
+            var next = op
+            next.baseSeq = readSeq
+            readOps.append(next)
+        }
+        persistRead()
+        readFlush?.cancel()
+        readFlush = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard let self, !Task.isCancelled else { return }
+            await self.flushReads()
+        }
+    }
+
+    private func syncReads() async {
+        guard bound else { return }
+        guard let remote = try? await api().readRuns() else { return }
+        if !UserDefaults.standard.bool(forKey: readBootKey) {
+            for op in localStampsToUpload(local: readAt, server: remote.readRuns, baseSeq: remote.seq) {
+                readOps.removeAll { $0.runId == op.runId }
+                readOps.append(op)
+            }
+            UserDefaults.standard.set(true, forKey: readBootKey)
+        }
+        readSeq = remote.seq
+        readAt = applyPendingReads(server: remote.readRuns, pending: readOps)
+        persistRead()
+        await flushReads()
+    }
+
+    private func flushReads() async {
+        while bound, !readOps.isEmpty {
+            let base = readOps[0].baseSeq
+            let batch = Array(readOps.filter { $0.baseSeq == base }.prefix(200))
+            guard let remote = try? await api().postReadRuns(baseSeq: base, ops: batch) else { return }
+            readOps.removeAll { pending in
+                batch.contains { $0.runId == pending.runId && $0.baseSeq == pending.baseSeq && $0.op == pending.op && $0.at == pending.at }
+            }
+            readSeq = remote.seq
+            readAt = applyPendingReads(server: remote.readRuns, pending: readOps)
+            persistRead()
         }
     }
 }

@@ -59,8 +59,42 @@ class TokenStore(ctx: Context) {
         plain.edit().putString("readAt", o.toString()).apply()
     }
 
+    fun readBootstrapped(): Boolean = plain.getBoolean("readBootstrapped", false)
+
+    fun setReadBootstrapped() {
+        plain.edit().putBoolean("readBootstrapped", true).apply()
+    }
+
+    fun readOps(): List<ReadOp> {
+        val raw = plain.getString("readOps", "") ?: return emptyList()
+        return runCatching {
+            val arr = org.json.JSONArray(raw)
+            buildList {
+                for (i in 0 until arr.length()) {
+                    val o = arr.getJSONObject(i)
+                    add(ReadOp(
+                        o.getString("op"),
+                        o.getString("runId"),
+                        if (o.has("at") && !o.isNull("at")) o.getDouble("at") else null,
+                        o.optLong("baseSeq"),
+                    ))
+                }
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    fun saveReadOps(ops: List<ReadOp>) {
+        val arr = org.json.JSONArray()
+        ops.forEach { op ->
+            val o = org.json.JSONObject().put("op", op.op).put("runId", op.runId).put("baseSeq", op.baseSeq)
+            if (op.at != null) o.put("at", op.at)
+            arr.put(o)
+        }
+        plain.edit().putString("readOps", arr.toString()).apply()
+    }
+
     fun clear() {
         relay = ""; fleet = ""; token = ""; fcmToken = ""
-        plain.edit().remove("readAt").apply()
+        plain.edit().remove("readAt").remove("readOps").remove("readBootstrapped").apply()
     }
 }

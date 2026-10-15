@@ -10,6 +10,7 @@ import { ingestEvent } from "./ingest";
 import { handleWsMessage, type WsData } from "./ws";
 import { limitsFromEnv, httpStatusForRunError, followupOutcome, type ConcurrencyLimits } from "./concurrency";
 import { BlobStore, MAX_BLOB_BYTES, isInlineRenderMime, responseContentType } from "./blobs";
+import { applyReadOps, parseReadOps, readViewOf } from "./readSync";
 import { assertPromptSnippets, fillSnippetIds, readUiPrefs, writeUiPrefs, mergeUiPrefs } from "./uiPrefs";
 import { JoinTickets } from "./joinTickets";
 import { startRelayClient } from "./relayClient";
@@ -296,6 +297,36 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
     } catch {
       db.query("INSERT INTO audit (ts, actor, action, target, payload) VALUES (?1,'hub','UI_PREFS_WRITE_FAIL',?2,?3)")
         .run(Date.now(), home, "{}");
+      return c.json({ error: "WRITE_FAIL" }, 500);
+    }
+  });
+
+  const readView = () => {
+    const cur = readUiPrefs(home);
+    if (!cur.ok) return cur;
+    return { ok: true as const, prefs: cur.prefs, view: readViewOf({ seq: cur.prefs.readSeq, marks: cur.prefs.readMarks }) };
+  };
+  app.get("/api/read-runs", (c) => {
+    const cur = readView();
+    if (!cur.ok) return c.json({ error: "READ_FAIL" }, 503);
+    return c.json(cur.view);
+  });
+  app.post("/api/read-runs", async (c) => {
+    const parsed = parseReadOps(await c.req.json().catch(() => null));
+    if (!parsed.ok) return c.json({ error: "INVALID" }, 400);
+    const cur = readView();
+    if (!cur.ok) return c.json({ error: "READ_FAIL" }, 503);
+    try {
+      const nextState = applyReadOps(
+        { seq: cur.prefs.readSeq, marks: cur.prefs.readMarks },
+        parsed.baseSeq,
+        parsed.ops,
+      );
+      const view = readViewOf(nextState);
+      writeUiPrefs(home, { ...cur.prefs, readSeq: nextState.seq, readMarks: nextState.marks, readRuns: view.readRuns });
+      if (view.seq !== cur.view.seq) sse.broadcast("*", { type: "read.updated", seq: view.seq });
+      return c.json(view);
+    } catch {
       return c.json({ error: "WRITE_FAIL" }, 500);
     }
   });

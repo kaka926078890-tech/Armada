@@ -128,6 +128,7 @@ struct RunDTO: Decodable, Identifiable, Hashable {
     var canRetry: Bool?
     var archived: Bool?
     var updatedAt: Int?
+    var readBasis: Int?
     var title: String?
     var conversationId: String?
     var chatgptThreadId: String?
@@ -170,6 +171,8 @@ struct RunDTO: Decodable, Identifiable, Hashable {
     }
 
     var activityTs: Int { updatedAt ?? 0 }
+
+    var unreadBasis: Int { readBasis ?? activityTs }
 
     var column: BoardColumn {
         BoardColumn.column(for: status)
@@ -257,12 +260,13 @@ func runMatchesMarkReadScope(_ run: RunDTO, _ scope: MarkReadScope) -> Bool {
 
 func runIsUnread(_ run: RunDTO, readAt: [String: Double]) -> Bool {
     let seen = readAt[run.runId]
+    let basis = Double(run.unreadBasis)
     if run.pendingAsk != nil {
         if seen == nil { return true }
-        if Double(run.activityTs) > seen! { return true }
+        if basis > seen! { return true }
     }
     if ["completed", "error", "unknown", "aborted"].contains(run.status) {
-        return seen == nil || Double(run.activityTs) > seen!
+        return seen == nil || basis > seen!
     }
     return false
 }
@@ -276,8 +280,8 @@ func applyMarkAllRead(readAt: [String: Double], runs: [RunDTO], nowMs: Double, s
     var stamped = Set<String>()
     for run in runs {
         guard runMatchesMarkReadScope(run, scope), runIsUnread(run, readAt: readAt) else { continue }
-        guard shouldStampReadAt(seen: next[run.runId], activityTs: run.activityTs) else { continue }
-        next[run.runId] = stampReadAt(nowMs: nowMs, activityTs: run.activityTs)
+        guard shouldStampReadAt(seen: next[run.runId], activityTs: run.unreadBasis) else { continue }
+        next[run.runId] = stampReadAt(nowMs: nowMs, activityTs: run.unreadBasis)
         stamped.insert(run.runId)
     }
     return MarkAllReadResult(readAt: stamped.isEmpty ? readAt : next, stampedIds: stamped)
@@ -348,12 +352,49 @@ struct FollowupResponse: Decodable {
     var outcome: String?
 }
 
+struct ReadOp {
+    var op: String
+    var runId: String
+    var at: Double?
+    var baseSeq: Double
+}
+
+func localStampsToUpload(local: [String: Double], server: [String: Double], baseSeq: Double) -> [ReadOp] {
+    local.compactMap { id, at in
+        let seen = server[id]
+        if seen == nil || at > seen! { return ReadOp(op: "stamp", runId: id, at: at, baseSeq: baseSeq) }
+        return nil
+    }
+}
+
+func applyPendingReads(server: [String: Double], pending: [ReadOp]) -> [String: Double] {
+    var next = server
+    var last: [String: ReadOp] = [:]
+    var order: [String] = []
+    for op in pending {
+        if last[op.runId] == nil { order.append(op.runId) }
+        last[op.runId] = op
+    }
+    for id in order {
+        guard let op = last[id] else { continue }
+        if op.op == "clear" { next.removeValue(forKey: id) }
+        else if let at = op.at { next[id] = max(next[id] ?? 0, at) }
+    }
+    return next
+}
+
+struct ReadRunsResponse: Decodable {
+    var seq: Double
+    var readRuns: [String: Double]
+}
+
 struct StreamFrame: Decodable {
     var type: String
     var hubOffline: Bool?
     var workspaces: [WorkspaceDTO]?
     var run: RunDTO?
     var cursorReload: CursorReloadDTO?
+    var seq: Double?
 }
 
 struct EmptyJSON: Decodable {}
@@ -682,6 +723,20 @@ actor RelayAPI {
     func deletePushToken(_ token: String) async throws {
         let body = try JSONSerialization.data(withJSONObject: ["token": token])
         let _: EmptyJSON = try await send("/mobile/push-token", method: "DELETE", body: body, ok: [204], allowEmpty: true)
+    }
+
+    func readRuns() async throws -> ReadRunsResponse {
+        try await get("/mobile/read-runs")
+    }
+
+    func postReadRuns(baseSeq: Double, ops: [ReadOp]) async throws -> ReadRunsResponse {
+        let payload: [[String: Any]] = ops.map { op in
+            var row: [String: Any] = ["op": op.op, "runId": op.runId]
+            if let at = op.at { row["at"] = at }
+            return row
+        }
+        let body = try JSONSerialization.data(withJSONObject: ["baseSeq": baseSeq, "ops": payload])
+        return try await send("/mobile/read-runs", method: "POST", body: body, ok: [200])
     }
 
     func promptSnippets() async throws -> [PromptSnippet] {

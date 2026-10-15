@@ -30,6 +30,7 @@ describe("isWorkspaceKey / normalizeUiPrefs", () => {
     expect(n).toEqual({
       ...UI_PREFS_DEFAULTS,
       readRuns: { a: 1 },
+      readMarks: { a: { seq: 0, at: 1 } },
       detailWidth: 0.4,
     });
     expect(normalizeUiPrefs({ detailWidth: 0.5 }).detailWidth).toBe(0.5);
@@ -80,6 +81,13 @@ describe("readUiPrefs / writeUiPrefs / merge", () => {
     const base = { ...UI_PREFS_DEFAULTS, readRuns: { r1: 9 }, theme: "dark" as const };
     expect(mergeUiPrefs(base, { theme: "light" }).theme).toBe("light");
     expect(mergeUiPrefs(base, { theme: "light" }).readRuns).toEqual({ r1: 9 });
+  });
+
+  test("merge PUT readRuns does not replace the stored map", () => {
+    const base = { ...UI_PREFS_DEFAULTS, readRuns: { r1: 9 }, readMarks: { r1: { seq: 2, at: 9 } }, readSeq: 2 };
+    const next = mergeUiPrefs(base, { readRuns: { r2: 1 } });
+    expect(next.readRuns).toEqual({ r1: 9 });
+    expect(next.readSeq).toBe(2);
   });
 
   test("quietUnread is not a shared pref", () => {

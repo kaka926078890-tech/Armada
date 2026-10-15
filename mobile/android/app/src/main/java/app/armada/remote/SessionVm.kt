@@ -48,6 +48,10 @@ class SessionVm(app: Application) : AndroidViewModel(app) {
     private var snippetsSeq = 0
     private val saveSnippetsMutex = Mutex()
     private var readAt = store.readAt().toMutableMap()
+    private var readSeq = 0L
+    private var readOps = store.readOps().toMutableList()
+    private val readMutex = Mutex()
+    private var readFlush: Job? = null
     private var unreadHold = mutableSetOf<String>()
     private var foreground = true
 
@@ -163,19 +167,19 @@ class SessionVm(app: Application) : AndroidViewModel(app) {
 
     fun markOpened(runId: String) {
         if (!shouldStampOpened(unreadHold, runId)) return
-        val activity = _state.value.board.runs.find { it.runId == runId }?.activityTs
-            ?: _state.value.board.hidden.find { it.runId == runId }?.activityTs
-        if (!shouldStampReadAt(readAt[runId], activity)) return
-        readAt[runId] = stampReadAt(System.currentTimeMillis().toDouble(), activity)
-        store.saveReadAt(readAt)
-        _state.value = _state.value.copy(readRev = _state.value.readRev + 1)
+        val run = _state.value.board.runs.find { it.runId == runId }
+            ?: _state.value.board.hidden.find { it.runId == runId }
+        val basis = run?.let { unreadBasis(it) }
+        if (!shouldStampReadAt(readAt[runId], basis)) return
+        val at = stampReadAt(System.currentTimeMillis().toDouble(), basis)
+        readAt[runId] = at
+        enqueueReads(listOf(ReadOp("stamp", runId, at, readSeq)))
     }
 
     fun markUnread(runId: String, hold: Boolean) {
         readAt.remove(runId)
         if (hold) unreadHold.add(runId) else unreadHold.remove(runId)
-        store.saveReadAt(readAt)
-        _state.value = _state.value.copy(readRev = _state.value.readRev + 1)
+        enqueueReads(listOf(ReadOp("clear", runId, null, readSeq)))
     }
 
     fun markAllRead(scope: MarkReadScope) {
@@ -189,8 +193,82 @@ class SessionVm(app: Application) : AndroidViewModel(app) {
         readAt.clear()
         readAt.putAll(result.readAt)
         unreadHold.removeAll(result.stampedIds)
+        enqueueReads(result.stampedIds.map { id -> ReadOp("stamp", id, result.readAt[id], readSeq) })
+    }
+
+    private fun enqueueReads(ops: List<ReadOp>) {
+        for (op in ops) {
+            readOps.removeAll { it.runId == op.runId }
+            readOps.add(op.copy(baseSeq = readSeq))
+        }
         store.saveReadAt(readAt)
+        store.saveReadOps(readOps)
         _state.value = _state.value.copy(readRev = _state.value.readRev + 1)
+        readFlush?.cancel()
+        readFlush = viewModelScope.launch {
+            delay(300)
+            flushReads()
+        }
+    }
+
+    private fun parseReadMap(o: org.json.JSONObject?): Map<String, Double> {
+        if (o == null) return emptyMap()
+        return o.keys().asSequence().associateWith { o.getDouble(it) }
+    }
+
+    private suspend fun syncReads() {
+        if (!_state.value.bound) return
+        val remote = withContext(Dispatchers.IO) { runCatching { api().readRuns() }.getOrNull() } ?: return
+        val seq = remote.optLong("seq")
+        val server = parseReadMap(remote.optJSONObject("readRuns"))
+        readMutex.withLock {
+            if (!store.readBootstrapped()) {
+                for (op in localStampsToUpload(readAt, server, seq)) {
+                    readOps.removeAll { it.runId == op.runId }
+                    readOps.add(op)
+                }
+                store.setReadBootstrapped()
+            }
+            readSeq = seq
+            val merged = applyPendingReads(server, readOps)
+            readAt.clear()
+            readAt.putAll(merged)
+            store.saveReadAt(readAt)
+            store.saveReadOps(readOps)
+            _state.value = _state.value.copy(readRev = _state.value.readRev + 1)
+        }
+        flushReads()
+    }
+
+    private suspend fun flushReads() {
+        while (_state.value.bound) {
+            val batch = readMutex.withLock {
+                val first = readOps.firstOrNull() ?: return@withLock null
+                readOps.filter { it.baseSeq == first.baseSeq }.take(200)
+            } ?: return
+            val arr = org.json.JSONArray()
+            for (op in batch) {
+                val o = org.json.JSONObject().put("op", op.op).put("runId", op.runId)
+                if (op.at != null) o.put("at", op.at)
+                arr.put(o)
+            }
+            val remote = withContext(Dispatchers.IO) {
+                runCatching { api().postReadRuns(batch.first().baseSeq, arr) }.getOrNull()
+            } ?: return
+            val seq = remote.optLong("seq")
+            val server = parseReadMap(remote.optJSONObject("readRuns"))
+            val snapshot = batch.toList()
+            readMutex.withLock {
+                readOps.removeAll { pending -> snapshot.any { it == pending } }
+                readSeq = seq
+                val merged = applyPendingReads(server, readOps)
+                readAt.clear()
+                readAt.putAll(merged)
+                store.saveReadAt(readAt)
+                store.saveReadOps(readOps)
+                _state.value = _state.value.copy(readRev = _state.value.readRev + 1)
+            }
+        }
     }
 
     fun clearUnreadHold(runId: String) {
@@ -224,6 +302,8 @@ class SessionVm(app: Application) : AndroidViewModel(app) {
 
     private suspend fun runLive() {
         refresh()
+        syncReads()
+        _state.value.watchingId?.let { markOpened(it) }
         var backoff = 2_000L
         while (foreground && _state.value.bound) {
             try {
@@ -279,6 +359,10 @@ class SessionVm(app: Application) : AndroidViewModel(app) {
                     cursorReload = reload ?: _state.value.cursorReload,
                     lastError = null,
                 )
+            }
+            "read" -> {
+                val seq = frame.optLong("seq")
+                if (seq > readSeq) viewModelScope.launch { syncReads() }
             }
             "run" -> {
                 val run = frame.optJSONObject("run")?.let(::parseRun) ?: return
