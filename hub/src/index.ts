@@ -260,28 +260,8 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
       .all(runId, afterOk, limit);
     return c.json(rows);
   });
-  app.get("/api/runs/:id/stream", (c) => {
-    const runId = c.req.param("id");
-    const stream = new ReadableStream({
-      start(controller) {
-        // Flush headers immediately so clients are not blocked waiting for first event.
-        controller.enqueue(new TextEncoder().encode(":ok\n\n"));
-        const unregister = sse.register(runId, controller);
-        (c.req.raw as any).signal?.addEventListener("abort", () => { unregister(); try { controller.close(); } catch {} });
-      },
-    });
-    return new Response(stream, { headers: { "content-type": "text/event-stream", "cache-control": "no-cache" } });
-  });
-  app.get("/api/events", (c) => {
-    const stream = new ReadableStream({
-      start(controller) {
-        controller.enqueue(new TextEncoder().encode(":ok\n\n"));
-        const unregister = sse.register("*", controller);
-        (c.req.raw as any).signal?.addEventListener("abort", () => { unregister(); try { controller.close(); } catch {} });
-      },
-    });
-    return new Response(stream, { headers: { "content-type": "text/event-stream", "cache-control": "no-cache" } });
-  });
+  app.get("/api/runs/:id/stream", (c) => sse.response(c.req.param("id"), c.req.raw.signal));
+  app.get("/api/events", (c) => sse.response("*", c.req.raw.signal));
   app.get("/api/audit/export", (c) => {
     const from = Number(c.req.query("from") ?? 0);
     const to = Number(c.req.query("to") ?? Date.now());

@@ -1,3 +1,5 @@
+export const SSE_KEEPALIVE_MS = 5_000;
+
 export class SseHub {
   onEvent?: (runId: string, event: object) => void;
   private clients = new Map<string, Set<ReadableStreamDefaultController>>();
@@ -16,6 +18,25 @@ export class SseHub {
         try { c.enqueue(new TextEncoder().encode(data)); } catch { /* closed */ }
       }
     }
+  }
+
+  /** Bun.serve drops a connection after 10 s with no bytes; the comment ping keeps it open. */
+  response(channel: string, signal: AbortSignal | undefined, keepaliveMs = SSE_KEEPALIVE_MS): Response {
+    const enc = new TextEncoder();
+    let stop = () => {};
+    const stream = new ReadableStream({
+      start: (controller) => {
+        controller.enqueue(enc.encode(":ok\n\n"));
+        const unregister = this.register(channel, controller);
+        const ping = setInterval(() => {
+          try { controller.enqueue(enc.encode(":ping\n\n")); } catch { stop(); }
+        }, keepaliveMs);
+        stop = () => { clearInterval(ping); unregister(); };
+        signal?.addEventListener("abort", () => { stop(); try { controller.close(); } catch {} });
+      },
+      cancel: () => stop(),
+    });
+    return new Response(stream, { headers: { "content-type": "text/event-stream", "cache-control": "no-cache" } });
   }
 
   closeAll(): void {
