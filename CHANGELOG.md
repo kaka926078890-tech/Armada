@@ -10,6 +10,10 @@ Armada 按 **面** 发版：扩展、桌面、iOS、Android 可以不同号。RE
 
 ## Unreleased
 
+### 修复
+
+- 任务完成后，Cursor 自己插入的 shell 汇报（`Briefly inform the user about the task result` 等）不再把卡片拉回运行中，手机不会为同一轮再收到一次「任务完成」。操作员在 Cursor 里亲手提交的下一句仍会复活卡片。
+
 ---
 
 ## 2026-10-15 — 扩展 0.4.50 · iOS TF 40 · Android 0.1.14 · 桌面 0.1.0

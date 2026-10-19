@@ -24,7 +24,7 @@ import { BlobStore, parseAttachmentIds, type BlobMeta } from "./blobs";
 import { appendRetired, decideArm, decideStop, parseRetiredIds, isWindowsMachineOs, genOf, stopFromCursorSessionEnd, isResumeStallError } from "./generationOwnership";
 import { parsePendingAsk, continueAllowed, optionInAsk, isPlanAsk, mergePendingAskRecord, ASK_TEXT_MAX, ASK_SUBMIT_TIMEOUT_MS } from "./pendingAsk";
 import {
-  OUTBOUND_LIMIT, QUEUE_DRAIN_MS, queueModeOf, statusUserPrompt,
+  OUTBOUND_LIMIT, QUEUE_DRAIN_MS, hookSubmitPrompt, isCursorProtocolUser, queueModeOf, statusUserPrompt,
 } from "./outboundClaim";
 import { matchRolloutTurn, parseChatgptRoot, readRollout, rolloutCardText, type RolloutTurn } from "./chatgptDesktop";
 
@@ -721,7 +721,7 @@ export class RunService {
 
   tryArmLiveGeneration(runId: string, hookEventName: string | null, payload: any, eventCid: unknown): void {
     const run = this.get(runId);
-    if (!run) return;
+    if (!run || isStatus(run.status, TERMINAL_STATUSES)) return;
     const retired = this.retiredState(run);
     const d = decideArm({
       hookEventName,
@@ -811,14 +811,18 @@ export class RunService {
   }
 
   /**
-   * 终态之后，Cursor 输入框又开了一轮 owner generation（不是中台 followup）。
-   * 不把卡拉回 running 的话，这一轮的 stop 会在 onStopEvent 入口被丢掉。
+   * 终态之后，操作员在 Cursor 里提交的新一轮（beforeSubmitPrompt）要拉回 running，
+   * 否则这轮 stop 会在 onStopEvent 入口被丢掉。
+   * shell 通知的 preToolUse 比协议用户句早到，不能据此复活；协议句本身也不复活。
    * 操作员关闭的卡不复活。卡片标题仍是上次中台写入的 prompt。
    */
   reopenForOwnerGeneration(runId: string, hookEventName: string | null, payload: any, eventCid: unknown): boolean {
     const run = this.get(runId);
     if (!run || run.end_reason === "OPERATOR_CLOSED") return false;
     if (!isStatus(run.status, TERMINAL_STATUSES)) return false;
+    if (hookEventName !== "beforeSubmitPrompt") return false;
+    const prompt = hookSubmitPrompt(payload);
+    if (prompt && isCursorProtocolUser(prompt)) return false;
     const d = decideArm({
       hookEventName,
       generationId: payload?.generation_id,

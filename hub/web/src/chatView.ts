@@ -1,9 +1,9 @@
 import type { RunEvent } from "./types";
 import { displayUserText } from "../../../extension/src/imageMarkers";
-import { CURSOR_INTERNAL_CONTEXT_MARKERS } from "../../src/outboundClaim";
+import { CURSOR_INTERNAL_CONTEXT_MARKERS, CURSOR_PROTOCOL_USER_PREFIXES, isCursorProtocolUser } from "../../src/outboundClaim";
 import { optionIdsCollide } from "./askOptions";
 
-export { CURSOR_INTERNAL_CONTEXT_MARKERS };
+export { CURSOR_INTERNAL_CONTEXT_MARKERS, CURSOR_PROTOCOL_USER_PREFIXES };
 
 export type ChatBlock =
   | { kind: "user"; text: string; seq: number; imageIds?: string[] }
@@ -174,19 +174,6 @@ export function extractUserText(raw: string): string {
   const q = raw.match(/<user_query>\s*([\s\S]*?)\s*<\/user_query>/);
   if (q) return q[1].trim();
   return raw.replace(/<timestamp>[\s\S]*?<\/timestamp>\s*/g, "").trim();
-}
-
-/** Cursor 协议注入的用户句前缀。只 startsWith 这些；对不上就当操作员输入画出来，不要 silently hide。 */
-export const CURSOR_PROTOCOL_USER_PREFIXES = [
-  "Perform any necessary follow-up actions",
-  "Implement the plan as specified",
-  "Briefly inform the user about the task result",
-] as const;
-
-/** Cursor 协议注入的用户句，不是操作员输入；详情不画成气泡。不参与忙/闲。 */
-function isCursorProtocolUser(text: string): boolean {
-  const t = text.trim();
-  return CURSOR_PROTOCOL_USER_PREFIXES.some((prefix) => t.startsWith(prefix));
 }
 
 function isCursorInternalContext(text: string): boolean {

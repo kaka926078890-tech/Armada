@@ -172,6 +172,63 @@ describe("event ingest", () => {
     ws.close();
   });
 
+  test("r-b9633b43: shell-notify preToolUse after completed does not reopen or complete again", async () => {
+    // 23:07 the card was already completed. Cursor's shell ping armed e13c4cfe
+    // on preToolUse (Read of a terminal file) before the protocol user line
+    // arrived, then stop completed that gen ~9s later and the phone rang again.
+    const G1 = "61192e2d-998b-4139-b37b-8e25f3abf2a9";
+    const G2 = "e13c4cfe-dc1b-49cc-9e2a-8155ffb19cba";
+    const { ws, api, runId } = await startBoundRun();
+    const snap = async () => (await (await api(`/api/runs/${runId}`)).json()) as any;
+    ws.send(JSON.stringify(ev(runId, 1, "beforeSubmitPrompt", {
+      conversation_id: "cid-1", generation_id: G1, prompt: "重新仔细检查一下，预览问题还有没有遗留的问题",
+    })));
+    ws.send(JSON.stringify(ev(runId, 2, "stop", {
+      status: "completed", conversation_id: "cid-1", generation_id: G1,
+    })));
+    await new Promise((r) => setTimeout(r, 80));
+    const done = await snap();
+    expect(done.status).toBe("completed");
+    expect(done.live_generation_id).toBeNull();
+    const started = done.started_at as number;
+
+    ws.send(JSON.stringify(ev(runId, 3, "preToolUse", {
+      conversation_id: "cid-1",
+      generation_id: G2,
+      model: "grok-4.7",
+      tool_name: "Read",
+      tool_input: { file_path: "/Users/apple/.cursor/projects/Users-apple-Desktop-desk/terminals/295397.txt" },
+    })));
+    await new Promise((r) => setTimeout(r, 80));
+    const armed = await snap();
+    expect(armed.status).toBe("completed");
+    expect(armed.live_generation_id).toBeNull();
+    expect(armed.started_at).toBe(started);
+
+    ws.send(JSON.stringify({
+      type: "run.event", runId, source: "transcript", seq: 4, ts: Date.now(),
+      payload: {
+        role: "user",
+        message: {
+          content: [{
+            type: "text",
+            text: "<timestamp>Monday, Oct 19, 2026, 11:07 PM (UTC+8)</timestamp>\n\n<user_query>Briefly inform the user about the task result and perform any follow-up actions (if needed). If there's no follow-ups needed, don't explicitly say that.</user_query>",
+          }],
+        },
+      },
+    }));
+    ws.send(JSON.stringify(ev(runId, 5, "stop", {
+      status: "completed", conversation_id: "cid-1", generation_id: G2,
+    })));
+    await new Promise((r) => setTimeout(r, 100));
+    const after = await snap();
+    expect(after.status).toBe("completed");
+    expect(after.live_generation_id).toBeNull();
+    expect(after.started_at).toBe(started);
+    expect(after.end_reason).toBe("completed");
+    ws.close();
+  });
+
   test("r-fc35e97f: retired preToolUse after completed does not reopen", async () => {
     const G1 = "f2fd16b2-08c8-4d64-bd40-6be3e637159e";
     const { ws, api, runId } = await startBoundRun();
