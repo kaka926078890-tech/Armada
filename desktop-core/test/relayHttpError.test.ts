@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "fs";
 import { join } from "path";
-import { classifyRelayHttp, NETWORK_INTERCEPT_COPY, PAIR_INVITE_COPY, operatorCopy } from "../src/relayHttpError";
+import { blobChunkDecision, classifyRelayHttp, NETWORK_INTERCEPT_COPY, PAIR_INVITE_COPY, operatorCopy } from "../src/relayHttpError";
 
 describe("classifyRelayHttp", () => {
   test("JSON 403 OPERATOR_REQUIRED is the pair-invite copy, not HTTP 403", () => {
@@ -66,6 +66,35 @@ describe("classifyRelayHttp", () => {
       expect(kt).toContain(`"${code}"`);
       expect(operatorCopy(code)).not.toBe(code);
     }
+  });
+
+  test("blob 200 with a blob id is success; a bare 200 is NET_REPLACED", () => {
+    const body = JSON.stringify({ blob: { sha256: "abc", id: "abc", mime: "image/jpeg", name: "a.jpg", size: 3 } });
+    expect(blobChunkDecision(201, body)).toEqual({ kind: "done", id: "abc" });
+    expect(blobChunkDecision(200, body)).toEqual({ kind: "done", id: "abc" });
+    const swapped = JSON.stringify({ blob: { name: "a.jpg", id: "sha256hex" } });
+    expect(blobChunkDecision(200, swapped)).toEqual({ kind: "done", id: "sha256hex" });
+    expect(blobChunkDecision(200, "<html>uuWAF</html>")).toEqual({ kind: "fail", code: "NET_REPLACED" });
+    expect(blobChunkDecision(200, '{"ok":true}')).toEqual({ kind: "fail", code: "NET_REPLACED" });
+    expect(blobChunkDecision(200, '{"blob":{"id":""}}')).toEqual({ kind: "fail", code: "NET_REPLACED" });
+    expect(blobChunkDecision(200, '{"error":"RATE_LIMIT"}')).toEqual({ kind: "fail", code: "RATE_LIMIT" });
+    expect(blobChunkDecision(202, body)).toEqual({ kind: "pending" });
+    expect(blobChunkDecision(404, "")).toEqual({ kind: "fail", code: "NO_ROUTE" });
+    expect(blobChunkDecision(201, '{"ok":true}')).toEqual({ kind: "decode" });
+    expect(blobChunkDecision(400, '{"error":"INVALID"}')).toEqual({ kind: "fail", code: "INVALID" });
+    expect(operatorCopy("NET_REPLACED")).toBe("网络把响应换掉了，请重试");
+
+    const root = join(import.meta.dir, "../..");
+    const swift = readFileSync(join(root, "mobile/ios/ArmadaRemote/RelayAPI.swift"), "utf8");
+    const kt = readFileSync(join(root, "mobile/android/core/src/main/kotlin/app/armada/remote/OperatorMessages.kt"), "utf8");
+    const client = readFileSync(join(root, "mobile/android/app/src/main/java/app/armada/remote/RelayClient.kt"), "utf8");
+    expect(swift).toContain("blobChunkDecision");
+    expect(swift).toContain('case "NET_REPLACED": return "网络把响应换掉了，请重试"');
+    expect(swift).not.toContain("if code != 201");
+    expect(kt).toContain("fun blobChunkDecision");
+    expect(kt).toContain("\"NET_REPLACED\" -> \"网络把响应换掉了，请重试\"");
+    expect(client).toContain("blobChunkDecision");
+    expect(client).not.toContain("resp.code != 201");
   });
 
   test("iOS and Android send JSON blob chunks and only treat 403 as Wi-Fi intercept", () => {

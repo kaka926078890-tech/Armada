@@ -61,6 +61,23 @@ class OperatorMessagesTest {
     }
 
     @Test
+    fun blob200WithIdIsDoneBare200IsReplaced() {
+        val body = """{"blob":{"sha256":"abc","id":"abc","mime":"image/jpeg","name":"a.jpg","size":3}}"""
+        assertEquals(BlobChunkDecision.Done("abc"), blobChunkDecision(201, body))
+        assertEquals(BlobChunkDecision.Done("abc"), blobChunkDecision(200, body))
+        assertEquals(BlobChunkDecision.Done("sha256hex"), blobChunkDecision(200, """{"blob":{"name":"a.jpg","id":"sha256hex"}}"""))
+        assertEquals(BlobChunkDecision.Fail("NET_REPLACED"), blobChunkDecision(200, "<html>uuWAF</html>"))
+        assertEquals(BlobChunkDecision.Fail("NET_REPLACED"), blobChunkDecision(200, """{"ok":true}"""))
+        assertEquals(BlobChunkDecision.Fail("NET_REPLACED"), blobChunkDecision(200, """{"blob":{"id":""}}"""))
+        assertEquals(BlobChunkDecision.Fail("RATE_LIMIT"), blobChunkDecision(200, """{"error":"RATE_LIMIT"}"""))
+        assertEquals(BlobChunkDecision.Pending, blobChunkDecision(202, body))
+        assertEquals(BlobChunkDecision.Fail("NO_ROUTE"), blobChunkDecision(404, ""))
+        assertEquals(BlobChunkDecision.Decode, blobChunkDecision(201, """{"ok":true}"""))
+        assertEquals(BlobChunkDecision.Fail("INVALID"), blobChunkDecision(400, """{"error":"INVALID"}"""))
+        assertEquals("网络把响应换掉了，请重试", operatorMessage("NET_REPLACED"))
+    }
+
+    @Test
     fun html403IsNetIntercept() {
         assertEquals("NET_INTERCEPT", classifyHttp(403, "<html>blocked</html>"))
         assertEquals("PAIR_INVITE", classifyHttp(403, """{"error":"OPERATOR_REQUIRED"}"""))

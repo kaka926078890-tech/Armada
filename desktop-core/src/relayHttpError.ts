@@ -11,6 +11,7 @@ export function operatorCopy(code: string): string {
     case "RATE_LIMIT": return "点得太快，请稍后再发";
     case "EMPTY_PROMPT": return "提示词是空的";
     case "NET_INTERCEPT": return NETWORK_INTERCEPT_COPY;
+    case "NET_REPLACED": return "网络把响应换掉了，请重试";
     case "ASK_INVALID_OPTION": return "选项无效，请改选或 Skip";
     case "ASK_TEXT_EMPTY": return "先写回复，或不选选项去点上面的答案";
     case "ASK_TEXT_TOO_LONG": return "回复太长，请缩短后再发";
@@ -43,4 +44,36 @@ export function classifyRelayHttp(status: number, bodyText: string): { code: str
     return { code: "NET_INTERCEPT", message: NETWORK_INTERCEPT_COPY };
   }
   return { code: `HTTP_${status}`, message: `HTTP ${status}` };
+}
+
+export type BlobChunkDecision =
+  | { kind: "pending" }
+  | { kind: "done"; id: string }
+  | { kind: "decode" }
+  | { kind: "fail"; code: string };
+
+/** Relay completes a blob with 201. A proxy may rewrite that to 200 and keep the JSON. */
+export function blobChunkDecision(status: number, body: string): BlobChunkDecision {
+  if (status === 202) return { kind: "pending" };
+  if (status === 404) return { kind: "fail", code: "NO_ROUTE" };
+  if (status === 200 || status === 201) {
+    const id = completedBlobId(body);
+    if (id) return { kind: "done", id };
+    if (status === 200) {
+      const code = classifyRelayHttp(status, body).code;
+      return { kind: "fail", code: code === "HTTP_200" ? "NET_REPLACED" : code };
+    }
+    return { kind: "decode" };
+  }
+  return { kind: "fail", code: classifyRelayHttp(status, body).code };
+}
+
+function completedBlobId(body: string): string | null {
+  try {
+    const blob = (JSON.parse(body) as { blob?: { id?: unknown } })?.blob;
+    if (typeof blob?.id === "string" && blob.id.length > 0) return blob.id;
+  } catch {
+    /* HTML or empty */
+  }
+  return null;
 }

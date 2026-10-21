@@ -14,6 +14,7 @@ fun operatorMessage(code: String): String = when (code) {
     "RATE_LIMIT" -> "点得太快，请稍后再发"
     "EMPTY_PROMPT" -> "写点字或加一张图"
     "NET_INTERCEPT" -> "当前网络拦截了中转。请关掉 Wi‑Fi 改用蜂窝，或换一个网络后再打开。"
+    "NET_REPLACED" -> "网络把响应换掉了，请重试"
     "OUTBOUND_LIMIT" -> "待消化续发已达上限，等 Cursor 消化后再发"
     "OUTBOUND_TEXT_ONLY" -> "运行中只能发文字"
     "INVALID_STATE" -> "当前状态不能重试"
@@ -59,6 +60,35 @@ fun appendSnippetBody(current: String, body: String): String {
 
 fun hideError(code: String): String =
     if (code == "INVALID_STATE") "运行中不能隐藏" else operatorMessage(code)
+
+sealed class BlobChunkDecision {
+    data object Pending : BlobChunkDecision()
+    data class Done(val id: String) : BlobChunkDecision()
+    data object Decode : BlobChunkDecision()
+    data class Fail(val code: String) : BlobChunkDecision()
+}
+
+/** Keep in sync with desktop-core blobChunkDecision. 201 is relay; 200 + blob id is a rewritten 201. */
+fun blobChunkDecision(status: Int, body: String): BlobChunkDecision {
+    if (status == 202) return BlobChunkDecision.Pending
+    if (status == 404) return BlobChunkDecision.Fail("NO_ROUTE")
+    if (status == 200 || status == 201) {
+        val id = completedBlobId(body)
+        if (id != null) return BlobChunkDecision.Done(id)
+        if (status == 200) {
+            val code = classifyHttp(status, body)
+            return BlobChunkDecision.Fail(if (code == "HTTP 200") "NET_REPLACED" else code)
+        }
+        return BlobChunkDecision.Decode
+    }
+    return BlobChunkDecision.Fail(classifyHttp(status, body))
+}
+
+private fun completedBlobId(body: String): String? {
+    val inner = Regex("\"blob\"\\s*:\\s*\\{([^{}]*)\\}").find(body)?.groupValues?.get(1) ?: return null
+    val id = Regex("\"id\"\\s*:\\s*\"([^\"]*)\"").find(inner)?.groupValues?.get(1) ?: return null
+    return id.ifEmpty { null }
+}
 
 fun classifyHttp(status: Int, body: String): String {
     val code = Regex("\"error\"\\s*:\\s*\"([^\"]+)\"").find(body)?.groupValues?.get(1)

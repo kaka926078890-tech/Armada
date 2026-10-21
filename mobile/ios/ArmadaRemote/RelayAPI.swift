@@ -441,6 +441,7 @@ enum RelayAPIError: LocalizedError {
         case "RATE_LIMIT": return "点得太快，请稍后再发"
         case "EMPTY_PROMPT": return "写点字或加一张图"
         case "NET_INTERCEPT": return "当前网络拦截了中转。请关掉 Wi‑Fi 改用蜂窝，或换一个网络后再打开。"
+        case "NET_REPLACED": return "网络把响应换掉了，请重试"
         case "OUTBOUND_LIMIT": return "待消化续发已达上限，等 Cursor 消化后再发"
         case "OUTBOUND_TEXT_ONLY": return "运行中只能发文字"
         case "INVALID_STATE": return "当前状态不能重试"
@@ -490,6 +491,39 @@ enum RelayAPIError: LocalizedError {
         }
         return .http(status, "HTTP \(status)")
     }
+
+    /// Keep in sync with desktop-core blobChunkDecision. 201 is relay; 200 + blob id is a rewritten 201.
+    static func blobChunkDecision(status: Int, data: Data) -> BlobChunkDecision {
+        if status == 202 { return .pending }
+        if status == 404 { return .fail("NO_ROUTE") }
+        if status == 200 || status == 201 {
+            if completedBlobId(data) != nil { return .accept }
+            if status == 200 {
+                if case .http(_, let msg) = classify(status: status, data: data) {
+                    return msg == "HTTP 200" ? .replaced : .fail(msg)
+                }
+                return .replaced
+            }
+            return .accept
+        }
+        return .passthrough
+    }
+
+    private static func completedBlobId(_ data: Data) -> String? {
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let blob = obj["blob"] as? [String: Any],
+              let id = blob["id"] as? String,
+              !id.isEmpty else { return nil }
+        return id
+    }
+}
+
+enum BlobChunkDecision {
+    case pending
+    case accept
+    case replaced
+    case fail(String)
+    case passthrough
 }
 
 actor RelayAPI {
@@ -671,11 +705,19 @@ actor RelayAPI {
         req.httpBody = try JSONSerialization.data(withJSONObject: obj)
         let (respData, resp) = try await URLSession.shared.data(for: req)
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-        if code == 202 { return nil }
-        if code == 404 { throw RelayAPIError.http(404, "NO_ROUTE") }
-        if code != 201 { throw RelayAPIError.classify(status: code, data: respData) }
-        struct Wrap: Decodable { var blob: BlobDTO }
-        return try JSONDecoder().decode(Wrap.self, from: respData).blob
+        switch RelayAPIError.blobChunkDecision(status: code, data: respData) {
+        case .pending:
+            return nil
+        case .replaced:
+            throw RelayAPIError.http(code, "NET_REPLACED")
+        case .fail(let reason):
+            throw RelayAPIError.http(code, reason)
+        case .passthrough:
+            throw RelayAPIError.classify(status: code, data: respData)
+        case .accept:
+            struct Wrap: Decodable { var blob: BlobDTO }
+            return try JSONDecoder().decode(Wrap.self, from: respData).blob
+        }
     }
 
     func retry(runId: String) async throws -> RunDTO {

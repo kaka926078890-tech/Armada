@@ -202,10 +202,12 @@ class RelayClient(base: String, private val token: String) {
             .build()
         http.newCall(req).execute().use { resp ->
             val text = resp.body?.string().orEmpty()
-            if (resp.code == 202) return null
-            if (resp.code == 404) throw RelayException("NO_ROUTE")
-            if (resp.code != 201) throw RelayException(classifyHttp(resp.code, text))
-            return parseBlob(JSONObject(text).getJSONObject("blob"))
+            return when (val decision = blobChunkDecision(resp.code, text)) {
+                is BlobChunkDecision.Pending -> null
+                is BlobChunkDecision.Fail -> throw RelayException(decision.code)
+                is BlobChunkDecision.Done, BlobChunkDecision.Decode ->
+                    parseBlob(JSONObject(text).getJSONObject("blob"))
+            }
         }
     }
 
