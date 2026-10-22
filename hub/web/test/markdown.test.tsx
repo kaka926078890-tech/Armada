@@ -4,7 +4,7 @@ import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import ChatThread, { AssistantMarkdown, markdownComponentsFor, askContinueAnswers, askContinueLabel, askSkipLabel, continueAllowed, isPlanAsk, planOverviewOf, ASK_LOCK_MS } from "../src/components/ChatThread";
 import { ASK_SUBMIT_TIMEOUT_MS } from "../../src/pendingAsk";
-import { MERMAID_RENDER_HOST_STYLE, quoteReservedSequenceActors } from "../src/components/MermaidChart";
+import { MERMAID_PREVIEW_MAX_PX, MERMAID_RENDER_HOST_STYLE, MermaidView, isolateSvgIds, nextMermaidZoom, quoteReservedSequenceActors } from "../src/components/MermaidChart";
 import type { ChatBlock } from "../src/chatView";
 
 describe("AssistantMarkdown", () => {
@@ -49,6 +49,31 @@ describe("AssistantMarkdown", () => {
     expect(MERMAID_RENDER_HOST_STYLE).toContain("position:fixed");
     expect(MERMAID_RENDER_HOST_STYLE).toContain("left:-10000px");
     expect(src).toContain("mermaid.render(id, quoteReservedSequenceActors(source), host)");
+  });
+
+  test("a ready diagram is a capped preview with an expand button", () => {
+    const html = renderToStaticMarkup(<MermaidView svg={'<svg id="a" viewBox="0 0 40 20"></svg>'} />);
+    expect(html).toContain("mermaid-preview");
+    expect(html).toContain('aria-label="展开流程图"');
+    expect(html).not.toContain('aria-label="放大"');
+    expect(MERMAID_PREVIEW_MAX_PX).toBe(220);
+    expect(nextMermaidZoom(1, 0.25)).toBe(1.25);
+    expect(nextMermaidZoom(3, 0.25)).toBe(3);
+    expect(nextMermaidZoom(0.5, -0.25)).toBe(0.5);
+  });
+
+  test("the dialog copy does not reuse the preview svg ids", () => {
+    const svg = '<svg id="a"><rect fill="url(#a)" href="#a"/></svg>';
+    expect(isolateSvgIds(svg, "d1-")).toBe('<svg id="d1-a"><rect fill="url(#d1-a)" href="#d1-a"/></svg>');
+    const html = renderToStaticMarkup(<MermaidView svg={svg} defaultOpen />);
+    expect(html).toContain('aria-label="流程图"');
+    expect(html).toContain('aria-label="放大"');
+    expect(html).toContain('aria-label="缩小"');
+    expect(html).toContain('aria-label="重置"');
+    expect(html).toContain('fill="url(#a)"');
+    expect(html).toMatch(/fill="url\(#d[0-9a-z]+-a\)"/);
+    const css = readFileSync(join(import.meta.dir, "../src/index.css"), "utf8");
+    expect(css).toContain(`max-height: ${MERMAID_PREVIEW_MAX_PX}px`);
   });
 
   test("a participant named Box is quoted so sequenceDiagram does not lex it as a group", () => {

@@ -1,4 +1,7 @@
 import { Children, isValidElement, useEffect, useState, type ReactNode } from "react";
+import { Maximize2, RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
+import { Button } from "./ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 
 type ThemeName = "dark" | "light";
 
@@ -143,6 +146,87 @@ async function renderMermaid(source: string, theme: ThemeName, host: HTMLElement
   return acceptSvg(svg);
 }
 
+/** Inline card height. Taller diagrams scale down inside it instead of filling the thread. */
+export const MERMAID_PREVIEW_MAX_PX = 220;
+export const MERMAID_ZOOM_MIN = 0.5;
+export const MERMAID_ZOOM_MAX = 3;
+export const MERMAID_ZOOM_STEP = 0.25;
+
+export function nextMermaidZoom(current: number, delta: number): number {
+  const next = Math.round((current + delta) * 100) / 100;
+  return Math.min(MERMAID_ZOOM_MAX, Math.max(MERMAID_ZOOM_MIN, next));
+}
+
+/** Dialog copy must not reuse the preview's svg ids, or one diagram's markers blank the other. */
+export function isolateSvgIds(svg: string, prefix: string): string {
+  return svg
+    .replace(/\bid="([^"]+)"/g, (_, id: string) => `id="${prefix}${id}"`)
+    .replace(/url\(#([^)]+)\)/g, (_, id: string) => `url(#${prefix}${id})`)
+    .replace(/href="#([^"]+)"/g, (_, id: string) => `href="#${prefix}${id}"`);
+}
+
+function svgPrefix(svg: string): string {
+  let hash = 0;
+  for (let i = 0; i < svg.length; i++) hash = (hash * 31 + svg.charCodeAt(i)) >>> 0;
+  return `d${hash.toString(36)}-`;
+}
+
+function ExpandIcon() {
+  return <Maximize2 className="size-3.5" aria-hidden />;
+}
+
+export function MermaidView({ svg, defaultOpen = false }: { svg: string; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
+  const [zoom, setZoom] = useState(1);
+  const dialogSvg = isolateSvgIds(svg, svgPrefix(svg));
+  return (
+    <>
+      <div className="mermaid-block relative mb-2 overflow-hidden rounded-md border border-border bg-muted/30">
+        <div className="mermaid-preview" aria-label="流程图">
+          <div dangerouslySetInnerHTML={{ __html: svg }} />
+        </div>
+        <button
+          type="button"
+          aria-label="展开流程图"
+          title="展开流程图"
+          onClick={() => setOpen(true)}
+          className="absolute top-1.5 right-1.5 z-10 rounded-md border border-border bg-background/90 p-1 text-muted-foreground hover:text-foreground"
+        >
+          <ExpandIcon />
+        </button>
+      </div>
+      <Dialog
+        open={open}
+        onOpenChange={(next) => {
+          setOpen(next);
+          if (!next) setZoom(1);
+        }}
+      >
+        <DialogContent
+          aria-label="流程图"
+          className="flex h-[min(90vh,860px)] w-[min(1100px,calc(100vw-2rem))] max-w-none flex-col gap-2 overflow-hidden p-3 sm:max-w-none"
+        >
+          <DialogHeader className="flex-row items-center gap-1 pr-8">
+            <DialogTitle className="text-[13px]">流程图</DialogTitle>
+            <Button type="button" variant="outline" size="icon-sm" aria-label="放大" onClick={() => setZoom((z) => nextMermaidZoom(z, MERMAID_ZOOM_STEP))}>
+              <ZoomIn />
+            </Button>
+            <Button type="button" variant="outline" size="icon-sm" aria-label="缩小" onClick={() => setZoom((z) => nextMermaidZoom(z, -MERMAID_ZOOM_STEP))}>
+              <ZoomOut />
+            </Button>
+            <Button type="button" variant="outline" size="icon-sm" aria-label="重置" onClick={() => setZoom(1)}>
+              <RotateCcw />
+            </Button>
+          </DialogHeader>
+          <div className="min-h-0 flex-1 overflow-auto">
+            <div className="mermaid-dialog" style={{ width: `${zoom * 100}%` }} dangerouslySetInnerHTML={{ __html: dialogSvg }} />
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
 export function MermaidChart({ source }: { source: string }) {
   const theme = usePageTheme();
   const [svg, setSvg] = useState<string | null>(null);
@@ -168,11 +252,5 @@ export function MermaidChart({ source }: { source: string }) {
   if (!svg) {
     return <div className="mermaid-block mb-2 min-h-8 rounded-md bg-muted/40" aria-busy="true" aria-label="流程图" />;
   }
-  return (
-    <div
-      className="mermaid-block mb-2 overflow-x-auto"
-      aria-label="流程图"
-      dangerouslySetInnerHTML={{ __html: svg }}
-    />
-  );
+  return <MermaidView svg={svg} />;
 }
