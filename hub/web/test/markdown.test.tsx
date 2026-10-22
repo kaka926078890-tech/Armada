@@ -4,7 +4,7 @@ import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import ChatThread, { AssistantMarkdown, markdownComponentsFor, askContinueAnswers, askContinueLabel, askSkipLabel, continueAllowed, isPlanAsk, planOverviewOf, ASK_LOCK_MS } from "../src/components/ChatThread";
 import { ASK_SUBMIT_TIMEOUT_MS } from "../../src/pendingAsk";
-import { MERMAID_RENDER_HOST_STYLE } from "../src/components/MermaidChart";
+import { MERMAID_RENDER_HOST_STYLE, quoteReservedSequenceActors } from "../src/components/MermaidChart";
 import type { ChatBlock } from "../src/chatView";
 
 describe("AssistantMarkdown", () => {
@@ -48,7 +48,67 @@ describe("AssistantMarkdown", () => {
     expect(effect).not.toContain("setSvg(null)");
     expect(MERMAID_RENDER_HOST_STYLE).toContain("position:fixed");
     expect(MERMAID_RENDER_HOST_STYLE).toContain("left:-10000px");
-    expect(src).toContain("mermaid.render(id, source, host)");
+    expect(src).toContain("mermaid.render(id, quoteReservedSequenceActors(source), host)");
+  });
+
+  test("a participant named Box is quoted so sequenceDiagram does not lex it as a group", () => {
+    const src = [
+      "sequenceDiagram",
+      "participant Lead as 主持成员进程",
+      "participant Team as 团会话",
+      "participant Box as 邮箱",
+      "participant Proc as 新成员进程",
+      "Lead->>Team: team_spawn_agent",
+      "Team->>Team: 校验主持身份、预设、名字",
+      "Team->>Team: 新建 conversation 和 slot",
+      "Team->>Box: 写入欢迎消息",
+      "Team->>Lead: 先返回，不等",
+      "Team->>Proc: 后台写入 Team MCP 配置并启动进程",
+      "Proc->>Box: 事件循环读未读，开始这一轮",
+    ].join("\n");
+    const out = quoteReservedSequenceActors(src);
+    expect(out).toContain('participant "Box" as 邮箱');
+    expect(out).toContain('Team->>"Box": 写入欢迎消息');
+    expect(out).toContain('Proc->>"Box": 事件循环读未读，开始这一轮');
+    expect(out).toContain("Lead->>Team: team_spawn_agent");
+    expect(out).not.toMatch(/participant Box /);
+    expect(out).not.toMatch(/->>Box:/);
+  });
+
+  test("box groups, closing end, and message text stay literal", () => {
+    const src = [
+      "sequenceDiagram",
+      "box Aqua 组",
+      "participant Lead",
+      "end",
+      "Lead->>Team: 打开 Box",
+      "else 另一支",
+    ].join("\n");
+    expect(quoteReservedSequenceActors(src)).toBe(src);
+    expect(quoteReservedSequenceActors("flowchart TD\n  A[开始] --> B[结束]")).toBe("flowchart TD\n  A[开始] --> B[结束]");
+  });
+
+  test("note, activate, create, and an actor named end are quoted around the keyword line", () => {
+    const src = [
+      "sequenceDiagram",
+      "participant end as 结束",
+      "participant Box as 邮箱",
+      "create participant Box as 邮箱",
+      "loop 一轮",
+      "Note over Box, end: 打开 Box",
+      "activate Box",
+      "A->>end: hi",
+      "end",
+    ].join("\n");
+    const out = quoteReservedSequenceActors(src);
+    expect(out).toContain('participant "end" as 结束');
+    expect(out).toContain('participant "Box" as 邮箱');
+    expect(out).toContain('create participant "Box" as 邮箱');
+    expect(out).toContain('Note over "Box", "end": 打开 Box');
+    expect(out).toContain('activate "Box"');
+    expect(out).toContain('A->>"end": hi');
+    expect(out).toContain("loop 一轮");
+    expect(out.endsWith("\nend")).toBe(true);
   });
 
   test("non-mermaid fence stays a code block with a copy button", () => {

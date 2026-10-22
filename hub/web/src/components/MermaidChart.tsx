@@ -49,6 +49,63 @@ export function mermaidSource(children: ReactNode): string | null {
   return null;
 }
 
+/** Case-insensitive sequenceDiagram tokens. A participant named Box is lexed as `box`, not an actor. */
+const SEQUENCE_RESERVED = new Set([
+  "box", "end", "note", "loop", "alt", "else", "opt", "par", "and", "critical",
+  "option", "break", "rect", "activate", "deactivate", "create", "destroy",
+  "autonumber", "title", "participant", "actor", "over",
+]);
+
+const SEQUENCE_ARROW = /(?:<<-->>|<<->>|-->>|->>|-->|->|--x|-x|--\)|-\))/;
+
+function quoteReservedWords(text: string): string {
+  return text.replace(/(^|[^"\w])([A-Za-z_][\w-]*)/g, (full, pre: string, word: string) => {
+    if (!SEQUENCE_RESERVED.has(word.toLowerCase())) return full;
+    return `${pre}"${word}"`;
+  });
+}
+
+function quoteActorId(raw: string): string {
+  const bare = raw.replace(/^"|"$/g, "");
+  return SEQUENCE_RESERVED.has(bare.toLowerCase()) ? `"${bare}"` : raw;
+}
+
+function rewriteSequenceLine(line: string): string {
+  if (/^\s*(?:end|else|and)\s*$/i.test(line)) return line;
+  if (/^\s*box\b/i.test(line) && !SEQUENCE_ARROW.test(line)) return line;
+
+  const decl = /^(\s*(?:participant|actor)\s+)("[^"]+"|\S+)(.*)$/i.exec(line);
+  if (decl) return decl[1] + quoteActorId(decl[2]) + decl[3];
+
+  const created = /^(\s*create\s+(?:participant|actor)\s+)("[^"]+"|\S+)(.*)$/i.exec(line);
+  if (created) return created[1] + quoteActorId(created[2]) + created[3];
+
+  const note = /^(\s*note\s+(?:left\s+of|right\s+of|over)\s+)(.*)$/i.exec(line);
+  if (note) {
+    const colon = note[2].indexOf(":");
+    const targets = colon < 0 ? note[2] : note[2].slice(0, colon);
+    const rest = colon < 0 ? "" : note[2].slice(colon);
+    return note[1] + quoteReservedWords(targets) + rest;
+  }
+
+  const life = /^(\s*(?:activate|deactivate|destroy)\s+)("[^"]+"|\S+)(.*)$/i.exec(line);
+  if (life) return life[1] + quoteActorId(life[2]) + life[3];
+
+  if (SEQUENCE_ARROW.test(line)) {
+    const colon = line.indexOf(":");
+    const head = colon < 0 ? line : line.slice(0, colon);
+    const tail = colon < 0 ? "" : line.slice(colon);
+    return quoteReservedWords(head) + tail;
+  }
+  return line;
+}
+
+/** Quote actor ids that mermaid would otherwise lex as sequenceDiagram keywords. */
+export function quoteReservedSequenceActors(source: string): string {
+  if (!/^\s*sequenceDiagram\b/i.test(source)) return source;
+  return source.split("\n").map(rewriteSequenceLine).join("\n");
+}
+
 let mermaidSeq = 0;
 
 /** Off-screen measuring box. mermaid.render otherwise appends a full diagram to document.body. */
@@ -82,7 +139,7 @@ async function renderMermaid(source: string, theme: ThemeName, host: HTMLElement
     },
   });
   const id = `armadaMermaid${mermaidSeq++}`;
-  const { svg } = await mermaid.render(id, source, host);
+  const { svg } = await mermaid.render(id, quoteReservedSequenceActors(source), host);
   return acceptSvg(svg);
 }
 
