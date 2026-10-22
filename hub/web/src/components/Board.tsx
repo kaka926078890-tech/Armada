@@ -70,7 +70,7 @@ export default function Board({ runs, selected, onSelect, showArchived, onHide, 
               const chrome = cardChromeOf(r, readMap[r.id]);
               const editing = editingId === r.id;
               return (
-                <Card key={r.id} size="sm" data-state={selected === r.id ? "open" : "closed"} className={`group min-w-0 text-left gap-0 py-0 ring-0 overflow-hidden motion-safe:transition-[border-color,box-shadow] motion-safe:duration-200 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)] ${cardChromeClass(chrome, selected === r.id)}`}>
+                <Card key={r.id} size="sm" data-state={selected === r.id ? "open" : "closed"} className={`group shrink-0 min-w-0 text-left gap-0 py-0 ring-0 overflow-hidden motion-safe:transition-[border-color,box-shadow] motion-safe:duration-200 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)] ${cardChromeClass(chrome, selected === r.id)}`}>
                   {editing ? (
                     <CardContent className="px-2.5 py-2">
                       <Input

@@ -144,6 +144,7 @@ describe("Board unread chrome", () => {
         onRename={() => {}}
       />,
     );
+    expect(html).toMatch(/data-slot="card"[^>]*\bshrink-0\b/);
     expect(html).toMatch(/line-clamp-2/);
     expect(html).toContain(`title="${prompt}"`);
     expect(html).toContain(`>${"超长提示词".repeat(8)}…<`);

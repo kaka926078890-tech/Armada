@@ -54,6 +54,8 @@ describe("appearance layout stays coordinated when text scales", () => {
     expect(board).toMatch(/line-clamp-2/);
     expect(board).toContain("clipCardTitle");
     expect(board).toContain("whitespace-nowrap");
+    // overflow-hidden cards in a column flex shrink to a hairline when the column is full.
+    expect(board).toContain("group shrink-0 min-w-0");
   });
 
   test("sidebar stays fixed; board columns share the width without a horizontal scrollbar", () => {
