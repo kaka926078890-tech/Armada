@@ -880,6 +880,31 @@ describe("AskQuestion chat blocks", () => {
     expect(segs[0]).toMatchObject({ kind: "ask" });
   });
 
+  test("jsonl text before AskQuestion is the card context, minus the appended hook thought", () => {
+    const thought = "Since that doc isn't tracked in git, there's nothing to commit. I should summarize the gaps and change map for the user, then use AskQuestion.";
+    const body = "发布顺序：先确认 FinClaw 版本，再发 `findesk-core`。\n\n还剩两件事需要你决定：";
+    const blocks = eventsToChat([
+      ev({ seq: 1, hook_event_name: "afterAgentThought", payload: JSON.stringify({ text: thought }) }),
+      ev({ seq: 2, source: "transcript", payload: JSON.stringify({
+        role: "assistant",
+        message: {
+          content: [
+            { type: "text", text: `${body}\n\n${thought}\n\n` },
+            {
+              type: "tool_use", name: "AskQuestion", id: "tool-ask-ctx",
+              input: { questions: [{ id: "memory", prompt: "成员记忆怎么定？", options: [{ id: "keep", label: "保留" }, { id: "drop", label: "不保留" }] }] },
+            },
+          ],
+        },
+      }) }),
+      ev({ seq: 3, source: "transcript", payload: JSON.stringify({ role: "assistant", message: { content: [{ type: "text", text: "记忆这项已经写进文档。" }] } }) }),
+      ev({ seq: 4, source: "transcript", payload: JSON.stringify({ type: "turn_ended", status: "success" }) }),
+    ]);
+    const ask = blocks.find((b) => b.kind === "ask");
+    expect(ask).toMatchObject({ kind: "ask", request_id: "tool-ask-ctx", context: body });
+    expect(blocks.some((b) => (b.kind === "thought" || b.kind === "assistant") && b.text.includes("发布顺序"))).toBe(false);
+  });
+
   test("cdp askQuestion event is pending; resolved does not emitUser", () => {
     const blocks = eventsToChat([
       ev({

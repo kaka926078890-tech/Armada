@@ -377,6 +377,11 @@ function AskCard({ block, onAnswerAsk, askFailSeq }: {
       className={`rounded-xl border border-border bg-card/60 pl-3 pr-3 py-3 border-l-[3px] ${plan ? "border-l-[#F1B467]" : "border-l-[#599CE7]"}`}
       onClick={(e) => e.stopPropagation()}
     >
+      {block.context ? (
+        <div className={`mb-3 pb-3 border-b border-border ${UI_TYPE} text-foreground leading-relaxed`}>
+          <AssistantMarkdown text={block.context} />
+        </div>
+      ) : null}
       <div className={`${UI_META} text-muted-foreground mb-1`}>{plan ? "计划" : "提问"}</div>
       <div className={`${UI_TYPE} text-foreground leading-relaxed`}>
         {multi ? null : <AssistantMarkdown text={block.prompt} />}

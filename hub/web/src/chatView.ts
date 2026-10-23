@@ -23,6 +23,7 @@ export type ChatBlock =
     error?: string;
     askKind?: "plan";
     continueAllowed?: boolean;
+    context?: string;
   }
   | {
     kind: "subagent";
@@ -255,7 +256,13 @@ function transcriptBlocks(ev: RunEvent, p: any): ChatBlock[] {
   }
   if (role === "assistant") {
     const hasToolUse = parts.some((c) => c?.type === "tool_use" && c.name);
+    const askPart = parts.find((c) => c?.type === "tool_use" && c.name === ASK_TOOL_NAME);
+    const askHasOptions = !!askPart && askOptionsFromInput((askPart.input ?? {}) as Record<string, unknown>).length > 0;
+    const askContext = askHasOptions
+      ? parts.filter((c) => c?.type === "text" && c.text).map((c) => String(c.text)).join("\n\n").trim()
+      : "";
     for (const c of parts) {
+      if (askHasOptions && c?.type === "text") continue;
       if (c?.type === "text" && c.text) {
         out.push({ kind: hasToolUse ? "thought" : "assistant", text: String(c.text), seq: ev.seq });
       }
@@ -286,6 +293,7 @@ function transcriptBlocks(ev: RunEvent, p: any): ChatBlock[] {
             action: "resolved",
             askKind: askKindOf(input.kind),
             continueAllowed: askContinueAllowed(questions),
+            ...(askContext ? { context: askContext } : {}),
           });
         }
         continue;
@@ -367,6 +375,7 @@ function dedupe(blocks: ChatBlock[]): ChatBlock[] {
             action: b.action === "pending" ? old.action === "resolved" ? "pending" : b.action : b.action,
             error: b.error || old.error,
             request_id: b.request_id || old.request_id,
+            context: b.context || old.context,
           };
           out[prev] = merged;
           if (merged.request_id) askById.set(merged.request_id, prev);
@@ -456,6 +465,23 @@ export function stripAppendedThought(text: string, replies: readonly string[]): 
   return best ?? text;
 }
 
+/** Ask 那一行 jsonl：正文后面接着当轮思考，原文就是某条 afterAgentThought。 */
+export function stripTrailingThoughts(text: string, thoughts: readonly string[]): string {
+  let out = text.trim();
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const raw of thoughts) {
+      const t = raw.trim();
+      if (t.length < 20 || t.length >= out.length || !out.endsWith(t)) continue;
+      const head = out.slice(0, out.length - t.length);
+      if (!head.endsWith("\n\n")) continue;
+      out = head.trim();
+      changed = true;
+    }
+  }
+  return out;
+}
+
 function finish(blocks: ChatBlock[]): ChatBlock[] {
   const hasSub = blocks.some((b) => b.kind === "subagent");
   const filtered = hasSub ? blocks.filter((b) => !(b.kind === "tool" && b.name === "Task")) : blocks;
@@ -540,6 +566,7 @@ export function eventsToChat(events: RunEvent[]): ChatBlock[] {
   const subFromHooks: ChatBlock[] = [];
   const children = new Map<string, ChildAcc>();
   const hookReplies: string[] = [];
+  const hookThoughts: string[] = [];
 
   for (const ev of sorted) {
     const p = parsePayload(ev.payload);
@@ -560,6 +587,9 @@ export function eventsToChat(events: RunEvent[]): ChatBlock[] {
     if (ev.hook_event_name === "afterAgentResponse" && typeof p?.text === "string" && p.text.trim()) {
       hookReplies.push(p.text);
     }
+    if (ev.hook_event_name === "afterAgentThought" && typeof p?.text === "string" && p.text.trim()) {
+      hookThoughts.push(p.text);
+    }
     const hb = hookBlocks(ev, p);
     fromHooks.push(...hb);
     for (const b of hb) if (b.kind === "subagent") subFromHooks.push(b);
@@ -576,8 +606,11 @@ export function eventsToChat(events: RunEvent[]): ChatBlock[] {
     if (ev.seq > lastTx) liveHooks.push(...hb);
   }
 
-  const clipReply = (b: ChatBlock): ChatBlock =>
-    b.kind === "assistant" ? { ...b, text: stripAppendedThought(b.text, hookReplies) } : b;
+  const clipReply = (b: ChatBlock): ChatBlock => {
+    if (b.kind === "assistant") return { ...b, text: stripAppendedThought(b.text, hookReplies) };
+    if (b.kind === "ask" && b.context) return { ...b, context: stripTrailingThoughts(b.context, hookThoughts) };
+    return b;
+  };
   const txBlocks = fromTx.map(clipReply);
   const liveBlocks = liveHooks.map(clipReply);
   const txUser = new Set(txBlocks.filter((b) => b.kind === "user").map((b) => b.kind === "user" ? b.text : ""));
