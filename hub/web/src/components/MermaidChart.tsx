@@ -173,12 +173,34 @@ export function svgWithIntrinsicSize(svg: string): string {
   });
 }
 
-/** Dialog copy must not reuse the preview's svg ids, or one diagram's markers blank the other. */
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Dialog copy must not reuse the preview's svg ids, or one diagram's markers blank the other.
+ *  Theme rules are `#svgId` selectors in `<style>`. Leave those and the dialog fills black.
+ */
 export function isolateSvgIds(svg: string, prefix: string): string {
-  return svg
+  const ids = [...new Set([...svg.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]))]
+    .sort((a, b) => b.length - a.length);
+  let out = svg
     .replace(/\bid="([^"]+)"/g, (_, id: string) => `id="${prefix}${id}"`)
     .replace(/url\(#([^)]+)\)/g, (_, id: string) => `url(#${prefix}${id})`)
     .replace(/href="#([^"]+)"/g, (_, id: string) => `href="#${prefix}${id}"`);
+  for (const id of ids) {
+    out = out.replace(new RegExp(`#${escapeRegExp(id)}(?![\\w-])`, "g"), `#${prefix}${id}`);
+  }
+  return out;
+}
+
+/** Zoom from the viewBox size. A percent of the dialog never grows a diagram mermaid capped with inline max-width. */
+export function mermaidZoomStyle(svg: string, zoom: number): { width: string; height?: string } {
+  const attrs = /<svg\b([^>]*)>/i.exec(svg)?.[1] ?? "";
+  const w = Number(/\swidth="([\d.]+)"/i.exec(attrs)?.[1]);
+  const h = Number(/\sheight="([\d.]+)"/i.exec(attrs)?.[1]);
+  if (!(w > 0) || !(h > 0)) return { width: `${zoom * 100}%` };
+  const px = (n: number) => `${Math.round(n * zoom * 100) / 100}px`;
+  return { width: px(w), height: px(h) };
 }
 
 function svgPrefix(svg: string): string {
@@ -235,7 +257,7 @@ export function MermaidView({ svg, defaultOpen = false }: { svg: string; default
             </Button>
           </DialogHeader>
           <div className="min-h-0 flex-1 overflow-auto">
-            <div className="mermaid-dialog" style={{ width: `${zoom * 100}%` }} dangerouslySetInnerHTML={{ __html: dialogSvg }} />
+            <div className="mermaid-dialog" style={mermaidZoomStyle(dialogSvg, zoom)} dangerouslySetInnerHTML={{ __html: dialogSvg }} />
           </div>
         </DialogContent>
       </Dialog>

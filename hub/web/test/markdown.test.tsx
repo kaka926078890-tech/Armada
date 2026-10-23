@@ -4,7 +4,7 @@ import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import ChatThread, { AssistantMarkdown, markdownComponentsFor, askContinueAnswers, askContinueLabel, askSkipLabel, continueAllowed, isPlanAsk, planOverviewOf, ASK_LOCK_MS } from "../src/components/ChatThread";
 import { ASK_SUBMIT_TIMEOUT_MS } from "../../src/pendingAsk";
-import { MERMAID_PREVIEW_MAX_PX, MERMAID_RENDER_HOST_STYLE, MermaidView, isolateSvgIds, nextMermaidZoom, quoteReservedSequenceActors, svgWithIntrinsicSize } from "../src/components/MermaidChart";
+import { MERMAID_PREVIEW_MAX_PX, MERMAID_RENDER_HOST_STYLE, MermaidView, isolateSvgIds, mermaidZoomStyle, nextMermaidZoom, quoteReservedSequenceActors, svgWithIntrinsicSize } from "../src/components/MermaidChart";
 import type { ChatBlock } from "../src/chatView";
 
 describe("AssistantMarkdown", () => {
@@ -75,6 +75,22 @@ describe("AssistantMarkdown", () => {
   test("the dialog copy does not reuse the preview svg ids", () => {
     const svg = '<svg id="a"><rect fill="url(#a)" href="#a"/></svg>';
     expect(isolateSvgIds(svg, "d1-")).toBe('<svg id="d1-a"><rect fill="url(#d1-a)" href="#d1-a"/></svg>');
+    const themed = [
+      '<svg id="armadaMermaid0" style="max-width: 744px;">',
+      "<style>#armadaMermaid0 .node rect{fill:#ECECFF;stroke:#9370DB}#armadaMermaid0 .edgePath .path{stroke:#333;fill:none}</style>",
+      '<marker id="armadaMermaid0_pointEnd"></marker>',
+      '<path marker-end="url(#armadaMermaid0_pointEnd)"/>',
+      "</svg>",
+    ].join("");
+    const isolated = isolateSvgIds(themed, "d1-");
+    expect(isolated).toContain('id="d1-armadaMermaid0"');
+    expect(isolated).toContain("#d1-armadaMermaid0 .node rect{fill:#ECECFF;stroke:#9370DB}");
+    expect(isolated).toContain("#d1-armadaMermaid0 .edgePath .path{stroke:#333;fill:none}");
+    expect(isolated).toContain('id="d1-armadaMermaid0_pointEnd"');
+    expect(isolated).toContain('marker-end="url(#d1-armadaMermaid0_pointEnd)"');
+    expect(isolated).not.toContain("#armadaMermaid0 ");
+    expect(isolated).not.toContain("#armadaMermaid0{");
+    expect(isolated).not.toContain("url(#d1-d1-");
     const html = renderToStaticMarkup(<MermaidView svg={svg} defaultOpen />);
     expect(html).toContain('aria-label="流程图"');
     expect(html).toContain('aria-label="放大"');
@@ -84,6 +100,10 @@ describe("AssistantMarkdown", () => {
     expect(html).toMatch(/fill="url\(#d[0-9a-z]+-a\)"/);
     const css = readFileSync(join(import.meta.dir, "../src/index.css"), "utf8");
     expect(css).toContain(`max-height: ${MERMAID_PREVIEW_MAX_PX}px`);
+    expect(css).toContain("max-width: none !important");
+    expect(mermaidZoomStyle('<svg width="184.5" height="474.5"></svg>', 1)).toEqual({ width: "184.5px", height: "474.5px" });
+    expect(mermaidZoomStyle('<svg width="184.5" height="474.5"></svg>', 1.5)).toEqual({ width: "276.75px", height: "711.75px" });
+    expect(mermaidZoomStyle('<svg width="100%"></svg>', 2)).toEqual({ width: "200%" });
   });
 
   test("a participant named Box is quoted so sequenceDiagram does not lex it as a group", () => {

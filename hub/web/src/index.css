@@ -194,7 +194,8 @@ html[data-theme="light"] {
   display: block;
   width: 100%;
   height: auto;
-  max-width: none;
+  /* mermaid writes max-width inline; without !important the zoom wrapper cannot grow the diagram */
+  max-width: none !important;
   max-height: none;
 }
 .mermaid-block .background { fill: transparent !important; }
