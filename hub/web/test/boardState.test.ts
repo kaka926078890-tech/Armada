@@ -6,7 +6,7 @@ import {
   filterRunsByWorkspace, sortConversations, groupSlotsByMachine, isUnreadCompleted, isUnreadMessage,
   workspaceHasUnread, workspaceUnreadCount, formatUnreadCount, canArchiveRun, canRetryRun, isHubArchived,
   workspaceFolderName, workspaceHasLiveRun, resolveSelectedWorkspace, isUnreadNeedInput, cardChromeClass, cardChromeOf, columnHasAlert,
-  applyMarkAllRead, isBoardUnread, unreadAlertDotClass, unreadBadgeClass,
+  applyMarkAllRead, isBoardUnread, shouldStampSelectedRun, unreadAlertDotClass, unreadBadgeClass,
   extensionLagNotice, REQUIRED_EXTENSION_VERSION, reloadPendingForMachine, resumeStallCopy, RESUME_STALL_REASON, type RunRow,
   BOARD_SSE_DEBOUNCE_MS, boardSseShouldRefresh,
 } from "../src/boardState";
@@ -185,6 +185,16 @@ describe("unread dots", () => {
     const run = { ...base, status: "cancelled", ended_at: 9 };
     expect(isUnreadMessage(run, undefined)).toBe(false);
     expect(workspaceHasUnread([run], {})).toBe(false);
+  });
+
+  test("a follow-up on the open card does not stamp read again", () => {
+    expect(shouldStampSelectedRun(null, "r-1")).toBe(true);
+    expect(shouldStampSelectedRun("r-1", "r-2")).toBe(true);
+    expect(shouldStampSelectedRun("r-1", "r-1")).toBe(false);
+    expect(shouldStampSelectedRun("r-1", null)).toBe(false);
+    const completed = { ...base, status: "completed" as const, ended_at: 5000 };
+    expect(isBoardUnread(completed, 1000)).toBe(true);
+    expect(cardChromeOf(completed, 1000)).toBe("done");
   });
 
   test("need-input is a red bar; unread completed is a green bar; unread error is a red bar", () => {

@@ -362,6 +362,14 @@ export function isBoardUnread(run: RunRow, readAt: number | undefined): boolean 
   return isUnreadAlert(run, readAt) || isUnreadNeedInput(run, readAt);
 }
 
+/**
+ * 只有换了一张卡才盖已读。同一张卡的 ended_at 变化（续发把结束时间清掉、完成再写上）
+ * 不算看过新结果，否则绿条会在详情还开着时自己消失。
+ */
+export function shouldStampSelectedRun(prevId: string | null, nextId: string | null): nextId is string {
+  return nextId != null && nextId !== prevId;
+}
+
 /** 盖已读时不能早于活动时间或 Ask 检出时间，否则红点会立刻回来。 */
 export function unreadWatermark(run: RunRow): number {
   return Math.max(runActivityTs(run), run.pending_ask?.detected_at ?? 0);

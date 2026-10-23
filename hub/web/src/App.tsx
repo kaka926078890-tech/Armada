@@ -7,7 +7,7 @@ import type { Machine } from "./types";
 import type { CursorReloadPendingView, RunRow } from "./boardState";
 import {
   decodeWorkspaceKey, encodeWorkspaceKey, filterRunsByWorkspace, listWorkspaceSlots, sortConversations,
-  workspaceFolderName, resolveSelectedWorkspace, applyMarkAllRead, isBoardUnread,
+  workspaceFolderName, resolveSelectedWorkspace, applyMarkAllRead, isBoardUnread, shouldStampSelectedRun,
   BOARD_SSE_DEBOUNCE_MS, boardSseShouldRefresh,
 } from "./boardState";
 import { applyPendingReads, localStampsToUpload, readSseShouldPull, takeReadBatches, type PendingRead } from "./readSync";
@@ -241,8 +241,7 @@ export default function App() {
 
   const openRun = useCallback((id: string) => {
     setSelectedRun(id);
-    persistRead(id);
-  }, [persistRead]);
+  }, []);
 
   const openRunFromAlert = useCallback((alert: { runId: string; machineId: string; workspaceRoot: string }) => {
     const known = runs.some((r) => r.id === alert.runId) || hiddenRuns.some((r) => r.id === alert.runId);
@@ -253,8 +252,7 @@ export default function App() {
     try { localStorage.setItem(WS_KEY, next.selectedWs); } catch { /* ignore */ }
     void api.putUiPrefs({ selectedWorkspace: next.selectedWs }).catch(() => {});
     setSelectedRun(next.selectedRun);
-    persistRead(next.selectedRun);
-  }, [runs, hiddenRuns, persistRead]);
+  }, [runs, hiddenRuns]);
 
   const refresh = useCallback(() => {
     if (!authed) return;
@@ -404,11 +402,13 @@ export default function App() {
     if (prefsReady) void api.putUiPrefs({ selectedWorkspace: resolvedWs }).catch(() => {});
   }, [resolvedWs, selectedWs, prefsReady]);
 
-  const selectedEnded = runs.find((r) => r.id === selectedRun)?.ended_at ?? null;
+  const selectedIdRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!selectedRun) return;
+    const prev = selectedIdRef.current;
+    selectedIdRef.current = selectedRun;
+    if (!shouldStampSelectedRun(prev, selectedRun)) return;
     persistRead(selectedRun);
-  }, [selectedRun, selectedEnded, persistRead]);
+  }, [selectedRun, persistRead]);
 
   const seenStatus = useRef<Map<string, string> | null>(null);
   const seenAsk = useRef<Map<string, string | null> | null>(null);
