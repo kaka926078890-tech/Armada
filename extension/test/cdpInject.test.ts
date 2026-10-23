@@ -826,6 +826,8 @@ describe("createImagePaster", () => {
     const r = await paste("/Users/x/armada-test-ws", "看图", [{ bytes: Buffer.from("x"), mime: "image/png" }], () => {}, true);
     expect(r.ok).toBe(true);
     expect(log.filter((c) => c.method === "Input.dispatchKeyEvent")).toHaveLength(2);
+    const pasteDown = log.find((c) => c.method === "Input.dispatchKeyEvent" && c.params?.type === "keyDown" && c.params?.key === "v");
+    expect(pasteDown?.params?.commands).toEqual(["paste"]);
     const insert = log.find((c) => c.method === "Input.insertText");
     expect(insert?.params?.text).toBe("看图");
   });

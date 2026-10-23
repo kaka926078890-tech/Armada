@@ -1134,8 +1134,11 @@ export function createImagePaster(deps: CdpSubmitterDeps) {
           await session.call("Runtime.evaluate", {
             expression: `(${COMPOSER_FOCUS_IMAGE_JS})()`, returnByValue: true,
           });
+          // 2026-10-23 真机：Meta+V 能到 aisplash 输入框，但不会发出 paste，芯片数停在 0。
+          // commands:paste 才会带上 image/png，.context-pill-image 才会出现。
           await session.call("Input.dispatchKeyEvent", {
             type: "keyDown", modifiers: meta, key: "v", code: "KeyV", windowsVirtualKeyCode: 86,
+            commands: ["paste"],
           });
           await session.call("Input.dispatchKeyEvent", {
             type: "keyUp", modifiers: meta, key: "v", code: "KeyV", windowsVirtualKeyCode: 86,

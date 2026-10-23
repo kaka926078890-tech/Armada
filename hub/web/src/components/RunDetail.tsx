@@ -9,6 +9,7 @@ import { collectEventPages, mergeEvents, EVENT_PAGE_SIZE, hasOlderEvents, olderE
 import { mergeAttachmentFiles, isConsoleAttachment, parseRunAttachmentIds } from "../attachments";
 import { ConsoleFilePicker } from "./ConsoleFilePicker";
 import { endFollowupSend, isFollowupSendEnter, tryBeginFollowupSend } from "../followupSend";
+import { queueComposerCaretRestore, shouldRefocusComposerAfterSend, shouldRestoreComposerFocus } from "../composerFocus";
 import { WIDTH_KEY, type PromptSnippet } from "../uiPrefs";
 import { appendSnippetBody } from "../promptSnippets";
 import { PromptSnippetBar } from "./PromptSnippetBar";
@@ -121,6 +122,7 @@ export default function RunDetail({
   const heightRef = useRef(0);
   const jumpedRef = useRef<string | null>(null);
   const sendingRef = useRef(false);
+  const followupRef = useRef<HTMLTextAreaElement>(null);
   const [sending, setSending] = useState(false);
   const sendEpoch = useRef(0);
   const seqRef = useRef(0);
@@ -366,6 +368,10 @@ export default function RunDetail({
         if (sendEpoch.current === epoch) {
           endFollowupSend(sendingRef);
           setSending(false);
+          const box = followupRef.current;
+          if (box) {
+            queueComposerCaretRestore(box, (active) => shouldRefocusComposerAfterSend(active, null));
+          }
         }
       }
     })();
@@ -604,8 +610,17 @@ export default function RunDetail({
           ) : null}
           <div className="flex gap-2 items-end">
             <Textarea
+              ref={followupRef}
               value={followup}
               onChange={(e) => setFollowup(e.target.value)}
+              onBlur={(e) => {
+                const el = e.currentTarget;
+                queueComposerCaretRestore(el, (active) => (
+                  sendingRef.current
+                    ? shouldRefocusComposerAfterSend(active, null)
+                    : shouldRestoreComposerFocus(active)
+                ));
+              }}
               onPaste={(e) => {
                 const items = [...e.clipboardData.files];
                 if (!items.length) return;
@@ -624,7 +639,7 @@ export default function RunDetail({
               placeholder={run.pending_ask ? (run.pending_ask.kind === "plan" ? "请先点上方 Build…" : "请先回答上方选择题…") : "接着说。Enter 发送，Shift+Enter 换行"}
               className="followup-input min-w-0 flex-1 min-h-[4.5rem] max-h-48 resize-y"
             />
-            <Button type="submit" disabled={!injectReady || sending || (!followup.trim() && followupFiles.length === 0)} className="shrink-0">发送</Button>
+            <Button type="button" data-armada-send="" disabled={!injectReady || sending || (!followup.trim() && followupFiles.length === 0)} className="shrink-0" onMouseDown={(e) => e.preventDefault()} onClick={() => sendFollowup()}>发送</Button>
           </div>
           <ConsoleFilePicker
             files={followupFiles}

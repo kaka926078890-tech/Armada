@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { mergeAttachmentFiles, isConsoleAttachment } from "../attachments";
 import { ConsoleFilePicker } from "./ConsoleFilePicker";
-import { shouldRestoreComposerFocus } from "../composerFocus";
+import { queueComposerCaretRestore, shouldRefocusComposerAfterSend, shouldRestoreComposerFocus } from "../composerFocus";
 import { endFollowupSend, isFollowupSendEnter, tryBeginFollowupSend } from "../followupSend";
 import { CDP_NOT_READY_COPY } from "../boardState";
 import { appendSnippetBody } from "../promptSnippets";
@@ -157,12 +157,11 @@ export function DispatchModal({
           style={{ fieldSizing: "fixed" }}
           onBlur={(e) => {
             const el = e.currentTarget;
-            requestAnimationFrame(() => {
-              if (!el.isConnected) return;
-              const active = el.ownerDocument.activeElement;
-              if (active === el) return;
-              if (shouldRestoreComposerFocus(active instanceof Element ? active : null)) el.focus();
-            });
+            queueComposerCaretRestore(el, (active) => (
+              sendingLock.current
+                ? shouldRefocusComposerAfterSend(active, null)
+                : shouldRestoreComposerFocus(active)
+            ));
           }}
           onKeyDown={(e) => {
             if (!isFollowupSendEnter(e)) return;
@@ -187,7 +186,7 @@ export function DispatchModal({
         {error && <div className={`${UI_TYPE} text-destructive`}>{error}</div>}
         <DialogFooter className="mx-0 mb-0">
           <Button type="button" variant="outline" onClick={onClose}>取消</Button>
-          <Button type="button" disabled={!canDispatch} onClick={() => submitDispatch()}>
+          <Button type="button" data-armada-send="" disabled={!canDispatch} onMouseDown={(e) => e.preventDefault()} onClick={() => submitDispatch()}>
             {sending ? "派发中…" : "派发"}
           </Button>
         </DialogFooter>

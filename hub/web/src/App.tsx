@@ -615,7 +615,7 @@ export default function App() {
         </div>
         {selectedRun && (
           <div className="absolute inset-0 z-40">
-            <button type="button" className="absolute inset-0 bg-black/70 backdrop-blur-[2px]" aria-label="关闭详情" onClick={() => setSelectedRun(null)} />
+            <div className="absolute inset-0 bg-black/70" onClick={() => setSelectedRun(null)} />
             <div className="absolute inset-y-0 right-0 flex pointer-events-none max-w-full">
               <div className="pointer-events-auto h-full min-h-0 max-w-full">
                 <RunDetail
