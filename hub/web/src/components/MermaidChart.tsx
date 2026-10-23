@@ -157,6 +157,22 @@ export function nextMermaidZoom(current: number, delta: number): number {
   return Math.min(MERMAID_ZOOM_MAX, Math.max(MERMAID_ZOOM_MIN, next));
 }
 
+/**
+ * mermaid 12 writes width="100%" and no height. Preview CSS uses width/height auto,
+ * so that SVG lays out at 0×0 and the card looks empty. Pin the viewBox size.
+ */
+export function svgWithIntrinsicSize(svg: string): string {
+  const box = /viewBox="\s*[-\d.]+\s+[-\d.]+\s+([-\d.]+)\s+([-\d.]+)\s*"/.exec(svg);
+  if (!box) return svg;
+  const w = Number(box[1]);
+  const h = Number(box[2]);
+  if (!(w > 0) || !(h > 0)) return svg;
+  return svg.replace(/<svg\b([^>]*)>/i, (_full, attrs: string) => {
+    const next = attrs.replace(/\swidth="[^"]*"/i, "").replace(/\sheight="[^"]*"/i, "");
+    return `<svg${next} width="${w}" height="${h}">`;
+  });
+}
+
 /** Dialog copy must not reuse the preview's svg ids, or one diagram's markers blank the other. */
 export function isolateSvgIds(svg: string, prefix: string): string {
   return svg
@@ -237,7 +253,7 @@ export function MermaidChart({ source }: { source: string }) {
     const host = mermaidRenderHost();
     document.body.appendChild(host);
     void renderMermaid(source, theme, host).then(
-      (next) => { if (!cancelled) setSvg(next); },
+      (next) => { if (!cancelled) setSvg(svgWithIntrinsicSize(next)); },
       () => { if (!cancelled) setFailed(true); },
     ).finally(() => host.remove());
     return () => { cancelled = true; };

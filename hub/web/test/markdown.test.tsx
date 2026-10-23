@@ -4,7 +4,7 @@ import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import ChatThread, { AssistantMarkdown, markdownComponentsFor, askContinueAnswers, askContinueLabel, askSkipLabel, continueAllowed, isPlanAsk, planOverviewOf, ASK_LOCK_MS } from "../src/components/ChatThread";
 import { ASK_SUBMIT_TIMEOUT_MS } from "../../src/pendingAsk";
-import { MERMAID_PREVIEW_MAX_PX, MERMAID_RENDER_HOST_STYLE, MermaidView, isolateSvgIds, nextMermaidZoom, quoteReservedSequenceActors } from "../src/components/MermaidChart";
+import { MERMAID_PREVIEW_MAX_PX, MERMAID_RENDER_HOST_STYLE, MermaidView, isolateSvgIds, nextMermaidZoom, quoteReservedSequenceActors, svgWithIntrinsicSize } from "../src/components/MermaidChart";
 import type { ChatBlock } from "../src/chatView";
 
 describe("AssistantMarkdown", () => {
@@ -49,6 +49,16 @@ describe("AssistantMarkdown", () => {
     expect(MERMAID_RENDER_HOST_STYLE).toContain("position:fixed");
     expect(MERMAID_RENDER_HOST_STYLE).toContain("left:-10000px");
     expect(src).toContain("mermaid.render(id, quoteReservedSequenceActors(source), host)");
+  });
+
+  test("a mermaid 12 svg with width 100% gets a real viewBox size", () => {
+    const raw = '<svg id="a" width="100%" viewBox="4 4 744 94.2" style="max-width: 744px;"></svg>';
+    const sized = svgWithIntrinsicSize(raw);
+    expect(sized).toContain('width="744"');
+    expect(sized).toContain('height="94.2"');
+    expect(sized).not.toContain('width="100%"');
+    expect(sized).toContain('viewBox="4 4 744 94.2"');
+    expect(svgWithIntrinsicSize("<svg></svg>")).toBe("<svg></svg>");
   });
 
   test("a ready diagram is a capped preview with an expand button", () => {
