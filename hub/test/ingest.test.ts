@@ -683,6 +683,35 @@ describe("event ingest", () => {
     ws.close();
   });
 
+  test("tool file bodies stay in sqlite and stay off the run stream and events API", async () => {
+    const { ws, api, runId } = await startBoundRun();
+    const body = "fn main() {}\n".repeat(400);
+    const ac = new AbortController();
+    const resp = await fetch(`http://127.0.0.1:${hub!.port}/api/runs/${runId}/stream?token=${hub!.token}`, { signal: ac.signal });
+    const reader = resp.body!.getReader();
+    ws.send(JSON.stringify(ev(runId, 1, "preToolUse", {
+      tool_name: "Write",
+      tool_input: { file_path: "/ws/a/src/lib.rs", content: body },
+    })));
+    let text = "";
+    for (let i = 0; i < 10 && !text.includes("preToolUse"); i++) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      text += new TextDecoder().decode(value);
+    }
+    expect(text).toContain("preToolUse");
+    expect(text).not.toContain(body.slice(0, 80));
+    expect(text).toContain("/ws/a/src/lib.rs");
+    ac.abort();
+    const stored = hub!.db.query("SELECT payload FROM run_events WHERE run_id=?1").get(runId) as { payload: string };
+    expect((JSON.parse(stored.payload) as { tool_input: { content: string } }).tool_input.content).toBe(body);
+    const events = (await (await api(`/api/runs/${runId}/events`)).json()) as { payload: string }[];
+    const shown = JSON.parse(events[0]!.payload) as { tool_input: { file_path: string; content: string } };
+    expect(shown.tool_input.file_path).toBe("/ws/a/src/lib.rs");
+    expect(shown.tool_input.content).toBe("");
+    ws.close();
+  });
+
   test("SSE stream receives events for the run", async () => {
     const { ws, runId } = await startBoundRun();
     const ac = new AbortController();

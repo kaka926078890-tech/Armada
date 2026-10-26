@@ -4,6 +4,7 @@ import type { SseHub } from "./sse";
 import { outboundClaimFromHook, outboundClaimFromTranscript } from "./outboundClaim";
 import { stopFromCursorSessionEnd, stopFromJsonlTurnEnded, genOf } from "./generationOwnership";
 import { ACTIVE_STATUSES, OCCUPYING_STATUSES, TERMINAL_STATUSES } from "./concurrency";
+import { clientEventPayload } from "./clientEvent";
 
 /** runId → 该任务派出的子代理 conversation_id。缓存；重启后从 run_events 重建。 */
 const subagentCids = new Map<string, Set<string>>();
@@ -220,6 +221,9 @@ export function ingestEvent(db: Database, runs: RunService, sse: SseHub, machine
       if (run.conversation_id && cid === run.conversation_id) subagentCids.delete(runId);
     }
   }
-  sse.broadcast(runId, { type: "run.event", runId, seq: maxSeq + 1, hookEventName: msg.hookEventName, payload: msg.payload, ts: msg.ts });
+  sse.broadcast(runId, {
+    type: "run.event", runId, seq: maxSeq + 1, hookEventName: msg.hookEventName,
+    payload: clientEventPayload(msg.payload), ts: msg.ts,
+  });
   (msg as any).__ack = ack();
 }

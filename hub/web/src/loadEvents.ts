@@ -22,6 +22,28 @@ export async function collectEventPages<T extends { seq: number }>(
   return all;
 }
 
+/** One in-flight tail fetch. A burst sets a single follow-up instead of a request per event. */
+export function createForwardGate(start: () => Promise<unknown>): () => void {
+  let flight = false;
+  let again = false;
+  const run = () => {
+    if (flight) {
+      again = true;
+      return;
+    }
+    flight = true;
+    let pending: Promise<unknown>;
+    try { pending = start(); } catch (err) { pending = Promise.reject(err); }
+    void pending.finally(() => {
+      flight = false;
+      if (!again) return;
+      again = false;
+      run();
+    });
+  };
+  return run;
+}
+
 export function mergeEvents<T extends { seq: number }>(prev: T[], incoming: T[]): T[] {
   if (incoming.length === 0) return prev;
   const bySeq = new Map<number, T>();

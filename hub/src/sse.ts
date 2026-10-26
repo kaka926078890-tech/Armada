@@ -13,7 +13,9 @@ export class SseHub {
   broadcast(runId: string, event: object): void {
     this.onEvent?.(runId, event);
     const data = `data: ${JSON.stringify(event)}\n\n`;
-    for (const ch of [runId, "*"]) {
+    // The board socket is "*". It ignores run.event; tool ticks must not be parsed there.
+    const channels = (event as { type?: string }).type === "run.event" ? [runId] : [runId, "*"];
+    for (const ch of channels) {
       for (const c of this.clients.get(ch) ?? []) {
         try { c.enqueue(new TextEncoder().encode(data)); } catch { /* closed */ }
       }

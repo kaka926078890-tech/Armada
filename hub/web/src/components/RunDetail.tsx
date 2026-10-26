@@ -5,7 +5,7 @@ import { workspaceFolderName, runDisplayName, canRetryRun, CDP_NOT_READY_COPY, r
 import ChatThread from "./ChatThread";
 import FilePreview from "./FilePreview";
 import { eventsToChat, mergePendingAsk, mergeOutboundChat, outboundUserText, queuedOutbound, stampOutboundImages, userMessageCaption, INITIAL_VISIBLE_TURNS, initialHiddenPrefixTurns, recentTurnsWindow, stampFallbackImageIds } from "../chatView";
-import { collectEventPages, mergeEvents, EVENT_PAGE_SIZE, hasOlderEvents, olderEventsQuery, shouldLoadOlder, prependPreserveScroll, stickAfterContentResize } from "../loadEvents";
+import { collectEventPages, mergeEvents, createForwardGate, EVENT_PAGE_SIZE, hasOlderEvents, olderEventsQuery, shouldLoadOlder, prependPreserveScroll, stickAfterContentResize } from "../loadEvents";
 import { mergeAttachmentFiles, isConsoleAttachment, parseRunAttachmentIds } from "../attachments";
 import { ConsoleFilePicker } from "./ConsoleFilePicker";
 import { HubImageRow } from "./ImageThumb";
@@ -183,18 +183,18 @@ export default function RunDetail({
       });
     };
 
-    const fetchForward = (afterSeq: number) => {
+    const fetchForward = createForwardGate(() =>
       collectEventPages(
         (after) => api.events(runId, { afterSeq: after, limit: EVENT_PAGE_SIZE }) as Promise<RunEvent[]>,
-        afterSeq,
+        seqRef.current,
         EVENT_PAGE_SIZE,
       )
         .then((evs) => {
           if (aborted || !Array.isArray(evs) || evs.length === 0) return;
           applyEvents(evs, "merge");
         })
-        .catch(() => { if (!aborted) setLoadError("事件加载失败（hub 不可达）"); });
-    };
+        .catch(() => { if (!aborted) setLoadError("事件加载失败（hub 不可达）"); }),
+    );
 
     api.events(runId, { fromEnd: true, limit: EVENT_PAGE_SIZE })
       .then((evs) => {
@@ -208,7 +208,7 @@ export default function RunDetail({
           setHiddenPrefixTurns(hidden);
         }
         tailReady.current = true;
-        if (seqRef.current > 0) fetchForward(seqRef.current);
+        if (seqRef.current > 0) fetchForward();
       })
       .catch(() => { if (!aborted) setLoadError("事件加载失败（hub 不可达）"); });
 
@@ -223,7 +223,7 @@ export default function RunDetail({
       }
       if (data.type === "run.event") {
         if (!tailReady.current) return;
-        fetchForward(seqRef.current);
+        fetchForward();
       }
       if (data.type === "run.status" || data.type === "run.archived" || data.type === "run.outbound") {
         api.run(runId).then((r) => {

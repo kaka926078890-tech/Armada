@@ -23,6 +23,7 @@ import type { RunEvent } from "../web/src/types";
 import { pruneHubLogs } from "./pruneLogs";
 import { ChatgptBridge } from "./chatgptBridge";
 import { parseChatgptRoot } from "./chatgptDesktop";
+import { clientEventRows } from "./clientEvent";
 
 export interface HubServer {
   server: ReturnType<typeof Bun.serve>;
@@ -249,17 +250,17 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
       const rows = db.query(
         "SELECT * FROM run_events WHERE run_id=?1 AND seq<?2 ORDER BY seq DESC LIMIT ?3",
       ).all(runId, beforeSeq, limit) as any[];
-      return c.json(rows.reverse());
+      return c.json(clientEventRows(rows.reverse()));
     }
     if (fromEnd && afterOk <= 0) {
       const rows = db.query(
         "SELECT * FROM run_events WHERE run_id=?1 ORDER BY seq DESC LIMIT ?2",
       ).all(runId, limit) as any[];
-      return c.json(rows.reverse());
+      return c.json(clientEventRows(rows.reverse()));
     }
     const rows = db.query("SELECT * FROM run_events WHERE run_id=?1 AND seq>?2 ORDER BY seq LIMIT ?3")
       .all(runId, afterOk, limit);
-    return c.json(rows);
+    return c.json(clientEventRows(rows as any[]));
   });
   app.get("/api/runs/:id/stream", (c) => sse.response(c.req.param("id"), c.req.raw.signal));
   app.get("/api/events", (c) => sse.response("*", c.req.raw.signal));

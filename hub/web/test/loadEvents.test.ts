@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
-  collectEventPages, mergeEvents, EVENT_PAGE_SIZE,
+  collectEventPages, mergeEvents, createForwardGate, EVENT_PAGE_SIZE,
   hasOlderEvents, olderEventsQuery, shouldLoadOlder, prependPreserveScroll,
   isStuckToBottom, stickAfterContentResize,
 } from "../src/loadEvents";
@@ -132,5 +132,26 @@ describe("follow the end when a diagram finishes layout", () => {
       scrollTop: 100,
       clientHeight: 300,
     })).toBe(false);
+  });
+});
+
+describe("createForwardGate", () => {
+  test("a burst waits for the in-flight fetch, then runs once more", async () => {
+    let calls = 0;
+    let release: () => void = () => {};
+    const gate = createForwardGate(() => new Promise<void>((resolve) => {
+      calls += 1;
+      release = resolve;
+    }));
+    gate();
+    gate();
+    gate();
+    expect(calls).toBe(1);
+    release();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(calls).toBe(2);
+    release();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(calls).toBe(2);
   });
 });
