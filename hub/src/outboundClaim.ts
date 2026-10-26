@@ -1,3 +1,4 @@
+import { hasImageMarkers, stripImageMarkers } from "../../extension/src/imageMarkers";
 import { normalizePrompt } from "./concurrency";
 
 export const OUTBOUND_LIMIT = 8;
@@ -55,4 +56,24 @@ export function hookSubmitPrompt(payload: any): string | null {
   if (typeof payload?.prompt !== "string") return null;
   const n = normalizePrompt(extractUserText(payload.prompt));
   return n || null;
+}
+
+/** 认领续发：去掉 Cursor 的图片包装。只剩图时 text 为空、imageOnly 为真。 */
+export function outboundClaimKey(raw: string): { text: string; imageOnly: boolean } | null {
+  const text = stripImageMarkers(extractUserText(raw));
+  if (text) return { text, imageOnly: false };
+  if (hasImageMarkers(raw)) return { text: "", imageOnly: true };
+  return null;
+}
+
+export function outboundClaimFromHook(payload: any): { text: string; imageOnly: boolean } | null {
+  if (typeof payload?.prompt !== "string") return null;
+  return outboundClaimKey(payload.prompt);
+}
+
+export function outboundClaimFromTranscript(payload: any): { text: string; imageOnly: boolean } | null {
+  if (payload?.role !== "user") return null;
+  const parts = Array.isArray(payload?.message?.content) ? payload.message.content : [];
+  const raw = parts.filter((c: any) => c?.type === "text").map((c: any) => String(c.text ?? "")).join("\n");
+  return outboundClaimKey(raw);
 }

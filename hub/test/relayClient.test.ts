@@ -155,6 +155,17 @@ describe("runToSnap", () => {
     expect(snap.queueMessageDefaultBehavior).toBe("queue");
   });
 
+  test("image-only outbound stays on the snap", () => {
+    const sha = "a".repeat(64);
+    const snap = runToSnap({
+      id: "r-1", machine_id: "m-1", workspace_root: "/ws/a", prompt: "hi", status: "running",
+      outbound: [{ id: "o1", prompt: "", expected_mode: "queue", state: "queued", created_at: 1, attachment_ids: [sha] }],
+    }, []);
+    expect(snap.outbound).toEqual([
+      { id: "o1", prompt: "", expectedMode: "queue", state: "queued", createdAt: 1, attachmentIds: [sha] },
+    ]);
+  });
+
   test("archived_at becomes archived boolean", () => {
     const base = { id: "r-1", machine_id: "m-1", workspace_root: "/ws/a", prompt: "hi", status: "completed", created_at: 1 };
     expect(runToSnap({ ...base, archived_at: 9 }, []).archived).toBe(true);

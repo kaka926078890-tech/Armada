@@ -760,7 +760,6 @@ fun DispatchModal(
     vm: SessionVm,
     workspace: WorkspaceDto,
     followupRunId: String?,
-    followupIsLive: Boolean = false,
     onSent: (BoardColumn) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -773,7 +772,6 @@ fun DispatchModal(
             vm,
             workspace,
             followupRunId,
-            followupIsLive,
             onSent = {
                 onSent(it)
                 onDismiss()
@@ -784,7 +782,7 @@ fun DispatchModal(
 }
 
 @Composable
-fun DispatchSheet(vm: SessionVm, workspace: WorkspaceDto, followupRunId: String?, followupIsLive: Boolean, onSent: (BoardColumn) -> Unit, onDismiss: () -> Unit) {
+fun DispatchSheet(vm: SessionVm, workspace: WorkspaceDto, followupRunId: String?, onSent: (BoardColumn) -> Unit, onDismiss: () -> Unit) {
     val state by vm.state.collectAsState()
     var prompt by remember { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
@@ -832,7 +830,7 @@ fun DispatchSheet(vm: SessionVm, workspace: WorkspaceDto, followupRunId: String?
     }
     val trimmed = prompt.trim()
     val chatgptTextOnly = workspace.workspaceRoot.startsWith("chatgpt:")
-    val photoEnabled = !followupIsLive && !chatgptTextOnly
+    val photoEnabled = !chatgptTextOnly
     val canSend = workspace.canInject && !sending && !listening && (trimmed.isNotEmpty() || (photoEnabled && drafts.isNotEmpty()))
     fun send() {
         if (listening) {
@@ -968,8 +966,6 @@ fun DispatchSheet(vm: SessionVm, workspace: WorkspaceDto, followupRunId: String?
             onPhoto = {
                 if (chatgptTextOnly) {
                     err = operatorMessage("CHATGPT_TEXT_ONLY")
-                } else if (!photoEnabled) {
-                    err = operatorMessage("OUTBOUND_TEXT_ONLY")
                 } else if (!canAcceptMoreAttachments(drafts.size, 1)) {
                     err = operatorMessage("ATTACHMENT_COUNT")
                 } else {
@@ -978,7 +974,6 @@ fun DispatchSheet(vm: SessionVm, workspace: WorkspaceDto, followupRunId: String?
             },
             onPhotoLong = {
                 if (chatgptTextOnly) err = operatorMessage("CHATGPT_TEXT_ONLY")
-                else if (!photoEnabled) err = operatorMessage("OUTBOUND_TEXT_ONLY")
                 else addClipboard()
             },
         )
@@ -1140,7 +1135,7 @@ fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String, onBack: () -> 
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         Text("${r.queuedOutbound.size} 条还在排队", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        r.queuedOutbound.forEach { Text(it.prompt, fontSize = 13.sp) }
+                        r.queuedOutbound.forEach { Text(outboundQueueLabel(it.prompt, it.attachmentIds.size), fontSize = 13.sp) }
                     }
                 }
                 if (r.isLive || r.showsRetry) {
@@ -1158,7 +1153,6 @@ fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String, onBack: () -> 
                 vm = vm,
                 workspace = ws,
                 followupRunId = runId,
-                followupIsLive = run?.isLive == true,
                 onSent = { scope.launch { vm.refresh(); runCatching { adopt(vm.api().run(runId)) } } },
                 onDismiss = { showFollow = false },
             )

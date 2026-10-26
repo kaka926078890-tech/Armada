@@ -17,7 +17,7 @@
 | 问题 | 同 cid 占用中 `POST /api/runs/:id/followup` → `409 CONVERSATION_BUSY`。详情只能等停。Cursor 已能在生成中 Enter：配置 `queue` 进托盘，`steer` 进当前轮用户句。 |
 | 核心方案 | **方案 1：全程打进 Cursor。** `running` 续发不改 `status`；占注入槽后 `openComposer(cid)` + 现网 `COMPOSER_ENTER_JS`（普通 Enter）。心跳上报 `cursor.composer.queueMessageDefaultBehavior`；详情按该值立刻画托盘或当前轮用户句。存在 `state=queued` 时 matching completed → `QUEUE_DRAIN`（记下 `deferred_stop`，清零后重放）。 |
 | 关键约束 | ① 详情无 Send/Queue 开关，不改被控机配置。② 同 cid 仍一条 live 生成。③ `running` 续发 **Mac/Win 都不得** `retireLiveGeneration` / 在注入当下 `attachHubGeneration`。④ 注入槽 = `dispatched`/`binding` **加上** `outbound.state=injecting`。⑤ `openComposer(cid)` 硬前置；v1 沿用 `COMPOSER_FOCUS_JS` 空框优先（**只保证焦点卡**）。⑥ `hasOutstandingOutbound` 计未落成用户句的 `queued` 与 `steered`。⑦ running 注入禁止 `addPending` / `bindKnown` / `FollowupStopGuard.arm`。 |
-| 明确不做 | 中台 FIFO 代替 Cursor 队列；解析 `settings.json`；Cmd/Alt+Enter 按配置切换；复刻 Keep Queuing 提示；`pending_ask` / `dispatched` / `binding` 续发；v1 运行中带图；v1 CDP 读队列 DOM 纠偏；v1 改 FOCUS 拒绝第一空框。 |
+| 明确不做 | 中台 FIFO 代替 Cursor 队列；解析 `settings.json`；Cmd/Alt+Enter 按配置切换；复刻 Keep Queuing 提示；`pending_ask` / `dispatched` / `binding` 续发；v1 CDP 读队列 DOM 纠偏；v1 改 FOCUS 拒绝第一空框。 |
 
 **可行性（写生产前）：**
 
@@ -121,7 +121,7 @@ v1 识别与 outstanding：
 | 字段 | 约束 |
 | --- | --- |
 | `id` / `run_id` | PK；FK `runs.id` |
-| `prompt` / `attachments` | 与现网 followup 相同；v1 running **纯文本**（`attachmentIds.length>0` → 409 `OUTBOUND_TEXT_ONLY`） |
+| `prompt` / `attachments` | 与现网 followup 相同。running 可以附图：blob 校验后写入 `attachments`，`run.followup` 带 `attachments` 且 `live: true`。纯文本仍走原来的 Enter |
 | `expected_mode` | 注入当时心跳：`queue` / `steer` / `unknown` |
 | `state` | `injecting` → `queued` \| `steered` \| `failed`；增量 jsonl user 认领 → `consumed` |
 | `created_at` | epoch ms；认领下界 |
@@ -144,11 +144,11 @@ COUNT(*) dispatched/binding on machine
 
 ### 4.3 REST / WS
 
-`POST /api/runs/:id/followup` body 不变。带图的 running 请求 → 409 `OUTBOUND_TEXT_ONLY`。
+`POST /api/runs/:id/followup` body 不变。running 带 `attachmentIds` 与终态续聊同一套 blob 校验，注入走现网 `injectAttachments`。
 
 | 原状态 | 结果 |
 | --- | --- |
-| `running` 且无 `pending_ask`、有 cid、纯文本 | 201；outbound `injecting`；**status 仍 `running`** |
+| `running` 且无 `pending_ask`、有 cid、有文字或附图 | 201；outbound `injecting`；**status 仍 `running`** |
 | `queued` / `dispatched` / `binding` | 409 `CONVERSATION_BUSY` |
 | `pending_ask` | 409 `CONVERSATION_BUSY` |
 | 注入槽忙 | 409 `INJECT_SLOT_BUSY`；不插 outbound |
@@ -360,7 +360,7 @@ turn_ended(G1) + queued → ignore QUEUE_DRAIN
 | A10 | rearm / Win 新 gen 作废 deferred_stop | hub |
 | A11 | 认领只用 created_at 之后 transcript user + `normalizePrompt(extractUserText)`；不扫历史 | hub ingest |
 | A12 | abort/error/cancel → apply；outbound `failed` | hub |
-| A13 | `OUTBOUND_LIMIT` 429；带图 running → `OUTBOUND_TEXT_ONLY` | hub |
+| A13 | `OUTBOUND_LIMIT` 429。running 附图走 blob 校验并 `run.followup` `live` + `attachments` | hub |
 | A14 | 工作区 occupying `PROMPT_COLLISION` 仍在 | hub |
 | A15 | slot COUNT 含 injecting 时 `promoteNextQueued` 被挡 | hub |
 | A16 | offline → outbound failed | hub |

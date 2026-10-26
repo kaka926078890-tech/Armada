@@ -5,7 +5,7 @@
 - 父文档：
   - [2026-09-02-armada-composer-image-chip-design.md](./2026-09-02-armada-composer-image-chip-design.md)（中台图文派发 / blob / 芯片）
   - [2026-09-14-armada-workspace-file-attach-design.md](./2026-09-14-armada-workspace-file-attach-design.md)（非图文件 inbox；本规格 **不做** 手机 pdf/txt）
-  - [2026-09-14-armada-running-followup-design.md](./2026-09-14-armada-running-followup-design.md)（running 续发 `OUTBOUND_TEXT_ONLY`）
+  - [2026-09-14-armada-running-followup-design.md](./2026-09-14-armada-running-followup-design.md)（running 续发可以附图）
   - [2026-09-12-armada-relay-mobile-design.md](./2026-09-12-armada-relay-mobile-design.md)（`cmd.dispatch` 已预留 `attachmentIds?`；v1 明确不做 blobs——本规格把它升级）
   - [armada-hub-app-parity](../../../.cursor/rules/armada-hub-app-parity.mdc)
 - 修订范围：中转 `/mobile/blobs` + `cmd.blobPut` + `cmd.dispatch`/`cmd.followup` 传递 `attachmentIds`；`runToSnap` 带附件元数据；iOS/Android 派发/续聊选图。不改 `generation_id` / `decideStop` / ingest cid / 现网 CDP 贴图选择器。
@@ -19,7 +19,7 @@
 | --- | --- |
 | 问题 | 中台 `POST /api/blobs` + `attachmentIds` 已通；中转 `cmd.dispatch` **丢掉**附件；App 无上传。手机无法发图。 |
 | 核心方案 | App 把 PNG/JPEG 传到中转 → 中转经 WS `cmd.blobPut` 写入 **hub BlobStore**（权威仍在被控机旁的 hub）→ 派发/终态续聊带 `attachmentIds` → 扩展走现网 `createImagePaster`。 |
-| 关键约束 | 芯片语义零变化：成功 = 回车前芯片数 = N；失败不降级 `@路径`；不压缩已是 PNG/JPEG 的原件。running 续发仍纯文本。 |
+| 关键约束 | 芯片语义零变化：成功 = 回车前芯片数 = N；失败不降级 `@路径`；不压缩已是 PNG/JPEG 的原件。running 续发可以附图，和终态续聊同一套 blob。 |
 | 明确不做 | 新 CDP；GIF/WebP/PDF；running 附图；中转当 blob 权威库；App WebView 套壳；绕过 IDE 打模型 API。 |
 
 ---
@@ -57,7 +57,7 @@
 1. **Hub 仍是 blob 权威。** 扩展继续 `GET /api/blobs/:sha256`。中转只管道 + 短 TTL 缓冲。
 2. **不新发明贴图。** 注入顺序、芯片计数、`armada.imagePaste`、失败码全部沿用 2026-09-02 规格。
 3. **纯文本零变化。** 无 `attachmentIds` 的 dispatch/followup 与现网字节级一致。
-4. **running 不附图。** 409 `OUTBOUND_TEXT_ONLY` 保持。手机入口在 `run.isLive` 时隐藏相册。
+4. **running 可以附图。** 中转把 `attachmentIds` 转给 hub。手机续聊在运行中也打开相册。Codex 线程仍只发文字。
 5. **格式在手机收口。** 相册 HEIC → 设备上转 JPEG（原像素，质量 ≥ 0.92）再上传。禁止把 HEIC 交给 hub。已是 PNG/JPEG 的禁止再压。
 6. **相等才发布。** App 列表不因附件元数据抖动整树刷新（沿用本轮 `runContentEquals`）。
 
@@ -153,7 +153,7 @@ Hub 落地：`blobs.put(Buffer.from(bytesBase64,'base64'), mime, name)`，与 `P
 
 Hub `cmd.dispatch`：`POST /api/runs` body **必须**含 `attachmentIds`（今日缺口）。
 
-`POST /mobile/runs/:id/followup` 同样带 `attachmentIds`。若该 run `status===running` 且 ids 非空：不要发 hub，直接 409 `OUTBOUND_TEXT_ONLY`（与 `runs.followupWhileRunning` 对齐，避免中转空等）。
+`POST /mobile/runs/:id/followup` 同样带 `attachmentIds`。`status===running` 时照样 `cmd.followup` 把 ids 交给 hub，由 hub 校验 blob 并注入。
 
 成功码：派发 201；终态续聊 200；running 纯文本续发 201——**不因有图改码**。
 
@@ -255,7 +255,7 @@ sequenceDiagram
 - 选图：系统 `PhotosPicker` / `PickVisualMedia`；可多选，第 5 张 UI 拒收不发请求。
 - 预览：输入框上方一排缩略图，可删单张。不提供裁剪。
 - 发送：`prompt.trim()` 或 `attachmentIds.length≥1`。
-- live run 续聊：相册按钮 `disabled`，点了 toast「运行中只能发文字」。
+- live run 续聊：相册可用，和空闲续聊一样最多 4 张。Codex 线程仍禁用相册。
 - HEIC：选中后本机转 JPEG，失败则该张红字「无法转换这张图」，不上传。
 - 粘贴：若系统剪贴板是 PNG/JPEG，允许贴进预览条（iOS `UIPasteboard.image`；Android clipboard URI）。非图忽略。
 

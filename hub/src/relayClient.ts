@@ -5,6 +5,7 @@ import { originOf } from "../../relay/src/uri";
 import { eventsToChat, lastTurnAssistantBody } from "../web/src/chatView";
 import { runDisplayName } from "../web/src/boardState";
 import type { RunEvent } from "../web/src/types";
+import { parseAttachmentIds } from "./blobs";
 import { canRetryStatus, LIVE_STATUSES, TERMINAL_STATUSES } from "./concurrency";
 import { createRelayCommandHandler, startRelayHeartbeat } from "./relayCommandHandler";
 import { createDeskTunnel } from "./deskTunnel";
@@ -33,6 +34,7 @@ export type OutboundSnap = {
   expectedMode: string;
   state: string;
   createdAt: number;
+  attachmentIds?: string[];
 };
 
 export type SnapAttachment = { id: string; mime: string; name: string; size: number };
@@ -80,6 +82,13 @@ export function snapAttachmentsOf(run: any): SnapAttachment[] {
   return out;
 }
 
+function outboundAttachmentIds(o: Record<string, unknown>): string[] {
+  if (Array.isArray(o.attachmentIds)) return o.attachmentIds.filter((x): x is string => typeof x === "string" && x.length > 0);
+  if (Array.isArray(o.attachment_ids)) return o.attachment_ids.filter((x): x is string => typeof x === "string" && x.length > 0);
+  if (typeof o.attachments === "string") return parseAttachmentIds(o.attachments);
+  return [];
+}
+
 function snapOutbound(raw: unknown): OutboundSnap[] {
   if (!Array.isArray(raw)) return [];
   const out: OutboundSnap[] = [];
@@ -88,13 +97,17 @@ function snapOutbound(raw: unknown): OutboundSnap[] {
     const o = item as Record<string, unknown>;
     const id = typeof o.id === "string" ? o.id : "";
     const prompt = typeof o.prompt === "string" ? o.prompt : "";
-    if (!id || !prompt) continue;
+    const attachmentIds = outboundAttachmentIds(o);
+    if (!id || (!prompt && !attachmentIds.length)) continue;
     const expectedMode = typeof o.expectedMode === "string" ? o.expectedMode
       : typeof o.expected_mode === "string" ? o.expected_mode : "";
     const state = typeof o.state === "string" ? o.state : "";
     const createdAt = typeof o.createdAt === "number" ? o.createdAt
       : typeof o.created_at === "number" ? o.created_at : 0;
-    out.push({ id, prompt, expectedMode, state, createdAt });
+    out.push({
+      id, prompt, expectedMode, state, createdAt,
+      ...(attachmentIds.length ? { attachmentIds } : {}),
+    });
   }
   return out;
 }

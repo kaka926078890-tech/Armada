@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { assistantBodyForPrompt, assistantBodyText, lastTurnAssistantBody, operatorChatTurns, eventsToChat, extractUserText, segmentChat, INITIAL_VISIBLE_TURNS, initialHiddenPrefixTurns, recentTurnsWindow, mergeOutboundChat, mergePendingAsk, queuedOutbound, collapseRepeatedTools, processFoldLabel, CURSOR_PROTOCOL_USER_PREFIXES, userMessageCaption, stampFallbackImageIds, stripAppendedThought } from "../src/chatView";
+import { assistantBodyForPrompt, assistantBodyText, lastTurnAssistantBody, operatorChatTurns, eventsToChat, extractUserText, segmentChat, INITIAL_VISIBLE_TURNS, initialHiddenPrefixTurns, recentTurnsWindow, mergeOutboundChat, mergePendingAsk, outboundUserText, queuedOutbound, stampOutboundImages, collapseRepeatedTools, processFoldLabel, CURSOR_PROTOCOL_USER_PREFIXES, userMessageCaption, stampFallbackImageIds, stripAppendedThought } from "../src/chatView";
 import type { ChatBlock } from "../src/chatView";
 import type { RunEvent } from "../src/types";
 
@@ -1069,6 +1069,22 @@ describe("mergeOutboundChat / queuedOutbound", () => {
       "user:旧问题",
       "user:直发",
     ]);
+  });
+  test("running image followup shows thumbs and does not duplicate the transcript line", () => {
+    const blocks: ChatBlock[] = [{ kind: "user", text: "[图片] 看图", seq: 1 }];
+    const donors = [{ prompt: "看图", attachment_ids: ["abc"] }];
+    const stamped = stampOutboundImages(blocks, donors);
+    expect(stamped).toEqual([{ kind: "user", text: "[图片] 看图", seq: 1, imageIds: ["abc"] }]);
+    const outbound = [
+      { id: "o1", prompt: "看图", expected_mode: "steer", state: "steered", created_at: 2, attachment_ids: ["abc"] },
+    ];
+    expect(mergeOutboundChat(stamped, outbound)).toEqual(stamped);
+    const queued = [
+      { id: "o2", prompt: "", expected_mode: "queue", state: "queued", created_at: 3, attachment_ids: ["abc"] },
+    ];
+    expect(queuedOutbound(queued).map((o) => o.attachment_ids)).toEqual([["abc"]]);
+    expect(outboundUserText("", 1)).toBe("[图片]");
+    expect(outboundUserText("看图", 1)).toBe("[图片] 看图");
   });
   test("same text already in transcript is not duplicated", () => {
     const blocks: ChatBlock[] = [{ kind: "user", text: "直发", seq: 1 }];

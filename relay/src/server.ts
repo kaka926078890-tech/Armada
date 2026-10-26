@@ -1036,15 +1036,12 @@ export function createRelayServer(opts: {
       return c.json({ error: "RATE_LIMIT" }, 429);
     }
     const runId = c.req.param("id");
-    const row = db.query("SELECT id, status FROM runs WHERE id=?1 AND fleet_id=?2").get(runId, fleet.id) as
-      | { id: string; status?: string }
+    const row = db.query("SELECT id FROM runs WHERE id=?1 AND fleet_id=?2").get(runId, fleet.id) as
+      | { id: string }
       | undefined;
     if (!row) return c.json({ error: "NOT_FOUND" }, 404);
     const ids = parseMobileAttachmentIds(read.attachmentIds);
     if (ids.error) return c.json({ error: ids.error }, 400);
-    if (ids.ids && ids.ids.length && row.status === "running") {
-      return c.json({ error: "OUTBOUND_TEXT_ONLY" }, 409);
-    }
     const requestId = `r${++reqSeq}`;
     const cmd: Record<string, unknown> = { type: "cmd.followup", requestId, runId, prompt: read.prompt };
     if (ids.ids && ids.ids.length) cmd.attachmentIds = ids.ids;

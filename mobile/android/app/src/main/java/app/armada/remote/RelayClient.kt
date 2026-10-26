@@ -412,10 +412,18 @@ private fun parseAsk(o: JSONObject): PendingAskDto {
 
 private fun parseOutbound(o: JSONObject) = OutboundDto(
     id = o.getString("id"),
-    prompt = o.getString("prompt"),
+    prompt = o.optString("prompt"),
     expectedMode = o.optString("expectedMode"),
     state = o.optString("state"),
     createdAt = o.optLong("createdAt"),
+    attachmentIds = o.optJSONArray("attachmentIds")?.let { arr ->
+        buildList {
+            for (i in 0 until arr.length()) {
+                val id = arr.optString(i)
+                if (id.isNotBlank()) add(id)
+            }
+        }
+    } ?: emptyList(),
 )
 
 private fun JSONObject.optNullableString(key: String): String? {

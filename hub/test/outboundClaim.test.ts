@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { extractUserText, transcriptUserPrompt, statusUserPrompt, hookSubmitPrompt, queueModeOf } from "../src/outboundClaim";
+import { extractUserText, transcriptUserPrompt, statusUserPrompt, hookSubmitPrompt, outboundClaimFromHook, outboundClaimKey, queueModeOf } from "../src/outboundClaim";
 
 describe("outboundClaim", () => {
   test("extractUserText strips wrappers", () => {
@@ -20,6 +20,11 @@ describe("outboundClaim", () => {
   });
   test("hook submit prompt normalizes", () => {
     expect(hookSubmitPrompt({ prompt: "  排队句  " })).toBe("排队句");
+  });
+  test("image followup claim strips markers and keeps a caption", () => {
+    expect(outboundClaimKey("[Image]\n<image_files>a.png</image_files>\n看图")).toEqual({ text: "看图", imageOnly: false });
+    expect(outboundClaimFromHook({ prompt: "[Image]\n<image_files>a.png</image_files>" })).toEqual({ text: "", imageOnly: true });
+    expect(outboundClaimKey("看图")).toEqual({ text: "看图", imageOnly: false });
   });
 
   test("statusUserPrompt ignores Cursor internal catalogs and keeps operator text", () => {

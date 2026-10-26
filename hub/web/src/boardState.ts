@@ -17,7 +17,9 @@ export interface RunRow {
   } | null;
   outbound?: {
     id: string; prompt: string; expected_mode: string; state: string; created_at: number;
+    attachment_ids?: string[];
   }[];
+  image_donors?: { prompt: string; attachment_ids: string[] }[];
   queue_message_default_behavior?: string | null;
 }
 

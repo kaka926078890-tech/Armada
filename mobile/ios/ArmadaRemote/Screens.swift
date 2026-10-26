@@ -1040,7 +1040,6 @@ struct DispatchSheet: View {
     @EnvironmentObject var session: Session
     let workspace: WorkspaceDTO
     var followupRunId: String? = nil
-    var followupIsLive: Bool = false
     var onDone: (BoardColumn) -> Void
     @StateObject private var speech = PromptSpeech()
     @State private var prompt = ""
@@ -1060,7 +1059,7 @@ struct DispatchSheet: View {
     }
 
     private var chatgptTextOnly: Bool { live.workspaceRoot.hasPrefix("chatgpt:") }
-    private var photoEnabled: Bool { !followupIsLive && !chatgptTextOnly }
+    private var photoEnabled: Bool { !chatgptTextOnly }
     private var canSend: Bool {
         live.canInject && !sending && !speech.listening && (!trimmed.isEmpty || (photoEnabled && !drafts.isEmpty))
     }
@@ -1149,7 +1148,7 @@ struct DispatchSheet: View {
                             if chatgptTextOnly {
                                 err = RelayAPIError.operatorMessage("CHATGPT_TEXT_ONLY")
                             } else {
-                                err = RelayAPIError.operatorMessage(followupIsLive ? "OUTBOUND_TEXT_ONLY" : "ATTACHMENT_COUNT")
+                                err = RelayAPIError.operatorMessage("ATTACHMENT_COUNT")
                             }
                         },
                         onSend: { Task { await send() } },
@@ -1394,7 +1393,7 @@ struct RunDetailView: View {
                                 .font(.system(size: 12))
                                 .foregroundStyle(hub.mutedForeground)
                             ForEach(run.queuedOutbound) { q in
-                                Text(q.prompt)
+                                Text(q.queueLabel)
                                     .font(.system(size: 13))
                                     .foregroundStyle(hub.foreground)
                             }
@@ -1469,7 +1468,7 @@ struct RunDetailView: View {
         }
         .sheet(isPresented: $showDispatch) {
             if let slot {
-                DispatchSheet(workspace: slot, followupRunId: runId, followupIsLive: run?.isLive == true) { _ in
+                DispatchSheet(workspace: slot, followupRunId: runId) { _ in
                     showDispatch = false
                     Task {
                         await reload()

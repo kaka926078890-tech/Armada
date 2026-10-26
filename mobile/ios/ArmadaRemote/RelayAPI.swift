@@ -85,6 +85,16 @@ struct OutboundDTO: Decodable, Hashable, Identifiable {
     var expectedMode: String
     var state: String
     var createdAt: Int
+    var attachmentIds: [String]?
+
+    var queueLabel: String {
+        let text = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let n = attachmentIds?.count ?? 0
+        let img = n == 0 ? "" : (n == 1 ? "[图片]" : "[\(n) 张图片]")
+        if img.isEmpty { return text }
+        if text.isEmpty { return img }
+        return "\(img) \(text)"
+    }
 }
 
 struct RunAttachment: Decodable, Hashable {

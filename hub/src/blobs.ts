@@ -170,8 +170,11 @@ export class BlobStore {
   /** refcount = runs whose attachments JSON currently lists the sha; unref_at only stamps when first hitting 0. */
   syncRefsFromRuns(now = Date.now()): void {
     const runRows = this.db.query("SELECT attachments FROM runs").all() as { attachments: string }[];
+    const outRows = this.db.query(
+      "SELECT attachments FROM run_outbound WHERE state IN ('injecting','queued','steered','consumed')",
+    ).all() as { attachments: string }[];
     const counts = new Map<string, number>();
-    for (const r of runRows) {
+    for (const r of [...runRows, ...outRows]) {
       const seen = new Set<string>();
       for (const id of parseAttachmentIds(r.attachments)) {
         if (seen.has(id)) continue;

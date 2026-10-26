@@ -379,4 +379,12 @@ class ModelsTest {
         assertFalse(liveWorkspace("w", emptyList(), stale)!!.canInject)
         assertEquals(null, liveWorkspace("missing", listOf(live)))
     }
+
+    @Test
+    fun outboundQueueLabelKeepsImageOnlyRows() {
+        assertEquals("看图", outboundQueueLabel("看图", 0))
+        assertEquals("[图片]", outboundQueueLabel("", 1))
+        assertEquals("[图片] 看图", outboundQueueLabel("看图", 1))
+        assertEquals("[2 张图片]", outboundQueueLabel("  ", 2))
+    }
 }

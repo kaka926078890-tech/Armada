@@ -4,10 +4,11 @@ import type { Machine, RunEvent } from "../types";
 import { workspaceFolderName, runDisplayName, canRetryRun, CDP_NOT_READY_COPY, resumeStallCopy, type RunRow } from "../boardState";
 import ChatThread from "./ChatThread";
 import FilePreview from "./FilePreview";
-import { eventsToChat, mergePendingAsk, mergeOutboundChat, queuedOutbound, INITIAL_VISIBLE_TURNS, initialHiddenPrefixTurns, recentTurnsWindow, stampFallbackImageIds } from "../chatView";
+import { eventsToChat, mergePendingAsk, mergeOutboundChat, outboundUserText, queuedOutbound, stampOutboundImages, userMessageCaption, INITIAL_VISIBLE_TURNS, initialHiddenPrefixTurns, recentTurnsWindow, stampFallbackImageIds } from "../chatView";
 import { collectEventPages, mergeEvents, EVENT_PAGE_SIZE, hasOlderEvents, olderEventsQuery, shouldLoadOlder, prependPreserveScroll, stickAfterContentResize } from "../loadEvents";
 import { mergeAttachmentFiles, isConsoleAttachment, parseRunAttachmentIds } from "../attachments";
 import { ConsoleFilePicker } from "./ConsoleFilePicker";
+import { HubImageRow } from "./ImageThumb";
 import { endFollowupSend, isFollowupSendEnter, tryBeginFollowupSend } from "../followupSend";
 import { queueComposerCaretRestore, shouldRefocusComposerAfterSend, shouldRestoreComposerFocus } from "../composerFocus";
 import { WIDTH_KEY, type PromptSnippet } from "../uiPrefs";
@@ -336,10 +337,6 @@ export default function RunDetail({
           setFollowupError("Codex 续聊这一轮只发文字。");
           return;
         }
-        if (run.status === "running" && followupFiles.length > 0) {
-          setFollowupError("运行中续发暂只支持纯文本。");
-          return;
-        }
         for (const f of followupFiles) {
           const r = await api.uploadBlob(f);
           if (r.error || !r.blob) { setFollowupError(r.error ?? "上传失败"); return; }
@@ -414,7 +411,10 @@ export default function RunDetail({
     completed: "已完成", cancelled: "已取消", aborted: "已中止", error: "异常", unknown: "未知",
   };
   const chatAll = stampFallbackImageIds(
-    mergePendingAsk(mergeOutboundChat(eventsToChat(events), run.outbound), run.pending_ask),
+    mergePendingAsk(mergeOutboundChat(
+      stampOutboundImages(eventsToChat(events), run.image_donors),
+      run.outbound,
+    ), run.pending_ask),
     parseRunAttachmentIds(run.attachments),
   );
   const queued = queuedOutbound(run.outbound);
@@ -585,9 +585,16 @@ export default function RunDetail({
               {queued.length} 条还在排队
             </div>
             <div className="flex flex-col gap-1.5">
-              {queued.map((q) => (
-                <div key={q.id} className={`${UI_TYPE} text-foreground leading-relaxed`}>{q.prompt}</div>
-              ))}
+              {queued.map((q) => {
+                const ids = q.attachment_ids ?? [];
+                const caption = userMessageCaption(outboundUserText(q.prompt, ids.length), ids);
+                return (
+                  <div key={q.id} className={`${UI_TYPE} text-foreground leading-relaxed`}>
+                    {ids.length ? <div className={caption ? "mb-1.5" : undefined}><HubImageRow ids={ids} /></div> : null}
+                    {caption}
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}

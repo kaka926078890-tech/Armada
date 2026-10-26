@@ -791,7 +791,31 @@ export type OutboundRow = {
   expected_mode: string;
   state: string;
   created_at: number;
+  attachment_ids?: string[];
 };
+
+/** 续发气泡和 transcript 用同一句展示文案，图才会盖到同一条上。 */
+export function outboundUserText(prompt: string, attachmentCount: number): string {
+  const n = normPrompt(extractUserText(prompt));
+  if (!n && attachmentCount <= 0) return "";
+  if (attachmentCount <= 0) return prompt;
+  return displayUserText(n || prompt, attachmentCount);
+}
+
+export function stampOutboundImages(
+  blocks: ChatBlock[],
+  donors: { prompt: string; attachment_ids?: string[] }[] | null | undefined,
+): ChatBlock[] {
+  const hooks: ChatBlock[] = [];
+  for (const [i, d] of (donors ?? []).entries()) {
+    const ids = d.attachment_ids ?? [];
+    if (!ids.length) continue;
+    const text = outboundUserText(d.prompt, ids.length);
+    if (!text) continue;
+    hooks.push({ kind: "user", text, seq: i, imageIds: ids });
+  }
+  return stampUserImageIds(blocks, hooks);
+}
 
 function isQueueMode(mode: string): boolean {
   return mode === "queue";
@@ -807,19 +831,26 @@ export function queuedOutbound(outbound: OutboundRow[] | null | undefined): Outb
 /** steered / injecting(非 queue) 乐观用户句；jsonl 同文到达后只留 transcript。 */
 export function mergeOutboundChat(blocks: ChatBlock[], outbound: OutboundRow[] | null | undefined): ChatBlock[] {
   if (!outbound?.length) return blocks;
+  const seenKey = (text: string, imageIds?: string[]) => {
+    const n = normPrompt(extractUserText(text));
+    if (!n) return "";
+    return imageIds?.length ? `${n}\n${imageIds.join(",")}` : n;
+  };
   const seen = new Set(
     blocks.filter((b): b is Extract<ChatBlock, { kind: "user" }> => b.kind === "user")
-      .map((b) => normPrompt(extractUserText(b.text))),
+      .map((b) => seenKey(b.text, b.imageIds)),
   );
   const extra: ChatBlock[] = [];
   let seq = (blocks.at(-1)?.seq ?? 0) + 1;
   for (const o of outbound) {
     if (isQueueMode(o.expected_mode)) continue;
     if (o.state !== "injecting" && o.state !== "steered") continue;
-    const n = normPrompt(extractUserText(o.prompt));
-    if (!n || seen.has(n)) continue;
-    extra.push({ kind: "user", text: o.prompt, seq: seq++ });
-    seen.add(n);
+    const ids = o.attachment_ids ?? [];
+    const text = outboundUserText(o.prompt, ids.length);
+    const key = seenKey(text, ids);
+    if (!text || !key || seen.has(key)) continue;
+    extra.push({ kind: "user", text, seq: seq++, ...(ids.length ? { imageIds: ids } : {}) });
+    seen.add(key);
   }
   return extra.length ? [...blocks, ...extra] : blocks;
 }

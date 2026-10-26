@@ -359,7 +359,7 @@ App：
 | `EMPTY_PROMPT` | 提示词是空的 |
 | `NET_INTERCEPT` | 当前网络拦截了中转。请关掉 Wi‑Fi 改用蜂窝，或换一个网络后再打开。 |
 | `OUTBOUND_LIMIT` | 待消化续发已达上限，等 Cursor 消化后再发 |
-| `OUTBOUND_TEXT_ONLY` | 运行中续发暂只支持纯文本 |
+| `OUTBOUND_TEXT_ONLY` | 旧中台拒绝运行中发图。当前中台运行中可以附图 |
 | `INVALID_STATE` | 当前状态不能重试 / 隐藏时改写「运行中不能隐藏」 |
 | `NOT_FOUND` | 任务不存在 |
 | `INVALID` | 推送登记失败 |

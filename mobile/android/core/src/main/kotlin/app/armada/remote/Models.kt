@@ -49,7 +49,22 @@ data class OutboundDto(
     val expectedMode: String,
     val state: String,
     val createdAt: Long,
+    val attachmentIds: List<String> = emptyList(),
 )
+
+fun outboundQueueLabel(prompt: String, attachmentCount: Int): String {
+    val text = prompt.trim()
+    val img = when {
+        attachmentCount <= 0 -> ""
+        attachmentCount == 1 -> "[图片]"
+        else -> "[$attachmentCount 张图片]"
+    }
+    return when {
+        img.isEmpty() -> text
+        text.isEmpty() -> img
+        else -> "$img $text"
+    }
+}
 
 data class RunAttachmentDto(
     val id: String,

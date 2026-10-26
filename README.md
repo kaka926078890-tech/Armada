@@ -233,7 +233,7 @@ bun run dev:relay-attach
 1. **iOS：** Xcode 打开 `mobile/ios/ArmadaRemote.xcodeproj`，模拟器或真机跑 **ArmadaRemote**（Bundle ID `app.armada.remote`）。
 2. **Android：** `mobile/android` 打 debug APK（见 [`mobile/android/README.md`](mobile/android/README.md)）；模拟器中转填 `http://10.0.2.2:8780`。
 3. 粘贴 **op** 邀请（不要贴 pair）。
-4. 舰队页按 **机器 → 工作区**；点仓看五列任务；仓顶栏 **派发** 新开对话（可从相册选最多 4 张 PNG/JPEG），详情 **续聊** 同一对话（运行中只能发文字）。绑定后会申请通知权限；锁屏 Ask / 完成 / 失败由中转代发 APNs（iOS）或 FCM（Android）（点通知进详情强制 GET）。
+4. 舰队页按 **机器 → 工作区**；点仓看五列任务；仓顶栏 **派发** 新开对话（可从相册选最多 4 张 PNG/JPEG），详情 **续聊** 同一对话（运行中也可以发图）。绑定后会申请通知权限；锁屏 Ask / 完成 / 失败由中转代发 APNs（iOS）或 FCM（Android）（点通知进详情强制 GET）。
 5. Agent 选择题在详情里 Continue / Skip。终态正文是这一轮助手回复，不是整段 Cursor 会话。
 
 一部手机目前只绑一条 op（一台在线中台）。多台受控机只要登记在这台中台上，选不同仓即可分别派。多部手机可贴同一条 op，共用操作者令牌。
@@ -469,7 +469,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\armada-cursor.ps1 C:
 | `CONVERSATION_BUSY` | **中台**：该对话仍在排队/绑定，或有未回答的选择题。运行中可对同一张卡续发 |
 | `INJECT_SLOT_BUSY` | **中台**：正在向该机注入另一条任务，稍后再续聊 |
 | `OUTBOUND_LIMIT` | **中台**：该卡待消化续发已达 8 条 |
-| `OUTBOUND_TEXT_ONLY` | **中台**：运行中续发暂只支持纯文本 |
+| `OUTBOUND_TEXT_ONLY` | **中台**：旧版本拒绝运行中发图。当前中台运行中续发可以附图 |
 | `WINDOW_BUSY` | **中台**：关了 `ARMADA_MULTI_RUN_PER_WINDOW` 时，该窗口已有占用项则 409。默认会开新窗再注入。同卡 running 续聊仍走 followup |
 | 一直「待本机回车」但黄字是「绑定中」，超时后进异常 | **受控**：须装 **armada-agent ≥ 0.4.19**（当前 **0.4.52**）并 Reload。0.4.10 扫描窗 20s 会 BIND_TIMEOUT。Windows 无 hook，绑定等 jsonl，约 **3 分钟**；macOS 约 **1 分钟** |
 | 本机对话已结束，看板仍「运行中」 | **受控**：须 ≥ 0.4.18。日志：`stop synthesized` / `adopt r-…`。Hub 须把 `status: success` 收成 completed |

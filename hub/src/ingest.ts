@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import type { RunService } from "./runs";
 import type { SseHub } from "./sse";
-import { hookSubmitPrompt, transcriptUserPrompt } from "./outboundClaim";
+import { outboundClaimFromHook, outboundClaimFromTranscript } from "./outboundClaim";
 import { stopFromCursorSessionEnd, stopFromJsonlTurnEnded, genOf } from "./generationOwnership";
 import { ACTIVE_STATUSES, OCCUPYING_STATUSES, TERMINAL_STATUSES } from "./concurrency";
 
@@ -178,15 +178,15 @@ export function ingestEvent(db: Database, runs: RunService, sse: SseHub, machine
   run = runs.get(runId) ?? run;
   if (msg.hookEventName === "beforeSubmitPrompt") {
     runs.tryArmLiveGeneration(runId, msg.hookEventName, msg.payload, cid);
-    const bsp = hookSubmitPrompt(msg.payload);
-    if (bsp) runs.claimOutbound(runId, bsp, msg.ts ?? Date.now());
+    const claim = outboundClaimFromHook(msg.payload);
+    if (claim) runs.claimOutbound(runId, claim.text, msg.ts ?? Date.now(), { imageOnly: claim.imageOnly });
   }
   if (msg.hookEventName === "preToolUse") {
     runs.tryArmLiveGeneration(runId, msg.hookEventName, msg.payload, cid);
   }
   if (msg.source === "transcript") {
-    const user = transcriptUserPrompt(msg.payload);
-    if (user) runs.claimOutbound(runId, user, msg.ts ?? Date.now());
+    const claim = outboundClaimFromTranscript(msg.payload);
+    if (claim) runs.claimOutbound(runId, claim.text, msg.ts ?? Date.now(), { imageOnly: claim.imageOnly });
     const mapped = stopFromJsonlTurnEnded(msg.payload);
     if (mapped && jsonlTurnEndedMayStop(db, runId)) {
       run = runs.get(runId) ?? run;

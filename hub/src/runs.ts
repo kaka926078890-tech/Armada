@@ -122,22 +122,48 @@ export class RunService {
     ).get(runId) as { n: number }).n;
   }
 
-  private hasOutboundCollision(runId: string, prompt: string): boolean {
+  private hasOutboundCollision(runId: string, prompt: string, attachmentIds: string[] = []): boolean {
     const key = normalizePrompt(prompt);
-    if (!key) return false;
     const rows = this.db.query(
-      `SELECT prompt FROM run_outbound WHERE run_id=?1 AND state IN ('injecting','queued','steered')`,
-    ).all(runId) as { prompt: string }[];
-    return rows.some((r) => normalizePrompt(r.prompt) === key);
+      `SELECT prompt, attachments FROM run_outbound WHERE run_id=?1 AND state IN ('injecting','queued','steered')`,
+    ).all(runId) as { prompt: string; attachments: string }[];
+    if (key) return rows.some((r) => normalizePrompt(r.prompt) === key);
+    if (!attachmentIds.length) return false;
+    const want = [...attachmentIds].sort().join(",");
+    return rows.some((r) => !normalizePrompt(r.prompt) && [...parseAttachmentIds(r.attachments)].sort().join(",") === want);
   }
 
   private listVisibleOutbound(runId: string): {
-    id: string; prompt: string; expected_mode: string; state: string; created_at: number;
+    id: string; prompt: string; expected_mode: string; state: string; created_at: number; attachment_ids?: string[];
   }[] {
-    return this.db.query(
-      `SELECT id, prompt, expected_mode, state, created_at FROM run_outbound
+    const rows = this.db.query(
+      `SELECT id, prompt, attachments, expected_mode, state, created_at FROM run_outbound
        WHERE run_id=?1 AND state IN ('injecting','queued','steered') ORDER BY id ASC`,
-    ).all(runId) as { id: string; prompt: string; expected_mode: string; state: string; created_at: number }[];
+    ).all(runId) as { id: string; prompt: string; attachments: string; expected_mode: string; state: string; created_at: number }[];
+    return rows.map((r) => {
+      const attachment_ids = parseAttachmentIds(r.attachments);
+      return {
+        id: r.id,
+        prompt: r.prompt,
+        expected_mode: r.expected_mode,
+        state: r.state,
+        created_at: r.created_at,
+        ...(attachment_ids.length ? { attachment_ids } : {}),
+      };
+    });
+  }
+
+  /** 已消化的附图也留着，详情把缩略图盖回 transcript 用户句。失败的注入不盖。 */
+  private listImageDonors(runId: string): { prompt: string; attachment_ids: string[] }[] {
+    const rows = this.db.query(
+      `SELECT prompt, attachments FROM run_outbound
+       WHERE run_id=?1 AND state IN ('injecting','queued','steered','consumed')
+       ORDER BY created_at ASC`,
+    ).all(runId) as { prompt: string; attachments: string }[];
+    return rows.flatMap((r) => {
+      const attachment_ids = parseAttachmentIds(r.attachments);
+      return attachment_ids.length ? [{ prompt: r.prompt, attachment_ids }] : [];
+    });
   }
 
   private injectingOutbound(runId: string): {
@@ -160,6 +186,7 @@ export class RunService {
     ).get(id) as { id: string; run_id: string; prompt: string; expected_mode: string } | null;
     if (!row) return;
     this.db.query("UPDATE run_outbound SET state=?1 WHERE id=?2").run(state, id);
+    this.blobs?.syncRefsFromRuns();
     this.broadcastOutbound(row.run_id, { id: row.id, state, expected_mode: row.expected_mode, prompt: row.prompt });
   }
 
@@ -219,13 +246,18 @@ export class RunService {
     this.onStopEvent(runId, snap.payload, { replayDeferred: !!opts?.ignoreOpenChildren });
   }
 
-  claimOutbound(runId: string, promptNorm: string, eventTs: number): void {
-    if (!promptNorm) return;
+  claimOutbound(runId: string, promptNorm: string, eventTs: number, opts?: { imageOnly?: boolean }): void {
+    if (!promptNorm && !opts?.imageOnly) return;
     const rows = this.db.query(
-      `SELECT id, prompt, state, expected_mode, created_at FROM run_outbound
+      `SELECT id, prompt, attachments, state, expected_mode, created_at FROM run_outbound
        WHERE run_id=?1 AND state IN ('injecting','queued','steered') ORDER BY id ASC`,
-    ).all(runId) as { id: string; prompt: string; state: string; expected_mode: string; created_at: number }[];
-    const hit = rows.find((r) => r.created_at <= eventTs && normalizePrompt(r.prompt) === promptNorm);
+    ).all(runId) as { id: string; prompt: string; attachments: string; state: string; expected_mode: string; created_at: number }[];
+    const hit = rows.find((r) => {
+      if (r.created_at > eventTs) return false;
+      const stored = stripImageMarkers(r.prompt);
+      if (promptNorm) return stored === promptNorm;
+      return !stored && parseAttachmentIds(r.attachments).length > 0;
+    });
     if (!hit) return;
     const queueTurn = hit.state === "queued" || (hit.state === "injecting" && hit.expected_mode === "queue");
     const run = this.get(runId);
@@ -1025,6 +1057,7 @@ export class RunService {
       ...rest,
       pending_ask: parsePendingAsk(row.pending_ask),
       outbound: this.listVisibleOutbound(row.id),
+      image_donors: this.listImageDonors(row.id),
       queue_message_default_behavior: mode,
       window_connected: !!(row.window_id && this.registry.isConnected(row.machine_id, row.window_id)),
       attachment_items: this.wsAttachments(parseAttachmentIds(row.attachments)) ?? [],
@@ -1356,13 +1389,18 @@ export class RunService {
 
   private followupWhileRunning(run: any, prompt: string, attachmentIds: string[]): { error?: string; run?: any } {
     if (parsePendingAsk(run.pending_ask)) return { error: "CONVERSATION_BUSY" };
-    if (attachmentIds.length > 0) return { error: "OUTBOUND_TEXT_ONLY" };
-    if (!normalizePrompt(prompt)) return { error: "EMPTY_PROMPT" };
+    if (this.blobs && attachmentIds.length) {
+      const checked = this.blobs.metas(attachmentIds);
+      if (checked.error) return { error: checked.error };
+    } else if (attachmentIds.length && !this.blobs) {
+      return { error: "ATTACHMENT_NOT_FOUND" };
+    }
+    if (!normalizePrompt(prompt) && attachmentIds.length === 0) return { error: "EMPTY_PROMPT" };
     if (this.injectSlotCount(run.machine_id) > 0) return { error: "INJECT_SLOT_BUSY" };
     if (this.hasPromptCollision(run.machine_id, run.workspace_root, prompt, attachmentIds, run.id)) {
       return { error: "PROMPT_COLLISION" };
     }
-    if (this.hasOutboundCollision(run.id, prompt)) return { error: "PROMPT_COLLISION" };
+    if (this.hasOutboundCollision(run.id, prompt, attachmentIds)) return { error: "PROMPT_COLLISION" };
     if (this.unconsumedOutboundCount(run.id) >= OUTBOUND_LIMIT) return { error: "OUTBOUND_LIMIT" };
     const routed = this.resolveInjectWindow(run, { requireCdp: true });
     if (!routed.ok) return { error: routed.error };
@@ -1373,9 +1411,11 @@ export class RunService {
     const now = Date.now();
     this.db.query(
       `INSERT INTO run_outbound (id, run_id, prompt, attachments, expected_mode, state, created_at)
-       VALUES (?1,?2,?3,'[]',?4,'injecting',?5)`,
-    ).run(id, run.id, prompt, expected_mode, now);
+       VALUES (?1,?2,?3,?4,?5,'injecting',?6)`,
+    ).run(id, run.id, prompt, JSON.stringify(attachmentIds), expected_mode, now);
+    this.blobs?.syncRefsFromRuns();
     this.broadcastOutbound(run.id, { id, state: "injecting", expected_mode, prompt });
+    const attachments = this.wsAttachments(attachmentIds);
     this.registry.sendTo(run.machine_id, win.windowId, {
       type: "run.followup",
       runId: run.id,
@@ -1383,6 +1423,7 @@ export class RunService {
       workspaceRoot: run.workspace_root,
       prompt,
       live: true,
+      ...(attachments?.length ? { attachments } : {}),
     });
     this.audit("hub", "run.followup.live", run.id, { outboundId: id, expected_mode, prompt: prompt.slice(0, 80) });
     return { run: this.get(run.id) };

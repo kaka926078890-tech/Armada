@@ -1289,12 +1289,38 @@ describe("relay serve", () => {
     ws.close();
   });
 
-  test("running followup with attachmentIds is 409 without hub cmd", async () => {
+  test("running followup with attachmentIds is forwarded to the hub", async () => {
     const s = start();
     const fleet = s.createFleet();
     const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
     const seen: any[] = [];
-    ws.addEventListener("message", (e) => seen.push(JSON.parse(String(e.data))));
+    ws.addEventListener("message", (e) => {
+      const msg = JSON.parse(String(e.data));
+      seen.push(msg);
+      if (msg.type === "cmd.followup") {
+        ws.send(JSON.stringify({
+          type: "cmd.result",
+          requestId: msg.requestId,
+          ok: true,
+          run: {
+            runId: msg.runId,
+            machineId: "m-1",
+            workspaceRoot: "/Users/me/proj",
+            prompt: msg.prompt,
+            status: "running",
+            outbound: [{
+              id: "o1",
+              prompt: msg.prompt,
+              expectedMode: "queue",
+              state: "injecting",
+              createdAt: 1,
+              attachmentIds: msg.attachmentIds,
+            }],
+            updatedAt: Date.now(),
+          },
+        }));
+      }
+    });
     autoHub(ws);
     ws.send(JSON.stringify({
       type: "snap.run",
@@ -1314,9 +1340,13 @@ describe("relay serve", () => {
       headers: { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" },
       body: JSON.stringify({ prompt: "看图", attachmentIds: [sha] }),
     });
-    expect(f.status).toBe(409);
-    expect(await f.json()).toEqual({ error: "OUTBOUND_TEXT_ONLY" });
-    expect(seen.some((m) => m.type === "cmd.followup")).toBe(false);
+    expect(f.status).toBe(201);
+    const body = await f.json() as any;
+    expect(body.outcome).toBe("queued");
+    expect(body.run.outbound[0].attachmentIds).toEqual([sha]);
+    const cmd = seen.find((m) => m.type === "cmd.followup");
+    expect(cmd.prompt).toBe("看图");
+    expect(cmd.attachmentIds).toEqual([sha]);
     ws.close();
   });
 

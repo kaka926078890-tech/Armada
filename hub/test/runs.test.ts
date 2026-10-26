@@ -1376,11 +1376,8 @@ describe("running followup outbound", () => {
     ws.close();
   });
 
-  test("A13 OUTBOUND_LIMIT 429 and running images OUTBOUND_TEXT_ONLY; A14 collision still", async () => {
+  test("A13 OUTBOUND_LIMIT 429; A14 collision still", async () => {
     const { ws, api, run } = await bindRunning({ mode: "steer" });
-    const img = await api(`/api/runs/${run.id}/followup`, { method: "POST", body: JSON.stringify({ prompt: "续", attachmentIds: ["nope"] }) });
-    expect(img.status).toBe(409);
-    expect(((await img.json()) as any).error).toBe("OUTBOUND_TEXT_ONLY");
     for (let i = 0; i < 8; i++) {
       const f = await api(`/api/runs/${run.id}/followup`, { method: "POST", body: JSON.stringify({ prompt: `续${i}` }) });
       expect(f.status).toBe(201);
@@ -1406,6 +1403,93 @@ describe("running followup outbound", () => {
     const live = (await (await api(`/api/runs/${run.id}`)).json()) as any;
     expect(live.status).toBe("unknown");
     expect(live.outbound).toEqual([]);
+    ws.close();
+  });
+
+  test("running followup sends image attachments and claims the image turn", async () => {
+    const { ws, inbound, api, run } = await bindRunning({ mode: "steer" });
+    const missing = await api(`/api/runs/${run.id}/followup`, {
+      method: "POST", body: JSON.stringify({ prompt: "续", attachmentIds: ["nope"] }),
+    });
+    expect(missing.status).toBe(400);
+    expect(((await missing.json()) as any).error).toBe("ATTACHMENT_NOT_FOUND");
+    const empty = await api(`/api/runs/${run.id}/followup`, {
+      method: "POST", body: JSON.stringify({ prompt: "  ", attachmentIds: [] }),
+    });
+    expect(empty.status).toBe(400);
+    expect(((await empty.json()) as any).error).toBe("EMPTY_PROMPT");
+
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    const fd = new FormData();
+    fd.append("file", new File([png], "a.png", { type: "image/png" }));
+    const up = await fetch(`http://127.0.0.1:${hub!.port}/api/blobs`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${hub!.token}` },
+      body: fd,
+    });
+    const { blob } = await up.json() as any;
+    inbound.length = 0;
+    const img = await api(`/api/runs/${run.id}/followup`, {
+      method: "POST", body: JSON.stringify({ prompt: "看图", attachmentIds: [blob.id] }),
+    });
+    expect(img.status).toBe(201);
+    const sent = await img.json() as any;
+    expect(sent.run.status).toBe("running");
+    expect(sent.run.outbound[0]).toMatchObject({ prompt: "看图", state: "injecting", attachment_ids: [blob.id] });
+    await new Promise((x) => setTimeout(x, 40));
+    expect(inbound.find((m) => m.type === "run.followup")).toMatchObject({
+      live: true,
+      prompt: "看图",
+      attachments: [expect.objectContaining({ id: blob.id, mime: "image/png" })],
+    });
+    expect(inbound.find((m) => m.type === "run.followup")?.generation_id).toBeUndefined();
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    await new Promise((x) => setTimeout(x, 40));
+    ws.send(JSON.stringify({
+      type: "run.event", runId: run.id, source: "hook", hookEventName: "beforeSubmitPrompt",
+      payload: {
+        prompt: "[Image]\n<image_files>a.png</image_files>\n看图",
+        conversation_id: "cid-1",
+      },
+      ts: Date.now(), seq: 50,
+    }));
+    await new Promise((x) => setTimeout(x, 60));
+    const after = await (await api(`/api/runs/${run.id}`)).json() as any;
+    expect(after.status).toBe("running");
+    expect(after.outbound).toEqual([]);
+    expect(after.image_donors).toEqual([{ prompt: "看图", attachment_ids: [blob.id] }]);
+
+    inbound.length = 0;
+    const only = await api(`/api/runs/${run.id}/followup`, {
+      method: "POST", body: JSON.stringify({ prompt: "", attachmentIds: [blob.id] }),
+    });
+    expect(only.status).toBe(201);
+    await new Promise((x) => setTimeout(x, 40));
+    expect(inbound.find((m) => m.type === "run.followup")).toMatchObject({
+      live: true,
+      prompt: "",
+      attachments: [expect.objectContaining({ id: blob.id })],
+    });
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    await new Promise((x) => setTimeout(x, 40));
+    const created = (hub!.db.query(
+      "SELECT created_at FROM run_outbound WHERE run_id=?1 AND state='steered'",
+    ).get(run.id) as { created_at: number }).created_at;
+    ws.send(JSON.stringify({
+      type: "run.event", runId: run.id, source: "hook", hookEventName: "beforeSubmitPrompt",
+      payload: { prompt: "[Image]\n<image_files>a.png</image_files>", conversation_id: "cid-1" },
+      ts: created + 10, seq: 51,
+    }));
+    await new Promise((x) => setTimeout(x, 60));
+    const done = await (await api(`/api/runs/${run.id}`)).json() as any;
+    expect(done.outbound).toEqual([]);
+    expect(done.image_donors).toEqual([
+      { prompt: "看图", attachment_ids: [blob.id] },
+      { prompt: "", attachment_ids: [blob.id] },
+    ]);
     ws.close();
   });
 
