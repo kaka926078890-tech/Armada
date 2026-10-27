@@ -513,6 +513,7 @@ type Emitted = { source: string; hook: string | null; payload: Record<string, un
 
 export function cursorFromEmitted(events: Emitted[]): ComposerCursor {
   const c = emptyCursor();
+  let stoppedGen: string | null = null;
   for (const ev of events) {
     const p = ev.payload ?? {};
     const bubble = typeof p.bubble_id === "string" ? p.bubble_id : "";
@@ -524,6 +525,9 @@ export function cursorFromEmitted(events: Emitted[]): ComposerCursor {
     if (ev.hook === "beforeSubmitPrompt") {
       if (bubble && !c.users.includes(bubble)) c.users.push(bubble);
       if (gen) c.armedGen = gen;
+      // A later submit is a new turn. The previous stop must not stay latched
+      // after the hub rebuilds this cursor (r-2aadbcbc overlay restart).
+      if (c.stopped && gen && stoppedGen && gen !== stoppedGen) c.stopped = false;
     }
     if (ev.hook === "afterAgentThought" && bubble && typeof p.text === "string") {
       const key = `${bubble}\0${p.text}`;
@@ -534,7 +538,10 @@ export function cursorFromEmitted(events: Emitted[]): ComposerCursor {
     if (ev.hook === "subagentStart" && typeof p.conversation_id === "string") {
       if (!c.children[p.conversation_id]) c.children[p.conversation_id] = { texts: [], closed: false };
     }
-    if (ev.hook === "stop") c.stopped = true;
+    if (ev.hook === "stop") {
+      c.stopped = true;
+      stoppedGen = gen ?? c.generationId;
+    }
     if (ev.source === "subagent-transcript") {
       const cid = typeof p.__subagent_cid === "string" ? p.__subagent_cid : "";
       if (!cid) continue;

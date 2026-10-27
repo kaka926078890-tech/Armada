@@ -4,7 +4,7 @@ import { mkdtempSync } from "fs";
 import { hostname, tmpdir } from "os";
 import { join } from "path";
 import {
-  emptyCursor, matchComposer, planComposerTick, readComposerView, readHeaderCandidates,
+  cursorFromEmitted, emptyCursor, matchComposer, planComposerTick, readComposerView, readHeaderCandidates,
   type ComposerBubble, type ComposerView,
 } from "../src/composerDb";
 import { createServer, type HubServer } from "../src/index";
@@ -164,6 +164,66 @@ describe("composer table plan", () => {
     expect(events.some((e) => e.hook === "stop")).toBe(false);
     expect(events.some((e) => e.hook === "subagentStart")).toBe(true);
     expect(events.some((e) => e.source === "subagent-transcript" && e.payload.role === "assistant")).toBe(true);
+  });
+
+  // r-2aadbcbc: overlay restarted the hub after a follow-up armed gen-live.
+  // Replay saw the previous stop first, so uuid-cleared never emitted this turn's text or stop.
+  test("a rebuilt cursor drops the previous stop once a later submit arms a new generation", () => {
+    const cursor = cursorFromEmitted([
+      { source: "db", hook: "beforeSubmitPrompt", payload: { prompt: "first", bubble_id: "u1", generation_id: "gen-old", conversation_id: "cid-1" } },
+      { source: "db", hook: "afterAgentResponse", payload: { text: "done once", bubble_id: "a1", generation_id: "gen-old", conversation_id: "cid-1" } },
+      { source: "db", hook: "stop", payload: { status: "completed", generation_id: "gen-old", conversation_id: "cid-1" } },
+      { source: "db", hook: "beforeSubmitPrompt", payload: { prompt: "重新打包安装一下", conversation_id: "cid-1" } },
+      { source: "db", hook: "beforeSubmitPrompt", payload: { prompt: "重新打包安装一下", bubble_id: "u2", generation_id: "gen-live", conversation_id: "cid-1" } },
+      { source: "db", hook: "preToolUse", payload: { tool_name: "Shell", conversation_id: "cid-1", bubble_id: "tool1" } },
+    ]);
+    expect(cursor.stopped).toBe(false);
+    expect(cursor.armedGen).toBe("gen-live");
+    const done = snap({
+      cid: "cid-1",
+      status: "completed",
+      generationId: null,
+      bubbles: [
+        bubble({ id: "u1", type: 1, text: "first" }),
+        bubble({ id: "a1", type: 2, text: "done once" }),
+        bubble({ id: "u2", type: 1, text: "重新打包安装一下" }),
+        bubble({ id: "tool1", toolName: "Shell", toolStatus: "completed" }),
+        bubble({ id: "final", type: 2, text: "Armada 已覆盖安装并拉起" }),
+      ],
+    });
+    const { events } = planComposerTick(done, [], cursor);
+    expect(events.find((e) => e.hook === "stop")?.payload).toMatchObject({ status: "completed", generation_id: "gen-live" });
+    expect(events.some((e) => e.hook === "afterAgentResponse" && e.payload.text === "Armada 已覆盖安装并拉起")).toBe(true);
+    expect(events.some((e) => e.payload.text === "done once")).toBe(false);
+  });
+
+  test("a rebuilt cursor stays stopped when the latest submit is the generation that already stopped", () => {
+    const cursor = cursorFromEmitted([
+      { source: "db", hook: "beforeSubmitPrompt", payload: { prompt: "first", bubble_id: "u1", generation_id: "gen-1" } },
+      { source: "db", hook: "afterAgentResponse", payload: { text: "done", bubble_id: "a1", generation_id: "gen-1" } },
+      { source: "db", hook: "stop", payload: { status: "completed", generation_id: "gen-1" } },
+    ]);
+    expect(cursor.stopped).toBe(true);
+    const { events } = planComposerTick(snap({
+      cid: "cid-1",
+      status: "completed",
+      generationId: null,
+      bubbles: [
+        bubble({ id: "u1", type: 1, text: "first" }),
+        bubble({ id: "a1", type: 2, text: "done" }),
+      ],
+    }), [], cursor);
+    expect(events.some((e) => e.hook === "stop")).toBe(false);
+  });
+
+  test("a rebuilt cursor keeps the new generation's own stop", () => {
+    const cursor = cursorFromEmitted([
+      { source: "db", hook: "stop", payload: { status: "completed", generation_id: "gen-old" } },
+      { source: "db", hook: "beforeSubmitPrompt", payload: { prompt: "again", bubble_id: "u2", generation_id: "gen-live" } },
+      { source: "db", hook: "stop", payload: { status: "completed", generation_id: "gen-live" } },
+    ]);
+    expect(cursor.stopped).toBe(true);
+    expect(cursor.armedGen).toBe("gen-live");
   });
 });
 
