@@ -291,3 +291,34 @@ describe("Sidebar vsix pack notice", () => {
     expect(html).not.toContain("扩展待 Reload");
   });
 });
+
+describe("Sidebar event source", () => {
+  test("only the local machine can switch hooks and the table", () => {
+    const html = renderToStaticMarkup(
+      <Sidebar
+        slots={[slot, { ...slot, machineId: "m-local", machineName: "This Mac", root: "/Users/apple/Desktop/desk" }]}
+        machines={[
+          {
+            id: "m-win", name: "PF39WTSM", os: "win32", cursor_version: null, extension_version: null,
+            open_workspaces: "[]", status: "online", last_seen_at: 1, display_name: "Win Destop",
+          },
+          {
+            id: "m-local", name: "appledeMacBook-Pro.local", os: "darwin", cursor_version: null, extension_version: null,
+            open_workspaces: "[]", status: "online", last_seen_at: 1, display_name: "Mac Arm New",
+            local: true, event_source: "hooks",
+          },
+        ]}
+        allRuns={[]}
+        selectedKey={null}
+        onSelectWorkspace={() => {}}
+        readMap={{}}
+        onDispatch={() => {}}
+        onRename={() => {}}
+        onEventSource={() => {}}
+      />,
+    );
+    expect(html).toContain("数据");
+    expect(html).toContain(">表<");
+    expect(html.match(/aria-pressed/g)?.length).toBe(2);
+  });
+});

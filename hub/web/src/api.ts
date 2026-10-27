@@ -61,6 +61,8 @@ export const api = {
   unarchive: (id: string) => req(`/api/runs/${id}/unarchive`, { method: "POST" }).then((r) => r.json()),
   renameMachine: (id: string, displayName: string) =>
     req(`/api/machines/${id}`, { method: "PATCH", body: JSON.stringify({ displayName }) }).then((r) => r.json()),
+  setEventSource: (id: string, eventSource: "hooks" | "db") =>
+    req(`/api/machines/${id}`, { method: "PATCH", body: JSON.stringify({ eventSource }) }).then((r) => r.json()),
   getUiPrefs: () => req("/api/ui-prefs").then(async (r) => {
     if (r.status === 503) throw new Error("READ_FAIL");
     if (!r.ok) throw new Error(`ui-prefs ${r.status}`);

@@ -14,6 +14,7 @@ export interface MachineRow {
   cursor_version: string | null; extension_version: string | null;
   open_workspaces: string; status: string; last_seen_at: number | null;
   display_name: string | null;
+  event_source?: string | null;
   queue_message_default_behavior?: string | null;
   cdp_ready?: boolean | null;
 }
@@ -101,6 +102,13 @@ export class Registry {
 
   getMachine(id: string): MachineRow | null {
     return (this.db.query("SELECT * FROM machines WHERE id=?1").get(id) as MachineRow) ?? null;
+  }
+
+  setEventSource(id: string, source: "hooks" | "db", localId: string | null): { error?: "NOT_FOUND" | "NOT_LOCAL"; machine?: MachineRow } {
+    if (!this.getMachine(id)) return { error: "NOT_FOUND" };
+    if (id !== localId) return { error: "NOT_LOCAL" };
+    this.db.query("UPDATE machines SET event_source=?1 WHERE id=?2").run(source, id);
+    return { machine: this.getMachine(id)! };
   }
 
   setDisplayName(id: string, displayName: string | null): { error?: string; machine?: MachineRow } {

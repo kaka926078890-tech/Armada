@@ -81,7 +81,7 @@ function ReloadChrome({
 }
 
 export default function Sidebar({
-  slots, machines, allRuns, selectedKey, onSelectWorkspace, readMap, onDispatch, onRename, onMonitorChatgpt,
+  slots, machines, allRuns, selectedKey, onSelectWorkspace, readMap, onDispatch, onRename, onEventSource, onMonitorChatgpt,
   showDesktopActions, onOpenWorkspace, onRepairCdp, onGetShareLink, onReloadMachine, reloadMachineIds,
   reloadPending, reloadBusy, requiredVsix, packNotice, quietUnread = false,
   showArchived = false, onlineCount = 0, machineCount = 0,
@@ -95,6 +95,7 @@ export default function Sidebar({
   readMap: Record<string, number>;
   onDispatch: () => void;
   onRename: (machineId: string, displayName: string) => void;
+  onEventSource?: (machineId: string, source: "hooks" | "db") => void;
   onMonitorChatgpt?: () => void;
   showDesktopActions?: boolean;
   onOpenWorkspace?: () => void;
@@ -203,6 +204,28 @@ export default function Sidebar({
                 </>
               )}
             </div>
+            {(() => {
+              const machine = machines.find((m) => m.id === g.machineId);
+              if (!machine?.local || !onEventSource) return null;
+              const mode = machine.event_source === "db" ? "db" : "hooks";
+              const btn = (source: "hooks" | "db", label: string) => (
+                <button
+                  type="button"
+                  aria-pressed={mode === source}
+                  onClick={() => onEventSource(g.machineId, source)}
+                  className={`rounded px-1.5 py-0.5 ${UI_META} ${mode === source ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                  {label}
+                </button>
+              );
+              return (
+                <div className="mx-3 mb-1 flex items-center gap-1" title="只影响这台电脑。hooks 仍安装。">
+                  <span className={`${UI_META} text-muted-foreground`}>数据</span>
+                  {btn("hooks", "hooks")}
+                  {btn("db", "表")}
+                </div>
+              );
+            })()}
             {lag ? (
               <div className={`pl-7 pr-3 pb-1 ${UI_META} text-amber-400 leading-snug`}>{lag}</div>
             ) : null}

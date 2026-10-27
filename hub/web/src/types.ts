@@ -3,6 +3,8 @@ export interface Machine {
   cursor_version: string | null; extension_version: string | null;
   open_workspaces: string; status: string; last_seen_at: number | null;
   display_name?: string | null;
+  event_source?: "hooks" | "db" | null;
+  local?: boolean;
   cdp_ready?: boolean | null;
   chatgpt_workspaces?: { root: string; label: string; ready: boolean }[];
   chatgpt_port?: "absent" | "down" | "ready";

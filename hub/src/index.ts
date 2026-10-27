@@ -1,3 +1,4 @@
+import { hostname } from "os";
 import { join } from "path";
 import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
@@ -7,6 +8,8 @@ import { Registry } from "./registry";
 import { RunService } from "./runs";
 import { SseHub } from "./sse";
 import { ingestEvent } from "./ingest";
+import { pickLocalMachineId, usesComposerDb } from "./composerDb";
+import { startComposerFeed } from "./composerDbFeed";
 import { handleWsMessage, type WsData } from "./ws";
 import { limitsFromEnv, httpStatusForRunError, followupOutcome, type ConcurrencyLimits } from "./concurrency";
 import { BlobStore, MAX_BLOB_BYTES, isInlineRenderMime, responseContentType } from "./blobs";
@@ -35,7 +38,7 @@ export interface HubServer {
   stop: () => void;
 }
 
-export function createServer(opts: { port?: number; hostname?: string; home?: string; concurrency?: ConcurrencyLimits; vsixSearchDirs?: string[]; fileReadTimeoutMs?: number; chatgpt?: boolean } = {}): HubServer {
+export function createServer(opts: { port?: number; hostname?: string; home?: string; concurrency?: ConcurrencyLimits; vsixSearchDirs?: string[]; fileReadTimeoutMs?: number; chatgpt?: boolean; composerCursorPath?: string | null } = {}): HubServer {
   const home = ARMADA_HOME(opts.home);
   const token = loadToken(home);
   const db = openDb(home);
@@ -77,6 +80,13 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
       case "run.progress": runs.onRunProgress(machineId, msg); break;
       case "run.bound": runs.onRunBound(machineId, msg); break;
       case "run.event": {
+        const source = typeof msg.source === "string" ? msg.source : "hook";
+        if (usesComposerDb(db, machineId) && source !== "db" && source !== "cdp" && source !== "hub") {
+          if (typeof msg.seq === "number") {
+            registry.sendTo(machineId, ws.data.windowId!, { type: "event.ack", machineId, lastSeq: msg.seq });
+          }
+          break;
+        }
         ingestEvent(db, runs, sse, machineId, msg);
         const ack = (msg as any).__ack;
         if (ack) registry.sendTo(machineId, ws.data.windowId!, ack);
@@ -110,7 +120,15 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
     tickets.revoke();
     return c.json({ ok: true });
   });
-  app.get("/api/machines", (c) => c.json(chatgpt.machines(registry.listMachines())));
+  app.get("/api/machines", (c) => {
+    const rows = chatgpt.machines(registry.listMachines());
+    const localId = pickLocalMachineId(rows, hostname(), (id) => registry.isMachineConnected(id));
+    return c.json(rows.map((m) => ({
+      ...m,
+      event_source: m.event_source === "db" ? "db" : "hooks",
+      local: m.id === localId,
+    })));
+  });
   app.post("/api/chatgpt/monitor", async (c) => {
     const result = await chatgpt.launchMonitor();
     if ("error" in result) return c.json(result, 409);
@@ -152,8 +170,18 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
   });
   app.patch("/api/machines/:id", async (c) => {
     const body = await c.req.json().catch(() => ({}));
+    const id = c.req.param("id");
+    if (body.eventSource !== undefined) {
+      if (body.eventSource !== "hooks" && body.eventSource !== "db") return c.json({ error: "INVALID" }, 400);
+      const localId = pickLocalMachineId(registry.listMachines(), hostname(), (mid) => registry.isMachineConnected(mid));
+      const { machine, error } = registry.setEventSource(id, body.eventSource, localId);
+      if (error === "NOT_FOUND") return c.json({ error }, 404);
+      if (error) return c.json({ error }, 409);
+      sse.broadcast("*", { type: "machine.updated" });
+      return c.json({ machine });
+    }
     if (typeof body.displayName !== "string") return c.json({ error: "INVALID" }, 400);
-    const { machine, error } = registry.setDisplayName(c.req.param("id"), body.displayName);
+    const { machine, error } = registry.setDisplayName(id, body.displayName);
     if (error) return c.json({ error }, 404);
     return c.json({ machine });
   });
@@ -438,6 +466,7 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
   });
 
   blobs.sweep();
+  const composerFeed = startComposerFeed({ hub: db, runs, sse, registry, cursorPath: opts.composerCursorPath });
   const sweepTimer = setInterval(() => {
     registry.sweep();
     runs.sweepTimeouts();
@@ -460,6 +489,7 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
       fileBroker.dispose();
       chatgpt.stop();
       relay?.stop();
+      composerFeed.stop();
       clearInterval(sweepTimer);
       clearInterval(logTimer);
       sse.closeAll();
