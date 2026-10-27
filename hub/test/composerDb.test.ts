@@ -59,6 +59,81 @@ describe("composer table plan", () => {
     expect(events.some((e) => e.hook === "afterAgentResponse" && e.payload.text === "finished")).toBe(true);
   });
 
+  test("a recovered turn flushes its text and stops the old generation before the next user", () => {
+    const armed = planComposerTick(snap({
+      cid: "cid-1",
+      bubbles: [bubble({ id: "u1", type: 1, text: "first" })],
+    }), [], emptyCursor()).cursor;
+    const next = snap({
+      cid: "cid-1",
+      status: "aborted",
+      generationId: "gen-2",
+      bubbles: [
+        bubble({ id: "u1", type: 1, text: "first" }),
+        bubble({ id: "a", type: 2, text: "the real body" }),
+        bubble({ id: "u2", type: 1, text: "second" }),
+      ],
+    });
+    const { events } = planComposerTick(next, [], armed);
+    const bodyAt = events.findIndex((e) => e.hook === "afterAgentResponse" && e.payload.text === "the real body");
+    const stopAt = events.findIndex((e) => e.hook === "stop");
+    const secondAt = events.findIndex((e) => e.hook === "beforeSubmitPrompt" && e.payload.prompt === "second");
+    expect(bodyAt).toBeGreaterThanOrEqual(0);
+    expect(stopAt).toBeGreaterThan(bodyAt);
+    expect(secondAt).toBeGreaterThan(stopAt);
+    expect(events[stopAt]?.payload).toMatchObject({ status: "completed", generation_id: "gen-1" });
+  });
+
+  test("uuid already swapped after the next user was emitted still flushes the previous body", () => {
+    const armed = planComposerTick(snap({
+      cid: "cid-1",
+      bubbles: [
+        bubble({ id: "u1", type: 1, text: "first" }),
+        bubble({ id: "a", type: 2, text: "the real body" }),
+        bubble({ id: "u2", type: 1, text: "second" }),
+      ],
+    }), [], emptyCursor()).cursor;
+    expect(armed.users).toEqual(["u1", "u2"]);
+    expect(armed.stopped).toBe(false);
+    const swapped = snap({
+      cid: "cid-1",
+      status: "aborted",
+      generationId: "gen-2",
+      bubbles: [
+        bubble({ id: "u1", type: 1, text: "first" }),
+        bubble({ id: "a", type: 2, text: "the real body" }),
+        bubble({ id: "u2", type: 1, text: "second" }),
+      ],
+    });
+    const { events } = planComposerTick(swapped, [], armed);
+    const bodyAt = events.findIndex((e) => e.hook === "afterAgentResponse" && e.payload.text === "the real body");
+    const stopAt = events.findIndex((e) => e.hook === "stop");
+    expect(bodyAt).toBeGreaterThanOrEqual(0);
+    expect(stopAt).toBeGreaterThan(bodyAt);
+    expect(events[stopAt]?.payload).toMatchObject({ status: "completed", generation_id: "gen-1" });
+  });
+
+  test("a new generation without a new user bubble does not stop the open turn", () => {
+    const armed = planComposerTick(snap({
+      cid: "cid-1",
+      generationId: "gen-1",
+      bubbles: [
+        bubble({ id: "u", type: 1, text: "do the thing" }),
+        bubble({ id: "a", type: 2, text: "partial" }),
+      ],
+    }), [], emptyCursor()).cursor;
+    const { events } = planComposerTick(snap({
+      cid: "cid-1",
+      generationId: "gen-2",
+      bubbles: [
+        bubble({ id: "u", type: 1, text: "do the thing" }),
+        bubble({ id: "a", type: 2, text: "partial" }),
+      ],
+    }), [], armed);
+    expect(events.some((e) => e.hook === "stop")).toBe(false);
+    expect(events.some((e) => e.hook === "afterAgentResponse")).toBe(false);
+  });
+
   test("one aborted sample after the uuid clears does not stop; completed on the next sample does", () => {
     const armed = planComposerTick(snap({ cid: "cid-1", bubbles: [bubble({ id: "u", type: 1, text: "hi" })] }), [], emptyCursor()).cursor;
     const cleared = snap({ cid: "cid-1", status: "aborted", generationId: null, bubbles: [bubble({ id: "u", type: 1, text: "hi" })] });

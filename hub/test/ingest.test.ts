@@ -229,6 +229,31 @@ describe("event ingest", () => {
     ws.close();
   });
 
+  test("system_notification BSP after completed does not reopen", async () => {
+    const G1 = "61192e2d-998b-4139-b37b-8e25f3abf2a9";
+    const G2 = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
+    const { ws, api, runId } = await startBoundRun();
+    const snap = async () => (await (await api(`/api/runs/${runId}`)).json()) as any;
+    ws.send(JSON.stringify(ev(runId, 1, "beforeSubmitPrompt", {
+      conversation_id: "cid-1", generation_id: G1, prompt: "帮我在OPC上测试一下",
+    })));
+    ws.send(JSON.stringify(ev(runId, 2, "stop", {
+      status: "completed", conversation_id: "cid-1", generation_id: G1,
+    })));
+    await new Promise((r) => setTimeout(r, 80));
+    ws.send(JSON.stringify(ev(runId, 3, "beforeSubmitPrompt", {
+      conversation_id: "cid-1",
+      generation_id: G2,
+      prompt: "<timestamp>Tuesday, Oct 27, 2026, 2:38 PM (UTC+8)</timestamp>\n<system_notification>\nThe beginning of the above subagent result is already visible to the user.\n</system_notification>",
+    })));
+    await new Promise((r) => setTimeout(r, 80));
+    const after = await snap();
+    expect(after.status).toBe("completed");
+    expect(after.live_generation_id).toBeNull();
+    expect(after.end_reason).toBe("completed");
+    ws.close();
+  });
+
   test("r-fc35e97f: retired preToolUse after completed does not reopen", async () => {
     const G1 = "f2fd16b2-08c8-4d64-bd40-6be3e637159e";
     const { ws, api, runId } = await startBoundRun();

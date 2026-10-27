@@ -306,11 +306,17 @@ function transcriptBlocks(ev: RunEvent, p: any): ChatBlock[] {
   return out;
 }
 
+function hookUserBody(raw: string): string {
+  if (raw.includes("<system_notification>") && !raw.includes("<user_query>")) return "";
+  if (raw.includes("<user_query>")) return extractUserText(raw);
+  return raw;
+}
+
 function hookBlocks(ev: RunEvent, p: any): ChatBlock[] {
   const hook = ev.hook_event_name;
   if (hook === "beforeSubmitPrompt" && typeof p?.prompt === "string") {
     const ids = parseHookAttachmentIds(p?.attachmentIds);
-    const shown = displayUserText(p.prompt, ids.length);
+    const shown = displayUserText(hookUserBody(p.prompt), ids.length);
     return emitUser(shown, ev.seq, ids);
   }
   if (hook === "afterAgentThought" && typeof p?.text === "string" && p.text.trim()) {
@@ -419,6 +425,8 @@ function lastAssistantBlock(blocks: ChatBlock[]): Extract<ChatBlock, { kind: "as
  * Cursor jsonl: one assistant line is one UI unit; turn_ended closes a generation.
  * Keep the last text-only of the first generation (operator answer) and of the last
  * generation (latest protocol status). Other assistants become thoughts.
+ * A longer assistant in that same generation stays a body. Composer db can append
+ * the short protocol note after the operator report with no turn_ended between them.
  */
 function applyCursorGenerations(blocks: ChatBlock[]): ChatBlock[] {
   const turns = splitChatTurns(blocks);
@@ -438,10 +446,13 @@ function applyCursorGenerations(blocks: ChatBlock[]): ChatBlock[] {
     const keep = new Set<ChatBlock>();
     if (first) keep.add(first);
     if (last) keep.add(last);
+    let keptLen = 0;
+    for (const b of keep) if (b.kind === "assistant") keptLen = Math.max(keptLen, b.text.length);
     for (const gen of gens) {
       for (const b of gen) {
         if (b.kind === "assistant" && !keep.has(b)) {
-          out.push({ kind: "thought", text: b.text, seq: b.seq });
+          if (b.text.length > keptLen) out.push(b);
+          else out.push({ kind: "thought", text: b.text, seq: b.seq });
         } else {
           out.push(b);
         }

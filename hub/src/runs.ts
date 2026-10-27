@@ -845,7 +845,7 @@ export class RunService {
   /**
    * 终态之后，操作员在 Cursor 里提交的新一轮（beforeSubmitPrompt）要拉回 running，
    * 否则这轮 stop 会在 onStopEvent 入口被丢掉。
-   * shell 通知的 preToolUse 比协议用户句早到，不能据此复活；协议句本身也不复活。
+   * shell 通知的 preToolUse 比协议用户句早到，不能据此复活；协议句和只有 system_notification 的气泡也不复活。
    * 操作员关闭的卡不复活。卡片标题仍是上次中台写入的 prompt。
    */
   reopenForOwnerGeneration(runId: string, hookEventName: string | null, payload: any, eventCid: unknown): boolean {
@@ -853,6 +853,8 @@ export class RunService {
     if (!run || run.end_reason === "OPERATOR_CLOSED") return false;
     if (!isStatus(run.status, TERMINAL_STATUSES)) return false;
     if (hookEventName !== "beforeSubmitPrompt") return false;
+    const raw = typeof payload?.prompt === "string" ? payload.prompt : "";
+    if (raw.includes("<system_notification>") && !raw.includes("<user_query>")) return false;
     const prompt = hookSubmitPrompt(payload);
     if (prompt && isCursorProtocolUser(prompt)) return false;
     const d = decideArm({

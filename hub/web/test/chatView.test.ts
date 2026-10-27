@@ -843,6 +843,29 @@ describe("Cursor generation rendering", () => {
     expect(segs.filter((s) => s.kind === "assistant")).toHaveLength(2);
     expect(segs.filter((s) => s.kind === "process").length).toBeGreaterThan(0);
   });
+
+  test("db shell notification is hidden and a longer report stays the body", () => {
+    const report = "在本机 OPC 壳上按用例表实机跑过。窗口是当前分支，结论如下。\n\n| 项 | 结果 |\n|---|---|\n| 开通 | 过了 |";
+    const note = "这两条是刚才实机跑测时的中间过程，结论没有变。";
+    const blocks = eventsToChat([
+      ev({ seq: 1, source: "db", hook_event_name: "beforeSubmitPrompt", payload: JSON.stringify({ prompt: "帮我在OPC上测试一下" }) }),
+      ev({ seq: 2, source: "db", hook_event_name: "beforeSubmitPrompt", payload: JSON.stringify({
+        prompt: "<timestamp>Tuesday, Oct 27, 2026, 2:38 PM (UTC+8)</timestamp>\n<system_notification>\nThe beginning of the above subagent result is already visible to the user.\n</system_notification>",
+      }) }),
+      ev({ seq: 3, source: "db", hook_event_name: "beforeSubmitPrompt", payload: JSON.stringify({
+        prompt: "<timestamp>Tuesday, Oct 27, 2026, 2:38 PM (UTC+8)</timestamp>\n<system_notification>\nnotify\n</system_notification>\n<user_query>Briefly inform the user about the task result and perform any follow-up actions (if needed).</user_query>",
+      }) }),
+      ev({ seq: 4, source: "db", hook_event_name: "afterAgentResponse", payload: JSON.stringify({ text: "先看广发那份测试用例。" }) }),
+      ev({ seq: 5, source: "db", hook_event_name: "afterAgentResponse", payload: JSON.stringify({ text: report }) }),
+      ev({ seq: 6, source: "db", hook_event_name: "afterAgentResponse", payload: JSON.stringify({ text: note }) }),
+    ]);
+    expect(blocks.filter((b) => b.kind === "user")).toEqual([
+      { kind: "user", text: "帮我在OPC上测试一下", seq: 1 },
+    ]);
+    const assts = blocks.filter((b) => b.kind === "assistant");
+    expect(assts.map((b) => b.kind === "assistant" ? b.text : "")).toEqual([report, note]);
+    expect(blocks.some((b) => b.kind === "thought" && b.text.startsWith("先看广发"))).toBe(true);
+  });
 });
 
 describe("AskQuestion chat blocks", () => {

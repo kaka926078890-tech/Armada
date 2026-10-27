@@ -242,6 +242,20 @@ function bsp(snap: ComposerView, bubble: ComposerBubble): DbEvent {
   };
 }
 
+function childStillBusy(children: ComposerView[], cursor: ComposerCursor): boolean {
+  for (const child of children) {
+    const cur = childOf(cursor, child.cid);
+    if (child.generationId) return true;
+    const sawWork = cur.texts.length > 0 || !!child.generationId;
+    const closing = !cur.closed && !child.generationId && (
+      doneStatus(child.status) || (sawWork && (child.status === "aborted" || child.status === "error"))
+    );
+    if (closing) continue;
+    if (!cur.closed && !doneStatus(child.status)) return true;
+  }
+  return false;
+}
+
 /** Events the hub already understands. Busy is chatGenerationUUID, not composer status. */
 export function planComposerTick(
   snap: ComposerView,
@@ -251,6 +265,64 @@ export function planComposerTick(
   const next = structuredClone(cursor);
   const events: DbEvent[] = [];
   const emit = (ev: DbEvent) => events.push(ev);
+  const flushText = (b: ComposerBubble, gen: string | null): boolean => {
+    if (b.type !== 2 || !b.text.trim() || b.toolName || next.assistants.includes(b.id)) return false;
+    next.assistants.push(b.id);
+    emit({
+      source: "db",
+      hook: "afterAgentResponse",
+      conversationId: snap.cid,
+      payload: {
+        text: b.text,
+        conversation_id: snap.cid,
+        bubble_id: b.id,
+        ...(gen ? { generation_id: gen } : {}),
+      },
+    });
+    return true;
+  };
+
+  // A finished composer turn often never shows uuid=null: the next user bubble
+  // replaces chatGenerationUUID first. Flush the text-only answer and stop the
+  // previous generation before that user is emitted, or the body is skipped and
+  // the card stays running. A uuid swap with no new user is a resume — leave it.
+  const newUserAt = snap.bubbles.findIndex((b) => b.type === 1 && b.text.trim() && !next.users.includes(b.id));
+  const priorGen = next.generationId;
+  const genChanged = !!(snap.generationId && priorGen && snap.generationId !== priorGen);
+  const uuidGone = !snap.generationId && next.sawGeneration;
+  const turnMoved = genChanged || uuidGone || next.abortSeen;
+  let cut = -1;
+  if (newUserAt > 0 && turnMoved) cut = newUserAt;
+  else if (genChanged && next.sawGeneration && !next.stopped) {
+    let lastKnown = -1;
+    for (let i = 0; i < snap.bubbles.length; i++) {
+      const b = snap.bubbles[i];
+      if (b?.type === 1 && b.text.trim() && next.users.includes(b.id)) lastKnown = i;
+    }
+    if (lastKnown > 0) cut = lastKnown;
+  }
+  if (cut > 0 && next.sawGeneration && !next.stopped && turnMoved) {
+    let flushed = false;
+    for (const b of snap.bubbles.slice(0, cut)) {
+      if (flushText(b, priorGen)) flushed = true;
+    }
+    const stopForNewUser = newUserAt > 0;
+    if ((stopForNewUser || flushed) && !childStillBusy(children, next)) {
+      const hadText = snap.bubbles.slice(0, cut).some((b) => b.type === 2 && !!b.text.trim() && next.assistants.includes(b.id));
+      next.stopped = true;
+      emit({
+        source: "db",
+        hook: "stop",
+        conversationId: snap.cid,
+        payload: {
+          status: hadText ? "completed" : snap.status === "error" ? "error" : "aborted",
+          conversation_id: snap.cid,
+          ...(priorGen ? { generation_id: priorGen } : {}),
+        },
+      });
+    }
+  }
+
   if (snap.generationId) {
     if (next.stopped && next.armedGen !== snap.generationId) next.stopped = false;
     next.generationId = snap.generationId;
@@ -390,16 +462,7 @@ export function planComposerTick(
   if (abortHold) next.abortSeen = true;
   if (snap.generationId) next.abortSeen = false;
   if (uuidCleared && !abortHold && !next.stopped && !childBusy) {
-    for (const b of snap.bubbles) {
-      if (b.type !== 2 || !b.text.trim() || next.assistants.includes(b.id)) continue;
-      next.assistants.push(b.id);
-      emit({
-        source: "db",
-        hook: "afterAgentResponse",
-        conversationId: snap.cid,
-        payload: { text: b.text, conversation_id: snap.cid, bubble_id: b.id },
-      });
-    }
+    for (const b of snap.bubbles) flushText(b, next.generationId);
     const stopStatus = doneStatus(snap.status) ? "completed"
       : snap.status === "aborted" ? "aborted"
       : snap.status === "error" ? "error"
