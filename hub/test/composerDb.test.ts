@@ -4,16 +4,26 @@ import { mkdtempSync } from "fs";
 import { hostname, tmpdir } from "os";
 import { join } from "path";
 import {
-  cursorFromEmitted, emptyCursor, matchComposer, planComposerTick, readComposerView, readHeaderCandidates,
+  composerFeedWatches, cursorFromEmitted, emptyCursor, matchComposer, planComposerTick, readComposerView, readHeaderCandidates,
   type ComposerBubble, type ComposerView,
 } from "../src/composerDb";
 import { createServer, type HubServer } from "../src/index";
 
 function bubble(partial: Partial<ComposerBubble> & { id: string }): ComposerBubble {
   return {
-    type: 2, text: "", thinking: "", toolName: "", toolStatus: "", subagentComposerId: "",
+    type: 2, text: "", thinking: "", toolName: "", toolStatus: "", subagentComposerId: "", requestId: "",
     ...partial,
   };
+}
+
+const CURSOR_GEN = "6bc4f02c-7ae3-4e80-a2b3-b8f613605ee7";
+
+function stoppedAfterFirstTurn() {
+  return cursorFromEmitted([
+    { source: "db", hook: "beforeSubmitPrompt", payload: { prompt: "first", bubble_id: "u1", generation_id: "gen-1", conversation_id: "cid-1" } },
+    { source: "db", hook: "afterAgentResponse", payload: { text: "done once", bubble_id: "a1", generation_id: "gen-1", conversation_id: "cid-1" } },
+    { source: "db", hook: "stop", payload: { status: "completed", generation_id: "gen-1", conversation_id: "cid-1" } },
+  ]);
 }
 
 function snap(partial: Partial<ComposerView> & { cid: string }): ComposerView {
@@ -173,8 +183,8 @@ describe("composer table plan", () => {
       { source: "db", hook: "beforeSubmitPrompt", payload: { prompt: "first", bubble_id: "u1", generation_id: "gen-old", conversation_id: "cid-1" } },
       { source: "db", hook: "afterAgentResponse", payload: { text: "done once", bubble_id: "a1", generation_id: "gen-old", conversation_id: "cid-1" } },
       { source: "db", hook: "stop", payload: { status: "completed", generation_id: "gen-old", conversation_id: "cid-1" } },
-      { source: "db", hook: "beforeSubmitPrompt", payload: { prompt: "重新打包安装一下", conversation_id: "cid-1" } },
-      { source: "db", hook: "beforeSubmitPrompt", payload: { prompt: "重新打包安装一下", bubble_id: "u2", generation_id: "gen-live", conversation_id: "cid-1" } },
+      { source: "db", hook: "beforeSubmitPrompt", payload: { prompt: "????????", conversation_id: "cid-1" } },
+      { source: "db", hook: "beforeSubmitPrompt", payload: { prompt: "????????", bubble_id: "u2", generation_id: "gen-live", conversation_id: "cid-1" } },
       { source: "db", hook: "preToolUse", payload: { tool_name: "Shell", conversation_id: "cid-1", bubble_id: "tool1" } },
     ]);
     expect(cursor.stopped).toBe(false);
@@ -186,14 +196,14 @@ describe("composer table plan", () => {
       bubbles: [
         bubble({ id: "u1", type: 1, text: "first" }),
         bubble({ id: "a1", type: 2, text: "done once" }),
-        bubble({ id: "u2", type: 1, text: "重新打包安装一下" }),
+        bubble({ id: "u2", type: 1, text: "????????" }),
         bubble({ id: "tool1", toolName: "Shell", toolStatus: "completed" }),
-        bubble({ id: "final", type: 2, text: "Armada 已覆盖安装并拉起" }),
+        bubble({ id: "final", type: 2, text: "Armada ????????" }),
       ],
     });
     const { events } = planComposerTick(done, [], cursor);
     expect(events.find((e) => e.hook === "stop")?.payload).toMatchObject({ status: "completed", generation_id: "gen-live" });
-    expect(events.some((e) => e.hook === "afterAgentResponse" && e.payload.text === "Armada 已覆盖安装并拉起")).toBe(true);
+    expect(events.some((e) => e.hook === "afterAgentResponse" && e.payload.text === "Armada ????????")).toBe(true);
     expect(events.some((e) => e.payload.text === "done once")).toBe(false);
   });
 
@@ -216,6 +226,78 @@ describe("composer table plan", () => {
     expect(events.some((e) => e.hook === "stop")).toBe(false);
   });
 
+  // r-2209d0b5: card already stopped. Operator typed in Cursor. The feed next saw the
+  // finished turn only after an Armada follow-up. User requestId is the generation;
+  // chatGenerationUUID was already gone, so the body was skipped and only the prompt landed.
+  test("a stopped card emits a finished Cursor turn's prompt, body, and stop", () => {
+    const cursor = stoppedAfterFirstTurn();
+    expect(cursor.stopped).toBe(true);
+    const done = snap({
+      cid: "cid-1",
+      status: "completed",
+      generationId: null,
+      bubbles: [
+        bubble({ id: "u1", type: 1, text: "first", requestId: "gen-1" }),
+        bubble({ id: "a1", type: 2, text: "done once" }),
+        bubble({ id: "u2", type: 1, text: "?????????", requestId: CURSOR_GEN }),
+        bubble({ id: "a2", type: 2, text: "?????????? SynLoom???????????????" }),
+      ],
+    });
+    const { events } = planComposerTick(done, [], cursor);
+    const userAt = events.findIndex((e) => e.hook === "beforeSubmitPrompt" && e.payload.prompt === "?????????");
+    const bodyAt = events.findIndex((e) => e.hook === "afterAgentResponse" && e.payload.text === "?????????? SynLoom???????????????");
+    const stopAt = events.findIndex((e) => e.hook === "stop" && e.payload.generation_id === CURSOR_GEN);
+    expect(userAt).toBeGreaterThanOrEqual(0);
+    expect(events[userAt]?.payload.generation_id).toBe(CURSOR_GEN);
+    expect(bodyAt).toBeGreaterThan(userAt);
+    expect(stopAt).toBeGreaterThan(bodyAt);
+    expect(events[stopAt]?.payload.status).toBe("completed");
+    expect(events.some((e) => e.payload.text === "done once")).toBe(false);
+  });
+
+  test("a finished Cursor turn closes before the live follow-up that woke the feed", () => {
+    const cursor = stoppedAfterFirstTurn();
+    const liveGen = "f05540d0-5537-41d7-940f-bc6fabea1809";
+    const { events } = planComposerTick(snap({
+      cid: "cid-1",
+      status: "aborted",
+      generationId: liveGen,
+      bubbles: [
+        bubble({ id: "u1", type: 1, text: "first", requestId: "gen-1" }),
+        bubble({ id: "a1", type: 2, text: "done once" }),
+        bubble({ id: "u2", type: 1, text: "?????????", requestId: CURSOR_GEN }),
+        bubble({ id: "a2", type: 2, text: "?????????? SynLoom???????????????" }),
+        bubble({ id: "u3", type: 1, text: "???????????????????", requestId: liveGen }),
+      ],
+    }), [], cursor);
+    const userAt = events.findIndex((e) => e.hook === "beforeSubmitPrompt" && e.payload.prompt === "?????????");
+    const bodyAt = events.findIndex((e) => e.hook === "afterAgentResponse" && String(e.payload.text).includes("?????"));
+    const stopAt = events.findIndex((e) => e.hook === "stop" && e.payload.generation_id === CURSOR_GEN);
+    const liveAt = events.findIndex((e) => e.hook === "beforeSubmitPrompt" && e.payload.prompt === "???????????????????");
+    expect(userAt).toBeGreaterThanOrEqual(0);
+    expect(bodyAt).toBeGreaterThan(userAt);
+    expect(stopAt).toBeGreaterThan(bodyAt);
+    expect(liveAt).toBeGreaterThan(stopAt);
+    expect(events[liveAt]?.payload.generation_id).toBe(liveGen);
+    expect(events.some((e) => e.hook === "stop" && e.payload.generation_id === liveGen)).toBe(false);
+  });
+
+  test("a Cursor turn that still holds chatGenerationUUID is armed and not stopped", () => {
+    const cursor = stoppedAfterFirstTurn();
+    const { events } = planComposerTick(snap({
+      cid: "cid-1",
+      status: "aborted",
+      generationId: CURSOR_GEN,
+      bubbles: [
+        bubble({ id: "u1", type: 1, text: "first", requestId: "gen-1" }),
+        bubble({ id: "a1", type: 2, text: "done once" }),
+        bubble({ id: "u2", type: 1, text: "?????????", requestId: CURSOR_GEN }),
+      ],
+    }), [], cursor);
+    expect(events.find((e) => e.hook === "beforeSubmitPrompt" && e.payload.prompt === "?????????")?.payload.generation_id).toBe(CURSOR_GEN);
+    expect(events.some((e) => e.hook === "stop")).toBe(false);
+  });
+
   test("a rebuilt cursor keeps the new generation's own stop", () => {
     const cursor = cursorFromEmitted([
       { source: "db", hook: "stop", payload: { status: "completed", generation_id: "gen-old" } },
@@ -224,6 +306,17 @@ describe("composer table plan", () => {
     ]);
     expect(cursor.stopped).toBe(true);
     expect(cursor.armedGen).toBe("gen-live");
+  });
+});
+
+describe("composer feed watch", () => {
+  test("a bound terminal card stays on the table feed; a closed card does not", () => {
+    expect(composerFeedWatches({ status: "running", conversation_id: "cid" })).toBe(true);
+    expect(composerFeedWatches({ status: "completed", conversation_id: "cid", end_reason: "completed" })).toBe(true);
+    expect(composerFeedWatches({ status: "cancelled", conversation_id: "cid", end_reason: "cancelled" })).toBe(true);
+    expect(composerFeedWatches({ status: "completed", conversation_id: "cid", end_reason: "OPERATOR_CLOSED" })).toBe(false);
+    expect(composerFeedWatches({ status: "completed", conversation_id: null, end_reason: "completed" })).toBe(false);
+    expect(composerFeedWatches({ status: "queued", conversation_id: "cid" })).toBe(false);
   });
 });
 
@@ -258,7 +351,9 @@ describe("composer sqlite read", () => {
       fullConversationHeadersOnly: [{ bubbleId: "u" }, { bubbleId: "a" }],
       subagentComposerIds: [],
     }));
-    db.query("INSERT INTO cursorDiskKV (key, value) VALUES (?1,?2)").run(`bubbleId:${cid}:u`, JSON.stringify({ type: 1, text: "hello" }));
+    db.query("INSERT INTO cursorDiskKV (key, value) VALUES (?1,?2)").run(`bubbleId:${cid}:u`, JSON.stringify({
+      type: 1, text: "hello", requestId: "6bc4f02c-7ae3-4e80-a2b3-b8f613605ee7",
+    }));
     db.query("INSERT INTO cursorDiskKV (key, value) VALUES (?1,?2)").run(`bubbleId:${cid}:a`, JSON.stringify({
       type: 2, text: "", thinking: { text: "hmm" },
     }));
@@ -270,6 +365,7 @@ describe("composer sqlite read", () => {
     const view = readComposerView(db, cid);
     expect(view?.generationId).toBe("gen-1");
     expect(view?.status).toBe("aborted");
+    expect(view?.bubbles[0]?.requestId).toBe("6bc4f02c-7ae3-4e80-a2b3-b8f613605ee7");
     expect(view?.bubbles[1]?.thinking).toBe("hmm");
     db.close();
   });

@@ -4,8 +4,8 @@ import { homedir, hostname } from "os";
 import { join } from "path";
 import { parseAttachmentIds } from "./blobs";
 import {
-  cursorFromEmitted, matchComposer, pickLocalMachineId, planComposerTick,
-  readComposerView, readHeaderCandidates, seedCursor, usesComposerDb,
+  composerFeedWatches, cursorFromEmitted, matchComposer, pickLocalMachineId, planComposerTick,
+  readComposerHead, readComposerView, readHeaderCandidates, seedCursor, usesComposerDb,
   type ComposerCursor, type ComposerView,
 } from "./composerDb";
 import { ingestEvent } from "./ingest";
@@ -32,6 +32,7 @@ type RunLite = {
   conversation_id: string | null;
   created_at: number;
   attachments: string | null;
+  end_reason: string | null;
 };
 
 export function startComposerFeed(opts: {
@@ -79,11 +80,12 @@ export function startComposerFeed(opts: {
       cursors.clear();
       return;
     }
-    const runs = opts.hub.query(
-      `SELECT id, workspace_root, prompt, status, conversation_id, created_at, attachments
+    const runs = (opts.hub.query(
+      `SELECT id, workspace_root, prompt, status, conversation_id, created_at, attachments, end_reason
        FROM runs
-       WHERE machine_id=?1 AND archived_at IS NULL AND status IN ('dispatched','binding','running')`,
-    ).all(localId) as RunLite[];
+       WHERE machine_id=?1 AND archived_at IS NULL
+         AND status IN ('dispatched','binding','running','completed','error','aborted','cancelled')`,
+    ).all(localId) as RunLite[]).filter((r) => composerFeedWatches(r));
     const active = new Set(runs.map((r) => r.id));
     for (const id of cursors.keys()) if (!active.has(id)) cursors.delete(id);
     if (!runs.length) return;
@@ -114,13 +116,8 @@ export function startComposerFeed(opts: {
     for (const run of runs) {
       const cid = run.conversation_id;
       if (!cid) continue;
-      const snap = readComposerView(db, cid);
-      if (!snap) continue;
-      const children: ComposerView[] = [];
-      for (const id of snap.subagentIds) {
-        const child = readComposerView(db, id);
-        if (child) children.push(child);
-      }
+      const head = readComposerHead(db, cid);
+      if (!head) continue;
       let cur = cursors.get(run.id);
       if (!cur) {
         const dbEvents = opts.hub.query(
@@ -133,12 +130,23 @@ export function startComposerFeed(opts: {
             hook: e.hook,
             payload: JSON.parse(e.payload) as Record<string, unknown>,
           })));
-        } else {
-          const n = opts.hub.query("SELECT COUNT(*) AS n FROM run_events WHERE run_id=?1").get(run.id) as { n: number };
-          cur = seedCursor(snap, children, n.n);
         }
       }
+      const openChild = !!cur && Object.values(cur.children).some((c) => !c.closed);
+      if (cur && !head.generationId && cur.stopped && !openChild && cur.idleKey === head.idleKey) continue;
+      const snap = readComposerView(db, cid);
+      if (!snap) continue;
+      const children: ComposerView[] = [];
+      for (const id of snap.subagentIds) {
+        const child = readComposerView(db, id);
+        if (child) children.push(child);
+      }
+      if (!cur) {
+        const n = opts.hub.query("SELECT COUNT(*) AS n FROM run_events WHERE run_id=?1").get(run.id) as { n: number };
+        cur = seedCursor(snap, children, n.n);
+      }
       const planned = planComposerTick(snap, children, cur);
+      planned.cursor.idleKey = !head.generationId && planned.cursor.stopped ? head.idleKey : "";
       cursors.set(run.id, planned.cursor);
       for (const ev of planned.events) {
         if (ev.hook === "stop") console.log(`composer-db stop ${run.id} ${String(ev.payload.status)}`);
