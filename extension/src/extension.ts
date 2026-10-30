@@ -24,7 +24,7 @@ import { enrichPlanAsk, planDirsFor } from "./planFile";
 import { PENDING_RELOAD_ATTEMPT_NAME, PENDING_RELOAD_NAME, decideReloadFire, decideWindowReload, highestInstalledArmadaAgent, highestInstalledVsix, mergeReloadAttempt, noteReloadCommandSettled, parsePendingReload, parseReloadAttempt, reloadAttemptBlocksWindow, windowHasInFlightArmadaRun, windowHasOpenComposerTurn, windowHasRecentSettle, type ReloadFireState } from "../../desktop-core/src/cursorReload";
 import { readWorkspaceFile } from "./workspaceFileRead";
 
-const EXTENSION_VERSION = "0.4.52";
+const EXTENSION_VERSION = "0.4.53";
 
 let client: { dispose: () => void } | null = null;
 
