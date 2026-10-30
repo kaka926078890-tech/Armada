@@ -31,15 +31,25 @@ export interface ConcurrencyLimits {
   multiRunPerWindow: boolean;
 }
 
-function clampInt(raw: string | undefined, fallback: number, min: number, max: number): number {
-  const n = raw == null || raw === "" ? fallback : Number(raw);
+/** Occupying runs (queued through running) per machine / workspace. Settings can raise this; 256 is the typo guard. */
+export const RUN_LIMIT_MIN = 1;
+export const RUN_LIMIT_MAX = 256;
+export const DEFAULT_MAX_RUNS_PER_MACHINE = 32;
+export const DEFAULT_MAX_RUNS_PER_WORKSPACE = 32;
+
+export function clampRunLimit(raw: unknown, fallback: number): number {
+  const n = typeof raw === "number"
+    ? raw
+    : typeof raw === "string" && raw.trim() !== ""
+      ? Number(raw)
+      : NaN;
   if (!Number.isFinite(n)) return fallback;
-  return Math.min(max, Math.max(min, Math.trunc(n)));
+  return Math.min(RUN_LIMIT_MAX, Math.max(RUN_LIMIT_MIN, Math.trunc(n)));
 }
 
 export function limitsFromEnv(env: Record<string, string | undefined> = process.env): ConcurrencyLimits {
-  const maxPerMachine = clampInt(env.ARMADA_MAX_RUNS_PER_MACHINE, 8, 1, 32);
-  let maxPerWorkspace = clampInt(env.ARMADA_MAX_RUNS_PER_WORKSPACE, 4, 1, 16);
+  const maxPerMachine = clampRunLimit(env.ARMADA_MAX_RUNS_PER_MACHINE, DEFAULT_MAX_RUNS_PER_MACHINE);
+  let maxPerWorkspace = clampRunLimit(env.ARMADA_MAX_RUNS_PER_WORKSPACE, DEFAULT_MAX_RUNS_PER_WORKSPACE);
   if (maxPerWorkspace > maxPerMachine) maxPerWorkspace = maxPerMachine;
   const flag = (env.ARMADA_MULTI_RUN_PER_WINDOW ?? "1").trim();
   return { maxPerMachine, maxPerWorkspace, multiRunPerWindow: flag !== "0" };

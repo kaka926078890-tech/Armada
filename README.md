@@ -78,7 +78,7 @@
 
 被控侧看到的就是普通 Cursor 窗口：文件树、Agent 对话、该机自己的账号与模型选择。派发沿用该窗口当前选中的模型。
 
-同一机器可并行多条任务（默认每机 8、每工作区 4）；整机同时只有 1 条处于派发/绑定（CDP 注入串行）。同工作区再派新任务时，已打开的窗走 `composer.createNew`，**不再**再开一扇 Untitled 工作区。注入槽空了就可以并发；未答 Ask 仍占窗。超出限额 → `429 RUN_LIMIT`。同工作区相同 prompt → `409 PROMPT_COLLISION`。关着的工作区不能派（`400 WORKSPACE_NOT_OPEN`）。收口与续聊请用 **armada-agent ≥ 0.4.19**；**文件附件请用 ≥ 0.4.22**（Windows `@` 菜单会等 typeahead）。**当前请装 0.4.52**（桌面在 macOS / Linux / Windows 创建或恢复舰队时，把包内 vsix 解包到 `~/.cursor/extensions`。空闲 Reload 只在这个目录里已经有目标版本时才执行；没有新包不会因为窗口空闲就 Reload。有包时还要等未收口 composer jsonl，且收口后再等 2 分钟）。
+同一机器可并行多条任务（默认每机 32、每工作区 32，中台「设置 → 并发上限」可改成 1–256，保存后马上生效；没保存过时才看环境变量。手机 App 这一版不能改这两个数，但 App 派发同样受它们约束）。整机同时只有 1 条处于派发/绑定（CDP 注入串行）。同工作区再派新任务时，已打开的窗走 `composer.createNew`，**不再**再开一扇 Untitled 工作区。注入槽空了就可以并发；未答 Ask 仍占窗。超出限额 → `429 RUN_LIMIT`。同工作区相同 prompt → `409 PROMPT_COLLISION`。关着的工作区不能派（`400 WORKSPACE_NOT_OPEN`）。收口与续聊请用 **armada-agent ≥ 0.4.19**；**文件附件请用 ≥ 0.4.22**（Windows `@` 菜单会等 typeahead）。**当前请装 0.4.52**（桌面在 macOS / Linux / Windows 创建或恢复舰队时，把包内 vsix 解包到 `~/.cursor/extensions`。空闲 Reload 只在这个目录里已经有目标版本时才执行；没有新包不会因为窗口空闲就 Reload。有包时还要等未收口 composer jsonl，且收口后再等 2 分钟）。
 
 完成、失败、需要处理选择题时，桌面会弹系统通知，浏览器会闪标题；点通知可回到那张卡。
 
@@ -504,8 +504,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\armada-cursor.ps1 C:
 | `armada.autoSubmit` | Cursor 设置 | 默认 `true`；`false` 则只预填、等人回车 |
 | `armada.imagePaste` | Cursor 设置 | 默认 `true`；`false` 时带附件的任务会被拒绝 |
 | `ARMADA_HUB_URL` / `ARMADA_HUB_TOKEN` | 环境变量（扩展） | 仅当对应 Cursor 设置项为空时回退；设置项非空优先 |
-| `ARMADA_MAX_RUNS_PER_MACHINE` | 环境变量 | 每机占用中任务上限，默认 8（含 queued） |
-| `ARMADA_MAX_RUNS_PER_WORKSPACE` | 环境变量 | 每工作区上限，默认 4 |
+| `ARMADA_MAX_RUNS_PER_MACHINE` | 环境变量，未在设置里保存时 | 每机占用中任务上限，默认 32（含 queued），最大 256 |
+| `ARMADA_MAX_RUNS_PER_WORKSPACE` | 环境变量，未在设置里保存时 | 每工作区上限，默认 32，且不超过每机上限 |
+| 并发上限 | 中台设置 | 写入 `~/.armada/ui-prefs.json`，优先于上面两个环境变量 |
 | `ARMADA_MULTI_RUN_PER_WINDOW` | 环境变量 | `0` 关闭同窗并行（U1 探针失败时用） |
 | `~/.armada/relay.json` | 中台数据目录 | 可选；`{ relay, fleet, secret }`。没有则不拨中转 |
 | `RELAY_HOME` | 环境变量 | 中转数据目录，默认 `~/.armada-relay` |

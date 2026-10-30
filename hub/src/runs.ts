@@ -4,6 +4,7 @@ import type { InjectRoute, Registry } from "./registry";
 import type { SseHub } from "./sse";
 import {
   type ConcurrencyLimits,
+  clampRunLimit,
   limitsFromEnv,
   normalizePrompt,
   OCCUPYING_STATUSES,
@@ -50,6 +51,17 @@ export class RunService {
     this.limits = opts.limits ?? limitsFromEnv();
     this.blobs = opts.blobs;
     registry.onMachineOffline = (id) => this.onMachineOffline(id);
+  }
+
+  setLimits(next: ConcurrencyLimits): void {
+    const maxPerMachine = clampRunLimit(next.maxPerMachine, this.limits.maxPerMachine);
+    let maxPerWorkspace = clampRunLimit(next.maxPerWorkspace, this.limits.maxPerWorkspace);
+    if (maxPerWorkspace > maxPerMachine) maxPerWorkspace = maxPerMachine;
+    this.limits = { maxPerMachine, maxPerWorkspace, multiRunPerWindow: next.multiRunPerWindow };
+  }
+
+  limitsSnapshot(): ConcurrencyLimits {
+    return { ...this.limits };
   }
 
   private blobs?: BlobStore;

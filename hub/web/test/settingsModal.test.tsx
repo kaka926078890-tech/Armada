@@ -45,6 +45,13 @@ describe("SettingsModal", () => {
     expect(html).toContain("还没有快捷提示词，在输入框上方点添加");
     expect(html).not.toContain("解绑");
     expect(html).not.toContain("跟随系统");
+    expect(html).toContain("并发上限");
+    expect(html).toContain("每台机器");
+    expect(html).toContain("每个工作区");
+    expect(html).toContain("1–256");
+    expect(html).toContain("保存并发上限");
+    expect(html).toContain('aria-label="每台机器并发上限"');
+    expect(html).toContain('value="32"');
     expect(html).toContain("消息免打扰");
     expect(html).toContain("清除所有已读");
     expect(html).toContain("未读红点改为灰点");

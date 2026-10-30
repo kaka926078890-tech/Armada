@@ -9,8 +9,13 @@ describe("normalizePrompt", () => {
 });
 
 describe("limitsFromEnv", () => {
-  test("defaults 8/4/multi-on", () => {
-    expect(limitsFromEnv({})).toEqual({ maxPerMachine: 8, maxPerWorkspace: 4, multiRunPerWindow: true });
+  test("defaults 32/32/multi-on and clamps to 256", () => {
+    expect(limitsFromEnv({})).toEqual({ maxPerMachine: 32, maxPerWorkspace: 32, multiRunPerWindow: true });
+    expect(limitsFromEnv({ ARMADA_MAX_RUNS_PER_MACHINE: "999", ARMADA_MAX_RUNS_PER_WORKSPACE: "0" })).toEqual({
+      maxPerMachine: 256,
+      maxPerWorkspace: 1,
+      multiRunPerWindow: true,
+    });
   });
   test("clamps and enforces M <= N", () => {
     const l = limitsFromEnv({

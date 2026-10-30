@@ -95,6 +95,8 @@ export default function App() {
   const [theme, setTheme] = useState<ThemeName>(() => loadTheme());
   const [fontScale, setFontScale] = useState<FontScale>(() => loadFontScale());
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [maxRunsPerMachine, setMaxRunsPerMachine] = useState(32);
+  const [maxRunsPerWorkspace, setMaxRunsPerWorkspace] = useState(32);
   const [quietUnread, setQuietUnread] = useState(loadQuietUnread);
   const [snippets, setSnippets] = useState<PromptSnippet[]>([]);
   const [snippetError, setSnippetError] = useState("");
@@ -306,8 +308,13 @@ export default function App() {
     (async () => {
       const local = loadLocalUiPrefsMirror();
       try {
-        const remote = await api.getUiPrefs() as UiPrefsGetResponse;
+        const remote = await api.getUiPrefs() as UiPrefsGetResponse & {
+          maxRunsPerMachine?: number;
+          maxRunsPerWorkspace?: number;
+        };
         if (cancelled) return;
+        if (typeof remote.maxRunsPerMachine === "number") setMaxRunsPerMachine(remote.maxRunsPerMachine);
+        if (typeof remote.maxRunsPerWorkspace === "number") setMaxRunsPerWorkspace(remote.maxRunsPerWorkspace);
         const { source, ...prefs } = remote;
         applyUiPrefsToLocalStorage(prefs);
         setTheme(prefs.theme);
@@ -674,6 +681,16 @@ export default function App() {
           }}
           canMarkAllRead={canMarkAllRead}
           onMarkAllRead={markAllRead}
+          maxRunsPerMachine={maxRunsPerMachine}
+          maxRunsPerWorkspace={maxRunsPerWorkspace}
+          onRunLimits={async (machine, workspace) => {
+            const next = await api.putUiPrefs({ maxRunsPerMachine: machine, maxRunsPerWorkspace: workspace }) as {
+              maxRunsPerMachine: number;
+              maxRunsPerWorkspace: number;
+            };
+            setMaxRunsPerMachine(next.maxRunsPerMachine);
+            setMaxRunsPerWorkspace(next.maxRunsPerWorkspace);
+          }}
           onClose={() => setSettingsOpen(false)}
         />
       )}

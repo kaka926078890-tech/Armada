@@ -46,7 +46,15 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
   if (pruned.events >= 10_000) db.exec("VACUUM");
   const registry = new Registry(db);
   const sse = new SseHub();
-  const limits = opts.concurrency ?? limitsFromEnv();
+  const envLimits = limitsFromEnv();
+  const stored = opts.concurrency ? null : readUiPrefs(home);
+  const limits = opts.concurrency ?? (stored?.ok
+    ? {
+      maxPerMachine: stored.prefs.maxRunsPerMachine,
+      maxPerWorkspace: stored.prefs.maxRunsPerWorkspace,
+      multiRunPerWindow: envLimits.multiRunPerWindow,
+    }
+    : envLimits);
   const blobs = new BlobStore(db, home);
   const tickets = new JoinTickets(db);
   const runs = new RunService(db, registry, sse, { limits, blobs });
@@ -320,8 +328,18 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
       return c.json({ error: "READ_FAIL" }, 503);
     }
     try {
-      const next = mergeUiPrefs(cur.prefs, body as Record<string, unknown>);
+      const patch = body as Record<string, unknown>;
+      const next = mergeUiPrefs(cur.prefs, patch);
       writeUiPrefs(home, next);
+      if (Object.prototype.hasOwnProperty.call(patch, "maxRunsPerMachine")
+        || Object.prototype.hasOwnProperty.call(patch, "maxRunsPerWorkspace")) {
+        const live = runs.limitsSnapshot();
+        runs.setLimits({
+          maxPerMachine: next.maxRunsPerMachine,
+          maxPerWorkspace: next.maxRunsPerWorkspace,
+          multiRunPerWindow: live.multiRunPerWindow,
+        });
+      }
       return c.json(next);
     } catch {
       db.query("INSERT INTO audit (ts, actor, action, target, payload) VALUES (?1,'hub','UI_PREFS_WRITE_FAIL',?2,?3)")
@@ -501,8 +519,8 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
 
 if (import.meta.main) {
   const lan = process.argv.includes("--lan");
-  const limits = limitsFromEnv();
-  const s = createServer({ hostname: lan ? "0.0.0.0" : "127.0.0.1", concurrency: limits, chatgpt: true });
+  const s = createServer({ hostname: lan ? "0.0.0.0" : "127.0.0.1", chatgpt: true });
+  const limits = s.runs.limitsSnapshot();
   console.log(`armada-hub listening on http://${s.server.hostname}:${s.port} (token in ${ARMADA_HOME()}/token)`);
   console.log(`armada-hub concurrency=v2-slot N=${limits.maxPerMachine} M=${limits.maxPerWorkspace} multiWindow=${limits.multiRunPerWindow ? 1 : 0}`);
 }

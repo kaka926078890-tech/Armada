@@ -1,5 +1,11 @@
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
+import {
+  clampRunLimit,
+  DEFAULT_MAX_RUNS_PER_MACHINE,
+  DEFAULT_MAX_RUNS_PER_WORKSPACE,
+  limitsFromEnv,
+} from "./concurrency";
 import { normalizeReadState, readViewOf, type ReadMark } from "./readSync";
 import { writeFileAtomic } from "./writeFileAtomic";
 
@@ -23,6 +29,9 @@ export type UiPrefs = {
   readMarks: Record<string, ReadMark>;
   detailWidth: number;
   promptSnippets: PromptSnippet[];
+  /** Occupying runs allowed on one machine. Saved from 设置; env is only the fallback before the first save. */
+  maxRunsPerMachine: number;
+  maxRunsPerWorkspace: number;
 };
 
 export type UiPrefsGetResponse = UiPrefs & { source: "file" | "defaults" };
@@ -38,6 +47,8 @@ export const UI_PREFS_DEFAULTS: UiPrefs = {
   readMarks: {},
   detailWidth: 0.4,
   promptSnippets: [],
+  maxRunsPerMachine: DEFAULT_MAX_RUNS_PER_MACHINE,
+  maxRunsPerWorkspace: DEFAULT_MAX_RUNS_PER_WORKSPACE,
 };
 
 function asSnippetItem(raw: unknown): { id?: string; title: string; body: string } | null {
@@ -127,7 +138,10 @@ function clampReadRuns(raw: unknown): Record<string, number> {
   return Object.fromEntries(trimmed);
 }
 
-export function normalizeUiPrefs(raw: unknown): UiPrefs {
+export function normalizeUiPrefs(
+  raw: unknown,
+  fallback: { maxRunsPerMachine?: number; maxRunsPerWorkspace?: number } = {},
+): UiPrefs {
   const o = raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
   const theme = o.theme === "light" || o.theme === "dark" ? o.theme : "dark";
   const fontScale = o.fontScale === "large" || o.fontScale === "xlarge" || o.fontScale === "normal"
@@ -137,6 +151,15 @@ export function normalizeUiPrefs(raw: unknown): UiPrefs {
   const detailWidth = normalizeDetailWidth(o.detailWidth);
   const read = normalizeReadState(o, clampReadRuns(o.readRuns));
   const view = readViewOf(read);
+  const maxRunsPerMachine = clampRunLimit(
+    o.maxRunsPerMachine,
+    fallback.maxRunsPerMachine ?? DEFAULT_MAX_RUNS_PER_MACHINE,
+  );
+  let maxRunsPerWorkspace = clampRunLimit(
+    o.maxRunsPerWorkspace,
+    fallback.maxRunsPerWorkspace ?? DEFAULT_MAX_RUNS_PER_WORKSPACE,
+  );
+  if (maxRunsPerWorkspace > maxRunsPerMachine) maxRunsPerWorkspace = maxRunsPerMachine;
   return {
     version: 1,
     theme,
@@ -148,6 +171,8 @@ export function normalizeUiPrefs(raw: unknown): UiPrefs {
     readMarks: read.marks,
     detailWidth,
     promptSnippets: normalizePromptSnippets(o.promptSnippets),
+    maxRunsPerMachine,
+    maxRunsPerWorkspace,
   };
 }
 
@@ -159,13 +184,19 @@ export type ReadUiPrefsResult =
   | { ok: true; prefs: UiPrefs; source: "file" | "defaults" }
   | { ok: false; error: "READ_FAIL" };
 
+function runLimitFallback(): { maxRunsPerMachine: number; maxRunsPerWorkspace: number } {
+  const env = limitsFromEnv();
+  return { maxRunsPerMachine: env.maxPerMachine, maxRunsPerWorkspace: env.maxPerWorkspace };
+}
+
 export function readUiPrefs(home: string): ReadUiPrefsResult {
+  const fallback = runLimitFallback();
   const p = prefsPath(home);
-  if (!existsSync(p)) return { ok: true, prefs: { ...UI_PREFS_DEFAULTS }, source: "defaults" };
+  if (!existsSync(p)) return { ok: true, prefs: normalizeUiPrefs({}, fallback), source: "defaults" };
   try {
     const text = readFileSync(p, "utf8");
     const parsed = JSON.parse(text);
-    return { ok: true, prefs: normalizeUiPrefs(parsed), source: "file" };
+    return { ok: true, prefs: normalizeUiPrefs(parsed, fallback), source: "file" };
   } catch {
     return { ok: false, error: "READ_FAIL" };
   }
@@ -176,10 +207,13 @@ export function writeUiPrefs(home: string, prefs: UiPrefs): void {
 }
 
 export function mergeUiPrefs(base: UiPrefs, patch: Record<string, unknown>): UiPrefs {
-  const known = ["theme", "fontScale", "selectedWorkspace", "readRunsSeeded", "detailWidth", "promptSnippets"] as const;
+  const known = ["theme", "fontScale", "selectedWorkspace", "readRunsSeeded", "detailWidth", "promptSnippets", "maxRunsPerMachine", "maxRunsPerWorkspace"] as const;
   const next: Record<string, unknown> = { ...base };
   for (const k of known) {
     if (Object.prototype.hasOwnProperty.call(patch, k)) next[k] = patch[k];
   }
-  return normalizeUiPrefs(next);
+  return normalizeUiPrefs(next, {
+    maxRunsPerMachine: base.maxRunsPerMachine,
+    maxRunsPerWorkspace: base.maxRunsPerWorkspace,
+  });
 }

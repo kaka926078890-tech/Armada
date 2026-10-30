@@ -82,6 +82,26 @@ describe("GET/PUT /api/ui-prefs", () => {
     expect(await got.json()).toEqual({ seq: afterClear.seq, readRuns: {} });
   });
 
+  test("PUT run limits updates the live gate and clamps", async () => {
+    const { base, tok } = start();
+    expect(s!.runs.limitsSnapshot()).toMatchObject({ maxPerMachine: 32, maxPerWorkspace: 32 });
+    const put = await fetch(`${base}/api/ui-prefs`, {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${tok}`, "content-type": "application/json" },
+      body: JSON.stringify({ maxRunsPerMachine: 3, maxRunsPerWorkspace: 9 }),
+    });
+    expect(put.status).toBe(200);
+    expect(await put.json()).toMatchObject({ maxRunsPerMachine: 3, maxRunsPerWorkspace: 3 });
+    expect(s!.runs.limitsSnapshot()).toMatchObject({ maxPerMachine: 3, maxPerWorkspace: 3 });
+    const theme = await fetch(`${base}/api/ui-prefs`, {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${tok}`, "content-type": "application/json" },
+      body: JSON.stringify({ theme: "light" }),
+    });
+    expect(theme.status).toBe(200);
+    expect(s!.runs.limitsSnapshot()).toMatchObject({ maxPerMachine: 3, maxPerWorkspace: 3 });
+  });
+
   test("PUT non-object → 400", async () => {
     const { base, tok } = start();
     const r = await fetch(`${base}/api/ui-prefs`, {

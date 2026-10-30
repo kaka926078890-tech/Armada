@@ -45,6 +45,20 @@ describe("isWorkspaceKey / normalizeUiPrefs", () => {
     expect(normalizeUiPrefs({ fontScale: "xlarge" }).fontScale).toBe("xlarge");
   });
 
+  test("run limits clamp to 1–256 and workspace cannot exceed the machine", () => {
+    expect(normalizeUiPrefs({}).maxRunsPerMachine).toBe(32);
+    expect(normalizeUiPrefs({}).maxRunsPerWorkspace).toBe(32);
+    expect(normalizeUiPrefs({ maxRunsPerMachine: 999, maxRunsPerWorkspace: 0 })).toMatchObject({
+      maxRunsPerMachine: 256,
+      maxRunsPerWorkspace: 1,
+    });
+    expect(normalizeUiPrefs({ maxRunsPerMachine: 4, maxRunsPerWorkspace: 9 }).maxRunsPerWorkspace).toBe(4);
+    expect(normalizeUiPrefs({ maxRunsPerMachine: "nope" }, { maxRunsPerMachine: 7, maxRunsPerWorkspace: 3 })).toMatchObject({
+      maxRunsPerMachine: 7,
+      maxRunsPerWorkspace: 3,
+    });
+  });
+
   test("caps readRuns at 5000 keeping newest by value", () => {
     const readRuns: Record<string, number> = {};
     for (let i = 0; i < 5002; i++) readRuns[`r-${i}`] = i;

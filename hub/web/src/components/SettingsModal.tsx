@@ -5,6 +5,7 @@ import type { PromptSnippet } from "../uiPrefs";
 import { AddSnippetDialog } from "./PromptSnippetBar";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
+import { Input } from "./ui/input";
 import { UI_LABEL, UI_META, UI_TYPE } from "../ui";
 
 const EDIT_LEAD = "保存后，输入框上方的标签和追加正文会一起更新。";
@@ -13,6 +14,7 @@ export default function SettingsModal({
   theme, fontScale, onTheme, onFontScale, onClose,
   snippets = [], saveSnippets, reloadSnippets, snippetError = "",
   quietUnread = false, onQuietUnread, canMarkAllRead = false, onMarkAllRead,
+  maxRunsPerMachine = 32, maxRunsPerWorkspace = 32, onRunLimits,
 }: {
   theme: ThemeName;
   fontScale: FontScale;
@@ -27,6 +29,9 @@ export default function SettingsModal({
   onQuietUnread?: (next: boolean) => void;
   canMarkAllRead?: boolean;
   onMarkAllRead?: () => void;
+  maxRunsPerMachine?: number;
+  maxRunsPerWorkspace?: number;
+  onRunLimits?: (maxRunsPerMachine: number, maxRunsPerWorkspace: number) => Promise<void>;
 }) {
   const [editing, setEditing] = useState<PromptSnippet | null>(null);
   const [title, setTitle] = useState("");
@@ -34,6 +39,13 @@ export default function SettingsModal({
   const [editError, setEditError] = useState("");
   const [actionError, setActionError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [machineLimit, setMachineLimit] = useState(String(maxRunsPerMachine));
+  const [workspaceLimit, setWorkspaceLimit] = useState(String(maxRunsPerWorkspace));
+  const [limitError, setLimitError] = useState("");
+  const [limitBusy, setLimitBusy] = useState(false);
+
+  useEffect(() => { setMachineLimit(String(maxRunsPerMachine)); }, [maxRunsPerMachine]);
+  useEffect(() => { setWorkspaceLimit(String(maxRunsPerWorkspace)); }, [maxRunsPerWorkspace]);
 
   useEffect(() => { reloadSnippets?.(); }, [reloadSnippets]);
 
@@ -60,6 +72,26 @@ export default function SettingsModal({
       setActionError(snippetOperatorMessage(e));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const saveLimits = async () => {
+    if (!onRunLimits || limitBusy) return;
+    const machine = Number(machineLimit);
+    const workspace = Number(workspaceLimit);
+    if (!Number.isInteger(machine) || machine < 1 || machine > 256
+      || !Number.isInteger(workspace) || workspace < 1 || workspace > 256) {
+      setLimitError("请输入 1–256 的整数");
+      return;
+    }
+    setLimitBusy(true);
+    setLimitError("");
+    try {
+      await onRunLimits(machine, workspace);
+    } catch {
+      setLimitError("保存失败，请再试一次");
+    } finally {
+      setLimitBusy(false);
     }
   };
 
@@ -121,6 +153,38 @@ export default function SettingsModal({
             <p className={`${UI_META} text-muted-foreground`}>开启后，未读红点改为灰点，未读数量仍在。</p>
             <Button type="button" variant="outline" disabled={!canMarkAllRead} onClick={() => onMarkAllRead?.()}>
               清除所有已读
+            </Button>
+          </div>
+        </div>
+        <div>
+          <div className={`${UI_LABEL} mb-1.5`}>并发上限</div>
+          <p className={`${UI_META} text-muted-foreground mb-1.5`}>
+            含排队中的任务。每台机器、每个工作区各算一次，工作区不能超过机器。保存后马上生效，范围 1–256。手机 App 这一版不能改这两个数。
+          </p>
+          <div className="flex flex-col gap-2">
+            <label className={`${UI_META} text-muted-foreground`}>
+              每台机器
+              <Input
+                className="mt-1"
+                inputMode="numeric"
+                value={machineLimit}
+                aria-label="每台机器并发上限"
+                onChange={(e) => setMachineLimit(e.target.value)}
+              />
+            </label>
+            <label className={`${UI_META} text-muted-foreground`}>
+              每个工作区
+              <Input
+                className="mt-1"
+                inputMode="numeric"
+                value={workspaceLimit}
+                aria-label="每个工作区并发上限"
+                onChange={(e) => setWorkspaceLimit(e.target.value)}
+              />
+            </label>
+            {limitError && <div className={`${UI_TYPE} text-destructive`}>{limitError}</div>}
+            <Button type="button" variant="outline" disabled={limitBusy} onClick={() => { void saveLimits(); }}>
+              {limitBusy ? "保存中…" : "保存并发上限"}
             </Button>
           </div>
         </div>
