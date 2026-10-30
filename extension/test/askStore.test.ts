@@ -83,6 +83,56 @@ describe("stored ask", () => {
     })[0]).toBe("b1");
   });
 
+  test("a stored question is pending before the chat marks it pending", () => {
+    const early = {
+      toolFormerData: {
+        name: "ask_question",
+        status: "loading",
+        additionalData: null,
+        rawArgs: JSON.stringify({
+          questions: [{
+            id: "market-source",
+            prompt: "行情终端按哪条数据来源做？",
+            options: [
+              { id: "plus", label: "对齐 Plus" },
+              { id: "tushare", label: "只用 Tushare" },
+            ],
+          }],
+        }),
+      },
+    };
+    const hit = inspectStoredBubbles("cid-1", [early]);
+    expect(hit.state).toBe("pending");
+    if (hit.state !== "pending") return;
+    expect(hit.inspect.prompt).toBe("行情终端按哪条数据来源做？");
+    expect(hit.inspect.options.map((o) => o.label)).toEqual(["A", "B", "C"]);
+  });
+
+  test("params carry the question when rawArgs is empty", () => {
+    const early = {
+      toolFormerData: {
+        name: "ask_question",
+        status: "loading",
+        additionalData: { status: "loading" },
+        rawArgs: null,
+        params: JSON.stringify({
+          questions: [{
+            id: "parse-scope",
+            prompt: "上传资料这一项先解析哪些文件？",
+            options: [
+              { id: "text", label: "先做纯文本" },
+              { id: "office", label: "连 PDF 一起解析" },
+            ],
+          }],
+        }),
+      },
+    };
+    const hit = inspectStoredBubbles("cid-1", [early]);
+    expect(hit.state).toBe("pending");
+    if (hit.state !== "pending") return;
+    expect(hit.inspect.prompt).toBe("上传资料这一项先解析哪些文件？");
+  });
+
   test("latest submitted ask is not pending, and loading holds", () => {
     const submitted = {
       toolFormerData: { ...pending.toolFormerData, additionalData: { status: "submitted" } },

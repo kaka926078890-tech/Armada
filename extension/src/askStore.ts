@@ -64,6 +64,13 @@ function classifyBubble(bubble: unknown): AskClass {
   return "loading";
 }
 
+function questionsOf(tf: Record<string, unknown> | null): AskInspectQuestion[] {
+  if (!tf) return [];
+  const fromRaw = questionsFromArgs(tf.rawArgs);
+  if (fromRaw.length) return fromRaw;
+  return questionsFromArgs(tf.params);
+}
+
 function questionsFromArgs(rawArgs: unknown): AskInspectQuestion[] {
   const args = asObject(rawArgs);
   const list = Array.isArray(args?.questions) ? args.questions : [];
@@ -90,25 +97,28 @@ function questionsFromArgs(rawArgs: unknown): AskInspectQuestion[] {
   return questions;
 }
 
-/** Bubbles are in header order. The latest ask_question decides. */
+/** Bubbles are in header order. The latest ask_question decides. A question body is enough; the chat does not have to be focused. */
 export function inspectStoredBubbles(cid: string, bubbles: unknown[]): DbAsk {
   let state: "pending" | "loading" | "submitted" | "none" = "none";
-  let pending: unknown = null;
+  let questions: AskInspectQuestion[] = [];
   for (const bubble of bubbles) {
     const kind = classifyBubble(bubble);
     if (kind === "skip") continue;
-    if (kind === "pending") {
-      state = "pending";
-      pending = bubble;
+    if (kind === "submitted") {
+      state = "submitted";
+      questions = [];
       continue;
     }
-    pending = null;
-    state = kind;
+    const parsed = questionsOf(asObject(asObject(bubble)?.toolFormerData));
+    if (!parsed.length) {
+      state = "loading";
+      questions = [];
+      continue;
+    }
+    state = "pending";
+    questions = parsed;
   }
-  if (state !== "pending" || !pending) return { cid, state: state === "pending" ? "loading" : state };
-  const tf = asObject(asObject(pending)?.toolFormerData);
-  const questions = questionsFromArgs(tf?.rawArgs);
-  if (!questions.length) return { cid, state: "loading" };
+  if (state !== "pending" || !questions.length) return { cid, state: state === "pending" ? "loading" : state };
   const first = questions[0]!;
   return {
     cid,
