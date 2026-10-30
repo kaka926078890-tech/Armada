@@ -564,7 +564,7 @@ describe("Run dispatch", () => {
     ws.close();
   });
 
-  test("pending ask on the window queues a new start; skip-resolved then promotes", async () => {
+  test("pending ask does not queue a new start in the same window", async () => {
     const { ws, inbound, api } = await startWithExt({ extensionVersion: "0.4.31" });
     const r1 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "ask-hold" }) });
     const { run: a } = await r1.json() as any;
@@ -584,24 +584,11 @@ describe("Run dispatch", () => {
     inbound.length = 0;
     const r2 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "next" }) });
     const body2 = await r2.json() as any;
-    expect(body2.run.status).toBe("queued");
-    expect(inbound.filter((m) => m.type === "run.start")).toEqual([]);
-    expect(((await (await api(`/api/runs/${a.id}`)).json()) as any).pending_ask.request_id).toBe("ask-1");
-
-    const skip = await api(`/api/runs/${a.id}/answer-ask`, {
-      method: "POST",
-      body: JSON.stringify({ request_id: "ask-1", action: "skip" }),
-    });
-    expect(skip.status).toBe(202);
-    expect(((await (await api(`/api/runs/${body2.run.id}`)).json()) as any).status).toBe("queued");
-    ws.send(JSON.stringify({
-      type: "run.event", runId: a.id, conversationId: "cid-ask", source: "cdp", hookEventName: "askQuestionResolved", seq: 2, ts: Date.now(),
-      payload: { request_id: "ask-1", via: "cdp", conversation_id: "cid-ask" },
-    }));
-    await new Promise((r) => setTimeout(r, 150));
-    expect(((await (await api(`/api/runs/${a.id}`)).json()) as any).pending_ask).toBeNull();
-    expect(((await (await api(`/api/runs/${body2.run.id}`)).json()) as any).status).toBe("dispatched");
+    expect(body2.run.status).toBe("dispatched");
+    expect(body2.run.window_id).toBe(a.window_id);
+    await new Promise((r) => setTimeout(r, 80));
     expect(inbound.filter((m) => m.type === "run.start" && m.prompt === "next")).toHaveLength(1);
+    expect(((await (await api(`/api/runs/${a.id}`)).json()) as any).pending_ask.request_id).toBe("ask-1");
     ws.close();
   });
 

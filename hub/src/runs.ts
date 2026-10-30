@@ -302,17 +302,11 @@ export class RunService {
     return rows.some((r) => r.id !== exceptId && collisionKey(r.prompt, parseAttachmentIds(r.attachments)) === key);
   }
 
-  private windowHasPendingAsk(machineId: string, windowId: string): boolean {
-    const rows = this.db.query(
-      `SELECT pending_ask FROM runs WHERE machine_id=?1 AND window_id=?2 AND status IN (${sqlStatusIn(PROGRESSING_STATUSES)}) AND pending_ask IS NOT NULL`,
-    ).all(machineId, windowId) as { pending_ask: string }[];
-    return rows.some((r) => parsePendingAsk(r.pending_ask) != null);
-  }
-
   /**
    * New start = `composer.createNew` in an already-open window (Desk).
    * Do not duplicate the folder into Untitled (Workspace) (2026-09-21 v4).
-   * Unanswered Ask still occupies (B1). Old ext / multiRunPerWindow=0 stay one-run-per-window.
+   * A pending question stays on its own chat and does not hold the window.
+   * Old ext / multiRunPerWindow=0 stay one-run-per-window.
    */
   private windowHasProgressing(machineId: string, windowId: string): boolean {
     return !!this.db.query(
@@ -321,7 +315,6 @@ export class RunService {
   }
 
   private windowCanAcceptStart(machineId: string, windowId: string): boolean {
-    if (this.windowHasPendingAsk(machineId, windowId)) return false;
     if (!this.windowHasProgressing(machineId, windowId)) return true;
     if (!this.limits.multiRunPerWindow) return false;
     return extensionSupportsMultiRunPerWindow(this.registry.windowExtensionVersion(machineId, windowId));
