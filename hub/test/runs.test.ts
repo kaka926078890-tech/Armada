@@ -245,6 +245,10 @@ describe("Run dispatch", () => {
     const r3 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "c" }) });
     expect(r3.status).toBe(429);
     expect(((await r3.json()) as any).error).toBe("RUN_LIMIT");
+    const rejected = hub!.db.query("SELECT payload FROM audit WHERE action='run.reject' ORDER BY id DESC LIMIT 1").get() as { payload: string };
+    expect(JSON.parse(rejected.payload)).toMatchObject({
+      via: "create", error: "RUN_LIMIT", machineId: "m-1", workspaceRoot: "/ws/a", attachmentCount: 0,
+    });
   });
 
   test("old extension 0.3.8 same window stays queued and does not get second run.start", async () => {

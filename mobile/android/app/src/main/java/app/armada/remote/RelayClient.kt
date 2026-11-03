@@ -38,13 +38,26 @@ class RelayClient(base: String, private val token: String) {
         private const val BLOB_CHUNK = WAF_JSON_CHUNK_BYTES
     }
 
-    suspend fun workspaces(): Triple<Boolean, List<WorkspaceDto>, CursorReloadDto?> {
+    data class WorkspacePage(
+        val hubOffline: Boolean,
+        val workspaces: List<WorkspaceDto>,
+        val cursorReload: CursorReloadDto?,
+        val maxAttachments: Int?,
+    )
+
+    suspend fun workspaces(): WorkspacePage {
         val o = JSONObject(get("/mobile/workspaces"))
         val list = o.optJSONArray("workspaces") ?: JSONArray()
         val ws = buildList {
             for (i in 0 until list.length()) add(parseWorkspace(list.getJSONObject(i)))
         }
-        return Triple(o.optBoolean("hubOffline"), ws, o.optJSONObject("cursorReload")?.let(::parseCursorReload))
+        val cap = o.optInt("maxAttachments", -1)
+        return WorkspacePage(
+            o.optBoolean("hubOffline"),
+            ws,
+            o.optJSONObject("cursorReload")?.let(::parseCursorReload),
+            cap.takeIf { it in 1..256 },
+        )
     }
 
     suspend fun cursorReload(): CursorReloadDto {

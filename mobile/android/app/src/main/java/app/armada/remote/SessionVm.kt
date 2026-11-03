@@ -24,6 +24,7 @@ data class UiState(
     val lastError: String? = null,
     val hubOffline: Boolean = false,
     val workspaces: List<WorkspaceDto> = emptyList(),
+    val maxAttachments: Int = 4,
     val snippets: List<PromptSnippet> = emptyList(),
     val cursorReload: CursorReloadDto? = null,
     val reloadBusy: Map<String, String> = emptyMap(),
@@ -353,10 +354,12 @@ class SessionVm(app: Application) : AndroidViewModel(app) {
                 val arr = frame.optJSONArray("workspaces") ?: return
                 val list = buildList { for (i in 0 until arr.length()) add(parseWorkspace(arr.getJSONObject(i))) }
                 val reload = frame.optJSONObject("cursorReload")?.let(::parseCursorReload)
+                val cap = frame.optInt("maxAttachments", -1)
                 _state.value = _state.value.copy(
                     hubOffline = frame.optBoolean("hubOffline"),
                     workspaces = list,
                     cursorReload = reload ?: _state.value.cursorReload,
+                    maxAttachments = if (cap in 1..256) cap else _state.value.maxAttachments,
                     lastError = null,
                 )
             }
@@ -379,7 +382,10 @@ class SessionVm(app: Application) : AndroidViewModel(app) {
         val seq = refreshSeq
         try {
             val client = api()
-            val (offline, ws, fromWs) = withContext(Dispatchers.IO) { client.workspaces() }
+            val page = withContext(Dispatchers.IO) { client.workspaces() }
+            val offline = page.hubOffline
+            val ws = page.workspaces
+            val fromWs = page.cursorReload
             val reload = fromWs ?: withContext(Dispatchers.IO) { runCatching { client.cursorReload() }.getOrNull() }
             val runs = withContext(Dispatchers.IO) { client.runs() }
             val hidden = withContext(Dispatchers.IO) {
@@ -389,6 +395,7 @@ class SessionVm(app: Application) : AndroidViewModel(app) {
             _state.value = _state.value.copy(
                 hubOffline = offline,
                 workspaces = ws,
+                maxAttachments = page.maxAttachments ?: _state.value.maxAttachments,
                 cursorReload = reload,
                 board = adoptFetchedLists(_state.value.board, runs, hidden),
                 lastError = null,

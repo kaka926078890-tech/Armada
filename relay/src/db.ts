@@ -98,6 +98,7 @@ export function openRelayDb(home: string): Database {
   ensureColumn(db, "runs", "chatgpt_thread_id", "chatgpt_thread_id TEXT");
   ensureColumn(db, "runs", "attachments", "attachments TEXT");
   ensureColumn(db, "runs", "read_basis", "read_basis INTEGER");
+  ensureColumn(db, "fleets", "max_attachments", "max_attachments INTEGER");
   db.exec(`CREATE TABLE IF NOT EXISTS push_tokens (
     token TEXT NOT NULL,
     fleet_id TEXT NOT NULL REFERENCES fleets(id),

@@ -44,6 +44,7 @@ struct WorkspacesResponse: Decodable {
     var hubOffline: Bool
     var workspaces: [WorkspaceDTO]
     var cursorReload: CursorReloadDTO?
+    var maxAttachments: Int?
 }
 
 struct CursorReloadPending: Decodable, Equatable {
@@ -404,6 +405,7 @@ struct StreamFrame: Decodable {
     var workspaces: [WorkspaceDTO]?
     var run: RunDTO?
     var cursorReload: CursorReloadDTO?
+    var maxAttachments: Int?
     var seq: Double?
 }
 
@@ -459,7 +461,7 @@ enum RelayAPIError: LocalizedError {
         case "INVALID": return "推送登记失败"
         case "ATTACHMENT_TOO_LARGE": return "单张不能超过 8 MB"
         case "ATTACHMENT_INVALID_MIME": return "只支持 PNG / JPEG"
-        case "ATTACHMENT_COUNT": return "最多 4 张图"
+        case "ATTACHMENT_COUNT": return "附件超过当前上限"
         case "ATTACHMENT_NOT_FOUND": return "图片还没传到中台，请重试"
         case "IMAGE_PASTE_DISABLED": return "被控机关了贴图"
         case "IMAGE_PASTE_FAILED": return "图片没贴进 Cursor，请重试"

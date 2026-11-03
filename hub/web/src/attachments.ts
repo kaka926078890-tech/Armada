@@ -1,4 +1,4 @@
-export const MAX_CONSOLE_ATTACHMENTS = 4;
+export const MAX_CONSOLE_ATTACHMENTS = 32;
 
 export const CONSOLE_FILE_EXTS = ["pdf", "txt", "md", "json", "csv", "xml", "yaml", "yml", "html", "htm", "log"] as const;
 
@@ -16,12 +16,17 @@ export function isConsoleAttachment(file: File): boolean {
   return (CONSOLE_FILE_EXTS as readonly string[]).includes(ext);
 }
 
-/** 控制台选附件/粘贴：第 5 个起列表拒收。非法类型忽略，不计入 rejected。 */
-export function mergeAttachmentFiles(prev: File[], incoming: File[]): { files: File[]; rejected: number } {
+/** 控制台选附件/粘贴：超过上限的丢掉。非法类型忽略，不计入 rejected。 */
+export function mergeAttachmentFiles(prev: File[], incoming: File[], max = MAX_CONSOLE_ATTACHMENTS): { files: File[]; rejected: number } {
+  const cap = Number.isInteger(max) && max > 0 ? max : MAX_CONSOLE_ATTACHMENTS;
   const ok = incoming.filter(isConsoleAttachment);
   const next = [...prev, ...ok];
-  const files = next.slice(0, MAX_CONSOLE_ATTACHMENTS);
+  const files = next.slice(0, cap);
   return { files, rejected: next.length - files.length };
+}
+
+export function attachmentLimitMessage(max: number): string {
+  return `最多 ${max} 个附件，已忽略多余文件`;
 }
 
 export const mergeImageFiles = mergeAttachmentFiles;

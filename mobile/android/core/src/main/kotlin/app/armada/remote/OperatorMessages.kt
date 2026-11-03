@@ -22,7 +22,7 @@ fun operatorMessage(code: String): String = when (code) {
     "INVALID" -> "推送登记失败"
     "ATTACHMENT_TOO_LARGE" -> "单张不能超过 8 MB"
     "ATTACHMENT_INVALID_MIME" -> "只支持 PNG / JPEG"
-    "ATTACHMENT_COUNT" -> "最多 4 张图"
+    "ATTACHMENT_COUNT" -> "附件超过当前上限"
     "ATTACHMENT_NOT_FOUND" -> "图片还没传到中台，请重试"
     "IMAGE_PASTE_DISABLED" -> "被控机关了贴图"
     "IMAGE_PASTE_FAILED" -> "图片没贴进 Cursor，请重试"

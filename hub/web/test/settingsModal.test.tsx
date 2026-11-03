@@ -49,7 +49,9 @@ describe("SettingsModal", () => {
     expect(html).toContain("每台机器");
     expect(html).toContain("每个工作区");
     expect(html).toContain("1–256");
-    expect(html).toContain("保存并发上限");
+    expect(html).toContain("保存上限");
+    expect(html).toContain("每次附件");
+    expect(html).toContain('aria-label="每次附件上限"');
     expect(html).toContain('aria-label="每台机器并发上限"');
     expect(html).toContain('value="32"');
     expect(html).toContain("消息免打扰");

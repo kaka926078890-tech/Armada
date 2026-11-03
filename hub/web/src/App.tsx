@@ -97,6 +97,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [maxRunsPerMachine, setMaxRunsPerMachine] = useState(32);
   const [maxRunsPerWorkspace, setMaxRunsPerWorkspace] = useState(32);
+  const [maxAttachments, setMaxAttachments] = useState(32);
   const [quietUnread, setQuietUnread] = useState(loadQuietUnread);
   const [snippets, setSnippets] = useState<PromptSnippet[]>([]);
   const [snippetError, setSnippetError] = useState("");
@@ -311,10 +312,12 @@ export default function App() {
         const remote = await api.getUiPrefs() as UiPrefsGetResponse & {
           maxRunsPerMachine?: number;
           maxRunsPerWorkspace?: number;
+          maxAttachments?: number;
         };
         if (cancelled) return;
         if (typeof remote.maxRunsPerMachine === "number") setMaxRunsPerMachine(remote.maxRunsPerMachine);
         if (typeof remote.maxRunsPerWorkspace === "number") setMaxRunsPerWorkspace(remote.maxRunsPerWorkspace);
+        if (typeof remote.maxAttachments === "number") setMaxAttachments(remote.maxAttachments);
         const { source, ...prefs } = remote;
         applyUiPrefsToLocalStorage(prefs);
         setTheme(prefs.theme);
@@ -629,6 +632,7 @@ export default function App() {
                 <RunDetail
                   runId={selectedRun}
                   machines={machines}
+                  maxAttachments={maxAttachments}
                   onClose={() => setSelectedRun(null)}
                   onChanged={refresh}
                   snippets={snippets}
@@ -650,6 +654,7 @@ export default function App() {
           snippets={snippets}
           saveSnippets={saveSnippets}
           reloadSnippets={reloadSnippets}
+          maxAttachments={maxAttachments}
           onClose={() => setDispatchOpen(false)}
           onDone={() => { setDispatchOpen(false); refresh(); }}
         />
@@ -683,13 +688,20 @@ export default function App() {
           onMarkAllRead={markAllRead}
           maxRunsPerMachine={maxRunsPerMachine}
           maxRunsPerWorkspace={maxRunsPerWorkspace}
-          onRunLimits={async (machine, workspace) => {
-            const next = await api.putUiPrefs({ maxRunsPerMachine: machine, maxRunsPerWorkspace: workspace }) as {
+          maxAttachments={maxAttachments}
+          onRunLimits={async (machine, workspace, attachments) => {
+            const next = await api.putUiPrefs({
+              maxRunsPerMachine: machine,
+              maxRunsPerWorkspace: workspace,
+              maxAttachments: attachments,
+            }) as {
               maxRunsPerMachine: number;
               maxRunsPerWorkspace: number;
+              maxAttachments: number;
             };
             setMaxRunsPerMachine(next.maxRunsPerMachine);
             setMaxRunsPerWorkspace(next.maxRunsPerWorkspace);
+            setMaxAttachments(next.maxAttachments);
           }}
           onClose={() => setSettingsOpen(false)}
         />

@@ -53,6 +53,9 @@ describe("isWorkspaceKey / normalizeUiPrefs", () => {
       maxRunsPerWorkspace: 1,
     });
     expect(normalizeUiPrefs({ maxRunsPerMachine: 4, maxRunsPerWorkspace: 9 }).maxRunsPerWorkspace).toBe(4);
+    expect(normalizeUiPrefs({}).maxAttachments).toBe(32);
+    expect(normalizeUiPrefs({ maxAttachments: 999 }).maxAttachments).toBe(256);
+    expect(normalizeUiPrefs({ maxAttachments: 0 }).maxAttachments).toBe(1);
     expect(normalizeUiPrefs({ maxRunsPerMachine: "nope" }, { maxRunsPerMachine: 7, maxRunsPerWorkspace: 3 })).toMatchObject({
       maxRunsPerMachine: 7,
       maxRunsPerWorkspace: 3,

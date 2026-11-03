@@ -6,8 +6,8 @@ function png(name: string): File {
 }
 
 describe("mergeAttachmentFiles", () => {
-  test("drops a 5th image and reports rejected", () => {
-    const { files, rejected } = mergeAttachmentFiles([png("1"), png("2"), png("3"), png("4")], [png("5")]);
+  test("drops files past the caller cap and reports rejected", () => {
+    const { files, rejected } = mergeAttachmentFiles([png("1"), png("2"), png("3"), png("4")], [png("5")], 4);
     expect(files.map((f) => f.name)).toEqual(["1", "2", "3", "4"]);
     expect(rejected).toBe(1);
   });

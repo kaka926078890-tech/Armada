@@ -56,6 +56,7 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
     }
     : envLimits);
   const blobs = new BlobStore(db, home);
+  if (stored?.ok) blobs.setMaxAttachments(stored.prefs.maxAttachments);
   const tickets = new JoinTickets(db);
   const runs = new RunService(db, registry, sse, { limits, blobs });
   const chatgpt = new ChatgptBridge(db, runs, registry, sse);
@@ -231,7 +232,15 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
     if (!body || typeof body !== "object" || Array.isArray(body)) return c.json({ error: "INVALID" }, 400);
     const attachmentIds = Array.isArray(body.attachmentIds) ? body.attachmentIds.filter((x: unknown) => typeof x === "string") : [];
     const { run, error, queuePosition } = runs.create(body.machineId, body.workspaceRoot, body.prompt ?? "", { attachmentIds });
-    if (error) return c.json({ error }, httpStatusForRunError(error));
+    if (error) {
+      runs.noteRejected("create", {
+        error,
+        machineId: typeof body.machineId === "string" ? body.machineId : null,
+        workspaceRoot: typeof body.workspaceRoot === "string" ? body.workspaceRoot : null,
+        attachmentCount: attachmentIds.length,
+      });
+      return c.json({ error }, httpStatusForRunError(error));
+    }
     return c.json({ run, queuePosition }, 201);
   });
   app.get("/api/runs", (c) => c.json(runs.list(c.req.query("status"), c.req.query("machineId"), c.req.query("archived"))));
@@ -340,6 +349,14 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
           multiRunPerWindow: live.multiRunPerWindow,
         });
       }
+      if (Object.prototype.hasOwnProperty.call(patch, "maxAttachments")) {
+        blobs.setMaxAttachments(next.maxAttachments);
+      }
+      if (Object.prototype.hasOwnProperty.call(patch, "maxRunsPerMachine")
+        || Object.prototype.hasOwnProperty.call(patch, "maxRunsPerWorkspace")
+        || Object.prototype.hasOwnProperty.call(patch, "maxAttachments")) {
+        sse.broadcast("*", { type: "limits.updated" });
+      }
       return c.json(next);
     } catch {
       db.query("INSERT INTO audit (ts, actor, action, target, payload) VALUES (?1,'hub','UI_PREFS_WRITE_FAIL',?2,?3)")
@@ -426,7 +443,16 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
     const { prompt, attachmentIds: rawIds } = await c.req.json();
     const attachmentIds = Array.isArray(rawIds) ? rawIds.filter((x: unknown) => typeof x === "string") : [];
     const { run, error } = runs.followup(parent.id, typeof prompt === "string" ? prompt : "", attachmentIds);
-    if (error) return c.json({ error }, httpStatusForRunError(error));
+    if (error) {
+      runs.noteRejected("followup", {
+        error,
+        machineId: parent.machine_id,
+        workspaceRoot: parent.workspace_root,
+        attachmentCount: attachmentIds.length,
+        runId: parent.id,
+      });
+      return c.json({ error }, httpStatusForRunError(error));
+    }
     const outcome = followupOutcome(run.status);
     return c.json({ run, outcome }, outcome === "queued" ? 201 : 200);
   });
@@ -499,6 +525,7 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
   const relay = startRelayClient({
     home, hubPort: port, token, registry, runs, db, sse,
     listMachines: () => chatgpt.machines(registry.listMachines()),
+    maxAttachments: () => blobs.maxAttachmentsSnapshot(),
   });
   return {
     server, db, registry, runs, token,

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
-import { mergeAttachmentFiles, isConsoleAttachment } from "../attachments";
+import { attachmentLimitMessage, mergeAttachmentFiles, isConsoleAttachment, MAX_CONSOLE_ATTACHMENTS } from "../attachments";
 import { ConsoleFilePicker } from "./ConsoleFilePicker";
 import { queueComposerCaretRestore, shouldRefocusComposerAfterSend, shouldRestoreComposerFocus } from "../composerFocus";
 import { endFollowupSend, isFollowupSendEnter, tryBeginFollowupSend } from "../followupSend";
@@ -42,6 +42,7 @@ function parseWorkspaces(raw: string | undefined): { workspaces: string[]; parse
 export function DispatchModal({
   machines, preset, presetLabel, activeOnWorkspace, onClose, onDone,
   snippets = [], saveSnippets, reloadSnippets,
+  maxAttachments = MAX_CONSOLE_ATTACHMENTS,
 }: {
   machines: Machine[];
   preset?: { machineId: string; workspaceRoot: string };
@@ -52,6 +53,7 @@ export function DispatchModal({
   snippets?: PromptSnippet[];
   saveSnippets?: (next: PromptSnippet[]) => Promise<void>;
   reloadSnippets?: () => void;
+  maxAttachments?: number;
 }) {
   const online = machines.filter((m) => m.status === "online");
   const [machineId, setMachineId] = useState(preset?.machineId ?? online[0]?.id ?? "");
@@ -172,16 +174,17 @@ export function DispatchModal({
           onPaste={(e) => {
             const items = [...e.clipboardData.files];
             if (!items.length) return;
-            const { files: next, rejected } = mergeAttachmentFiles(files, items);
+            const { files: next, rejected } = mergeAttachmentFiles(files, items, maxAttachments);
             if (next.length === files.length && rejected === 0 && !items.some(isConsoleAttachment)) return;
             e.preventDefault();
             setFiles(next);
-            if (rejected) setError("最多 4 个附件，已忽略多余文件");
+            if (rejected) setError(attachmentLimitMessage(maxAttachments));
           }} />
         <ConsoleFilePicker
           files={files}
           onFiles={setFiles}
-          onRejected={() => setError("最多 4 个附件，已忽略多余文件")}
+          maxAttachments={maxAttachments}
+          onRejected={() => setError(attachmentLimitMessage(maxAttachments))}
         />
         {error && <div className={`${UI_TYPE} text-destructive`}>{error}</div>}
         <DialogFooter className="mx-0 mb-0">

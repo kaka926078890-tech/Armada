@@ -1,4 +1,4 @@
-import { CONSOLE_ACCEPT, displayAttachmentName, isConsoleImage, mergeAttachmentFiles } from "../attachments";
+import { CONSOLE_ACCEPT, displayAttachmentName, isConsoleImage, mergeAttachmentFiles, MAX_CONSOLE_ATTACHMENTS } from "../attachments";
 import { UI_META } from "../ui";
 import { LocalImageChip } from "./ImageThumb";
 import { Button } from "./ui/button";
@@ -7,10 +7,12 @@ export function ConsoleFilePicker({
   files,
   onFiles,
   onRejected,
+  maxAttachments = MAX_CONSOLE_ATTACHMENTS,
 }: {
   files: File[];
   onFiles: (next: File[]) => void;
   onRejected?: () => void;
+  maxAttachments?: number;
 }) {
   const images = files.map((f, i) => ({ f, i })).filter(({ f }) => isConsoleImage(f));
   const others = files.map((f, i) => ({ f, i })).filter(({ f }) => !isConsoleImage(f));
@@ -36,7 +38,7 @@ export function ConsoleFilePicker({
           className="sr-only"
           onChange={(e) => {
             const picked = [...(e.target.files ?? [])];
-            const { files: next, rejected } = mergeAttachmentFiles(files, picked);
+            const { files: next, rejected } = mergeAttachmentFiles(files, picked, maxAttachments);
             onFiles(next);
             if (rejected) onRejected?.();
             e.target.value = "";

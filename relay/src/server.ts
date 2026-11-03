@@ -20,6 +20,7 @@ const MAX_BODY = MAX_OPERATOR_BODY;
 const DISPATCH_TIMEOUT_MS = 15_000;
 const RATE_WINDOW_MS = 5 * 60 * 1000;
 const RATE_MAX = 20;
+const BLOB_RATE_MAX = 256;
 
 export type WorkspaceSnap = {
   machineId: string;
@@ -509,9 +510,17 @@ export function createRelayServer(opts: {
     };
   }
 
+  function storedAttachmentCap(fleetId: string): number | undefined {
+    const row = db.query("SELECT max_attachments FROM fleets WHERE id=?1").get(fleetId) as { max_attachments: number | null } | undefined;
+    const n = row?.max_attachments;
+    if (typeof n !== "number" || !Number.isInteger(n) || n < 1 || n > 256) return undefined;
+    return n;
+  }
+
   function workspacesPayload(fleetId: string): {
     type: "workspaces";
     hubOffline: boolean;
+    maxAttachments?: number;
     workspaces: {
       workspaceId: string;
       machineId: string;
@@ -537,11 +546,13 @@ export function createRelayServer(opts: {
       online: w.online !== false,
       cdpReady: w.cdpReady === true,
     }));
-    if (hubOffline) return { type: "workspaces", hubOffline, workspaces, cursorReload: emptyCursorReload() };
+    const maxAttachments = storedAttachmentCap(fleetId);
+    const cap = maxAttachments ? { maxAttachments } : {};
+    if (hubOffline) return { type: "workspaces", hubOffline, workspaces, cursorReload: emptyCursorReload(), ...cap };
     const cursorReload = cursorReloadByFleet.get(fleetId);
     return cursorReload
-      ? { type: "workspaces", hubOffline, workspaces, cursorReload }
-      : { type: "workspaces", hubOffline, workspaces };
+      ? { type: "workspaces", hubOffline, workspaces, cursorReload, ...cap }
+      : { type: "workspaces", hubOffline, workspaces, ...cap };
   }
 
   function emitWorkspaces(fleetId: string) {
@@ -586,13 +597,13 @@ export function createRelayServer(opts: {
   }
 
   function checkBlobRate(token: string): boolean {
-    return takeRate(blobRate, token);
+    return takeRate(blobRate, token, BLOB_RATE_MAX);
   }
 
-  function takeRate(map: Map<string, number[]>, token: string): boolean {
+  function takeRate(map: Map<string, number[]>, token: string, max = RATE_MAX): boolean {
     const now = Date.now();
     const arr = (map.get(token) ?? []).filter((t) => now - t < RATE_WINDOW_MS);
-    if (arr.length >= RATE_MAX) { map.set(token, arr); return false; }
+    if (arr.length >= max) { map.set(token, arr); return false; }
     arr.push(now);
     map.set(token, arr);
     return true;
@@ -681,8 +692,13 @@ export function createRelayServer(opts: {
 
   app.get("/mobile/workspaces", (c) => {
     const fleet = (c as any).get("fleet") as { id: string };
-    const { hubOffline, workspaces, cursorReload } = workspacesPayload(fleet.id);
-    return c.json(cursorReload ? { hubOffline, workspaces, cursorReload } : { hubOffline, workspaces });
+    const { hubOffline, workspaces, cursorReload, maxAttachments } = workspacesPayload(fleet.id);
+    return c.json({
+      hubOffline,
+      workspaces,
+      ...(cursorReload ? { cursorReload } : {}),
+      ...(maxAttachments ? { maxAttachments } : {}),
+    });
   });
 
   app.get("/mobile/prompt-snippets", async (c) => {
@@ -1245,6 +1261,10 @@ export function createRelayServer(opts: {
           }
           }
           db.query("UPDATE fleets SET workspaces=?1 WHERE id=?2").run(JSON.stringify(slots), fleetId);
+          const cap = Math.trunc(Number(msg.maxAttachments));
+          if (cap >= 1 && cap <= 256) {
+            db.query("UPDATE fleets SET max_attachments=?1 WHERE id=?2").run(cap, fleetId);
+          }
           const reload = parseCursorReloadSnap(msg.cursorReload);
           if (reload) cursorReloadByFleet.set(fleetId, reload);
           emitWorkspaces(fleetId);

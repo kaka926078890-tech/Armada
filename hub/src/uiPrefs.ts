@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import {
   clampRunLimit,
+  DEFAULT_MAX_ATTACHMENTS,
   DEFAULT_MAX_RUNS_PER_MACHINE,
   DEFAULT_MAX_RUNS_PER_WORKSPACE,
   limitsFromEnv,
@@ -32,6 +33,8 @@ export type UiPrefs = {
   /** Occupying runs allowed on one machine. Saved from 设置; env is only the fallback before the first save. */
   maxRunsPerMachine: number;
   maxRunsPerWorkspace: number;
+  /** Files plus images on one dispatch or follow-up. Saved from 设置. */
+  maxAttachments: number;
 };
 
 export type UiPrefsGetResponse = UiPrefs & { source: "file" | "defaults" };
@@ -49,6 +52,7 @@ export const UI_PREFS_DEFAULTS: UiPrefs = {
   promptSnippets: [],
   maxRunsPerMachine: DEFAULT_MAX_RUNS_PER_MACHINE,
   maxRunsPerWorkspace: DEFAULT_MAX_RUNS_PER_WORKSPACE,
+  maxAttachments: DEFAULT_MAX_ATTACHMENTS,
 };
 
 function asSnippetItem(raw: unknown): { id?: string; title: string; body: string } | null {
@@ -140,7 +144,7 @@ function clampReadRuns(raw: unknown): Record<string, number> {
 
 export function normalizeUiPrefs(
   raw: unknown,
-  fallback: { maxRunsPerMachine?: number; maxRunsPerWorkspace?: number } = {},
+  fallback: { maxRunsPerMachine?: number; maxRunsPerWorkspace?: number; maxAttachments?: number } = {},
 ): UiPrefs {
   const o = raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
   const theme = o.theme === "light" || o.theme === "dark" ? o.theme : "dark";
@@ -160,6 +164,10 @@ export function normalizeUiPrefs(
     fallback.maxRunsPerWorkspace ?? DEFAULT_MAX_RUNS_PER_WORKSPACE,
   );
   if (maxRunsPerWorkspace > maxRunsPerMachine) maxRunsPerWorkspace = maxRunsPerMachine;
+  const maxAttachments = clampRunLimit(
+    o.maxAttachments,
+    fallback.maxAttachments ?? DEFAULT_MAX_ATTACHMENTS,
+  );
   return {
     version: 1,
     theme,
@@ -173,6 +181,7 @@ export function normalizeUiPrefs(
     promptSnippets: normalizePromptSnippets(o.promptSnippets),
     maxRunsPerMachine,
     maxRunsPerWorkspace,
+    maxAttachments,
   };
 }
 
@@ -207,7 +216,7 @@ export function writeUiPrefs(home: string, prefs: UiPrefs): void {
 }
 
 export function mergeUiPrefs(base: UiPrefs, patch: Record<string, unknown>): UiPrefs {
-  const known = ["theme", "fontScale", "selectedWorkspace", "readRunsSeeded", "detailWidth", "promptSnippets", "maxRunsPerMachine", "maxRunsPerWorkspace"] as const;
+  const known = ["theme", "fontScale", "selectedWorkspace", "readRunsSeeded", "detailWidth", "promptSnippets", "maxRunsPerMachine", "maxRunsPerWorkspace", "maxAttachments"] as const;
   const next: Record<string, unknown> = { ...base };
   for (const k of known) {
     if (Object.prototype.hasOwnProperty.call(patch, k)) next[k] = patch[k];
@@ -215,5 +224,6 @@ export function mergeUiPrefs(base: UiPrefs, patch: Record<string, unknown>): UiP
   return normalizeUiPrefs(next, {
     maxRunsPerMachine: base.maxRunsPerMachine,
     maxRunsPerWorkspace: base.maxRunsPerWorkspace,
+    maxAttachments: base.maxAttachments,
   });
 }

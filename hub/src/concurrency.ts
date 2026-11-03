@@ -36,6 +36,8 @@ export const RUN_LIMIT_MIN = 1;
 export const RUN_LIMIT_MAX = 256;
 export const DEFAULT_MAX_RUNS_PER_MACHINE = 32;
 export const DEFAULT_MAX_RUNS_PER_WORKSPACE = 32;
+/** Attachments on one dispatch or follow-up. Same 1–256 gate as the run cap. */
+export const DEFAULT_MAX_ATTACHMENTS = 32;
 
 export function clampRunLimit(raw: unknown, fallback: number): number {
   const n = typeof raw === "number"

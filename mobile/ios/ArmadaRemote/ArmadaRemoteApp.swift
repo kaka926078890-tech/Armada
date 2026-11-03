@@ -50,6 +50,8 @@ final class Session: ObservableObject {
     @Published var bindError: String?
     @Published var workspaces: [WorkspaceDTO] = []
     @Published var hubOffline = false
+    /// Missing on an old relay. The hub default is 32 once it pushes snap.workspaces.
+    @Published var maxAttachments = 4
     @Published var runs: [RunDTO] = []
     @Published var hiddenRuns: [RunDTO] = []
     @Published var lastError: String?
@@ -139,6 +141,7 @@ final class Session: ObservableObject {
         UserDefaults.standard.removeObject(forKey: "token")
         OperatorKeychain.delete()
         workspaces = []; runs = []; hiddenRuns = []; snippets = []
+        maxAttachments = 4
         pendingArchive = []; pendingUnarchive = []
         lastBadge = -1
         refreshSeq += 1
@@ -300,6 +303,7 @@ final class Session: ObservableObject {
             guard seq == refreshSeq else { return }
             if hubOffline != ws.hubOffline { hubOffline = ws.hubOffline }
             if workspaces != ws.workspaces { workspaces = ws.workspaces }
+            if let cap = ws.maxAttachments, (1...256).contains(cap), maxAttachments != cap { maxAttachments = cap }
             if cursorReload != reloadState { cursorReload = reloadState }
             adoptFetchedLists(runs: newRuns, hidden: newHidden)
             if optionalChanged(lastError, nil) { lastError = nil }
@@ -436,6 +440,7 @@ final class Session: ObservableObject {
             if hubOffline != offline { hubOffline = offline }
             if workspaces != list { workspaces = list }
             if let reload = frame.cursorReload, cursorReload != reload { cursorReload = reload }
+            if let cap = frame.maxAttachments, (1...256).contains(cap), maxAttachments != cap { maxAttachments = cap }
             if optionalChanged(lastError, nil) { lastError = nil }
             applyBadge()
             return

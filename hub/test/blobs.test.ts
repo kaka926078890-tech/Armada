@@ -300,8 +300,29 @@ describe("blobs + image runs", () => {
     ws.close();
   });
 
-  test("create with 5 attachment ids is 400 ATTACHMENT_COUNT", async () => {
+  test("create with 33 attachment ids is 400 ATTACHMENT_COUNT", async () => {
     const { api, ws } = await start();
+    const r = await api("/api/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        machineId: "m-1", workspaceRoot: "/ws/a", prompt: "x",
+        attachmentIds: Array.from({ length: 33 }, (_, i) => `a${i}`),
+      }),
+    });
+    expect(r.status).toBe(400);
+    expect(((await r.json()) as any).error).toBe("ATTACHMENT_COUNT");
+    ws.close();
+  });
+
+  test("saved attachment cap of 4 rejects a fifth id", async () => {
+    const { api, ws } = await start();
+    const put = await api("/api/ui-prefs", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ maxAttachments: 4 }),
+    });
+    expect(put.status).toBe(200);
     const r = await api("/api/runs", {
       method: "POST",
       headers: { "content-type": "application/json" },

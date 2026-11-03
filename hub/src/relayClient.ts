@@ -239,6 +239,7 @@ export function startRelayClient(opts: {
   db: Database;
   sse: SseHub;
   listMachines?: () => unknown[];
+  maxAttachments?: () => number;
 }): { stop: () => void } | null {
   const cfg = loadRelayConfig(opts.home);
   if (!cfg) return null;
@@ -267,6 +268,7 @@ export function startRelayClient(opts: {
       type: "snap.workspaces",
       machines: opts.listMachines ? opts.listMachines() : opts.registry.listMachines(),
       cursorReload: cursorReloadView(opts.home, opts.registry.listMachines()),
+      ...(opts.maxAttachments ? { maxAttachments: opts.maxAttachments() } : {}),
     });
   };
 
@@ -304,7 +306,7 @@ export function startRelayClient(opts: {
   opts.sse.onEvent = (runId, event) => {
     prevEvent?.(runId, event);
     const t = (event as { type?: string }).type;
-    if (t === "machine.updated") pushWorkspaces();
+    if (t === "machine.updated" || t === "limits.updated") pushWorkspaces();
     if (t === "read.updated") {
       const seq = (event as { seq?: unknown }).seq;
       if (typeof seq === "number") send({ type: "read.updated", seq });

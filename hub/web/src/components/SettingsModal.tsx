@@ -14,7 +14,7 @@ export default function SettingsModal({
   theme, fontScale, onTheme, onFontScale, onClose,
   snippets = [], saveSnippets, reloadSnippets, snippetError = "",
   quietUnread = false, onQuietUnread, canMarkAllRead = false, onMarkAllRead,
-  maxRunsPerMachine = 32, maxRunsPerWorkspace = 32, onRunLimits,
+  maxRunsPerMachine = 32, maxRunsPerWorkspace = 32, maxAttachments = 32, onRunLimits,
 }: {
   theme: ThemeName;
   fontScale: FontScale;
@@ -31,7 +31,8 @@ export default function SettingsModal({
   onMarkAllRead?: () => void;
   maxRunsPerMachine?: number;
   maxRunsPerWorkspace?: number;
-  onRunLimits?: (maxRunsPerMachine: number, maxRunsPerWorkspace: number) => Promise<void>;
+  maxAttachments?: number;
+  onRunLimits?: (maxRunsPerMachine: number, maxRunsPerWorkspace: number, maxAttachments: number) => Promise<void>;
 }) {
   const [editing, setEditing] = useState<PromptSnippet | null>(null);
   const [title, setTitle] = useState("");
@@ -41,11 +42,13 @@ export default function SettingsModal({
   const [busy, setBusy] = useState(false);
   const [machineLimit, setMachineLimit] = useState(String(maxRunsPerMachine));
   const [workspaceLimit, setWorkspaceLimit] = useState(String(maxRunsPerWorkspace));
+  const [attachmentLimit, setAttachmentLimit] = useState(String(maxAttachments));
   const [limitError, setLimitError] = useState("");
   const [limitBusy, setLimitBusy] = useState(false);
 
   useEffect(() => { setMachineLimit(String(maxRunsPerMachine)); }, [maxRunsPerMachine]);
   useEffect(() => { setWorkspaceLimit(String(maxRunsPerWorkspace)); }, [maxRunsPerWorkspace]);
+  useEffect(() => { setAttachmentLimit(String(maxAttachments)); }, [maxAttachments]);
 
   useEffect(() => { reloadSnippets?.(); }, [reloadSnippets]);
 
@@ -79,15 +82,17 @@ export default function SettingsModal({
     if (!onRunLimits || limitBusy) return;
     const machine = Number(machineLimit);
     const workspace = Number(workspaceLimit);
+    const attachments = Number(attachmentLimit);
     if (!Number.isInteger(machine) || machine < 1 || machine > 256
-      || !Number.isInteger(workspace) || workspace < 1 || workspace > 256) {
+      || !Number.isInteger(workspace) || workspace < 1 || workspace > 256
+      || !Number.isInteger(attachments) || attachments < 1 || attachments > 256) {
       setLimitError("请输入 1–256 的整数");
       return;
     }
     setLimitBusy(true);
     setLimitError("");
     try {
-      await onRunLimits(machine, workspace);
+      await onRunLimits(machine, workspace, attachments);
     } catch {
       setLimitError("保存失败，请再试一次");
     } finally {
@@ -158,8 +163,8 @@ export default function SettingsModal({
         </div>
         <div>
           <div className={`${UI_LABEL} mb-1.5`}>并发上限</div>
-          <p className={`${UI_META} text-muted-foreground mb-1.5`}>
-            含排队中的任务。每台机器、每个工作区各算一次，工作区不能超过机器。保存后马上生效，范围 1–256。手机 App 这一版不能改这两个数。
+            <p className={`${UI_META} text-muted-foreground mb-1.5`}>
+            含排队中的任务。每台机器、每个工作区各算一次，工作区不能超过机器。每次派发或续发的附件另算一件上限。保存后马上生效，范围 1–256。手机 App 不能改这些数，但发图受附件上限约束。
           </p>
           <div className="flex flex-col gap-2">
             <label className={`${UI_META} text-muted-foreground`}>
@@ -182,9 +187,19 @@ export default function SettingsModal({
                 onChange={(e) => setWorkspaceLimit(e.target.value)}
               />
             </label>
+            <label className={`${UI_META} text-muted-foreground`}>
+              每次附件
+              <Input
+                className="mt-1"
+                inputMode="numeric"
+                value={attachmentLimit}
+                aria-label="每次附件上限"
+                onChange={(e) => setAttachmentLimit(e.target.value)}
+              />
+            </label>
             {limitError && <div className={`${UI_TYPE} text-destructive`}>{limitError}</div>}
             <Button type="button" variant="outline" disabled={limitBusy} onClick={() => { void saveLimits(); }}>
-              {limitBusy ? "保存中…" : "保存并发上限"}
+              {limitBusy ? "保存中…" : "保存上限"}
             </Button>
           </div>
         </div>

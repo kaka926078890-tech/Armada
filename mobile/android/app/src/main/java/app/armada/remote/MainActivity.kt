@@ -803,9 +803,10 @@ fun DispatchSheet(vm: SessionVm, workspace: WorkspaceDto, followupRunId: String?
     val micPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) speech.start(prompt) else err = dictationMessage("MIC_DENIED")
     }
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(MAX_RUN_ATTACHMENTS)) { uris ->
+    val cap = state.maxAttachments.coerceIn(1, 256)
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(cap)) { uris ->
         if (uris.isEmpty()) return@rememberLauncherForActivityResult
-        val accepted = uris.take(MAX_RUN_ATTACHMENTS - drafts.size)
+        val accepted = uris.take((cap - drafts.size).coerceAtLeast(0))
         if (uris.size > accepted.size) err = operatorMessage("ATTACHMENT_COUNT")
         val next = drafts.toMutableList()
         for ((i, uri) in accepted.withIndex()) {
@@ -819,7 +820,7 @@ fun DispatchSheet(vm: SessionVm, workspace: WorkspaceDto, followupRunId: String?
     fun addClipboard() {
         val uri = clipboardImageUri(context)
         if (uri == null) return
-        if (!canAcceptMoreAttachments(drafts.size, 1)) {
+        if (!canAcceptMoreAttachments(drafts.size, 1, cap)) {
             err = operatorMessage("ATTACHMENT_COUNT")
             return
         }
@@ -966,7 +967,7 @@ fun DispatchSheet(vm: SessionVm, workspace: WorkspaceDto, followupRunId: String?
             onPhoto = {
                 if (chatgptTextOnly) {
                     err = operatorMessage("CHATGPT_TEXT_ONLY")
-                } else if (!canAcceptMoreAttachments(drafts.size, 1)) {
+                } else if (!canAcceptMoreAttachments(drafts.size, 1, cap)) {
                     err = operatorMessage("ATTACHMENT_COUNT")
                 } else {
                     picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))

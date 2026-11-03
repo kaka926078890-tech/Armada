@@ -64,6 +64,23 @@ export class RunService {
     return { ...this.limits };
   }
 
+  /** Dispatch or follow-up refused before a run row is written. The phone only sees the HTTP error. */
+  noteRejected(kind: "create" | "followup", fields: {
+    error: string;
+    machineId?: string | null;
+    workspaceRoot?: string | null;
+    attachmentCount: number;
+    runId?: string | null;
+  }): void {
+    this.audit("hub", "run.reject", fields.runId || fields.machineId || "*", {
+      via: kind,
+      error: fields.error,
+      machineId: fields.machineId ?? null,
+      workspaceRoot: fields.workspaceRoot ?? null,
+      attachmentCount: fields.attachmentCount,
+    });
+  }
+
   private blobs?: BlobStore;
   private pendingFollowupPrompt = new Map<string, { prompt: string; attachmentIds: string[] }>();
   private askInFlight = new Set<string>();

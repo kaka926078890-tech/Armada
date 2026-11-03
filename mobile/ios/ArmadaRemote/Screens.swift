@@ -1060,6 +1060,7 @@ struct DispatchSheet: View {
 
     private var chatgptTextOnly: Bool { live.workspaceRoot.hasPrefix("chatgpt:") }
     private var photoEnabled: Bool { !chatgptTextOnly }
+    private var attachmentLimit: Int { min(256, max(1, session.maxAttachments)) }
     private var canSend: Bool {
         live.canInject && !sending && !speech.listening && (!trimmed.isEmpty || (photoEnabled && !drafts.isEmpty))
     }
@@ -1141,8 +1142,8 @@ struct DispatchSheet: View {
                         listening: speech.listening,
                         canSend: canSend,
                         photoVisible: blobsAvailable,
-                        photoEnabled: photoEnabled && !sending && drafts.count < 4,
-                        maxPick: max(1, 4 - drafts.count),
+                        photoEnabled: photoEnabled && !sending && drafts.count < attachmentLimit,
+                        maxPick: max(1, attachmentLimit - drafts.count),
                         onMic: { toggleMic() },
                         onPhotoDisabled: {
                             if chatgptTextOnly {
@@ -1191,7 +1192,7 @@ struct DispatchSheet: View {
             err = RelayAPIError.operatorMessage("CHATGPT_TEXT_ONLY")
             return
         }
-        if drafts.count >= 4 {
+        if drafts.count >= attachmentLimit {
             err = RelayAPIError.operatorMessage("ATTACHMENT_COUNT")
             return
         }
@@ -1205,7 +1206,7 @@ struct DispatchSheet: View {
     private func ingestPicker(_ items: [PhotosPickerItem]) async {
         pickerItems = []
         for item in items {
-            if drafts.count >= 4 {
+            if drafts.count >= attachmentLimit {
                 err = RelayAPIError.operatorMessage("ATTACHMENT_COUNT")
                 break
             }

@@ -47,7 +47,7 @@ class OperatorMessagesTest {
         assertEquals("ChatGPT 这一版只派发文字", operatorMessage("CHATGPT_TEXT_ONLY"))
         assertEquals("单张不能超过 8 MB", operatorMessage("ATTACHMENT_TOO_LARGE"))
         assertEquals("只支持 PNG / JPEG", operatorMessage("ATTACHMENT_INVALID_MIME"))
-        assertEquals("最多 4 张图", operatorMessage("ATTACHMENT_COUNT"))
+        assertEquals("附件超过当前上限", operatorMessage("ATTACHMENT_COUNT"))
         assertEquals("图片还没传到中台，请重试", operatorMessage("ATTACHMENT_NOT_FOUND"))
         assertEquals("被控机关了贴图", operatorMessage("IMAGE_PASTE_DISABLED"))
         assertEquals("图片没贴进 Cursor，请重试", operatorMessage("IMAGE_PASTE_FAILED"))

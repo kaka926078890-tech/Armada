@@ -2,9 +2,10 @@ import { createHash } from "crypto";
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "fs";
 import { join } from "path";
 import type { Database } from "bun:sqlite";
+import { clampRunLimit, DEFAULT_MAX_ATTACHMENTS } from "./concurrency";
 
 export const MAX_BLOB_BYTES = 8 * 1024 * 1024;
-export const MAX_ATTACHMENTS = 4;
+export const MAX_ATTACHMENTS = DEFAULT_MAX_ATTACHMENTS;
 export const MAX_TOTAL_BYTES = 24 * 1024 * 1024;
 
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
@@ -85,9 +86,18 @@ export class BlobStore {
   private uploads: number[] = [];
   private inFlight = 0;
   private lastQuotaAudit = 0;
+  private maxAttachments = DEFAULT_MAX_ATTACHMENTS;
 
   constructor(private db: Database, private home: string) {
     mkdirSync(blobsDir(home), { recursive: true });
+  }
+
+  setMaxAttachments(raw: unknown): void {
+    this.maxAttachments = clampRunLimit(raw, this.maxAttachments);
+  }
+
+  maxAttachmentsSnapshot(): number {
+    return this.maxAttachments;
   }
 
   beginUpload(): { error?: string; status?: number } {
@@ -103,7 +113,7 @@ export class BlobStore {
   put(bytes: Buffer, declaredMime: string, name: string, now = Date.now()): { error?: string; blob?: BlobMeta; status?: number } {
     const window = this.uploads.filter((t) => now - t < 60_000);
     this.uploads = window;
-    if (window.length >= 10) return { error: "RATE_LIMIT", status: 429 };
+    if (window.length >= this.maxAttachments * 2) return { error: "RATE_LIMIT", status: 429 };
 
     if (bytes.length > MAX_BLOB_BYTES) return { error: "ATTACHMENT_TOO_LARGE", status: 413 };
     const kind = detectBlobKind(bytes, name);
@@ -137,7 +147,7 @@ export class BlobStore {
   }
 
   metas(ids: string[]): { error?: string; items?: BlobMeta[]; status?: number } {
-    if (ids.length > MAX_ATTACHMENTS) return { error: "ATTACHMENT_COUNT", status: 400 };
+    if (ids.length > this.maxAttachments) return { error: "ATTACHMENT_COUNT", status: 400 };
     const items: BlobMeta[] = [];
     let total = 0;
     for (const id of ids) {

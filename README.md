@@ -72,7 +72,7 @@
 - 取消、隐藏/取消隐藏、异常卡「人工关闭」、导出审计
 - 标题可改；抽屉可拖宽度；往上滚可「加载更早对话」
 
-派发/续聊最多 **4** 个附件（PNG/JPEG 走图片芯片；pdf/txt/md/json/csv 等白名单文件落到工作区 `.armada/inbox/<runId>/` 再 `@` 引用。每件 ≤ 8 MiB，合计 ≤ 24 MiB）。图片失败**不会**改成 `@路径`。贴图必须走 CDP。可用 `armada.imagePaste`（默认 true）关掉**图片**路径；纯文件不受该开关影响。
+派发/续聊默认最多 **32** 个附件，中台「设置 → 并发上限 → 每次附件」可改成 1–256，保存后马上生效（PNG/JPEG 走图片芯片；pdf/txt/md/json/csv 等白名单文件落到工作区 `.armada/inbox/<runId>/` 再 `@` 引用。每件 ≤ 8 MiB，合计 ≤ 24 MiB）。手机 App 不能改这个数，但选图受它约束。图片失败**不会**改成 `@路径`。贴图必须走 CDP。可用 `armada.imagePaste`（默认 true）关掉**图片**路径；纯文件不受该开关影响。
 
 ### 真实 IDE 会话
 
@@ -233,7 +233,7 @@ bun run dev:relay-attach
 1. **iOS：** Xcode 打开 `mobile/ios/ArmadaRemote.xcodeproj`，模拟器或真机跑 **ArmadaRemote**（Bundle ID `app.armada.remote`）。
 2. **Android：** `mobile/android` 打 debug APK（见 [`mobile/android/README.md`](mobile/android/README.md)）；模拟器中转填 `http://10.0.2.2:8780`。
 3. 粘贴 **op** 邀请（不要贴 pair）。
-4. 舰队页按 **机器 → 工作区**；点仓看五列任务；仓顶栏 **派发** 新开对话（可从相册选最多 4 张 PNG/JPEG），详情 **续聊** 同一对话（运行中也可以发图）。绑定后会申请通知权限；锁屏 Ask / 完成 / 失败由中转代发 APNs（iOS）或 FCM（Android）（点通知进详情强制 GET）。
+4. 舰队页按 **机器 → 工作区**；点仓看五列任务；仓顶栏 **派发** 新开对话（相册选 PNG/JPEG，张数跟中台「每次附件」上限），详情 **续聊** 同一对话（运行中也可以发图）。绑定后会申请通知权限；锁屏 Ask / 完成 / 失败由中转代发 APNs（iOS）或 FCM（Android）（点通知进详情强制 GET）。
 5. Agent 选择题在详情里 Continue / Skip。终态正文是这一轮助手回复，不是整段 Cursor 会话。
 
 一部手机目前只绑一条 op（一台在线中台）。多台受控机只要登记在这台中台上，选不同仓即可分别派。多部手机可贴同一条 op，共用操作者令牌。

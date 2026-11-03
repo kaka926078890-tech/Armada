@@ -6,7 +6,7 @@ import ChatThread from "./ChatThread";
 import FilePreview from "./FilePreview";
 import { eventsToChat, mergePendingAsk, mergeOutboundChat, outboundUserText, queuedOutbound, stampOutboundImages, userMessageCaption, INITIAL_VISIBLE_TURNS, initialHiddenPrefixTurns, recentTurnsWindow, stampFallbackImageIds } from "../chatView";
 import { collectEventPages, mergeEvents, createForwardGate, EVENT_PAGE_SIZE, hasOlderEvents, olderEventsQuery, shouldLoadOlder, prependPreserveScroll, stickAfterContentResize } from "../loadEvents";
-import { mergeAttachmentFiles, isConsoleAttachment, parseRunAttachmentIds } from "../attachments";
+import { attachmentLimitMessage, mergeAttachmentFiles, isConsoleAttachment, parseRunAttachmentIds, MAX_CONSOLE_ATTACHMENTS } from "../attachments";
 import { ConsoleFilePicker } from "./ConsoleFilePicker";
 import { HubImageRow } from "./ImageThumb";
 import { endFollowupSend, isFollowupSendEnter, tryBeginFollowupSend } from "../followupSend";
@@ -94,11 +94,13 @@ function DrawerShell({ children }: { children: ReactNode }) {
 export default function RunDetail({
   runId, onClose, onChanged, machines = [],
   snippets = [], saveSnippets, reloadSnippets,
+  maxAttachments = MAX_CONSOLE_ATTACHMENTS,
 }: {
   runId: string; onClose: () => void; onChanged: () => void; machines?: Machine[];
   snippets?: PromptSnippet[];
   saveSnippets?: (next: PromptSnippet[]) => Promise<void>;
   reloadSnippets?: () => void;
+  maxAttachments?: number;
 }) {
   const [run, setRun] = useState<RunRow | null>(null);
   const [events, setEvents] = useState<RunEvent[]>([]);
@@ -631,11 +633,11 @@ export default function RunDetail({
               onPaste={(e) => {
                 const items = [...e.clipboardData.files];
                 if (!items.length) return;
-                const { files: next, rejected } = mergeAttachmentFiles(followupFiles, items);
+                const { files: next, rejected } = mergeAttachmentFiles(followupFiles, items, maxAttachments);
                 if (next.length === followupFiles.length && rejected === 0 && !items.some(isConsoleAttachment)) return;
                 e.preventDefault();
                 setFollowupFiles(next);
-                if (rejected) setFollowupError("最多 4 个附件，已忽略多余文件");
+                if (rejected) setFollowupError(attachmentLimitMessage(maxAttachments));
               }}
               onKeyDown={(e) => {
                 if (!isFollowupSendEnter(e)) return;
@@ -651,7 +653,8 @@ export default function RunDetail({
           <ConsoleFilePicker
             files={followupFiles}
             onFiles={setFollowupFiles}
-            onRejected={() => setFollowupError("最多 4 个附件，已忽略多余文件")}
+            maxAttachments={maxAttachments}
+            onRejected={() => setFollowupError(attachmentLimitMessage(maxAttachments))}
           />
         </form>
         </div>
