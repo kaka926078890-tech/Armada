@@ -181,11 +181,21 @@ export function readRolloutFile(path: string): string {
   try { return readFileSync(path, "utf8"); } catch { return ""; }
 }
 
+/** 主进程还在时 open 的参数会被单实例丢掉，接着退出完成，窗口就没了。 */
+export function afterQuit(running: boolean): "open" | "stuck" {
+  return running ? "stuck" : "open";
+}
+
 export async function relaunchChatgptWithPort(): Promise<void> {
-  Bun.spawnSync(["osascript", "-e", 'quit app "ChatGPT"']);
-  const gone = Date.now() + 12_000;
-  while (Date.now() < gone && chatgptAppRunning()) await sleep(300);
-  Bun.spawnSync(["open", "-a", "ChatGPT", "--args", "--remote-debugging-port=9334", "--remote-debugging-address=127.0.0.1"]);
+  if (await chatgptPortUp()) return;
+  if (chatgptAppRunning()) {
+    Bun.spawnSync(["osascript", "-e", 'quit app "ChatGPT"']);
+    const gone = Date.now() + 20_000;
+    while (Date.now() < gone && chatgptAppRunning()) await sleep(300);
+    if (afterQuit(chatgptAppRunning()) === "stuck") throw new Error("CHATGPT_PORT_DOWN");
+  }
+  const opened = Bun.spawnSync(["open", "-a", "ChatGPT", "--args", "--remote-debugging-port=9334", "--remote-debugging-address=127.0.0.1"]);
+  if (opened.exitCode !== 0) throw new Error("CHATGPT_PORT_DOWN");
   const up = Date.now() + 20_000;
   while (Date.now() < up) {
     if (await chatgptPortUp()) return;

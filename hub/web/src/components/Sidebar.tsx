@@ -82,7 +82,7 @@ function ReloadChrome({
 
 export default function Sidebar({
   slots, machines, allRuns, selectedKey, onSelectWorkspace, readMap, onDispatch, onRename, onEventSource, onMonitorChatgpt,
-  showDesktopActions, onOpenWorkspace, onRepairCdp, onGetShareLink, onReloadMachine, reloadMachineIds,
+  showDesktopActions, onOpenCursor, onOpenCodex, onRepairCdp, onGetShareLink, onReloadMachine, reloadMachineIds,
   reloadPending, reloadBusy, requiredVsix, packNotice, quietUnread = false,
   showArchived = false, onlineCount = 0, machineCount = 0,
   onToggleArchived, onOpenSettings, onLeave,
@@ -98,7 +98,8 @@ export default function Sidebar({
   onEventSource?: (machineId: string, source: "hooks" | "db") => void;
   onMonitorChatgpt?: () => void;
   showDesktopActions?: boolean;
-  onOpenWorkspace?: () => void;
+  onOpenCursor?: () => void;
+  onOpenCodex?: () => Promise<string | void> | void;
   onRepairCdp?: () => void;
   onGetShareLink?: () => void;
   onReloadMachine?: (machineId: string, action: "now" | "when-idle" | "skip") => void;
@@ -121,6 +122,8 @@ export default function Sidebar({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [monitoring, setMonitoring] = useState(false);
+  const [codexNote, setCodexNote] = useState("");
+  const mac = typeof navigator === "undefined" || !/Win/i.test(`${navigator.platform} ${navigator.userAgent}`);
 
   const hostOf = (id: string) => machines.find((m) => m.id === id)?.name ?? "";
   const lagOf = (id: string) => packNotice
@@ -151,9 +154,21 @@ export default function Sidebar({
       </Button>
       {showDesktopActions ? (
         <div className="mx-2 mb-1 flex flex-col">
-          <button type="button" className={`rounded-lg px-2 py-1.5 text-left ${UI_TYPE} text-muted-foreground hover:bg-background hover:text-foreground`} onClick={onOpenWorkspace}>
-            打开工作区
-          </button>
+          <div className={`px-2 pt-1 ${UI_META} text-muted-foreground`}>打开工作区</div>
+          <div className="flex gap-1 px-1">
+            <button type="button" className={`rounded-lg px-2 py-1.5 text-left ${UI_TYPE} text-muted-foreground hover:bg-background hover:text-foreground`} onClick={() => { setCodexNote(""); onOpenCursor?.(); }}>
+              Cursor
+            </button>
+            {mac ? (
+              <button type="button" className={`rounded-lg px-2 py-1.5 text-left ${UI_TYPE} text-muted-foreground hover:bg-background hover:text-foreground`} onClick={() => {
+                setCodexNote("");
+                void Promise.resolve(onOpenCodex?.()).then((note) => setCodexNote(typeof note === "string" ? note : ""));
+              }}>
+                Codex
+              </button>
+            ) : null}
+          </div>
+          {codexNote ? <div className={`px-2 pb-1 ${UI_META} text-amber-400`}>{codexNote}</div> : null}
           <button type="button" className={`rounded-lg px-2 py-1.5 text-left ${UI_TYPE} text-muted-foreground hover:bg-background hover:text-foreground`} onClick={onRepairCdp}>
             重新连接 Cursor
           </button>

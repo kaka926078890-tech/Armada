@@ -60,18 +60,19 @@ export class ChatgptBridge {
 
   async launchMonitor(): Promise<{ ok: true } | { error: string }> {
     if (this.launching) return { error: "CHATGPT_PORT_DOWN" };
-    if (!chatgptAppRunning()) return { error: "CHATGPT_NOT_RUNNING" };
     this.launching = true;
+    let result: { ok: true } | { error: string };
     try {
       await relaunchChatgptWithPort();
-      await this.tick();
-      return { ok: true };
+      result = { ok: true };
     } catch (err) {
       const code = err instanceof Error && err.message.startsWith("CHATGPT_") ? err.message : "CHATGPT_PORT_DOWN";
-      return { error: code };
+      result = { error: code };
     } finally {
       this.launching = false;
     }
+    await this.tick();
+    return result;
   }
 
   private publish(next: ChatgptMachineView): void {

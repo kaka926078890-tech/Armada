@@ -179,13 +179,16 @@ describe("Sidebar inject gate", () => {
         onDispatch={() => {}}
         onRename={() => {}}
         showDesktopActions
-        onOpenWorkspace={() => {}}
+        onOpenCursor={() => {}}
+        onOpenCodex={() => {}}
         onRepairCdp={() => {}}
         onGetShareLink={() => {}}
       />,
     );
     expect(html).toContain("重新连接 Cursor");
     expect(html).toContain("打开工作区");
+    expect(html).toContain("Cursor");
+    expect(html).toContain("Codex");
     expect(html).toContain("分享给手机");
     expect(html).not.toContain("grid-cols-3 gap-1");
   });

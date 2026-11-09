@@ -556,13 +556,18 @@ export default function App() {
           onRename={(id, displayName) => { api.renameMachine(id, displayName).then(refresh); }}
           onEventSource={(id, source) => { api.setEventSource(id, source).then(refresh); }}
           showDesktopActions={desktop}
-          onOpenWorkspace={() => {
+          onOpenCursor={() => requestDesktop("open-workspace")}
+          onOpenCodex={() => {
             const root = preset?.workspaceRoot ?? "";
-            if (root.startsWith("chatgpt:") && root !== "chatgpt:monitor") {
+            const ready = machines.some((m) => m.chatgpt_port === "ready");
+            if (ready && root.startsWith("chatgpt:") && root !== "chatgpt:monitor") {
               void api.createChatgptProject();
               return;
             }
-            requestDesktop("open-workspace");
+            return api.monitorChatgpt().then((body) => {
+              refresh();
+              return body?.error ? "Codex 没有用调试口打开" : "";
+            });
           }}
           onRepairCdp={() => requestDesktop("repair-cdp")}
           onGetShareLink={() => requestDesktop("get-share-link")}
