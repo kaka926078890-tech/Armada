@@ -70,6 +70,16 @@ async function startTwoWindows(opts: {
 }
 
 describe("Run dispatch", () => {
+  test("win32 does not start a second run in a window that is already running", async () => {
+    const { ws, inbound, api } = await startWithExt({ os: "win32-x64", extensionVersion: "0.4.53" });
+    const first = await (await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "one" }) })).json() as { run: { id: string } };
+    ws.send(JSON.stringify({ type: "run.bound", runId: first.run.id, conversationId: "cid-1", promptMatch: true }));
+    await new Promise((r) => setTimeout(r, 80));
+    const second = await (await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "two" }) })).json() as { run: { status: string } };
+    expect(second.run.status).toBe("queued");
+    expect(inbound.filter((m) => m.type === "run.start")).toHaveLength(1);
+  });
+
   test("POST /api/runs happy path: dispatched → binding → running", async () => {
     const { ws, inbound, api } = await startWithExt();
     const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "hello" }) });

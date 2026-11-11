@@ -20,6 +20,7 @@ import { hubRunsNeedingTranscriptFollow, shouldArmFollowupStopOnAdopt } from "./
 import { noteOwnerBsp, clearGeneration, synthesizedStopPayload, noteHubGeneration, onFollowupBindGeneration } from "./generationStamp";
 import { parseAskInspect, askPollMany, askQuestionsKey, coalesceAskInspect, isAskUnknown, ASK_MISS_LIMIT } from "./askDetect";
 import { mergeVisibleAndStoredAsks, readStoredAsks } from "./askStore";
+import { createWindowsComposerFeed, openWindowsComposerDb } from "./windowsComposerFeed";
 import { enrichPlanAsk, planDirsFor } from "./planFile";
 import { PENDING_RELOAD_ATTEMPT_NAME, PENDING_RELOAD_NAME, decideReloadFire, decideWindowReload, highestInstalledArmadaAgent, highestInstalledVsix, mergeReloadAttempt, noteReloadCommandSettled, parsePendingReload, parseReloadAttempt, reloadAttemptBlocksWindow, windowHasInFlightArmadaRun, windowHasOpenComposerTurn, windowHasRecentSettle, type ReloadFireState } from "../../desktop-core/src/cursorReload";
 import { readWorkspaceFile } from "./workspaceFileRead";
@@ -192,6 +193,7 @@ export function activate(context: vscode.ExtensionContext): void {
   };
 
   const attachMissingTranscripts = (): void => {
+    if (process.platform === "win32") return;
     for (const [runId, owner] of boundRuns) {
       const root = boundWorkspaces.get(runId);
       const dir = root ? transcriptsDirForWorkspace(homedir(), root) : null;
@@ -229,6 +231,10 @@ export function activate(context: vscode.ExtensionContext): void {
     }
     core.enqueue({ type: "run.bound", runId: match.run.runId, conversationId: match.conversationId, transcriptPath: path, promptMatch: match.promptMatch });
     log(`run.bound ${match.run.runId} cid=${match.conversationId} via=${via}`);
+    if (process.platform === "win32") {
+      windowsFeed.watch(match.run.runId, match.conversationId);
+      return;
+    }
     watchWorkspaceTranscripts(match.run.workspaceRoot);
     if (path) {
       boundPaths.set(match.run.runId, path);
@@ -245,6 +251,8 @@ export function activate(context: vscode.ExtensionContext): void {
   };
 
   const tryBindFromTranscripts = (): void => {
+    // Windows binds from state.vscdb. A second jsonl with the same prompt is BIND_AMBIGUOUS.
+    if (process.platform === "win32") return;
     if (pendingRuns.length === 0) return;
     const boundCids = new Set([...boundRuns.values()].map((v) => v.conversationId));
     const files = [];
@@ -291,6 +299,31 @@ export function activate(context: vscode.ExtensionContext): void {
     if (dirWatch.watched().length !== n) log(`transcript watch ${dir}`);
   };
 
+  const windowsFeed = createWindowsComposerFeed({
+    enabled: process.platform === "win32",
+    open: () => openWindowsComposerDb(),
+    onBind: (run, conversationId) => {
+      applyBinding({
+        run,
+        conversationId,
+        transcriptPath: null,
+        promptMatch: true,
+      }, "composer-db");
+    },
+    onEvent: (runId, ev) => {
+      core.enqueue({
+        type: "run.event",
+        runId,
+        conversationId: ev.conversationId,
+        source: ev.source,
+        hookEventName: ev.hook,
+        payload: ev.payload,
+        ts: Date.now(),
+        seq: nextExtSeq(),
+      });
+    },
+  });
+
   const executor = new Executor({
     globalState: context.globalState,
     send: (m) => { log(`=> ${JSON.stringify(m)}`); core.enqueue(m); },
@@ -298,10 +331,12 @@ export function activate(context: vscode.ExtensionContext): void {
       pendingRuns.push(run);
       watchWorkspaceTranscripts(run.workspaceRoot);
       tryBindFromTranscripts();
+      windowsFeed?.note(run);
     },
     removePending: (runId) => {
       const i = pendingRuns.findIndex((r) => r.runId === runId);
       if (i >= 0) pendingRuns.splice(i, 1);
+      windowsFeed?.forget(runId);
     },
     onInjected: (runId) => cancelWatcher.noteInjection(runId),
     probeCdp: async () => {
@@ -458,9 +493,14 @@ export function activate(context: vscode.ExtensionContext): void {
     });
   };
 
+  let windowsPoll = false;
   const spoolPoll = setInterval(() => {
     forwarder.poll();
     tryBindFromTranscripts();
+    if (!windowsPoll) {
+      windowsPoll = true;
+      void windowsFeed.poll().finally(() => { windowsPoll = false; });
+    }
     for (const run of pendingRuns) watchWorkspaceTranscripts(run.workspaceRoot);
   }, 1000);
   const transcriptPoll = setInterval(() => {
@@ -558,6 +598,10 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!alreadyBound) {
           claimConversation(boundRuns, t.runId, t.conversationId, t.prompt);
           log(`adopt ${t.runId} cid=${t.conversationId}`);
+        }
+        if (process.platform === "win32") {
+          windowsFeed.watch(t.runId, t.conversationId);
+          continue;
         }
         const dir = transcriptsDirForWorkspace(homedir(), t.workspaceRoot);
         const path = dir ? transcriptJsonlPath(dir, t.conversationId) : null;

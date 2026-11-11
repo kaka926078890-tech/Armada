@@ -333,6 +333,8 @@ export class RunService {
 
   private windowCanAcceptStart(machineId: string, windowId: string): boolean {
     if (!this.windowHasProgressing(machineId, windowId)) return true;
+    // Windows createNew aborts the composer already running in that window.
+    if (isWindowsMachineOs(this.registry.getMachine(machineId)?.os)) return false;
     if (!this.limits.multiRunPerWindow) return false;
     return extensionSupportsMultiRunPerWindow(this.registry.windowExtensionVersion(machineId, windowId));
   }

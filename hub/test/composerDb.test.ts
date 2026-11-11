@@ -4,7 +4,7 @@ import { mkdtempSync } from "fs";
 import { hostname, tmpdir } from "os";
 import { join } from "path";
 import {
-  composerFeedWatches, cursorFromEmitted, emptyCursor, matchComposer, planComposerTick, readComposerView, readHeaderCandidates,
+  composerFeedWatches, cursorFromEmitted, emptyCursor, matchComposer, matchComposerByCreatedAt, planComposerTick, readComposerView, readHeaderCandidates,
   type ComposerBubble, type ComposerView,
 } from "../src/composerDb";
 import { createServer, type HubServer } from "../src/index";
@@ -317,6 +317,71 @@ describe("composer feed watch", () => {
     expect(composerFeedWatches({ status: "completed", conversation_id: "cid", end_reason: "OPERATOR_CLOSED" })).toBe(false);
     expect(composerFeedWatches({ status: "completed", conversation_id: null, end_reason: "completed" })).toBe(false);
     expect(composerFeedWatches({ status: "queued", conversation_id: "cid" })).toBe(false);
+  });
+});
+
+describe("windows composer bind", () => {
+  const cid = "251e2de9-fef2-4ef9-aadd-663258b24116";
+  const bubbleId = "aa287f49-6f3b-4c12-972d-9da1fc11d66b";
+
+  test("empty fullConversationHeadersOnly still reads bubbleId rows and ignores tool fragments", () => {
+    const db = new Database(":memory:");
+    db.exec("CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value TEXT)");
+    db.query("INSERT INTO cursorDiskKV (key, value) VALUES (?1,?2)").run(`composerData:${cid}`, JSON.stringify({
+      status: "aborted",
+      chatGenerationUUID: CURSOR_GEN,
+      fullConversationHeadersOnly: [],
+      subagentComposerIds: [],
+    }));
+    db.query("INSERT INTO cursorDiskKV (key, value) VALUES (?1,?2)").run(`bubbleId:${cid}:${bubbleId}`, JSON.stringify({
+      type: 1, text: "ARMADA-WIN-DB-PROBE-20261111-0922", requestId: CURSOR_GEN,
+    }));
+    db.query("INSERT INTO cursorDiskKV (key, value) VALUES (?1,?2)").run(
+      `bubbleId:${cid}:${bubbleId}/t:call-080fe9e1-e15f-4539-b136-2530bd70098e-0`,
+      JSON.stringify({ type: 2, text: "tool fragment" }),
+    );
+    const live = readComposerView(db, cid);
+    expect(live?.status).toBe("aborted");
+    expect(live?.generationId).toBe(CURSOR_GEN);
+    expect(live?.bubbles.map((b) => b.id)).toEqual([bubbleId]);
+    const armed = planComposerTick(live!, [], emptyCursor());
+    expect(armed.events.some((e) => e.hook === "stop")).toBe(false);
+    expect(armed.events.find((e) => e.hook === "beforeSubmitPrompt")?.payload.generation_id).toBe(CURSOR_GEN);
+    db.query("UPDATE cursorDiskKV SET value=?1 WHERE key=?2").run(JSON.stringify({
+      status: "completed",
+      chatGenerationUUID: "",
+      fullConversationHeadersOnly: [],
+      subagentComposerIds: [],
+    }), `composerData:${cid}`);
+    const done = planComposerTick(readComposerView(db, cid)!, [], armed.cursor);
+    expect(done.events.find((e) => e.hook === "stop")?.payload).toMatchObject({
+      status: "completed",
+      generation_id: CURSOR_GEN,
+    });
+    db.close();
+  });
+
+  test("binds the composer createNew wrote, without a user bubble and across Windows path case", () => {
+    const anchor = 1_794_360_201_000;
+    const headers = [
+      {
+        composerId: cid, createdAt: 1_794_360_201_518, isSubagent: false,
+        workspacePath: "c:\\Users\\PC\\Desktop\\work", firstUserText: null,
+      },
+      {
+        composerId: "later", createdAt: anchor + 20_000, isSubagent: false,
+        workspacePath: "C:\\Users\\PC\\Desktop\\work", firstUserText: null,
+      },
+    ];
+    expect(matchComposer(headers, {
+      prompt: "ARMADA-WIN-DB-PROBE-20261111-0922",
+      workspaceRoot: "c:\\Users\\PC\\Desktop\\work",
+      createdAt: anchor,
+    }, new Set())).toBeNull();
+    expect(matchComposerByCreatedAt(headers, {
+      workspaceRoot: "c:\\Users\\PC\\Desktop\\work",
+      createdAt: anchor,
+    }, new Set())).toBe(cid);
   });
 });
 

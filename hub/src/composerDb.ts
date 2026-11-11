@@ -1,10 +1,11 @@
-import type { Database } from "bun:sqlite";
 import { hasImageMarkers, stripImageMarkers } from "../../extension/src/imageMarkers";
 import { workspacePathsEqual } from "../../extension/src/workspacePath";
 import { CHATGPT_LOCAL_MACHINE, sameHost } from "./chatgptAttach";
 
 /** Header createdAt may land a few milliseconds around dispatch. */
 export const HEADER_CREATED_SKEW_MS = 5_000;
+/** createNew's header is the row written in this window. Same clock as the Windows bind timeout. */
+const COMPOSER_CREATE_WINDOW_MS = 180_000;
 
 export type HeaderCandidate = {
   composerId: string;
@@ -87,13 +88,38 @@ export function pickLocalMachineId(
   return hits.length === 1 ? hits[0]!.id : null;
 }
 
-export function usesComposerDb(db: Database, machineId: string): boolean {
+export function usesComposerDb(db: { query(sql: string): { get(...args: any[]): any } }, machineId: string): boolean {
   try {
     const row = db.query("SELECT event_source FROM machines WHERE id=?1").get(machineId) as { event_source?: string | null } | null;
     return row?.event_source === "db";
   } catch {
     return false;
   }
+}
+
+/**
+ * Windows jsonl never lists the user row in `fullConversationHeadersOnly`.
+ * The header `createNew` writes is the one whose `createdAt` is first after
+ * inject. Prompt text lives in `bubbleId:` rows, so it cannot be the key.
+ */
+export function matchComposerByCreatedAt(
+  headers: HeaderCandidate[],
+  run: { workspaceRoot: string; createdAt: number },
+  bound: Set<string>,
+): string | null {
+  const from = run.createdAt - 1_000;
+  const until = run.createdAt + COMPOSER_CREATE_WINDOW_MS;
+  const hits = headers.filter((h) =>
+    !h.isSubagent
+    && !bound.has(h.composerId)
+    && h.createdAt >= from
+    && h.createdAt <= until
+    && h.workspacePath
+    && workspacePathsEqual(h.workspacePath, run.workspaceRoot)
+  );
+  if (hits.length === 0) return null;
+  hits.sort((a, b) => a.createdAt - b.createdAt || a.composerId.localeCompare(b.composerId));
+  return hits[0]!.composerId;
 }
 
 export function matchComposer(
@@ -205,6 +231,26 @@ export function readHeaderCandidates(db: Kv, sinceMs: number): HeaderCandidate[]
   return out;
 }
 
+/** `bubbleId:<cid>:<id>/t:call-…` is a tool fragment, not a bubble. */
+function directBubbleIds(db: Kv, cid: string): string[] {
+  const prefix = `bubbleId:${cid}:`;
+  let rows: { key?: unknown }[] = [];
+  try {
+    rows = db.query("SELECT key FROM cursorDiskKV WHERE key LIKE ?1").all(`${prefix}%`) as { key?: unknown }[];
+  } catch {
+    return [];
+  }
+  const ids: string[] = [];
+  for (const row of rows) {
+    const key = typeof row.key === "string" ? row.key : "";
+    if (!key.startsWith(prefix)) continue;
+    const rest = key.slice(prefix.length);
+    if (!rest || rest.includes("/") || rest.includes("\\")) continue;
+    ids.push(rest);
+  }
+  return ids;
+}
+
 export function readComposerView(db: Kv, cid: string): ComposerView | null {
   const cell = db.query("SELECT value FROM cursorDiskKV WHERE key=?1").get(`composerData:${cid}`) as { value?: unknown } | null;
   const raw = cellText(cell?.value);
@@ -212,16 +258,21 @@ export function readComposerView(db: Kv, cid: string): ComposerView | null {
   let composer: unknown;
   try { composer = JSON.parse(raw); } catch { return null; }
   const headers = asRecord(composer)?.fullConversationHeadersOnly;
-  const bubbles: ComposerBubble[] = [];
+  const ids: string[] = [];
   if (Array.isArray(headers)) {
     for (const h of headers) {
       const id = asRecord(h)?.bubbleId;
-      if (typeof id !== "string" || !id) continue;
-      const bubbleCell = db.query("SELECT value FROM cursorDiskKV WHERE key=?1").get(`bubbleId:${cid}:${id}`) as { value?: unknown } | null;
-      const text = cellText(bubbleCell?.value);
-      if (!text) continue;
-      try { bubbles.push(parseBubble(id, JSON.parse(text))); } catch { /* skip one bad row */ }
+      if (typeof id === "string" && id) ids.push(id);
     }
+  }
+  // PF39WTSM 2026-11-11: the header list stays empty while bubbleId rows hold the turn.
+  const bubbleIds = ids.length > 0 ? ids : directBubbleIds(db, cid);
+  const bubbles: ComposerBubble[] = [];
+  for (const id of bubbleIds) {
+    const bubbleCell = db.query("SELECT value FROM cursorDiskKV WHERE key=?1").get(`bubbleId:${cid}:${id}`) as { value?: unknown } | null;
+    const text = cellText(bubbleCell?.value);
+    if (!text) continue;
+    try { bubbles.push(parseBubble(id, JSON.parse(text))); } catch { /* skip one bad row */ }
   }
   return parseComposer(cid, composer, bubbles);
 }

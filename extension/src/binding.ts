@@ -7,6 +7,8 @@ export interface PendingRun {
   prompt: string;
   dispatchedAt: number; // epoch ms
   attachmentIds?: string[];
+  /** Epoch ms taken immediately before `composer.createNew`. Windows table bind uses this. */
+  anchorAt?: number;
 }
 
 export interface HookEventView {

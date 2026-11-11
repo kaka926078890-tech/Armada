@@ -314,6 +314,7 @@ export class Executor {
       }
       // createNew = 空对话。newAgentChat 会把活动编辑器做成引用芯片（真机
       // NON_EMPTY_INPUT:windows-packaging-self-hosted-）；其前再 focus 编辑器组会把用户挪开的焦点抢回去。
+      const anchorAt = Date.now();
       await vscode.commands.executeCommand("composer.createNew");
       this.noteProgress(msg.runId, "inject");
       if (attachments.length) {
@@ -336,6 +337,7 @@ export class Executor {
         workspaceRoot: msg.workspaceRoot,
         prompt: msg.prompt,
         dispatchedAt: Date.now(),
+        anchorAt,
         attachmentIds: attachments.map((a) => a.sha256 || a.id).filter((x): x is string => !!x),
       });
       pendingAdded = true;
