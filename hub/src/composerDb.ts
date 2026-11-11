@@ -231,8 +231,28 @@ export function readHeaderCandidates(db: Kv, sinceMs: number): HeaderCandidate[]
   return out;
 }
 
-/** `bubbleId:<cid>:<id>/t:call-…` is a tool fragment, not a bubble. */
-function directBubbleIds(db: Kv, cid: string): string[] {
+function bubbleRest(key: string, prefix: string): string {
+  return key.startsWith(prefix) ? key.slice(prefix.length) : "";
+}
+
+/** First `/` or `\` in a bubble key suffix. Tool calls use `t:call-`; Windows text uses `s:<n>`. */
+function bubbleSplit(rest: string): { parent: string; tail: string } | null {
+  const slash = rest.indexOf("/");
+  const back = rest.indexOf("\\");
+  const cut = slash < 0 ? back : back < 0 ? slash : Math.min(slash, back);
+  if (cut <= 0) return null;
+  return { parent: rest.slice(0, cut), tail: rest.slice(cut + 1) };
+}
+
+function isToolCallTail(tail: string): boolean {
+  return tail.startsWith("t:call-") && !tail.includes("/") && !tail.includes("\\");
+}
+
+/**
+ * Header list empty: parent rows, then that parent's `/s:<n>` steps in numeric
+ * order, then its `/t:call-` rows. Nested `fc_` fragments stay out.
+ */
+function fallbackBubbleIds(db: Kv, cid: string): string[] {
   const prefix = `bubbleId:${cid}:`;
   let rows: { key?: unknown }[] = [];
   try {
@@ -240,15 +260,75 @@ function directBubbleIds(db: Kv, cid: string): string[] {
   } catch {
     return [];
   }
-  const ids: string[] = [];
+  const parents: string[] = [];
+  const steps = new Map<string, { n: number; id: string }[]>();
+  const tools = new Map<string, string[]>();
   for (const row of rows) {
     const key = typeof row.key === "string" ? row.key : "";
-    if (!key.startsWith(prefix)) continue;
-    const rest = key.slice(prefix.length);
-    if (!rest || rest.includes("/") || rest.includes("\\")) continue;
-    ids.push(rest);
+    const rest = bubbleRest(key, prefix);
+    if (!rest) continue;
+    const split = bubbleSplit(rest);
+    if (!split) {
+      parents.push(rest);
+      continue;
+    }
+    const step = /^s:(\d+)$/.exec(split.tail);
+    if (step) {
+      const list = steps.get(split.parent) ?? [];
+      list.push({ n: Number(step[1]), id: rest });
+      steps.set(split.parent, list);
+      continue;
+    }
+    if (isToolCallTail(split.tail)) {
+      const list = tools.get(split.parent) ?? [];
+      list.push(rest);
+      tools.set(split.parent, list);
+    }
   }
-  return ids;
+  const seen = new Set(parents);
+  const ordered = [...parents];
+  for (const parent of steps.keys()) if (!seen.has(parent)) ordered.push(parent);
+  for (const parent of tools.keys()) if (!seen.has(parent) && !ordered.includes(parent)) ordered.push(parent);
+  const out: string[] = [];
+  for (const parent of ordered) {
+    if (seen.has(parent)) out.push(parent);
+    const list = steps.get(parent);
+    if (list) {
+      list.sort((a, b) => a.n - b.n || a.id.localeCompare(b.id));
+      for (const step of list) out.push(step.id);
+    }
+    const calls = tools.get(parent);
+    if (calls) {
+      calls.sort((a, b) => a.localeCompare(b));
+      for (const id of calls) out.push(id);
+    }
+  }
+  return out;
+}
+
+function loadBubble(db: Kv, cid: string, id: string): ComposerBubble | null {
+  const bubbleCell = db.query("SELECT value FROM cursorDiskKV WHERE key=?1").get(`bubbleId:${cid}:${id}`) as { value?: unknown } | null;
+  const text = cellText(bubbleCell?.value);
+  if (!text) return null;
+  try { return parseBubble(id, JSON.parse(text)); } catch { return null; }
+}
+
+/** Empty-header child row. Tool rows that already contain text stay out: noteBubble would emit them as a reply. */
+function fallbackChild(id: string, bubble: ComposerBubble): ComposerBubble | null {
+  const split = bubbleSplit(id);
+  if (!split) return bubble;
+  if (/^s:\d+$/.test(split.tail)) {
+    const text = bubble.text.trim();
+    if (text && bubble.toolName) return null;
+    if (!text && !bubble.thinking) return null;
+    if (text && !bubble.toolName && bubble.type !== 2) return { ...bubble, type: 2 };
+    return bubble;
+  }
+  if (isToolCallTail(split.tail)) {
+    if (bubble.text.trim() || !bubble.toolName) return null;
+    return bubble;
+  }
+  return null;
 }
 
 export function readComposerView(db: Kv, cid: string): ComposerView | null {
@@ -266,13 +346,19 @@ export function readComposerView(db: Kv, cid: string): ComposerView | null {
     }
   }
   // PF39WTSM 2026-11-11: the header list stays empty while bubbleId rows hold the turn.
-  const bubbleIds = ids.length > 0 ? ids : directBubbleIds(db, cid);
+  const fromHeaders = ids.length > 0;
+  const bubbleIds = fromHeaders ? ids : fallbackBubbleIds(db, cid);
   const bubbles: ComposerBubble[] = [];
   for (const id of bubbleIds) {
-    const bubbleCell = db.query("SELECT value FROM cursorDiskKV WHERE key=?1").get(`bubbleId:${cid}:${id}`) as { value?: unknown } | null;
-    const text = cellText(bubbleCell?.value);
-    if (!text) continue;
-    try { bubbles.push(parseBubble(id, JSON.parse(text))); } catch { /* skip one bad row */ }
+    const bubble = loadBubble(db, cid, id);
+    if (!bubble) continue;
+    if (!fromHeaders && bubbleSplit(id)) {
+      const child = fallbackChild(id, bubble);
+      if (!child) continue;
+      bubbles.push(child);
+      continue;
+    }
+    bubbles.push(bubble);
   }
   return parseComposer(cid, composer, bubbles);
 }
@@ -626,9 +712,12 @@ export function planComposerTick(
   if (snap.generationId) next.abortSeen = false;
   if (uuidCleared && !abortHold && !next.stopped && !childBusy) {
     for (const b of snap.bubbles) flushText(b, next.generationId);
-    const stopStatus = doneStatus(snap.status) ? "completed"
-      : snap.status === "aborted" ? "aborted"
+    // Cursor leaves composer status at "aborted" after a normal Windows turn.
+    // A reply is completion. Aborted with no reply stays aborted.
+    const hadText = snap.bubbles.some((b) => b.type === 2 && !!b.text.trim() && !b.toolName && next.assistants.includes(b.id));
+    const stopStatus = hadText || doneStatus(snap.status) ? "completed"
       : snap.status === "error" ? "error"
+      : snap.status === "aborted" ? "aborted"
       : "completed";
     next.stopped = true;
     emit({

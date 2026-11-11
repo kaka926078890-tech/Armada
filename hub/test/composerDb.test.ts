@@ -361,6 +361,83 @@ describe("windows composer bind", () => {
     db.close();
   });
 
+  test("empty headers read s: text and thinking, and empty tool calls", () => {
+    const db = new Database(":memory:");
+    db.exec("CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value TEXT)");
+    db.query("INSERT INTO cursorDiskKV (key, value) VALUES (?1,?2)").run(`composerData:${cid}`, JSON.stringify({
+      status: "completed",
+      chatGenerationUUID: "",
+      fullConversationHeadersOnly: [],
+      subagentComposerIds: [],
+    }));
+    const put = (id: string, value: unknown) => {
+      db.query("INSERT INTO cursorDiskKV (key, value) VALUES (?1,?2)").run(`bubbleId:${cid}:${id}`, JSON.stringify(value));
+    };
+    const call = `${bubbleId}/t:call-080fe9e1-e15f-4539-b136-2530bd70098e-0`;
+    put(bubbleId, { type: 1, text: "do the thing", requestId: CURSOR_GEN });
+    put(`${bubbleId}/s:1`, { type: 2, text: "", thinking: { text: "looking" } });
+    put(`${bubbleId}/s:10`, { type: 1, text: "the long report" });
+    put(`${bubbleId}/s:2`, { type: 2, text: "short note" });
+    put(`${bubbleId}/s:3`, { type: 2, text: "tool said this", toolFormerData: { name: "read_file_v2", status: "completed" } });
+    put(call, { type: 2, text: "", toolFormerData: { name: "read_file_v2", status: "completed" } });
+    put(`${call}/fc_59065b3b`, { type: 2, text: "file body" });
+    const view = readComposerView(db, cid);
+    expect(view?.bubbles.map((b) => b.id)).toEqual([
+      bubbleId,
+      `${bubbleId}/s:1`,
+      `${bubbleId}/s:2`,
+      `${bubbleId}/s:10`,
+      call,
+    ]);
+    expect(view?.bubbles.find((b) => b.id.endsWith("/s:10"))?.type).toBe(2);
+    const { events } = planComposerTick(view!, [], emptyCursor());
+    expect(events.filter((e) => e.hook === "afterAgentThought").map((e) => e.payload.text)).toEqual(["looking"]);
+    expect(events.filter((e) => e.hook === "preToolUse").map((e) => e.payload.tool_name)).toEqual(["read_file_v2"]);
+    expect(events.filter((e) => e.hook === "afterAgentResponse").map((e) => e.payload.text)).toEqual([
+      "short note",
+      "the long report",
+    ]);
+    db.close();
+  });
+
+  test("a finished aborted composer with a reply stops as completed", () => {
+    const armed = planComposerTick(snap({
+      cid: "cid-1",
+      bubbles: [bubble({ id: "u", type: 1, text: "hi" })],
+    }), [], emptyCursor()).cursor;
+    const cleared = snap({
+      cid: "cid-1",
+      status: "aborted",
+      generationId: null,
+      bubbles: [
+        bubble({ id: "u", type: 1, text: "hi" }),
+        bubble({ id: "a", type: 2, text: "the reply" }),
+      ],
+    });
+    const hold = planComposerTick(cleared, [], armed);
+    expect(hold.events.some((e) => e.hook === "stop")).toBe(false);
+    const done = planComposerTick(cleared, [], hold.cursor);
+    expect(done.events.find((e) => e.hook === "afterAgentResponse")?.payload.text).toBe("the reply");
+    expect(done.events.find((e) => e.hook === "stop")?.payload.status).toBe("completed");
+  });
+
+  test("a finished aborted composer with no reply still stops as aborted", () => {
+    const armed = planComposerTick(snap({
+      cid: "cid-1",
+      bubbles: [bubble({ id: "u", type: 1, text: "hi" })],
+    }), [], emptyCursor()).cursor;
+    const cleared = snap({
+      cid: "cid-1",
+      status: "aborted",
+      generationId: null,
+      bubbles: [bubble({ id: "u", type: 1, text: "hi" })],
+    });
+    const hold = planComposerTick(cleared, [], armed);
+    expect(hold.events.some((e) => e.hook === "stop")).toBe(false);
+    const done = planComposerTick(cleared, [], hold.cursor);
+    expect(done.events.find((e) => e.hook === "stop")?.payload.status).toBe("aborted");
+  });
+
   test("binds the composer createNew wrote, without a user bubble and across Windows path case", () => {
     const anchor = 1_794_360_201_000;
     const headers = [
