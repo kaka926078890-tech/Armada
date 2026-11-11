@@ -71,6 +71,7 @@ export function openDb(home: string): Database {
   ensureColumn(db, "runs", "chatgpt_thread_id", "chatgpt_thread_id TEXT");
   ensureColumn(db, "runs", "chatgpt_turn_id", "chatgpt_turn_id TEXT");
   ensureColumn(db, "machines", "queue_message_default_behavior", "queue_message_default_behavior TEXT");
+  // Retired switch. The hub host always reads the composer table. The column stays so old databases open.
   ensureColumn(db, "machines", "event_source", "event_source TEXT NOT NULL DEFAULT 'hooks'");
   db.exec(`CREATE TABLE IF NOT EXISTS run_outbound (
     id TEXT PRIMARY KEY,

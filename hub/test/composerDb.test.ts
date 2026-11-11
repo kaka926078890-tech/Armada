@@ -517,14 +517,15 @@ describe("machine event source", () => {
   let hub: HubServer | null = null;
   afterEach(() => { hub?.stop(); hub = null; });
 
-  test("db mode on this machine drops hook events and keeps table events; another machine cannot switch", async () => {
+  test("hub host drops hook events and keeps table events; the source cannot be switched", async () => {
     const home = mkdtempSync(join(tmpdir(), "armada-cdb-"));
     hub = createServer({ port: 0, home, composerCursorPath: join(home, "missing.vscdb") });
-    const ws: WebSocket = await new Promise((res, rej) => {
+    const openWs = () => new Promise<WebSocket>((res, rej) => {
       const w = new WebSocket(`ws://127.0.0.1:${hub!.port}/ws?token=${hub!.token}`);
       w.onopen = () => res(w);
       w.onerror = rej;
     });
+    const ws = await openWs();
     ws.send(JSON.stringify({
       type: "register", machineId: "m-local", windowId: "w-1", name: hostname(), os: "darwin",
       openWorkspaces: ["/ws/a"], cdpReady: true,
@@ -540,18 +541,6 @@ describe("machine event source", () => {
     ws.send(JSON.stringify({ type: "run.bound", runId: created.run.id, conversationId: "cid-1", promptMatch: true }));
     await new Promise((r) => setTimeout(r, 80));
 
-    hub.db.query("INSERT INTO machines (id, name, os, open_workspaces, status, last_seen_at) VALUES ('m-other','other','win32','[]','online',?1)").run(Date.now());
-    const denied = await api("/api/machines/m-other", { method: "PATCH", body: JSON.stringify({ eventSource: "db" }) });
-    expect(denied.status).toBe(409);
-
-    const switched = await api("/api/machines/m-local", { method: "PATCH", body: JSON.stringify({ eventSource: "db" }) });
-    expect(switched.status).toBe(200);
-    const body = await switched.json() as { machine: { event_source: string; local?: boolean } };
-    expect(body.machine.event_source).toBe("db");
-
-    const machines = await (await api("/api/machines")).json() as { id: string; local: boolean; event_source: string }[];
-    expect(machines.find((m) => m.id === "m-local")).toMatchObject({ local: true, event_source: "db" });
-
     ws.send(JSON.stringify({
       type: "run.event", runId: created.run.id, source: "hook", hookEventName: "afterAgentThought",
       payload: { text: "from hook", conversation_id: "cid-1" }, ts: Date.now(), seq: 1,
@@ -564,6 +553,33 @@ describe("machine event source", () => {
     const events = await (await api(`/api/runs/${created.run.id}/events?limit=20`)).json() as { source: string; payload: string }[];
     const thoughts = events.filter((e) => e.payload.includes("from "));
     expect(thoughts.map((e) => e.source)).toEqual(["db"]);
+
+    const switched = await api("/api/machines/m-local", { method: "PATCH", body: JSON.stringify({ eventSource: "hooks" }) });
+    expect(switched.status).toBe(400);
+    const machines = await (await api("/api/machines")).json() as { id: string; local: boolean; event_source?: string }[];
+    const local = machines.find((m) => m.id === "m-local");
+    expect(local).toMatchObject({ local: true });
+    expect(local).not.toHaveProperty("event_source");
+
+    const other = await openWs();
+    other.send(JSON.stringify({
+      type: "register", machineId: "m-other", windowId: "w-2", name: "other-host", os: "darwin",
+      openWorkspaces: ["/ws/b"], cdpReady: true,
+    }));
+    await new Promise((r) => setTimeout(r, 80));
+    const otherRun = await (await api("/api/runs", {
+      method: "POST", body: JSON.stringify({ machineId: "m-other", workspaceRoot: "/ws/b", prompt: "hi" }),
+    })).json() as { run: { id: string } };
+    other.send(JSON.stringify({ type: "run.bound", runId: otherRun.run.id, conversationId: "cid-2", promptMatch: true }));
+    await new Promise((r) => setTimeout(r, 80));
+    other.send(JSON.stringify({
+      type: "run.event", runId: otherRun.run.id, source: "hook", hookEventName: "afterAgentThought",
+      payload: { text: "from hook", conversation_id: "cid-2" }, ts: Date.now(), seq: 1,
+    }));
+    await new Promise((r) => setTimeout(r, 80));
+    const otherEvents = await (await api(`/api/runs/${otherRun.run.id}/events?limit=20`)).json() as { source: string; payload: string }[];
+    expect(otherEvents.filter((e) => e.payload.includes("from hook")).map((e) => e.source)).toEqual(["hook"]);
     ws.close();
+    other.close();
   });
 });

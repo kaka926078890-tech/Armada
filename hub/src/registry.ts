@@ -104,13 +104,6 @@ export class Registry {
     return (this.db.query("SELECT * FROM machines WHERE id=?1").get(id) as MachineRow) ?? null;
   }
 
-  setEventSource(id: string, source: "hooks" | "db", localId: string | null): { error?: "NOT_FOUND" | "NOT_LOCAL"; machine?: MachineRow } {
-    if (!this.getMachine(id)) return { error: "NOT_FOUND" };
-    if (id !== localId) return { error: "NOT_LOCAL" };
-    this.db.query("UPDATE machines SET event_source=?1 WHERE id=?2").run(source, id);
-    return { machine: this.getMachine(id)! };
-  }
-
   setDisplayName(id: string, displayName: string | null): { error?: string; machine?: MachineRow } {
     if (!this.getMachine(id)) return { error: "NOT_FOUND" };
     const next = displayName == null ? null : displayName.trim().slice(0, 40);

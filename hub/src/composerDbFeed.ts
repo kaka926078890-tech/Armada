@@ -5,7 +5,7 @@ import { join } from "path";
 import { parseAttachmentIds } from "./blobs";
 import {
   composerFeedWatches, cursorFromEmitted, matchComposer, pickLocalMachineId, planComposerTick,
-  readComposerHead, readComposerView, readHeaderCandidates, seedCursor, usesComposerDb,
+  readComposerHead, readComposerView, readHeaderCandidates, seedCursor,
   type ComposerCursor, type ComposerView,
 } from "./composerDb";
 import { ingestEvent } from "./ingest";
@@ -76,7 +76,7 @@ export function startComposerFeed(opts: {
       hostname(),
       (id) => opts.registry.isMachineConnected(id),
     );
-    if (!localId || !usesComposerDb(opts.hub, localId)) {
+    if (!localId) {
       cursors.clear();
       return;
     }

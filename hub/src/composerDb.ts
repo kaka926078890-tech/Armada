@@ -88,13 +88,9 @@ export function pickLocalMachineId(
   return hits.length === 1 ? hits[0]!.id : null;
 }
 
-export function usesComposerDb(db: { query(sql: string): { get(...args: any[]): any } }, machineId: string): boolean {
-  try {
-    const row = db.query("SELECT event_source FROM machines WHERE id=?1").get(machineId) as { event_source?: string | null } | null;
-    return row?.event_source === "db";
-  } catch {
-    return false;
-  }
+/** Hub host reads Cursor's composer table. Remote machines stay on hooks and jsonl. */
+export function usesComposerDb(machineId: string, localId: string | null): boolean {
+  return localId != null && machineId === localId;
 }
 
 /**

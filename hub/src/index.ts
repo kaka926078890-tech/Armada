@@ -90,7 +90,8 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
       case "run.bound": runs.onRunBound(machineId, msg); break;
       case "run.event": {
         const source = typeof msg.source === "string" ? msg.source : "hook";
-        if (usesComposerDb(db, machineId) && source !== "db" && source !== "cdp" && source !== "hub") {
+        const localId = pickLocalMachineId(registry.listMachines(), hostname(), (id) => registry.isMachineConnected(id));
+        if (usesComposerDb(machineId, localId) && source !== "db" && source !== "cdp" && source !== "hub") {
           if (typeof msg.seq === "number") {
             registry.sendTo(machineId, ws.data.windowId!, { type: "event.ack", machineId, lastSeq: msg.seq });
           }
@@ -132,11 +133,11 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
   app.get("/api/machines", (c) => {
     const rows = chatgpt.machines(registry.listMachines());
     const localId = pickLocalMachineId(rows, hostname(), (id) => registry.isMachineConnected(id));
-    return c.json(rows.map((m) => ({
-      ...m,
-      event_source: m.event_source === "db" ? "db" : "hooks",
-      local: m.id === localId,
-    })));
+    return c.json(rows.map((m) => {
+      const view = { ...m, local: m.id === localId };
+      delete view.event_source;
+      return view;
+    }));
   });
   app.post("/api/chatgpt/monitor", async (c) => {
     const result = await chatgpt.launchMonitor();
@@ -180,15 +181,7 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
   app.patch("/api/machines/:id", async (c) => {
     const body = await c.req.json().catch(() => ({}));
     const id = c.req.param("id");
-    if (body.eventSource !== undefined) {
-      if (body.eventSource !== "hooks" && body.eventSource !== "db") return c.json({ error: "INVALID" }, 400);
-      const localId = pickLocalMachineId(registry.listMachines(), hostname(), (mid) => registry.isMachineConnected(mid));
-      const { machine, error } = registry.setEventSource(id, body.eventSource, localId);
-      if (error === "NOT_FOUND") return c.json({ error }, 404);
-      if (error) return c.json({ error }, 409);
-      sse.broadcast("*", { type: "machine.updated" });
-      return c.json({ machine });
-    }
+    if (body.eventSource !== undefined) return c.json({ error: "INVALID" }, 400);
     if (typeof body.displayName !== "string") return c.json({ error: "INVALID" }, 400);
     const { machine, error } = registry.setDisplayName(id, body.displayName);
     if (error) return c.json({ error }, 404);

@@ -296,7 +296,7 @@ describe("Sidebar vsix pack notice", () => {
 });
 
 describe("Sidebar event source", () => {
-  test("only the local machine can switch hooks and the table", () => {
+  test("the machine list has no hooks or table switch", () => {
     const html = renderToStaticMarkup(
       <Sidebar
         slots={[slot, { ...slot, machineId: "m-local", machineName: "This Mac", root: "/Users/apple/Desktop/desk" }]}
@@ -308,7 +308,7 @@ describe("Sidebar event source", () => {
           {
             id: "m-local", name: "appledeMacBook-Pro.local", os: "darwin", cursor_version: null, extension_version: null,
             open_workspaces: "[]", status: "online", last_seen_at: 1, display_name: "Mac Arm New",
-            local: true, event_source: "hooks",
+            local: true,
           },
         ]}
         allRuns={[]}
@@ -317,11 +317,10 @@ describe("Sidebar event source", () => {
         readMap={{}}
         onDispatch={() => {}}
         onRename={() => {}}
-        onEventSource={() => {}}
       />,
     );
-    expect(html).toContain("数据");
-    expect(html).toContain(">表<");
-    expect(html.match(/aria-pressed/g)?.length).toBe(2);
+    expect(html).not.toContain(">hooks<");
+    expect(html).not.toContain(">表<");
+    expect(html).not.toContain("aria-pressed");
   });
 });

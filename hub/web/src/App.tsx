@@ -554,7 +554,6 @@ export default function App() {
           onDispatch={() => { if (preset && preset.workspaceRoot !== "chatgpt:monitor") { reloadSnippets(); setDispatchOpen(true); } }}
           onMonitorChatgpt={() => api.monitorChatgpt().then(refresh)}
           onRename={(id, displayName) => { api.renameMachine(id, displayName).then(refresh); }}
-          onEventSource={(id, source) => { api.setEventSource(id, source).then(refresh); }}
           showDesktopActions={desktop}
           onOpenCursor={() => requestDesktop("open-workspace")}
           onOpenCodex={() => {
