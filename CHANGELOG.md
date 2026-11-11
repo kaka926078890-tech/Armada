@@ -12,6 +12,19 @@ Armada 按 **面** 发版：扩展、桌面、iOS、Android 可以不同号。RE
 
 ---
 
+## 2026-11-11 — 扩展 0.4.54 · iOS TF 42 · Android 0.1.14 · 桌面 0.1.0
+
+### 修复
+
+- Windows 派发改读本机 `state.vscdb`。新建对话后按 composer 对齐卡片，回合结束看 `chatGenerationUUID` 被清空。jsonl 迟到或重名不再把还在跑的任务标成异常。
+- Windows 同一窗口已有进行中的任务时，下一条保持排队，不再新开对话把当前这次打断。
+
+### 操作员注意
+
+扩展装 **0.4.54**。这台 Mac 的桌面号仍是 **0.1.0**，覆盖安装 Armada.app 之后，空闲 Reload 才会要求 **0.4.54**。Mac 上的表模式不变；新的读表在 Windows 扩展里。Windows 目录里要先有 `armada-agent-0.4.54.vsix` 并解包到扩展目录，只有 0.4.53 时 Reload 会跳过。iOS 仍是 TestFlight **42**。Android 仍是 **0.1.14**，这一轮没有新 APK。
+
+---
+
 ## 2026-11-03 — 扩展 0.4.53 · iOS TF 42 · Android 0.1.14 · 桌面 0.1.0
 
 ### 新增
