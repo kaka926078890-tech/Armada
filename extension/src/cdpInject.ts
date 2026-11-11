@@ -22,7 +22,9 @@
  */
 
 import { parseAskInspect, parsePlanInspect, planInspectToAsk, type AskInspect } from "./askDetect";
+import { acquireCdpLock, CDP_LOCK_WAIT_MS } from "./cdpLock";
 import { pickCdpPage, titleMatchesWorkspace, workspaceFolderName } from "./cdpPage";
+import { WS_HEARTBEAT_MS } from "./wsClient";
 
 export interface CdpSubmitResult {
   ok: boolean;
@@ -44,6 +46,9 @@ export interface CdpSubmitterDeps {
   windowId?: string;
   /** Runtime.evaluate 不返回时的上限。缺省 4s。卡住的 target 不能占住 Ask 轮询。 */
   callTimeoutMs?: number;
+  /** 与 executor 共用的 cdp.lock。问询拿不到就本拍 unknown，不连接 9222。 */
+  cdpLockPath?: string;
+  now?: () => number;
 }
 
 /** 一次 CDP 调用的上限。Ask 轮询拿不到结果就当 unknown，下一拍再扫。 */
@@ -62,6 +67,26 @@ export function withCallTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
 function callBudget(deps: CdpSubmitterDeps): number {
   const n = deps.callTimeoutMs;
   return typeof n === "number" && Number.isFinite(n) && n > 0 ? n : CDP_CALL_TIMEOUT_MS;
+}
+
+function budgetSession(session: CdpSession, timeoutMs: number): CdpSession {
+  return {
+    call(method, params) {
+      return withCallTimeout(session.call(method, params), timeoutMs);
+    },
+    close() {
+      session.close();
+    },
+  };
+}
+
+function callFail(e: unknown): CdpSubmitResult {
+  const msg = e instanceof Error ? e.message : String(e);
+  if (msg === "CDP_CALL_TIMEOUT") return { ok: false, reason: "CDP_CALL_TIMEOUT" };
+  if (msg === "CLIPBOARD_TIMEOUT" || msg.endsWith("CLIPBOARD_TIMEOUT")) {
+    return { ok: false, reason: "CLIPBOARD_TIMEOUT" };
+  }
+  return { ok: false, reason: `CDP_EVAL_FAIL:${msg}` };
 }
 
 export const WINDOW_STAMP_ATTR = "data-armada-window-id";
@@ -776,19 +801,37 @@ async function readWindowStamp(session: CdpSession, timeoutMs: number): Promise<
   }
 }
 
+type PageConnectOpts = {
+  /** 注入选窗才写章。问询回退只读，写失败不再把空章页交出去。 */
+  writeStamp?: boolean;
+  /** 只读全量持锁到这时刻就停。 */
+  deadline?: number;
+  /** 问询全量一拍只列一次 /json。 */
+  listOnce?: boolean;
+};
+
 async function connectWorkspacePage(
   deps: Required<Pick<CdpSubmitterDeps, "port">> & CdpSubmitterDeps,
   workspaceRoot: string,
-): Promise<{ ok: true; session: CdpSession } | { ok: false; reason: string }> {
+  opts?: PageConnectOpts,
+): Promise<{ ok: true; session: CdpSession; wsUrl: string } | { ok: false; reason: string }> {
   const fetchJson = deps.fetchJson ?? defaultFetchJson;
   const connect = deps.connect ?? defaultConnect;
   const log = deps.log ?? (() => {});
-  const listed = await fetchJsonWithRetry(
-    fetchJson,
-    `http://127.0.0.1:${deps.port}/json`,
-    1500,
-    { sleep: deps.sleep },
-  );
+  const now = deps.now ?? Date.now;
+  const writeStampEnabled = opts?.writeStamp !== false;
+  const pastDeadline = () => typeof opts?.deadline === "number" && now() >= opts.deadline;
+  if (pastDeadline()) return { ok: false, reason: "CDP_SCAN_BUDGET" };
+  const url = `http://127.0.0.1:${deps.port}/json`;
+  const listed = opts?.listOnce
+    ? await (async () => {
+      try {
+        return { ok: true as const, body: await fetchJson(url, 1500) };
+      } catch {
+        return { ok: false as const };
+      }
+    })()
+    : await fetchJsonWithRetry(fetchJson, url, 1500, { sleep: deps.sleep });
   if (!listed.ok) return { ok: false, reason: "CDP_UNREACHABLE" };
   const targets = listed.body as any[];
   const windowId = typeof deps.windowId === "string" ? deps.windowId.trim() : "";
@@ -797,39 +840,53 @@ async function connectWorkspacePage(
     const pages = (Array.isArray(targets) ? targets : []).filter(
       (t) => t?.type === "page" && typeof t.webSocketDebuggerUrl === "string" && t.webSocketDebuggerUrl,
     );
-    const opened: { session: CdpSession; stamp: string | null; title: string }[] = [];
-    for (const t of pages) {
-      try {
-        const session = await connect(String(t.webSocketDebuggerUrl), 2000);
-        const stamp = await readWindowStamp(session, timeoutMs);
-        opened.push({
-          session,
-          stamp,
-          title: typeof t.title === "string" ? t.title : "",
-        });
-      } catch {
-        // 连不上或读失败当未盖章，不据此 AMBIGUOUS
-      }
-    }
+    const opened: { session: CdpSession; stamp: string | null; title: string; wsUrl: string }[] = [];
     const closeExcept = (keep: CdpSession | null) => {
       for (const o of opened) {
         if (o.session !== keep) o.session.close();
       }
     };
-    const writeStamp = async (session: CdpSession) => {
+    for (const t of pages) {
+      if (pastDeadline()) {
+        closeExcept(null);
+        return { ok: false, reason: "CDP_SCAN_BUDGET" };
+      }
+      const wsUrl = String(t.webSocketDebuggerUrl);
       try {
-        await withCallTimeout(session.call("Runtime.evaluate", {
+        const raw = await connect(wsUrl, 2000);
+        if (pastDeadline()) {
+          raw.close();
+          closeExcept(null);
+          return { ok: false, reason: "CDP_SCAN_BUDGET" };
+        }
+        const session = budgetSession(raw, timeoutMs);
+        const stamp = await readWindowStamp(session, timeoutMs);
+        opened.push({
+          session,
+          stamp,
+          title: typeof t.title === "string" ? t.title : "",
+          wsUrl,
+        });
+      } catch {
+        // 连不上或读失败当未盖章，不据此 AMBIGUOUS
+      }
+    }
+    const writeStamp = async (session: CdpSession): Promise<boolean> => {
+      try {
+        await session.call("Runtime.evaluate", {
           expression: windowStampWriteExpression(windowId),
           returnByValue: true,
-        }), timeoutMs);
+        });
+        return true;
       } catch (e) {
         log(`window stamp write failed: ${String(e)}`);
+        return false;
       }
     };
     const hits = opened.filter((o) => o.stamp === windowId);
     if (hits.length === 1) {
       closeExcept(hits[0]!.session);
-      return { ok: true, session: hits[0]!.session };
+      return { ok: true, session: hits[0]!.session, wsUrl: hits[0]!.wsUrl };
     }
     if (hits.length > 1) {
       closeExcept(null);
@@ -838,9 +895,19 @@ async function connectWorkspacePage(
     const titleHits = opened.filter((o) => titleMatchesWorkspace(o.title, workspaceFolderName(workspaceRoot)));
     const unstamped = titleHits.filter((o) => !o.stamp);
     if (unstamped.length === 1) {
-      closeExcept(unstamped[0]!.session);
-      await writeStamp(unstamped[0]!.session);
-      return { ok: true, session: unstamped[0]!.session };
+      const chosen = unstamped[0]!;
+      closeExcept(chosen.session);
+      if (!writeStampEnabled) {
+        chosen.session.close();
+        return { ok: false, reason: "WINDOW_TARGET_NOT_FOUND" };
+      }
+      let wrote = await writeStamp(chosen.session);
+      if (!wrote) wrote = await writeStamp(chosen.session);
+      if (!wrote) {
+        chosen.session.close();
+        return { ok: false, reason: "CDP_CALL_TIMEOUT" };
+      }
+      return { ok: true, session: chosen.session, wsUrl: chosen.wsUrl };
     }
     closeExcept(null);
     if (unstamped.length > 1) return { ok: false, reason: "WINDOW_TARGET_AMBIGUOUS" };
@@ -848,9 +915,14 @@ async function connectWorkspacePage(
   }
   const picked = pickCdpPage(targets, workspaceRoot);
   if (!picked.ok) return picked;
+  if (pastDeadline()) return { ok: false, reason: "CDP_SCAN_BUDGET" };
   try {
-    const session = await connect(picked.wsUrl, 2000);
-    return { ok: true, session };
+    const raw = await connect(picked.wsUrl, 2000);
+    if (pastDeadline()) {
+      raw.close();
+      return { ok: false, reason: "CDP_SCAN_BUDGET" };
+    }
+    return { ok: true, session: budgetSession(raw, timeoutMs), wsUrl: picked.wsUrl };
   } catch (e) {
     return { ok: false, reason: `CDP_CONNECT_FAIL:${String(e)}` };
   }
@@ -867,28 +939,98 @@ async function dispatchKey(session: CdpSession, key: "Enter" | "Escape"): Promis
   });
 }
 
+function unknownFrom(e: unknown): AskCdpInspect {
+  const msg = e instanceof Error ? e.message : String(e);
+  return { unknown: true, reason: msg === "CDP_CALL_TIMEOUT" ? msg : `CDP_EVAL_FAIL:${msg}` };
+}
+
+async function probePage(session: CdpSession, timeoutMs: number): Promise<AskCdpInspect> {
+  const ask = parseAskInspect(await withCallTimeout(session.call("Runtime.evaluate", {
+    expression: `(${ASK_INSPECT_JS})()`, returnByValue: true,
+  }).then((x) => x?.result?.value), timeoutMs));
+  if (ask.present && ask.options.length > 0) return ask;
+  return planInspectToAsk(parsePlanInspect(
+    await withCallTimeout(session.call("Runtime.evaluate", {
+      expression: `(${PLAN_INSPECT_JS})()`, returnByValue: true,
+    }).then((x) => x?.result?.value), timeoutMs),
+  ));
+}
+
 export function createAskQuestionDriver(deps: CdpSubmitterDeps) {
   const sleep = deps.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
+  let rememberedUrl: string | null = null;
+  let rescanNotBefore = 0;
 
-  async function inspect(workspaceRoot: string): Promise<AskCdpInspect> {
-    const hit = await connectWorkspacePage(deps, workspaceRoot);
-    if (!hit.ok) return { unknown: true, reason: hit.reason };
+  async function inspectLocked(workspaceRoot: string, now: () => number): Promise<AskCdpInspect> {
+    const connect = deps.connect ?? defaultConnect;
     const timeoutMs = callBudget(deps);
+    const windowId = typeof deps.windowId === "string" ? deps.windowId.trim() : "";
+    if (rememberedUrl) {
+      const url = rememberedUrl;
+      try {
+        const raw = await connect(url, 2000);
+        const session = budgetSession(raw, timeoutMs);
+        if (windowId) {
+          const stamp = await readWindowStamp(session, timeoutMs);
+          if (stamp !== windowId) {
+            session.close();
+            rememberedUrl = null;
+          } else {
+            try {
+              return await probePage(session, timeoutMs);
+            } catch (e) {
+              return unknownFrom(e);
+            } finally {
+              session.close();
+            }
+          }
+        } else {
+          try {
+            return await probePage(session, timeoutMs);
+          } catch (e) {
+            return unknownFrom(e);
+          } finally {
+            session.close();
+          }
+        }
+      } catch {
+        rememberedUrl = null;
+      }
+    }
+    if (now() < rescanNotBefore) return { unknown: true, reason: "CDP_SCAN_COOLDOWN" };
+    const hit = await connectWorkspacePage(deps, workspaceRoot, {
+      writeStamp: false,
+      deadline: now() + CDP_LOCK_WAIT_MS,
+      listOnce: true,
+    });
+    if (!hit.ok) {
+      rescanNotBefore = now() + WS_HEARTBEAT_MS;
+      return { unknown: true, reason: hit.reason };
+    }
+    rememberedUrl = hit.wsUrl;
     try {
-      const ask = parseAskInspect(await withCallTimeout(hit.session.call("Runtime.evaluate", {
-        expression: `(${ASK_INSPECT_JS})()`, returnByValue: true,
-      }).then((x) => x?.result?.value), timeoutMs));
-      if (ask.present && ask.options.length > 0) return ask;
-      return planInspectToAsk(parsePlanInspect(
-        await withCallTimeout(hit.session.call("Runtime.evaluate", {
-          expression: `(${PLAN_INSPECT_JS})()`, returnByValue: true,
-        }).then((x) => x?.result?.value), timeoutMs),
-      ));
+      return await probePage(hit.session, timeoutMs);
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      return { unknown: true, reason: msg === "CDP_CALL_TIMEOUT" ? msg : `CDP_EVAL_FAIL:${msg}` };
+      return unknownFrom(e);
     } finally {
       hit.session.close();
+    }
+  }
+
+  async function inspect(workspaceRoot: string): Promise<AskCdpInspect> {
+    const now = deps.now ?? Date.now;
+    if (!deps.cdpLockPath) return inspectLocked(workspaceRoot, now);
+    const lock = await acquireCdpLock({
+      lockPath: deps.cdpLockPath,
+      timeoutMs: 0,
+      sleep: deps.sleep,
+      now,
+    });
+    if (!lock.ok) return { unknown: true, reason: "CDP_LOCK_TIMEOUT" };
+    try {
+      return await inspectLocked(workspaceRoot, now);
+    } finally {
+      lock.release();
     }
   }
 
@@ -963,7 +1105,7 @@ export function createAskQuestionDriver(deps: CdpSubmitterDeps) {
       }
       return { ok: false, reason: "ASK_SUBMIT_FAILED" };
     } catch (e) {
-      return { ok: false, reason: `CDP_EVAL_FAIL:${String(e)}` };
+      return callFail(e);
     } finally {
       hit.session.close();
     }
@@ -1085,7 +1227,7 @@ export function createCdpSubmitter(deps: CdpSubmitterDeps) {
       if (e !== "OK") return { ok: false, reason: `ENTER_FAIL:${e}` };
       return { ok: true };
     } catch (e) {
-      return { ok: false, reason: `CDP_EVAL_FAIL:${String(e)}` };
+      return callFail(e);
     } finally {
       session.close();
     }
@@ -1170,11 +1312,7 @@ export function createImagePaster(deps: CdpSubmitterDeps) {
       return { ok: true };
     } catch (e) {
       log(`image paste fail: ${String(e)}`);
-      const msg = e instanceof Error ? e.message : String(e);
-      if (msg === "CLIPBOARD_TIMEOUT" || msg.endsWith("CLIPBOARD_TIMEOUT")) {
-        return { ok: false, reason: "CLIPBOARD_TIMEOUT" };
-      }
-      return { ok: false, reason: `CDP_EVAL_FAIL:${String(e)}` };
+      return callFail(e);
     } finally {
       session.close();
     }
@@ -1299,7 +1437,7 @@ export function createFileMentionPaster(deps: CdpSubmitterDeps) {
       return { ok: true };
     } catch (e) {
       log(`file mention fail: ${String(e)}`);
-      return { ok: false, reason: `CDP_EVAL_FAIL:${String(e)}` };
+      return callFail(e);
     } finally {
       session.close();
     }
@@ -1337,7 +1475,7 @@ export function createComposerFinisher(deps: CdpSubmitterDeps) {
       }
       return { ok: true };
     } catch (e) {
-      return { ok: false, reason: `CDP_EVAL_FAIL:${String(e)}` };
+      return callFail(e);
     } finally {
       session.close();
     }

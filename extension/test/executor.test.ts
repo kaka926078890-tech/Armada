@@ -21,6 +21,8 @@ mock.module("vscode", () => ({
   Uri: { file: (p: string) => ({ fsPath: p, scheme: "file" }) },
 }));
 
+import { createAskQuestionDriver, createImagePaster } from "../src/cdpInject";
+import { acquireCdpLock, CDP_LOCK_WAIT_MS } from "../src/cdpLock";
 import { CancelWatcher, Executor } from "../src/executor";
 
 function makeExec(over: Partial<ConstructorParameters<typeof Executor>[0]> = {}) {
@@ -400,7 +402,7 @@ describe("Executor dirty composer", () => {
     expect(spawned[0]?.cmd).toBe("/bin/cursor");
     expect(spawned[0]?.args[0]).toBe("--new-window");
     const file = spawned[0]?.args[1] ?? "";
-    expect(file.endsWith("/open-windows/desk.code-workspace")).toBe(true);
+    expect(file.replaceAll("\\", "/").endsWith("/open-windows/desk.code-workspace")).toBe(true);
     const body = JSON.parse(await Bun.file(file).text()) as { folders: { path: string }[] };
     expect(body.folders[0]?.path).toBe("/Users/apple/Desktop/desk");
   });
@@ -645,6 +647,108 @@ describe("CancelWatcher injection identity", () => {
       hook: "preToolUse",
       raw: { conversation_id: "cid-1", generation_id: "g-live" },
     }, 101_000)).toBeNull();
+  });
+
+  test("stamp write timeout fails the inject, does not ack accepted, and releases the lock", async () => {
+    const root = "C:/Users/PC/Desktop/work";
+    const lockPath = join(mkdtempSync(join(tmpdir(), "armada-stamp-")), "cdp.lock");
+    let writes = 0;
+    let closed = 0;
+    const paster = createImagePaster({
+      port: 9222,
+      windowId: "sess-win-1",
+      callTimeoutMs: 20,
+      sleep: async () => {},
+      fetchJson: async () => [{
+        type: "page",
+        title: "SKILL.md - work - Cursor - Modified",
+        webSocketDebuggerUrl: "ws://work",
+      }],
+      connect: async () => ({
+        async call(_method: string, params?: Record<string, unknown>) {
+          const expr = String(params?.expression ?? "");
+          if (expr.includes("setAttribute")) {
+            writes += 1;
+            return new Promise(() => {});
+          }
+          if (expr.includes("data-armada-window-id")) return { result: { value: null } };
+          return { result: { value: "OK" } };
+        },
+        close() { closed += 1; },
+      }),
+    });
+    const { ex, acks } = makeExec({
+      cdpLockPath: lockPath,
+      probeCdp: async () => ({ ok: true }),
+      imagePaste: true,
+      fetchBlob: async () => ({ bytes: Buffer.from("x"), mime: "image/jpeg" }),
+      autoSubmitImages: (ws, prompt, steps, auto) => paster(ws, prompt, steps, async () => {}, auto),
+      globalState: { get: () => [root] as never, update: async () => {} },
+    });
+    const previousFolders = workspaceFolderPaths.slice();
+    workspaceFolderPaths = [root];
+    try {
+      await ex.startRun({ runId: "r1", workspaceRoot: root, prompt: "hi", attachments: pngAtt.map((a) => ({ ...a, mime: "image/jpeg" })) });
+      expect(acks[acks.length - 1]).toMatchObject({ type: "run.ack", runId: "r1", status: "rejected" });
+      expect(acks[acks.length - 1]).not.toMatchObject({ status: "accepted" });
+      expect(writes).toBe(2);
+      expect(closed).toBeGreaterThan(0);
+      const again = await acquireCdpLock({ lockPath, timeoutMs: 0, sleep: async () => {} });
+      expect(again.ok).toBe(true);
+      if (again.ok) again.release();
+    } finally {
+      workspaceFolderPaths = previousFolders;
+    }
+  });
+
+  test("read-only scan past the dispatch wait yields CDP_LOCK_TIMEOUT, unknown, and one /json", async () => {
+    const lockPath = join(mkdtempSync(join(tmpdir(), "armada-scan-")), "cdp.lock");
+    let t = 0;
+    const now = () => t;
+    const sleep = async (ms: number) => { t += ms; };
+    let fetches = 0;
+    let releaseConnect: () => void = () => {};
+    const gate = new Promise<void>((resolve) => { releaseConnect = resolve; });
+    let markStarted: () => void = () => {};
+    const started = new Promise<void>((resolve) => { markStarted = resolve; });
+    const driver = createAskQuestionDriver({
+      port: 9222,
+      windowId: "win-a",
+      now,
+      sleep,
+      cdpLockPath: lockPath,
+      fetchJson: async () => {
+        fetches += 1;
+        return [{ type: "page", title: "a — ws", webSocketDebuggerUrl: "ws://a" }];
+      },
+      connect: async () => {
+        markStarted();
+        await gate;
+        return {
+          async call() { return { result: { value: null } }; },
+          close() {},
+        };
+      },
+    });
+    const { ex, acks } = makeExec({
+      cdpLockPath: lockPath,
+      sleep,
+      now,
+      probeCdp: async () => ({ ok: true }),
+    });
+    const inspectP = driver.inspect("/ws/a");
+    await started;
+    await ex.startRun({ runId: "r1", workspaceRoot: "/ws/a", prompt: "hi" });
+    expect(acks[acks.length - 1]).toEqual({
+      type: "run.ack", runId: "r1", status: "rejected", reason: "CDP_LOCK_TIMEOUT",
+    });
+    expect(t).toBeGreaterThanOrEqual(CDP_LOCK_WAIT_MS);
+    releaseConnect();
+    const hit = await inspectP;
+    expect(hit).toMatchObject({ unknown: true });
+    expect(fetches).toBe(1);
+    await driver.inspect("/ws/a");
+    expect(fetches).toBe(1);
   });
 
   test("BSP after inject fills identity so a later human BSP is not re-cancelled", () => {

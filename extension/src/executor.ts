@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 import type { PendingRun } from "./binding";
-import { acquireCdpLock } from "./cdpLock";
+import { acquireCdpLock, CDP_LOCK_WAIT_MS } from "./cdpLock";
 import { workspaceFolderName } from "./cdpPage";
 import { workspacePathIn } from "./workspacePath";
 import { materializeInboxFile, uniqueInboxFilename } from "./workspaceInbox";
@@ -79,6 +79,7 @@ export interface ExecutorDeps {
   };
   send: (msg: object) => void;
   sleep?: (ms: number) => Promise<void>;
+  now?: () => number;
   /** Called after inject succeeds — binding window starts here. */
   addPending?: (run: PendingRun) => void;
   /** Drop a pending entry on INJECT_FAILED after it was already added. */
@@ -249,6 +250,15 @@ export class Executor {
     return this.deps.globalState.get<string[]>("armada.authorizedWorkspaces", []) ?? [];
   }
 
+  private acquireInjectLock() {
+    return acquireCdpLock({
+      lockPath: this.deps.cdpLockPath ?? join(homedir(), ".cursor", "armada", "cdp.lock"),
+      timeoutMs: CDP_LOCK_WAIT_MS,
+      sleep: this.sleep,
+      now: this.deps.now,
+    });
+  }
+
   /** 本窗已经打开该文件夹时什么都不做。同仓再派由 hub 在原窗 createNew，不要再复制出 Untitled。 */
   async openWorkspaceWindow(workspaceRoot: string): Promise<void> {
     const root = String(workspaceRoot ?? "").trim();
@@ -296,11 +306,7 @@ export class Executor {
       }
       await this.deps.globalState.update("armada.authorizedWorkspaces", [...this.authorizedWorkspaces(), msg.workspaceRoot]);
     }
-    const lock = await acquireCdpLock({
-      lockPath: this.deps.cdpLockPath ?? join(homedir(), ".cursor", "armada", "cdp.lock"),
-      timeoutMs: 25_000,
-      sleep: this.sleep,
-    });
+    const lock = await this.acquireInjectLock();
     if (!lock.ok) {
       this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: "CDP_LOCK_TIMEOUT" });
       return;
@@ -484,11 +490,7 @@ export class Executor {
       this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: "IMAGE_PASTE_DISABLED" });
       return;
     }
-    const lock = await acquireCdpLock({
-      lockPath: this.deps.cdpLockPath ?? join(homedir(), ".cursor", "armada", "cdp.lock"),
-      timeoutMs: 25_000,
-      sleep: this.sleep,
-    });
+    const lock = await this.acquireInjectLock();
     if (!lock.ok) {
       this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: "CDP_LOCK_TIMEOUT" });
       return;
@@ -550,11 +552,7 @@ export class Executor {
     text?: string;
   }): Promise<void> {
     const vscode = vs();
-    const lock = await acquireCdpLock({
-      lockPath: this.deps.cdpLockPath ?? join(homedir(), ".cursor", "armada", "cdp.lock"),
-      timeoutMs: 25_000,
-      sleep: this.sleep,
-    });
+    const lock = await this.acquireInjectLock();
     if (!lock.ok) {
       this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: "CDP_LOCK_TIMEOUT" });
       return;

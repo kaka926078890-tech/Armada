@@ -88,7 +88,8 @@ export function activate(context: vscode.ExtensionContext): void {
   let askMisses = 0;
   const askPlanTextByRun = new Map<string, string>();
 
-  const cdpDeps = { port: config.cdpPort, log, windowId };
+  const cdpLockPath = join(armadaDir, "cdp.lock");
+  const cdpDeps = { port: config.cdpPort, log, windowId, cdpLockPath };
   const cdpSubmit = config.autoSubmit ? createCdpSubmitter(cdpDeps) : null;
   const imagePaster = createImagePaster(cdpDeps);
   const filePaster = createFileMentionPaster(cdpDeps);
@@ -326,6 +327,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const executor = new Executor({
     globalState: context.globalState,
+    cdpLockPath,
     send: (m) => { log(`=> ${JSON.stringify(m)}`); core.enqueue(m); },
     addPending: (run) => {
       pendingRuns.push(run);

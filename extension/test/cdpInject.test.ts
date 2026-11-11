@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "fs";
+import { mkdtempSync, readFileSync } from "fs";
+import { tmpdir } from "os";
 import { join } from "path";
-import { parsePlanInspect, planInspectToAsk } from "../src/askDetect";
+import { askPollMany, parsePlanInspect, planInspectToAsk } from "../src/askDetect";
+import { acquireCdpLock } from "../src/cdpLock";
 import {
   createCdpSubmitter,
   createImagePaster,
@@ -1593,6 +1595,134 @@ describe("AskQuestion CDP driver", () => {
     expect(driver).not.toMatch(/toLowerCase\(\)\s*===\s*["']build["']/);
   });
 
+  test("lock held: inspect does not touch the debug port and does not clear a seen ask", async () => {
+    const lockPath = join(mkdtempSync(join(tmpdir(), "armada-ask-lock-")), "cdp.lock");
+    const held = await acquireCdpLock({ lockPath, timeoutMs: 0, sleep: async () => {} });
+    expect(held.ok).toBe(true);
+    let fetched = 0;
+    let connected = 0;
+    const driver = createAskQuestionDriver(deps({
+      cdpLockPath: lockPath,
+      fetchJson: async () => { fetched += 1; return [PAGE]; },
+      connect: async () => { connected += 1; return mockSession([{ present: false }]); },
+    }));
+    const hit = await driver.inspect("/Users/x/armada-test-ws");
+    expect(hit).toMatchObject({ unknown: true });
+    expect(fetched).toBe(0);
+    expect(connected).toBe(0);
+    const acts = askPollMany(
+      new Map([["r-1", { conversationId: "cid-1" }]]),
+      new Map([["r-1", "ask-1"]]),
+      [hit],
+      [],
+      () => "x",
+    );
+    expect(acts).toEqual([]);
+    if (held.ok) held.release();
+  });
+
+  test("remembered debug page is not listed again and ask does not write the stamp", async () => {
+    let fetches = 0;
+    const urls: string[] = [];
+    const log: CallLog[] = [];
+    const driver = createAskQuestionDriver(deps({
+      windowId: "win-a",
+      fetchJson: async () => {
+        fetches += 1;
+        return [{ type: "page", title: "note — armada-test-ws", webSocketDebuggerUrl: "ws://kept" }];
+      },
+      connect: async (url) => {
+        urls.push(url);
+        return stampSession({ stamp: "win-a", evalResults: [{ present: false }, { present: false }], log });
+      },
+    }));
+    await driver.inspect("/Users/x/armada-test-ws");
+    await driver.inspect("/Users/x/armada-test-ws");
+    expect(fetches).toBe(1);
+    expect(urls).toEqual(["ws://kept", "ws://kept"]);
+    expect(log.some((c) => /setAttribute/.test(String(c.params?.expression ?? "")))).toBe(false);
+  });
+
+  test("lost remembered page scans once; a failed scan is not repeated on the next tick", async () => {
+    let fetches = 0;
+    let connects = 0;
+    const driver = createAskQuestionDriver(deps({
+      windowId: "win-a",
+      fetchJson: async () => {
+        fetches += 1;
+        return [{ type: "page", title: "note — armada-test-ws", webSocketDebuggerUrl: "ws://kept" }];
+      },
+      connect: async () => {
+        connects += 1;
+        if (connects === 2) throw new Error("gone");
+        return stampSession({ stamp: "win-a", evalResults: [{ present: false }, { present: false }] });
+      },
+    }));
+    await driver.inspect("/Users/x/armada-test-ws");
+    expect(fetches).toBe(1);
+    await driver.inspect("/Users/x/armada-test-ws");
+    expect(fetches).toBe(2);
+    await driver.inspect("/Users/x/armada-test-ws");
+    expect(fetches).toBe(2);
+
+    let failedFetches = 0;
+    const down = createAskQuestionDriver(deps({
+      fetchJson: async () => { failedFetches += 1; throw new Error("down"); },
+    }));
+    expect(await down.inspect("/Users/x/armada-test-ws")).toMatchObject({ unknown: true });
+    expect(await down.inspect("/Users/x/armada-test-ws")).toMatchObject({ unknown: true });
+    expect(failedFetches).toBe(1);
+  });
+
+  test("ask selection does not write a stamp; inject still writes the unique unstamped title", async () => {
+    const askLog: CallLog[] = [];
+    const driver = createAskQuestionDriver(deps({
+      windowId: "win-a",
+      fetchJson: async () => [{
+        type: "page",
+        title: "SKILL.md - work - Cursor - Modified",
+        webSocketDebuggerUrl: "ws://work",
+      }],
+      connect: async () => stampSession({ stamp: null, evalResults: [{ present: false }], log: askLog }),
+    }));
+    const hit = await driver.inspect("C:/Users/PC/Desktop/work");
+    expect(hit).toMatchObject({ unknown: true });
+    expect(askLog.some((c) => /setAttribute/.test(String(c.params?.expression ?? "")))).toBe(false);
+
+    const injectLog: CallLog[] = [];
+    const submit = createCdpSubmitter(deps({
+      windowId: "win-a",
+      fetchJson: async () => [{
+        type: "page",
+        title: "SKILL.md - work - Cursor - Modified",
+        webSocketDebuggerUrl: "ws://work",
+      }],
+      connect: async () => stampSession({ stamp: null, evalResults: ["OK", "OK", "OK"], log: injectLog }),
+    }));
+    expect((await submit("C:/Users/PC/Desktop/work", "hi")).ok).toBe(true);
+    expect(injectLog.some((c) => /setAttribute/.test(String(c.params?.expression ?? "")))).toBe(true);
+  });
+
+  test("a hung image paste evaluate fails the paste instead of waiting forever", async () => {
+    let closed = 0;
+    const paste = createImagePaster(deps({
+      callTimeoutMs: 30,
+      connect: async () => ({
+        call() { return new Promise(() => {}); },
+        close() { closed += 1; },
+      }),
+    }));
+    const r = await paste(
+      "/Users/x/armada-test-ws",
+      "",
+      [{ bytes: Buffer.from("x"), mime: "image/jpeg" }],
+      async () => {},
+      false,
+    );
+    expect(r).toEqual({ ok: false, reason: "CDP_CALL_TIMEOUT" });
+    expect(closed).toBeGreaterThan(0);
+  });
+
   test("extension forwards kind into askDriver.submit", () => {
     const src = readFileSync(join(import.meta.dir, "../src/extension.ts"), "utf8");
     expect(src).toMatch(/askDriver\.submit\(\s*workspaceRoot,\s*action,\s*letter,\s*kind/);
@@ -1606,7 +1736,7 @@ describe("AskQuestion CDP driver", () => {
 
   test("extension shares windowId CDP deps and returns image paste result object", () => {
     const src = readFileSync(join(import.meta.dir, "../src/extension.ts"), "utf8");
-    expect(src).toMatch(/const cdpDeps = \{ port: config\.cdpPort, log, windowId \}/);
+    expect(src).toMatch(/const cdpDeps = \{ port: config\.cdpPort, log, windowId, cdpLockPath \}/);
     expect(src).toMatch(/createCdpSubmitter\(cdpDeps\)/);
     expect(src).toMatch(/createImagePaster\(cdpDeps\)/);
     expect(src).toMatch(/createFileMentionPaster\(cdpDeps\)/);

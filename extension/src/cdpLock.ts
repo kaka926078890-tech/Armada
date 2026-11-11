@@ -13,6 +13,9 @@ export type CdpLockOk = { ok: true; release: () => void };
 export type CdpLockFail = { ok: false; reason: "CDP_LOCK_TIMEOUT" };
 export type CdpLockResult = CdpLockOk | CdpLockFail;
 
+/** 派发拿锁的等待。问询的只读全量也到这时刻停，避免无限占着 9222。 */
+export const CDP_LOCK_WAIT_MS = 25_000;
+
 const POLL_MS = 50;
 /** Darwin fcntl.h O_EXLOCK — libuv/Node/Bun do not export this constant. */
 const O_EXLOCK = constants.O_EXLOCK ?? 0x20;
