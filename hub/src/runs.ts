@@ -39,8 +39,20 @@ function publicRunError(reason: string): string {
 export class RunService {
   private cancelRequested = new Set<string>();
   private promoting = false;
-  /** 续聊把已结束的卡拉回 dispatched。注入失败时要回到原状态，不能把整张卡写成这次的错误。 */
-  private followupRestore = new Map<string, { status: string; end_reason: string | null }>();
+  /**
+   * 续聊在被接受之前只是一次尝试。拒绝时整份已提交状态原样放回，
+   * 不新写一次完成。prompt 和用户句也要等接受后才落卡。
+   */
+  private followupRestore = new Map<string, {
+    status: string;
+    end_reason: string | null;
+    prompt: string;
+    attachments: string | null;
+    ended_at: number | null;
+    started_at: number | null;
+    live_generation_id: string | null;
+    retired_generation_ids: string | null;
+  }>();
   private limits: ConcurrencyLimits;
   private sessionEndReplaySeq = new Map<string, number>();
 
@@ -656,23 +668,23 @@ export class RunService {
     if (recoverable && this.denyReviveIfSlotBusy(machineId, run.id)) return;
     if (msg.status === "accepted") {
       this.followupRestore.delete(run.id);
-      this.setStatus(run.id, "binding", recoverable
-        ? { ended_at: null, end_reason: null, started_at: Date.now() }
-        : {}, "extension");
       const pending = this.pendingFollowupPrompt.get(run.id);
       if (pending !== undefined) {
         this.pendingFollowupPrompt.delete(run.id);
+        this.db.query("UPDATE runs SET prompt=?1, attachments=?2 WHERE id=?3")
+          .run(pending.prompt, JSON.stringify(pending.attachmentIds), run.id);
+        this.blobs?.syncRefsFromRuns();
         this.recordFollowupPrompt(run, pending.prompt, pending.attachmentIds);
       }
+      this.setStatus(run.id, "binding", recoverable
+        ? { ended_at: null, end_reason: null, started_at: Date.now() }
+        : {}, "extension");
     } else {
       this.pendingFollowupPrompt.delete(run.id);
       const prior = this.followupRestore.get(run.id);
       this.followupRestore.delete(run.id);
       if (prior && run.conversation_id && this.terminal(prior.status)) {
-        this.audit("extension", "run.followup.reject", run.id, {
-          reason: msg.reason ?? "REJECTED", restored: prior.status,
-        });
-        this.setStatus(run.id, prior.status, { end_reason: prior.end_reason }, "extension");
+        this.restoreFollowupAttempt(run.id, prior, msg.reason ?? "REJECTED");
         this.promoteNextQueued(machineId);
         return;
       }
@@ -1328,7 +1340,35 @@ export class RunService {
     });
   }
 
-  /** Windows 往往没有 beforeSubmitPrompt；hub 先落一条用户句，详情才不会丢续聊原文。 */
+  /** 拒绝没有提交这一轮。放回尝试之前的卡片，不记一次新的完成。 */
+  private restoreFollowupAttempt(runId: string, prior: {
+    status: string;
+    end_reason: string | null;
+    prompt: string;
+    attachments: string | null;
+    ended_at: number | null;
+    started_at: number | null;
+    live_generation_id: string | null;
+    retired_generation_ids: string | null;
+  }, reason: string): void {
+    const attemptGen = genOf(this.get(runId)?.live_generation_id);
+    const retiredBase = parseRetiredIds(prior.retired_generation_ids).ids;
+    const retired = attemptGen && attemptGen !== genOf(prior.live_generation_id)
+      ? appendRetired(retiredBase, attemptGen)
+      : retiredBase;
+    this.db.query(
+      `UPDATE runs SET status=?1, end_reason=?2, ended_at=?3, prompt=?4, attachments=?5,
+        started_at=?6, live_generation_id=?7, retired_generation_ids=?8 WHERE id=?9`,
+    ).run(
+      prior.status, prior.end_reason, prior.ended_at, prior.prompt, prior.attachments,
+      prior.started_at, prior.live_generation_id, JSON.stringify(retired), runId,
+    );
+    this.blobs?.syncRefsFromRuns();
+    this.audit("extension", "run.followup.reject", runId, { reason, restored: prior.status });
+    this.sse.broadcast(runId, { type: "run.status", runId, status: prior.status });
+  }
+
+  /** 续聊被接受之后才落用户句。注入失败不留下这一轮。 */
   private recordFollowupPrompt(run: { id: string; machine_id: string }, prompt: string, attachmentIds: string[] = []): void {
     const maxSeq = (this.db.query("SELECT COALESCE(MAX(seq),0) AS m FROM run_events WHERE run_id=?1").get(run.id) as { m: number }).m;
     const minExt = (this.db.query("SELECT MIN(ext_seq) AS m FROM run_events WHERE machine_id=?1").get(run.machine_id) as { m: number | null }).m;
@@ -1398,10 +1438,18 @@ export class RunService {
       return { error: "PROMPT_COLLISION" };
     }
 
-    this.followupRestore.set(runId, { status: run.status, end_reason: run.end_reason ?? null });
+    this.followupRestore.set(runId, {
+      status: run.status,
+      end_reason: run.end_reason ?? null,
+      prompt: run.prompt,
+      attachments: run.attachments ?? null,
+      ended_at: run.ended_at ?? null,
+      started_at: run.started_at ?? null,
+      live_generation_id: run.live_generation_id ?? null,
+      retired_generation_ids: run.retired_generation_ids ?? null,
+    });
     this.setStatus(runId, "dispatched", {
       ended_at: null, end_reason: null, started_at: Date.now(), window_id: win.windowId,
-      prompt, attachments: JSON.stringify(attachmentIds),
     });
     // Mac live 非空不得退役，等 owner BSP rearm。live 已空（含完成后续聊）签发 hub gen：
     // 协议续轮若吞掉 composer BSP，synth stop 会盖上已退役 gen → STOP_GEN_RETIRED 卡死运行中。
@@ -1410,8 +1458,7 @@ export class RunService {
       this.attachHubGeneration(runId, isWindowsMachineOs(os) ? "hub_windows" : "hub_unarmed");
     }
     this.cancelRequested.delete(runId);
-    if (attachmentIds.length === 0) this.recordFollowupPrompt({ id: runId, machine_id: run.machine_id }, prompt);
-    else this.pendingFollowupPrompt.set(runId, { prompt, attachmentIds });
+    this.pendingFollowupPrompt.set(runId, { prompt, attachmentIds });
 
     const live = this.get(runId);
     const gen = genOf(live?.live_generation_id);

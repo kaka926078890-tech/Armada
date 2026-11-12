@@ -845,7 +845,14 @@ describe("Run dispatch", () => {
       runId: run.id, conversationId: "cid-1", workspaceRoot: "/ws/a", prompt: "继续",
     });
     const events = (await (await api(`/api/runs/${run.id}/events`)).json()) as any[];
-    expect(events.some((e) => e.hook_event_name === "beforeSubmitPrompt" && JSON.parse(e.payload).prompt === "继续")).toBe(true);
+    expect(events.some((e) => e.hook_event_name === "beforeSubmitPrompt" && JSON.parse(e.payload).prompt === "继续")).toBe(false);
+    expect(again.prompt).toBe("a");
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    await new Promise((r2) => setTimeout(r2, 80));
+    const committed = (await (await api(`/api/runs/${run.id}`)).json()) as any;
+    expect(committed.prompt).toBe("继续");
+    const after = (await (await api(`/api/runs/${run.id}/events`)).json()) as any[];
+    expect(after.some((e) => e.hook_event_name === "beforeSubmitPrompt" && JSON.parse(e.payload).prompt === "继续")).toBe(true);
     ws.close();
   });
 
@@ -863,7 +870,7 @@ describe("Run dispatch", () => {
     const { run: again } = await f.json() as any;
     expect(again.id).toBe(run.id);
     expect(again.status).toBe("dispatched");
-    expect(again.prompt).toBe("继续");
+    expect(again.prompt).toBe("a");
     expect(again.ended_at).toBeNull();
     expect(again.parent_run_id).toBeNull();
     await new Promise((r2) => setTimeout(r2, 100));
@@ -906,8 +913,13 @@ describe("Run dispatch", () => {
     const f = await api(`/api/runs/${run.id}/followup`, { method: "POST", body: JSON.stringify({ prompt: "继续" }) });
     expect(f.status).toBe(200);
     const { run: again } = await f.json() as any;
-    expect(again.prompt).toBe("继续");
+    expect(again.prompt).toBe("第一句");
     expect(again.title).toBe("固定名");
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    await new Promise((r2) => setTimeout(r2, 80));
+    const committed = (await (await api(`/api/runs/${run.id}`)).json()) as any;
+    expect(committed.prompt).toBe("继续");
+    expect(committed.title).toBe("固定名");
     ws.close();
   });
 
@@ -975,11 +987,21 @@ describe("Run dispatch", () => {
     await new Promise((r2) => setTimeout(r2, 60));
     const f = await api(`/api/runs/${run.id}/followup`, { method: "POST", body: JSON.stringify({ prompt: "下一轮" }) });
     expect(f.status).toBe(200);
+    const before = hub!.db.query(
+      "SELECT COUNT(*) AS n FROM audit WHERE target=?1 AND action='run.completed'",
+    ).get(run.id) as { n: number };
     ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "rejected", reason: "CDP_CALL_TIMEOUT" }));
     await new Promise((r2) => setTimeout(r2, 60));
     const live = (await (await api(`/api/runs/${run.id}`)).json()) as any;
     expect(live.status).toBe("completed");
     expect(live.end_reason).toBe("completed");
+    expect(live.prompt).toBe("hello");
+    const events = (await (await api(`/api/runs/${run.id}/events`)).json()) as any[];
+    expect(events.some((e) => e.hook_event_name === "beforeSubmitPrompt" && JSON.parse(e.payload).prompt === "下一轮")).toBe(false);
+    const after = hub!.db.query(
+      "SELECT COUNT(*) AS n FROM audit WHERE target=?1 AND action='run.completed'",
+    ).get(run.id) as { n: number };
+    expect(after.n).toBe(before.n);
     ws.close();
   });
 

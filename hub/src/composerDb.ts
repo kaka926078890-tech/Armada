@@ -368,6 +368,60 @@ function doneStatus(status: string): boolean {
   return status === "completed" || status === "success";
 }
 
+function lastUserIndex(bubbles: ComposerBubble[]): number {
+  let last = -1;
+  for (let i = 0; i < bubbles.length; i++) {
+    const b = bubbles[i];
+    if (b?.type === 1 && b.text.trim()) last = i;
+  }
+  return last;
+}
+
+/** The user turn that contains this bubble. `chatGenerationUUID` belongs only to the open turn. */
+function generationOwning(bubbles: ComposerBubble[], index: number, openGen: string | null): string | null {
+  const last = lastUserIndex(bubbles);
+  let gen: string | null = null;
+  let open = false;
+  for (let i = 0; i <= index; i++) {
+    const b = bubbles[i];
+    if (b?.type === 1 && b.text.trim()) {
+      gen = b.requestId || null;
+      open = i === last;
+    }
+  }
+  if (gen) return gen;
+  return open ? openGen : null;
+}
+
+function bubbleIsBody(b: ComposerBubble): boolean {
+  return !!(b.thinking || b.toolName || (b.type === 2 && b.text.trim()));
+}
+
+/** Bubbles after the user that owns `gen`, and before the next user. */
+function turnSlice(bubbles: ComposerBubble[], gen: string | null): { owner: number; slice: ComposerBubble[] } {
+  let owner = -1;
+  if (gen) {
+    for (let i = bubbles.length - 1; i >= 0; i--) {
+      const b = bubbles[i];
+      if (b?.type === 1 && b.text.trim() && b.requestId === gen) {
+        owner = i;
+        break;
+      }
+    }
+  }
+  if (owner < 0) owner = lastUserIndex(bubbles);
+  if (owner < 0) return { owner: -1, slice: bubbles };
+  let end = bubbles.length;
+  for (let i = owner + 1; i < bubbles.length; i++) {
+    const b = bubbles[i];
+    if (b?.type === 1 && b.text.trim()) {
+      end = i;
+      break;
+    }
+  }
+  return { owner, slice: bubbles.slice(owner + 1, end) };
+}
+
 function bsp(snap: ComposerView, bubble: ComposerBubble, generationId?: string | null): DbEvent {
   const gen = generationId === undefined ? snap.generationId : generationId;
   return {
@@ -638,19 +692,23 @@ export function planComposerTick(
     next.sawGeneration = true;
   }
 
-  for (const b of snap.bubbles) {
+  const openAt = lastUserIndex(snap.bubbles);
+  for (let i = 0; i < snap.bubbles.length; i++) {
+    const b = snap.bubbles[i]!;
     if (b.type !== 1 || !b.text.trim() || next.users.includes(b.id)) continue;
-    emit(bsp(snap, b));
+    emit(bsp(snap, b, generationOwning(snap.bubbles, i, snap.generationId)));
     next.users.push(b.id);
-    if (snap.generationId) next.armedGen = snap.generationId;
+    if (snap.generationId && i === openAt) next.armedGen = snap.generationId;
   }
-  const lastUser = [...snap.bubbles].reverse().find((b) => b.type === 1 && b.text.trim());
+  const lastUser = openAt >= 0 ? snap.bubbles[openAt] : undefined;
   if (lastUser && snap.generationId && next.armedGen !== snap.generationId) {
     emit(bsp(snap, lastUser));
     next.armedGen = snap.generationId;
   }
 
-  for (const b of snap.bubbles) noteBubble(b, snap.generationId);
+  for (let i = 0; i < snap.bubbles.length; i++) {
+    noteBubble(snap.bubbles[i]!, generationOwning(snap.bubbles, i, snap.generationId));
+  }
 
   for (const id of snap.subagentIds) {
     if (!next.children[id]) {
@@ -715,10 +773,18 @@ export function planComposerTick(
   if (abortHold) next.abortSeen = true;
   if (snap.generationId) next.abortSeen = false;
   if (uuidCleared && !abortHold && !next.stopped && !childBusy) {
-    for (const b of snap.bubbles) flushText(b, next.generationId);
+    const owned = turnSlice(snap.bubbles, next.generationId);
+    const earlierHasBody = owned.owner > 0 && snap.bubbles.slice(0, owned.owner).some(bubbleIsBody);
+    const sliceHasWork = owned.slice.some(bubbleIsBody);
+    // Idle composer status belongs to the turn that already has bubbles.
+    // A newer user with an empty slice has not finished, so that status must not close it.
+    if (!sliceHasWork && earlierHasBody) {
+      return { events, cursor: next };
+    }
+    for (const b of owned.slice) flushText(b, next.generationId);
     // Cursor leaves composer status at "aborted" after a normal Windows turn.
-    // A reply is completion. Aborted with no reply stays aborted.
-    const hadText = snap.bubbles.some((b) => b.type === 2 && !!b.text.trim() && !b.toolName && next.assistants.includes(b.id));
+    // A reply of this generation is completion. Aborted with no reply stays aborted.
+    const hadText = owned.slice.some((b) => b.type === 2 && !!b.text.trim() && !b.toolName && next.assistants.includes(b.id));
     const stopStatus = hadText || doneStatus(snap.status) ? "completed"
       : snap.status === "error" ? "error"
       : snap.status === "aborted" ? "aborted"

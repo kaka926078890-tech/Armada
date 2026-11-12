@@ -145,6 +145,51 @@ describe("composer table plan", () => {
     });
   });
 
+  // r-cf2d0a37: reload attaches with an empty cursor. The previous reply is
+  // still in the composer. It must not become the new generation's body or stop.
+  test("an older reply does not complete the generation that just opened", () => {
+    const prior = "e50f0442-6d34-4ff3-a3c5-c0415e099e2f";
+    const live = "f6663ddf-8438-4de0-8749-2de83211c83f";
+    const older = "上传已经完成。ZA 0.1.7 安装包在 COS 上的地址是：";
+    const view = snap({
+      cid: "cid-1",
+      status: "aborted",
+      generationId: live,
+      bubbles: [
+        bubble({ id: "u1", type: 1, text: "upload the package", requestId: prior }),
+        bubble({ id: "a1", type: 2, text: older }),
+        bubble({ id: "u2", type: 1, text: "当前分支除开Finsafe，哪些是固定的能力缺陷", requestId: live }),
+      ],
+    });
+    const first = planComposerTick(view, [], emptyCursor());
+    expect(first.events.some((e) => e.hook === "afterAgentResponse" && e.payload.text === older)).toBe(false);
+    expect(first.events.some((e) => e.hook === "stop")).toBe(false);
+    expect(first.events.find((e) => e.hook === "beforeSubmitPrompt" && e.payload.bubble_id === "u1")?.payload.generation_id).toBe(prior);
+    expect(first.events.find((e) => e.hook === "beforeSubmitPrompt" && e.payload.bubble_id === "u2")?.payload.generation_id).toBe(live);
+
+    const idle = { ...view, generationId: null };
+    const hold = planComposerTick(idle, [], first.cursor);
+    const settled = hold.events.some((e) => e.hook === "stop") ? hold : planComposerTick(idle, [], hold.cursor);
+    expect(settled.events.some((e) => e.hook === "stop")).toBe(false);
+    expect(settled.events.some((e) => e.hook === "afterAgentResponse" && e.payload.text === older)).toBe(false);
+    expect(settled.cursor.stopped).toBe(false);
+
+    const replied = {
+      ...idle,
+      bubbles: [...view.bubbles, bubble({ id: "a2", type: 2, text: "the new answer" })],
+    };
+    const withReply = planComposerTick(replied, [], settled.cursor);
+    const finished = withReply.events.some((e) => e.hook === "stop") ? withReply : planComposerTick(replied, [], withReply.cursor);
+    expect(finished.events.find((e) => e.hook === "afterAgentResponse")?.payload).toMatchObject({
+      text: "the new answer",
+      generation_id: live,
+    });
+    expect(finished.events.find((e) => e.hook === "stop")?.payload).toMatchObject({
+      status: "completed",
+      generation_id: live,
+    });
+  });
+
   test("an operator follow-up with no assistant text still aborts the open turn", () => {
     const open = [
       bubble({ id: "u1", type: 1, text: "upload the package" }),
