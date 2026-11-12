@@ -69,15 +69,28 @@ function callBudget(deps: CdpSubmitterDeps): number {
   return typeof n === "number" && Number.isFinite(n) && n > 0 ? n : CDP_CALL_TIMEOUT_MS;
 }
 
+/** 超时后的 session。调用方不得再把它当未盖章页去写章。 */
+const timedOutSessions = new WeakSet<CdpSession>();
+
 function budgetSession(session: CdpSession, timeoutMs: number): CdpSession {
-  return {
+  let wrapped: CdpSession;
+  wrapped = {
     call(method, params) {
-      return withCallTimeout(session.call(method, params), timeoutMs);
+      return withCallTimeout(session.call(method, params), timeoutMs).catch((e) => {
+        if (e instanceof Error && e.message === "CDP_CALL_TIMEOUT") {
+          timedOutSessions.add(wrapped);
+          // 先拆掉这条调试连接，再去扫下一页。优雅 close 等不到对端握手，
+          // 卡住的 Runtime.evaluate 会一直占着 9222，后面的派发和续聊全部探口失败。
+          try { session.close(); } catch { /* already closed */ }
+        }
+        throw e;
+      });
     },
     close() {
       session.close();
     },
   };
+  return wrapped;
 }
 
 function callFail(e: unknown): CdpSubmitResult {
@@ -431,18 +444,44 @@ function defaultConnect(wsUrl: string, timeoutMs: number): Promise<CdpSession> {
     const ws = new WebSocket(wsUrl);
     let mid = 0;
     const pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void }>();
-    const timer = setTimeout(() => { ws.terminate(); reject(new Error("CDP_CONNECT_TIMEOUT")); }, timeoutMs);
+    let gone = false;
+    let settled = false;
+    const failConnect = (err: Error) => {
+      if (settled) return;
+      settled = true;
+      reject(err);
+    };
+    const drop = (err: Error) => {
+      if (gone) return;
+      gone = true;
+      for (const p of pending.values()) p.reject(err);
+      pending.clear();
+      try { ws.terminate(); } catch { /* already gone */ }
+    };
+    const timer = setTimeout(() => {
+      const err = new Error("CDP_CONNECT_TIMEOUT");
+      drop(err);
+      failConnect(err);
+    }, timeoutMs);
     ws.on("open", () => {
       clearTimeout(timer);
+      settled = true;
       resolve({
         call(method, params = {}) {
+          if (gone) return Promise.reject(new Error("CDP_CLOSED"));
           const id = ++mid;
           return new Promise((res, rej) => {
             pending.set(id, { resolve: res, reject: rej });
-            ws.send(JSON.stringify({ id, method, params }));
+            try {
+              ws.send(JSON.stringify({ id, method, params }));
+            } catch (e) {
+              pending.delete(id);
+              rej(e instanceof Error ? e : new Error(String(e)));
+            }
           });
         },
-        close() { ws.close(); },
+        // RST，不等 close 握手。对端卡在 evaluate 时优雅关闭不会摘掉 debugger。
+        close() { drop(new Error("CDP_CLOSED")); },
       });
     });
     ws.on("message", (data: unknown) => {
@@ -455,7 +494,15 @@ function defaultConnect(wsUrl: string, timeoutMs: number): Promise<CdpSession> {
     });
     ws.on("error", (e: unknown) => {
       clearTimeout(timer);
-      reject(e instanceof Error ? e : new Error(String(e)));
+      const err = e instanceof Error ? e : new Error(String(e));
+      failConnect(err);
+      drop(err);
+    });
+    ws.on("close", () => {
+      clearTimeout(timer);
+      const err = new Error("CDP_CLOSED");
+      drop(err);
+      failConnect(err);
     });
   });
 }
@@ -841,6 +888,7 @@ async function connectWorkspacePage(
       (t) => t?.type === "page" && typeof t.webSocketDebuggerUrl === "string" && t.webSocketDebuggerUrl,
     );
     const opened: { session: CdpSession; stamp: string | null; title: string; wsUrl: string }[] = [];
+    let sawTimeout = false;
     const closeExcept = (keep: CdpSession | null) => {
       for (const o of opened) {
         if (o.session !== keep) o.session.close();
@@ -861,6 +909,13 @@ async function connectWorkspacePage(
         }
         const session = budgetSession(raw, timeoutMs);
         const stamp = await readWindowStamp(session, timeoutMs);
+        if (timedOutSessions.has(session)) {
+          // 这一页的 evaluate 没有回来。连接已拆掉，不能留到扫完再关，
+          // 也不能当成「没盖章」去写章（写章会再挂 8 秒，并把 9222 占死）。
+          sawTimeout = true;
+          try { session.close(); } catch { /* already closed */ }
+          continue;
+        }
         opened.push({
           session,
           stamp,
@@ -911,6 +966,7 @@ async function connectWorkspacePage(
     }
     closeExcept(null);
     if (unstamped.length > 1) return { ok: false, reason: "WINDOW_TARGET_AMBIGUOUS" };
+    if (sawTimeout) return { ok: false, reason: "CDP_CALL_TIMEOUT" };
     return { ok: false, reason: "WINDOW_TARGET_NOT_FOUND" };
   }
   const picked = pickCdpPage(targets, workspaceRoot);

@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { createHash } from "crypto";
 import { mkdtempSync, readFileSync } from "fs";
+import { createServer } from "net";
 import { tmpdir } from "os";
 import { join } from "path";
 import { askPollMany, parsePlanInspect, planInspectToAsk } from "../src/askDetect";
@@ -558,6 +560,59 @@ describe("createCdpSubmitter", () => {
     expect(r.ok).toBe(false);
     expect(r.reason).toContain("CDP_CONNECT_FAIL");
   });
+
+  test("a hung evaluate resets the socket when the peer ignores the close handshake", async () => {
+    const sockets: import("net").Socket[] = [];
+    let ended = 0;
+    const server = createServer((socket) => {
+      sockets.push(socket);
+      socket.on("close", () => { ended += 1; });
+      let buf = Buffer.alloc(0);
+      let accepted = false;
+      socket.on("data", (chunk) => {
+        if (accepted) return;
+        buf = Buffer.concat([buf, chunk]);
+        const end = buf.indexOf("\r\n\r\n");
+        if (end < 0) return;
+        const text = buf.subarray(0, end).toString("utf8");
+        const key = /Sec-WebSocket-Key:\s*(.+)/i.exec(text)?.[1]?.trim();
+        if (!key) return;
+        const accept = createHash("sha1")
+          .update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
+          .digest("base64");
+        socket.write(
+          "HTTP/1.1 101 Switching Protocols\r\n" +
+          "Upgrade: websocket\r\nConnection: Upgrade\r\n" +
+          `Sec-WebSocket-Accept: ${accept}\r\n\r\n`,
+        );
+        accepted = true;
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+    const addr = server.address();
+    const port = typeof addr === "object" && addr ? addr.port : 0;
+    try {
+      const submit = createCdpSubmitter({
+        port,
+        callTimeoutMs: 80,
+        sleep: async () => {},
+        fetchJson: async () => [{
+          type: "page",
+          title: "hello.txt — armada-test-ws",
+          webSocketDebuggerUrl: `ws://127.0.0.1:${port}/devtools/page/1`,
+        }],
+      });
+      const started = Date.now();
+      const r = await submit("/Users/x/armada-test-ws", "hi");
+      expect(r).toEqual({ ok: false, reason: "CDP_CALL_TIMEOUT" });
+      expect(Date.now() - started).toBeLessThan(1000);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(ended).toBeGreaterThan(0);
+    } finally {
+      for (const s of sockets) s.destroy();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
 });
 
 const STAMP_ATTR = "data-armada-window-id";
@@ -592,6 +647,34 @@ function stampSession(opts: {
 describe("connectWorkspacePage window stamp", () => {
   const workRoot = "C:\\Users\\PC\\Desktop\\work";
   const WID = "sess-win-1";
+
+  test("a hung page is detached before the next target is opened", async () => {
+    const order: string[] = [];
+    const submit = createCdpSubmitter(deps({
+      windowId: WID,
+      callTimeoutMs: 40,
+      fetchJson: async () => [
+        { type: "page", title: "Cursor Settings — other", webSocketDebuggerUrl: "ws://hung" },
+        { type: "page", title: "unrelated - Cursor - Modified", webSocketDebuggerUrl: "ws://stamped" },
+      ],
+      connect: async (wsUrl) => {
+        order.push(`open:${wsUrl}`);
+        if (wsUrl === "ws://hung") {
+          return {
+            call() { return new Promise(() => {}); },
+            close() { order.push("close:hung"); },
+          };
+        }
+        if (!order.includes("close:hung")) throw new Error("hung debugger still attached");
+        return stampSession({ stamp: WID });
+      },
+    }));
+    const started = Date.now();
+    expect((await submit(workRoot, "hi")).ok).toBe(true);
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(order[0]).toBe("open:ws://hung");
+    expect(order).toContain("close:hung");
+  });
 
   test("stamp hit wins even when title has no folder (priority over v1)", async () => {
     const logs = new Map<string, CallLog[]>();
