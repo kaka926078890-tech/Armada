@@ -8,6 +8,7 @@ export { CURSOR_INTERNAL_CONTEXT_MARKERS, CURSOR_PROTOCOL_USER_PREFIXES };
 export type ChatBlock =
   | { kind: "user"; text: string; seq: number; imageIds?: string[] }
   | { kind: "assistant"; text: string; seq: number }
+  | { kind: "notice"; text: string; seq: number }
   | { kind: "thought"; text: string; seq: number }
   | { kind: "turn_end"; seq: number }
   | { kind: "tool"; name: string; summary: string; seq: number; count?: number }
@@ -328,6 +329,9 @@ function hookBlocks(ev: RunEvent, p: any): ChatBlock[] {
   }
   if (hook === "afterFileEdit" && typeof p?.file_path === "string") {
     return [{ kind: "file", path: p.file_path, seq: ev.seq }];
+  }
+  if (hook === "followupRejected" && typeof p?.text === "string" && p.text.trim()) {
+    return [{ kind: "notice", text: p.text.trim(), seq: ev.seq }];
   }
   if (hook === "afterAgentResponse" && typeof p?.text === "string" && p.text.trim()) {
     const text = p.text.trim().replace(/\[子代理\]\([^)]+\)\s*/g, "子代理 ");

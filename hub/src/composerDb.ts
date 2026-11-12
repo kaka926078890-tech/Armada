@@ -368,6 +368,15 @@ function doneStatus(status: string): boolean {
   return status === "completed" || status === "success";
 }
 
+function requestIdBefore(bubbles: ComposerBubble[], index: number): string | null {
+  for (let i = index - 1; i >= 0; i--) {
+    const b = bubbles[i];
+    const id = b?.type === 1 ? b.requestId.trim() : "";
+    if (id) return id;
+  }
+  return null;
+}
+
 function lastUserIndex(bubbles: ComposerBubble[]): number {
   let last = -1;
   for (let i = 0; i < bubbles.length; i++) {
@@ -520,9 +529,11 @@ export function planComposerTick(
   const next = structuredClone(cursor);
   const events: DbEvent[] = [];
   const emit = (ev: DbEvent) => events.push(ev);
+  const flushedNow = new Set<string>();
   const flushText = (b: ComposerBubble, gen: string | null): boolean => {
     if (b.type !== 2 || !b.text.trim() || b.toolName || next.assistants.includes(b.id)) return false;
     next.assistants.push(b.id);
+    flushedNow.add(b.id);
     emit({
       source: "db",
       hook: "afterAgentResponse",
@@ -594,6 +605,27 @@ export function planComposerTick(
     }
   };
 
+  // r-97b7ca05: the feed already emitted later users and moved on, so the
+  // turn-boundary flush never saw these text bubbles. Closed turns still owe
+  // their bodies. The open turn (bubbles after the last user) stays unflushed.
+  const closedThrough = lastUserIndex(snap.bubbles);
+  if (closedThrough > 0) {
+    let owner = -1;
+    for (let i = 0; i < closedThrough; i++) {
+      const b = snap.bubbles[i];
+      if (!b) continue;
+      if (b.type === 1 && b.text.trim()) owner = i;
+      if (owner < 0) continue;
+      let boundary = -1;
+      for (let j = i + 1; j <= closedThrough; j++) {
+        const n = snap.bubbles[j];
+        if (n?.type === 1 && n.text.trim()) { boundary = j; break; }
+      }
+      if (boundary < 0 || !next.users.includes(snap.bubbles[boundary]!.id)) continue;
+      flushText(b, snap.bubbles[owner]!.requestId.trim() || null);
+    }
+  }
+
   // A finished composer turn often never shows uuid=null: the next user bubble
   // replaces chatGenerationUUID first. Flush the text-only answer and stop the
   // previous generation before that user is emitted, or the body is skipped and
@@ -613,10 +645,22 @@ export function planComposerTick(
     }
     if (lastKnown > 0) cut = lastKnown;
   }
+  // r-6ddc3f97: uuid already moved on an earlier tick, so genChanged is false when
+  // the protocol user shows up. Flush the text sitting in front of that user.
+  // Do not stop — that sentence is still this card's turn.
+  if (
+    newUserAt > 0 && !turnMoved && !next.stopped && next.sawGeneration
+    && snap.generationId && next.armedGen === snap.generationId
+  ) {
+    const prevGen = requestIdBefore(snap.bubbles, newUserAt);
+    if (prevGen && prevGen !== snap.generationId) {
+      for (const b of snap.bubbles.slice(0, newUserAt)) flushText(b, prevGen);
+    }
+  }
   if (cut > 0 && next.sawGeneration && !next.stopped && turnMoved) {
     let flushed = false;
     for (const b of snap.bubbles.slice(0, cut)) {
-      if (flushText(b, priorGen)) flushed = true;
+      if (flushText(b, priorGen) || flushedNow.has(b.id)) flushed = true;
     }
     const stopForNewUser = newUserAt > 0;
     if ((stopForNewUser || flushed) && !childStillBusy(children, next)) {

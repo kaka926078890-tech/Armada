@@ -541,6 +541,11 @@ export default function ChatThread({ blocks, onAnswerAsk, onOpenFile, askFailSeq
             </div>
           );
         }
+        if (s.kind === "notice") {
+          return (
+            <div key={key} className={`${UI_TYPE} text-destructive px-0.5`} role="alert">{s.text}</div>
+          );
+        }
         if (s.kind === "assistant") {
           return (
             <div key={key} className="min-w-0 max-w-full px-0.5">

@@ -998,6 +998,9 @@ describe("Run dispatch", () => {
     expect(live.prompt).toBe("hello");
     const events = (await (await api(`/api/runs/${run.id}/events`)).json()) as any[];
     expect(events.some((e) => e.hook_event_name === "beforeSubmitPrompt" && JSON.parse(e.payload).prompt === "下一轮")).toBe(false);
+    const rejected = events.find((e) => e.hook_event_name === "followupRejected");
+    expect(JSON.parse(rejected.payload).text).toContain("续聊没有发出去");
+    expect(JSON.parse(rejected.payload).reason).toBe("CDP_CALL_TIMEOUT");
     const after = hub!.db.query(
       "SELECT COUNT(*) AS n FROM audit WHERE target=?1 AND action='run.completed'",
     ).get(run.id) as { n: number };

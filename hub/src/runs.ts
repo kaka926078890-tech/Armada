@@ -36,6 +36,15 @@ function publicRunError(reason: string): string {
   return reason;
 }
 
+/** 续聊被拒绝后卡片回到上一轮。操作员仍要在详情里看见这一轮没发出去。 */
+function followupRejectText(reason: string): string {
+  if (reason === "MENTION_CLICK:NO_MENU") return "续聊没有发出去。文件菜单没有出现，这一轮没有提交。";
+  if (reason === "MENTION_CLICK:AMBIGUOUS") return "续聊没有发出去。文件菜单对上了不止一条，这一轮没有提交。";
+  if (reason.startsWith("MENTION_CLICK")) return "续聊没有发出去。文件没有挂上，这一轮没有提交。";
+  if (reason === "CDP_CALL_TIMEOUT" || reason === "CDP_NOT_READY") return "续聊没有发出去。注入没有完成，这一轮没有提交。";
+  return `续聊没有发出去。这一轮没有提交（${reason}）。`;
+}
+
 export class RunService {
   private cancelRequested = new Set<string>();
   private promoting = false;
@@ -1365,7 +1374,26 @@ export class RunService {
     );
     this.blobs?.syncRefsFromRuns();
     this.audit("extension", "run.followup.reject", runId, { reason, restored: prior.status });
+    this.recordFollowupRejection(runId, reason);
     this.sse.broadcast(runId, { type: "run.status", runId, status: prior.status });
+  }
+
+  /** 拒绝不改终态，但详情要留下这一行，刷新之后仍然看得到。 */
+  private recordFollowupRejection(runId: string, reason: string): void {
+    const run = this.get(runId);
+    if (!run) return;
+    const maxSeq = (this.db.query("SELECT COALESCE(MAX(seq),0) AS m FROM run_events WHERE run_id=?1").get(runId) as { m: number }).m;
+    const minExt = (this.db.query("SELECT MIN(ext_seq) AS m FROM run_events WHERE machine_id=?1").get(run.machine_id) as { m: number | null }).m;
+    const extSeq = minExt == null || minExt >= 0 ? -1 : minExt - 1;
+    const ts = Date.now();
+    const body = { text: followupRejectText(reason), reason };
+    this.db.query(
+      `INSERT INTO run_events (run_id, seq, machine_id, ext_seq, source, hook_event_name, payload, ts, post_terminal)
+       VALUES (?1,?2,?3,?4,'hub','followupRejected',?5,?6,0)`,
+    ).run(runId, maxSeq + 1, run.machine_id, extSeq, JSON.stringify(body), ts);
+    this.sse.broadcast(runId, {
+      type: "run.event", runId, seq: maxSeq + 1, hookEventName: "followupRejected", payload: body, ts,
+    });
   }
 
   /** 续聊被接受之后才落用户句。注入失败不留下这一轮。 */

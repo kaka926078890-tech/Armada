@@ -10,6 +10,20 @@ function ev(partial: Partial<RunEvent> & { seq: number; payload: string }): RunE
   };
 }
 
+describe("follow-up rejection", () => {
+  test("a rejected follow-up stays a visible notice", () => {
+    const blocks = eventsToChat([
+      ev({ seq: 1, hook_event_name: "afterAgentResponse", payload: JSON.stringify({ text: "上一轮已经完成。" }) }),
+      ev({ seq: 2, hook_event_name: "followupRejected", payload: JSON.stringify({
+        text: "续聊没有发出去。文件菜单没有出现，这一轮没有提交。",
+        reason: "MENTION_CLICK:NO_MENU",
+      }) }),
+    ]);
+    expect(blocks.map((b) => b.kind)).toEqual(["assistant", "notice"]);
+    expect(segmentChat(blocks).map((s) => s.kind)).toEqual(["assistant", "notice"]);
+  });
+});
+
 describe("extractUserText", () => {
   test("strips timestamp and user_query wrapper", () => {
     const raw = "<timestamp>Saturday, Aug 29, 2026, 8:55 PM (UTC+8)</timestamp>\n<user_query>\n你会什么技能\n</user_query>";

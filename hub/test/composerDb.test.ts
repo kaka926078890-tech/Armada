@@ -244,6 +244,96 @@ describe("composer table plan", () => {
     expect(events[stopAt]?.payload).toMatchObject({ status: "completed", generation_id: "gen-1" });
   });
 
+  // r-6ddc3f97: the answer is already in a text bubble, then chatGenerationUUID
+  // swaps, and only the next tick brings "Briefly inform" with an empty requestId.
+  // The swap tick must not emit the body. The protocol tick must, without stopping.
+  test("a body already written before the generation swap flushes when the protocol user arrives later", () => {
+    const protocol = "<timestamp>Thursday, Nov 12, 2026, 5:20 PM (UTC+8)</timestamp>\n<system_notification>The following task has finished.</system_notification>\n<user_query>Briefly inform the user about the task result and perform any follow-up actions (if needed).</user_query>";
+    const open = [
+      bubble({ id: "u1", type: 1, text: "check the package", requestId: "gen-1" }),
+      bubble({ id: "tool", toolName: "Shell", toolStatus: "completed", toolInput: { command: "ls" } }),
+      bubble({ id: "body", type: 2, text: "今天这份 ZA 包里，托管 Node 是齐的。" }),
+    ];
+    const armed = planComposerTick(snap({
+      cid: "cid-1",
+      status: "generating",
+      generationId: "gen-1",
+      bubbles: open,
+    }), [], emptyCursor()).cursor;
+    const swapped = planComposerTick(snap({
+      cid: "cid-1",
+      status: "generating",
+      generationId: "gen-2",
+      bubbles: open,
+    }), [], armed);
+    expect(swapped.events.some((e) => e.hook === "afterAgentResponse")).toBe(false);
+    expect(swapped.events.some((e) => e.hook === "stop")).toBe(false);
+
+    const informed = planComposerTick(snap({
+      cid: "cid-1",
+      status: "generating",
+      generationId: "gen-2",
+      bubbles: [
+        ...open,
+        bubble({ id: "u2", type: 1, text: protocol, requestId: "" }),
+      ],
+    }), [], swapped.cursor);
+    const body = informed.events.find((e) => e.hook === "afterAgentResponse");
+    expect(body?.payload).toMatchObject({ text: "今天这份 ZA 包里，托管 Node 是齐的。", generation_id: "gen-1", bubble_id: "body" });
+    expect(informed.events.some((e) => e.hook === "stop")).toBe(false);
+    expect(informed.cursor.stopped).toBe(false);
+
+    const done = planComposerTick(snap({
+      cid: "cid-1",
+      status: "completed",
+      generationId: null,
+      bubbles: [
+        ...open,
+        bubble({ id: "u2", type: 1, text: protocol, requestId: "" }),
+        bubble({ id: "tail", type: 2, text: "全盘查找已经结束。" }),
+      ],
+    }), [], informed.cursor);
+    expect(done.events.find((e) => e.hook === "afterAgentResponse" && e.payload.bubble_id === "tail")?.payload.generation_id).toBe("gen-2");
+    expect(done.events.filter((e) => e.payload.bubble_id === "body")).toHaveLength(0);
+    expect(done.events.find((e) => e.hook === "stop")?.payload).toMatchObject({ status: "completed", generation_id: "gen-2" });
+  });
+
+  // r-97b7ca05: the packaged feed already emitted the users and a stop, then a
+  // later turn went live. The earlier text bubbles were never afterAgentResponse.
+  // A tick now must flush those closed bodies and leave the live sentence alone.
+  test("closed bodies missed by an earlier tick flush while the next turn is live", () => {
+    const protocol = "<timestamp>Thursday, Nov 12, 2026, 6:12 PM (UTC+8)</timestamp>\n<system_notification>The following task has finished.</system_notification>\n<user_query>Briefly inform the user about the task result and perform any follow-up actions (if needed).</user_query>";
+    const cursor = cursorFromEmitted([
+      { source: "db", hook: "beforeSubmitPrompt", payload: { prompt: "check", bubble_id: "u1", generation_id: "gen-1", conversation_id: "cid-1" } },
+      { source: "db", hook: "preToolUse", payload: { tool_name: "Shell", bubble_id: "tool", generation_id: "gen-1", conversation_id: "cid-1" } },
+      { source: "db", hook: "beforeSubmitPrompt", payload: { prompt: protocol, bubble_id: "u2", generation_id: "gen-2", conversation_id: "cid-1" } },
+      { source: "db", hook: "stop", payload: { status: "completed", generation_id: "gen-2", conversation_id: "cid-1" } },
+      { source: "db", hook: "beforeSubmitPrompt", payload: { prompt: "fix both", bubble_id: "u3", generation_id: "gen-3", conversation_id: "cid-1" } },
+    ]);
+    const { events, cursor: next } = planComposerTick(snap({
+      cid: "cid-1",
+      status: "aborted",
+      generationId: "gen-3",
+      bubbles: [
+        bubble({ id: "u1", type: 1, text: "check", requestId: "gen-1" }),
+        bubble({ id: "tool", toolName: "Shell", toolStatus: "completed", toolInput: { command: "ls" } }),
+        bubble({ id: "body", type: 2, text: "续聊没有发出去。看板仍显示已完成。" }),
+        bubble({ id: "u2", type: 1, text: protocol, requestId: "" }),
+        bubble({ id: "tail", type: 2, text: "日志定位已经结束。" }),
+        bubble({ id: "u3", type: 1, text: "fix both", requestId: "gen-3" }),
+        bubble({ id: "live", type: 2, text: "正在看代码。" }),
+      ],
+    }), [], cursor);
+    expect(events.find((e) => e.payload.bubble_id === "body")?.payload).toMatchObject({
+      text: "续聊没有发出去。看板仍显示已完成。",
+      generation_id: "gen-1",
+    });
+    expect(events.find((e) => e.payload.bubble_id === "tail")?.payload.text).toBe("日志定位已经结束。");
+    expect(events.some((e) => e.payload.bubble_id === "live")).toBe(false);
+    expect(events.some((e) => e.hook === "stop")).toBe(false);
+    expect(next.stopped).toBe(false);
+  });
+
   test("a new generation without a new user bubble does not stop the open turn", () => {
     const armed = planComposerTick(snap({
       cid: "cid-1",
