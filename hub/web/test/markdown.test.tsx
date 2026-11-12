@@ -189,6 +189,8 @@ describe("user bubble markdown", () => {
     expect(html).toContain("<br");
     expect(html).not.toContain("### 标题");
     expect(html).toContain('aria-label="复制消息"');
+    expect(html).toContain("w-full min-w-0");
+    expect(html).toContain("max-w-[78%]");
   });
 
   test("user bubble with imageIds shows a Cursor-sized thumb and hides [图片]", () => {

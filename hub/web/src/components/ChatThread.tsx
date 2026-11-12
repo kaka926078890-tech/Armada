@@ -133,7 +133,7 @@ function buildMarkdownComponents(openFileRef: OpenFileRef) {
       return <a href={href} className="text-primary hover:underline" target="_blank" rel="noreferrer">{children}</a>;
     },
     table: ({ children }: { children?: ReactNode }) => (
-      <div className="overflow-x-auto mb-2">
+      <div className="mb-2 min-w-0 max-w-full overflow-x-auto">
         <table className="text-[12px] border-collapse">{children}</table>
       </div>
     ),
@@ -169,7 +169,7 @@ function useMarkdownComponents(onOpenFile?: (path: string) => void) {
 export function AssistantMarkdown({ text, onOpenFile }: { text: string; onOpenFile?: (path: string) => void }) {
   const components = useMarkdownComponents(onOpenFile);
   return (
-    <div className={`break-words leading-[1.65] ${UI_BODY} text-foreground`}>
+    <div className={`min-w-0 max-w-full break-words leading-[1.65] [overflow-wrap:anywhere] ${UI_BODY} text-foreground`}>
       <Markdown remarkPlugins={[remarkGfm, remarkBreaks]} components={components}>{text}</Markdown>
     </div>
   );
@@ -178,7 +178,7 @@ export function AssistantMarkdown({ text, onOpenFile }: { text: string; onOpenFi
 function UserMarkdown({ text }: { text: string }) {
   const components = useMarkdownComponents();
   return (
-    <div className={`break-words leading-[1.65] ${UI_BODY} text-foreground`}>
+    <div className={`min-w-0 max-w-full break-words leading-[1.65] [overflow-wrap:anywhere] ${UI_BODY} text-foreground`}>
       <Markdown remarkPlugins={[remarkGfm, remarkBreaks]} components={components}>{text}</Markdown>
     </div>
   );
@@ -239,8 +239,8 @@ function CodeFence({ children }: { children?: ReactNode }) {
   if (chart != null) return <MermaidChart source={chart} />;
   const text = fenceText(children);
   return (
-    <div className="relative mb-2">
-      <pre className="p-2.5 pr-9 rounded-md bg-muted overflow-x-auto text-[12px]">{children}</pre>
+    <div className="relative mb-2 min-w-0 max-w-full">
+      <pre className="max-w-full overflow-x-auto rounded-md bg-muted p-2.5 pr-9 text-[12px]">{children}</pre>
       {text ? <CopyIconButton text={text} label="复制代码" className="absolute top-1 right-1 bg-muted" /> : null}
     </div>
   );
@@ -519,16 +519,16 @@ export default function ChatThread({ blocks, onAnswerAsk, onOpenFile, askFailSeq
   }
   const segs = segmentChat(blocks);
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex w-full min-w-0 max-w-full flex-col gap-4">
       {segs.map((s, i) => {
         const key = `${s.kind}-${s.seq}-${i}`;
         if (s.kind === "process") return <ProcessFold key={key} steps={s.steps} onOpenFile={onOpenFile} />;
         if (s.kind === "user") {
           const caption = userMessageCaption(s.text, s.imageIds);
           return (
-            <div key={key} className="flex justify-end">
-              <div className="max-w-[78%] flex flex-col items-end">
-                <div className="rounded-2xl bg-muted px-3.5 py-2 text-foreground leading-relaxed">
+            <div key={key} className="flex w-full min-w-0 justify-end">
+              <div className="flex min-w-0 max-w-[78%] flex-col items-end">
+                <div className="min-w-0 max-w-full break-words rounded-2xl bg-muted px-3.5 py-2 text-foreground leading-relaxed [overflow-wrap:anywhere]">
                   {s.imageIds?.length ? (
                     <div className={caption ? "mb-2" : undefined}>
                       <HubImageRow ids={s.imageIds} />
@@ -543,7 +543,7 @@ export default function ChatThread({ blocks, onAnswerAsk, onOpenFile, askFailSeq
         }
         if (s.kind === "assistant") {
           return (
-            <div key={key} className="px-0.5">
+            <div key={key} className="min-w-0 max-w-full px-0.5">
               <AssistantMarkdown text={s.text} onOpenFile={onOpenFile} />
               <CopyIconButton text={s.text} />
             </div>

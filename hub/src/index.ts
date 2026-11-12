@@ -12,7 +12,7 @@ import { pickLocalMachineId, usesComposerDb } from "./composerDb";
 import { startComposerFeed } from "./composerDbFeed";
 import { handleWsMessage, type WsData } from "./ws";
 import { limitsFromEnv, httpStatusForRunError, followupOutcome, type ConcurrencyLimits } from "./concurrency";
-import { BlobStore, MAX_BLOB_BYTES, isInlineRenderMime, responseContentType } from "./blobs";
+import { BlobStore, MAX_BLOB_BYTES, contentDispositionHeader, isInlineRenderMime, responseContentType } from "./blobs";
 import { applyReadOps, parseReadOps, readViewOf } from "./readSync";
 import { assertPromptSnippets, fillSnippetIds, readUiPrefs, writeUiPrefs, mergeUiPrefs } from "./uiPrefs";
 import { JoinTickets } from "./joinTickets";
@@ -215,8 +215,8 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
       "content-type": responseContentType(hit.mime),
       "x-content-type-options": "nosniff",
       "cache-control": "private, max-age=3600",
+      "content-disposition": contentDispositionHeader(hit.name, isInlineRenderMime(hit.mime)),
     };
-    if (!isInlineRenderMime(hit.mime)) headers["content-disposition"] = "attachment";
     return new Response(hit.bytes, { headers });
   });
 

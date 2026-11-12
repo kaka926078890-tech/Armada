@@ -1098,6 +1098,11 @@ describe("mergeOutboundChat / queuedOutbound", () => {
     const donors = [{ prompt: "看图", attachment_ids: ["abc"] }];
     const stamped = stampOutboundImages(blocks, donors);
     expect(stamped).toEqual([{ kind: "user", text: "[图片] 看图", seq: 1, imageIds: ["abc"] }]);
+    const fromTable = stampOutboundImages(
+      [{ kind: "user", text: "看图", seq: 1 }],
+      donors,
+    );
+    expect(fromTable).toEqual([{ kind: "user", text: "看图", seq: 1, imageIds: ["abc"] }]);
     const outbound = [
       { id: "o1", prompt: "看图", expected_mode: "steer", state: "steered", created_at: 2, attachment_ids: ["abc"] },
     ];

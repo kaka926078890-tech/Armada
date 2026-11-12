@@ -548,9 +548,9 @@ export default function RunDetail({
             loading: loadingOlderRef.current,
           })) loadOlder();
         }}
-        className="flex-1 min-h-0 min-w-0 overflow-y-auto px-4 py-4 [scrollbar-gutter:stable]"
+        className="flex-1 min-h-0 min-w-0 w-full overflow-x-hidden overflow-y-auto px-4 py-4 [scrollbar-gutter:stable]"
       >
-        <div ref={contentRef}>
+        <div ref={contentRef} className="min-w-0 max-w-full">
         {hasOlder && (
           <button
             type="button"

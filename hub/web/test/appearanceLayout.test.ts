@@ -123,5 +123,6 @@ describe("appearance layout stays coordinated when text scales", () => {
     expect(win.height).toBeGreaterThanOrEqual(800);
     expect(win.minWidth).toBeGreaterThanOrEqual(1024);
     expect(win.minHeight).toBeGreaterThanOrEqual(640);
+    expect(conf.app.security.csp).toContain("img-src 'self' data: blob:");
   });
 });

@@ -219,7 +219,8 @@ function stampUserImageIds(blocks: ChatBlock[], donors: ChatBlock[]): ChatBlock[
   if (!unused.length) return blocks;
   return blocks.map((b) => {
     if (b.kind !== "user" || b.imageIds?.length) return b;
-    const i = unused.findIndex((h) => h.text === b.text);
+    const key = attachmentTextKey(b.text);
+    const i = unused.findIndex((h) => attachmentTextKey(h.text) === key);
     if (i < 0) return b;
     const [h] = unused.splice(i, 1);
     return h?.imageIds?.length ? { ...b, imageIds: h.imageIds } : b;
@@ -718,6 +719,11 @@ export function operatorChatTurns(events: RunEvent[]): OperatorChatTurn[] {
 
 function normPrompt(s: string): string {
   return s.replace(/\s+/g, " ").trim();
+}
+
+/** Table bubbles keep the raw prompt. Donors prefix `[图片]`. Both name the same line. */
+function attachmentTextKey(text: string): string {
+  return normPrompt(text.replace(IMAGE_CAPTION_RE, ""));
 }
 
 /** 中转详情只取本轮（匹配 prompt 的那一折）助手正文，不含同一对话更早的任务。 */

@@ -1,5 +1,15 @@
 import type { PromptSnippet } from "./uiPrefs";
 
+export function blobNameFromDisposition(header: string | null): string {
+  if (!header) return "";
+  const star = /filename\*=UTF-8''([^;]+)/i.exec(header);
+  if (star?.[1]) {
+    try { return decodeURIComponent(star[1].trim()); } catch { /* plain filename below */ }
+  }
+  const plain = /filename="([^"]*)"/i.exec(header);
+  return plain?.[1]?.trim() ?? "";
+}
+
 export function getToken(): string { return localStorage.getItem("armada.token") ?? ""; }
 export function setToken(t: string): void { localStorage.setItem("armada.token", t); }
 export function clearToken(): void { localStorage.removeItem("armada.token"); }
@@ -53,7 +63,8 @@ export const api = {
     const r = await fetch(`/api/blobs/${encodeURIComponent(id)}`, { headers: { authorization: `Bearer ${getToken()}` } });
     if (r.status === 401) { window.dispatchEvent(new Event("armada:unauthorized")); throw new Error("unauthorized"); }
     if (!r.ok) throw new Error("ATTACHMENT_NOT_FOUND");
-    return r.blob();
+    const blob = await r.blob();
+    return { blob, name: blobNameFromDisposition(r.headers.get("content-disposition")) };
   },
   cancel: (id: string) => req(`/api/runs/${id}/cancel`, { method: "POST" }).then((r) => r.json()),
   close: (id: string) => req(`/api/runs/${id}/close`, { method: "POST" }).then((r) => r.json()),

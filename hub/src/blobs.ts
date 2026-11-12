@@ -47,6 +47,13 @@ export function responseContentType(mime: string): string {
   return isInlineRenderMime(mime) ? mime : "application/octet-stream";
 }
 
+/** Filename on the GET so the thread can label a file. Images stay inline. */
+export function contentDispositionHeader(name: string, inline: boolean): string {
+  const base = name.replace(/[\r\n"]/g, "_").trim() || "file";
+  const ascii = base.replace(/[^\x20-\x7e]/g, "_") || "file";
+  return `${inline ? "inline" : "attachment"}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(base)}`;
+}
+
 export function extOf(name: string): string {
   const base = name.replace(/\\/g, "/").split("/").pop() || "";
   const i = base.lastIndexOf(".");
@@ -138,12 +145,12 @@ export class BlobStore {
     return { blob: { id: sha256, sha256, mime: row.mime, name: row.name || storedName, size: row.size } };
   }
 
-  get(id: string): { bytes: Buffer; mime: string } | null {
-    const row = this.db.query("SELECT mime, size FROM blobs WHERE sha256=?1").get(id) as { mime: string; size: number } | null;
+  get(id: string): { bytes: Buffer; mime: string; name: string } | null {
+    const row = this.db.query("SELECT mime, size, name FROM blobs WHERE sha256=?1").get(id) as { mime: string; size: number; name: string } | null;
     if (!row) return null;
     const path = join(blobsDir(this.home), id);
     if (!existsSync(path)) return null;
-    return { bytes: readFileSync(path), mime: row.mime };
+    return { bytes: readFileSync(path), mime: row.mime, name: row.name || "file" };
   }
 
   metas(ids: string[]): { error?: string; items?: BlobMeta[]; status?: number } {

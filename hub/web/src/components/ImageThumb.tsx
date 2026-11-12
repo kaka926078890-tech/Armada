@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "../api";
-import { isConsoleImage } from "../attachments";
+import { displayAttachmentName, isConsoleImage } from "../attachments";
 
 function canMakeObjectUrl(): boolean {
   return typeof URL !== "undefined" && typeof URL.createObjectURL === "function";
@@ -46,32 +46,34 @@ function useObjectUrl(file: File | null): string {
   return src;
 }
 
-const hubBlobUrlCache = new Map<string, Promise<string>>();
+type HubBlobView = { url: string; name: string; image: boolean };
 
-function hubBlobUrl(id: string): Promise<string> {
-  const hit = hubBlobUrlCache.get(id);
+const hubBlobViewCache = new Map<string, Promise<HubBlobView>>();
+
+function hubBlobView(id: string): Promise<HubBlobView> {
+  const hit = hubBlobViewCache.get(id);
   if (hit) return hit;
-  const p = api.getBlob(id).then((blob) => {
-    const mime = blob.type || "";
-    if (mime && mime !== "image/png" && mime !== "image/jpeg") throw new Error("NOT_IMAGE");
+  const p = api.getBlob(id).then(({ blob, name }) => {
+    const mime = (blob.type || "").split(";")[0]?.trim() ?? "";
+    const image = mime === "image/png" || mime === "image/jpeg";
     if (!canMakeObjectUrl()) throw new Error("NO_OBJECT_URL");
-    return URL.createObjectURL(blob);
+    return { url: URL.createObjectURL(blob), name: name || "附件", image };
   });
-  hubBlobUrlCache.set(id, p);
-  p.catch(() => { hubBlobUrlCache.delete(id); });
+  hubBlobViewCache.set(id, p);
+  p.catch(() => { hubBlobViewCache.delete(id); });
   return p;
 }
 
-function useHubBlobUrl(id: string): string {
-  const [src, setSrc] = useState("");
+function useHubBlobView(id: string): HubBlobView | null {
+  const [view, setView] = useState<HubBlobView | null>(null);
   useEffect(() => {
     let stop = false;
-    void hubBlobUrl(id).then((url) => {
-      if (!stop) setSrc(url);
+    void hubBlobView(id).then((next) => {
+      if (!stop) setView(next);
     }).catch(() => {});
     return () => { stop = true; };
   }, [id]);
-  return src;
+  return view;
 }
 
 function ComposerChip({
@@ -138,9 +140,25 @@ function MessageThumb({ src, alt }: { src: string; alt: string }) {
   );
 }
 
+function FileChip({ name, href }: { name: string; href: string }) {
+  const label = displayAttachmentName(name);
+  return (
+    <a
+      href={href}
+      download={name}
+      className="inline-flex max-w-full min-w-0 items-center gap-2 rounded-xl bg-background px-3 py-2 text-[13px] text-foreground ring-1 ring-foreground/10"
+      title={name}
+    >
+      <span className="shrink-0 text-muted-foreground">文件</span>
+      <span className="min-w-0 truncate">{label}</span>
+    </a>
+  );
+}
+
 function HubMessageThumb({ id }: { id: string }) {
-  const src = useHubBlobUrl(id);
-  return <MessageThumb src={src} alt="图片" />;
+  const view = useHubBlobView(id);
+  if (view && !view.image) return <FileChip name={view.name} href={view.url} />;
+  return <MessageThumb src={view?.url ?? ""} alt="图片" />;
 }
 
 export function HubImageRow({ ids }: { ids: string[] }) {

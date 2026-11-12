@@ -119,6 +119,7 @@ describe("blobs + image runs", () => {
     expect(got.headers.get("content-type")).toMatch(/application\/octet-stream/);
     expect(got.headers.get("content-type")).not.toMatch(/text\/html/);
     expect(got.headers.get("content-disposition") ?? "").toMatch(/attachment/i);
+    expect(got.headers.get("content-disposition") ?? "").toContain("note.html");
     expect(got.headers.get("x-content-type-options")).toBe("nosniff");
     ws.close();
   });
