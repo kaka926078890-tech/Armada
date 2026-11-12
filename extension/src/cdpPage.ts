@@ -36,6 +36,12 @@ export function workspaceFolderName(workspaceRoot: string): string {
   return workspaceRoot.split(/[\\/]/).filter(Boolean).pop() ?? workspaceRoot;
 }
 
+function segmentIsFolder(segment: string, folder: string): boolean {
+  if (segment === folder) return true;
+  const wrapped = /^(.*) \(Workspace\)$/.exec(segment);
+  return !!wrapped && wrapped[1] === folder;
+}
+
 export function titleMatchesWorkspace(title: string, folder: string): boolean {
   if (!folder) return false;
   const trimmed = title.trim();
@@ -44,11 +50,11 @@ export function titleMatchesWorkspace(title: string, folder: string): boolean {
   const parts = splitTitleSegments(trimmed);
   if (!parts.length) return false;
   const product = findProductRange(parts);
-  if (!product) return parts[parts.length - 1] === folder;
+  if (!product) return segmentIsFolder(parts[parts.length - 1] ?? "", folder);
   const before = parts.slice(0, product.start);
   if (!before.length) return false;
-  if (before[before.length - 1] === folder) return true;
-  if (before.length >= 3 && before[before.length - 2] === folder) return true;
+  if (segmentIsFolder(before[before.length - 1] ?? "", folder)) return true;
+  if (before.length >= 3 && segmentIsFolder(before[before.length - 2] ?? "", folder)) return true;
   return false;
 }
 

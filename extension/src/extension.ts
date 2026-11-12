@@ -10,7 +10,7 @@ import { SpoolForwarder } from "./spool";
 import { matchHookToPending, claimConversation, eventBelongsToWindow, transcriptPathBelongsToCid, runIdForHook, rememberSubagent, isAmbiguousMatch, dropPendingRuns, type PendingRun, type BindingMatch } from "./binding";
 import { TranscriptTailer } from "./transcript";
 import { Executor, CancelWatcher } from "./executor";
-import { createCdpSubmitter, createImagePaster, createFileMentionPaster, createComposerFinisher, createAskQuestionDriver, probeCdpReadyForInject, type AskCdpInspect } from "./cdpInject";
+import { createCdpSubmitter, createImagePaster, createFileMentionPaster, createComposerFinisher, createAskQuestionDriver, cdpReadyReport, probeCdpReadyForInject, type AskCdpInspect } from "./cdpInject";
 import { createOsClipboardWriter } from "./osClipboard";
 import { mergeHooks, hooksDriftHash, spoolScriptName, shouldInstallArmadaHooks, installBundledSpoolScript } from "./hooksInstall";
 import { collectTranscriptViews, collectTranscriptTails, matchTranscriptToPending, stopPayloadFromTranscriptLine, stopFromTranscriptFileContent, transcriptsDirForWorkspace, isWithinTranscriptBindWindow, bindScanMinMtime, FollowupStopGuard, listSubagentTranscripts, childCidFromSubagentPath, decideLateTranscriptAttach, transcriptJsonlPath } from "./transcriptBind";
@@ -25,7 +25,7 @@ import { enrichPlanAsk, planDirsFor } from "./planFile";
 import { PENDING_RELOAD_ATTEMPT_NAME, PENDING_RELOAD_NAME, decideReloadFire, decideWindowReload, highestInstalledArmadaAgent, highestInstalledVsix, mergeReloadAttempt, noteReloadCommandSettled, parsePendingReload, parseReloadAttempt, reloadAttemptBlocksWindow, windowHasInFlightArmadaRun, windowHasOpenComposerTurn, windowHasRecentSettle, type ReloadFireState } from "../../desktop-core/src/cursorReload";
 import { readWorkspaceFile } from "./workspaceFileRead";
 
-const EXTENSION_VERSION = "0.4.57";
+const EXTENSION_VERSION = "0.4.58";
 
 let client: { dispose: () => void } | null = null;
 
@@ -342,8 +342,9 @@ export function activate(context: vscode.ExtensionContext): void {
     },
     onInjected: (runId) => cancelWatcher.noteInjection(runId),
     probeCdp: async () => {
-      const ok = await probeCdpReadyForInject({ port: config.cdpPort });
-      return ok ? { ok: true } : { ok: false, reason: "CDP_UNREACHABLE" };
+      const probe = await probeCdpReadyForInject({ port: config.cdpPort });
+      if (probe === "down") return { ok: false, reason: "CDP_UNREACHABLE" };
+      return { ok: true };
     },
     bindKnown: ({ runId, conversationId, workspaceRoot }) => {
       const run = pendingRuns.find((r) => r.runId === runId);
@@ -484,14 +485,23 @@ export function activate(context: vscode.ExtensionContext): void {
     try {
       queueMessageDefaultBehavior = vscode.workspace.getConfiguration("cursor.composer").get("queueMessageDefaultBehavior");
     } catch { /* tests / missing config */ }
-    void probeCdpReadyForInject({ port: config.cdpPort }).then((cdpReady) => {
+    let sent = false;
+    const emit = (probe: Parameters<typeof cdpReadyReport>[0] | null) => {
+      if (sent) return;
+      sent = true;
       core.enqueue({
         type: "heartbeat",
         openWorkspaces: workspaces(),
         activeRunIds: [...boundRuns.keys()],
-        cdpReady,
+        ...(probe ? cdpReadyReport(probe) : {}),
         ...(typeof queueMessageDefaultBehavior === "string" ? { queueMessageDefaultBehavior } : {}),
       });
+    };
+    // 探活再慢也要先心跳。中台 45 秒没收到心跳会把这台机器看成断线。
+    const timer = setTimeout(() => emit(null), 8000);
+    void probeCdpReadyForInject({ port: config.cdpPort }).then((probe) => {
+      clearTimeout(timer);
+      emit(probe);
     });
   };
 
@@ -746,15 +756,23 @@ export function activate(context: vscode.ExtensionContext): void {
       if (ws !== sock) return;
       log("ws open, registering");
       core.onOpen();
-      void probeCdpReadyForInject({ port: config.cdpPort }).then((cdpReady) => {
-        if (ws !== sock) return;
+      let sent = false;
+      const send = (probe: Parameters<typeof cdpReadyReport>[0] | null) => {
+        if (sent || ws !== sock) return;
+        sent = true;
         core.sendRegister({
           type: "register", machineId, windowId,
           name: hostname(), os: `${process.platform}-${process.arch}`,
           cursorVersion: vscode.version, extensionVersion: EXTENSION_VERSION,
           openWorkspaces: workspaces(),
-          cdpReady,
+          ...(probe ? cdpReadyReport(probe) : {}),
         });
+      };
+      // 中台 10 秒内收不到 register 就回 4001。/json 约 3 秒，探活不能挡住注册。
+      const timer = setTimeout(() => send(null), 8000);
+      void probeCdpReadyForInject({ port: config.cdpPort }).then((probe) => {
+        clearTimeout(timer);
+        send(probe);
       });
     });
     sock.on("message", (data) => {

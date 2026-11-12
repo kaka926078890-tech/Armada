@@ -303,7 +303,7 @@ export class Registry {
     const ids: string[] = [];
     for (const c of this.conns.values()) {
       if (c.machineId !== machineId) continue;
-      if (c.openWorkspaces.includes(workspaceRoot)) ids.push(c.windowId);
+      if (workspacePathIn(workspaceRoot, c.openWorkspaces)) ids.push(c.windowId);
     }
     return ids;
   }

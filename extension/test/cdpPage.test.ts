@@ -57,6 +57,13 @@ describe("titleMatchesWorkspace", () => {
     expect(titleMatchesWorkspace("armada-open-desk (Workspace)", "desk")).toBe(false);
   });
 
+  test("Windows .code-workspace title keeps the Cursor suffix", () => {
+    expect(titleMatchesWorkspace("work (Workspace) - Cursor", workWin)).toBe(true);
+    expect(titleMatchesWorkspace("file.ts - work (Workspace) - Cursor", workWin)).toBe(true);
+    expect(titleMatchesWorkspace("armada-open-desk (Workspace) - Cursor", "desk")).toBe(false);
+    expect(titleMatchesWorkspace("Untitled (Workspace) - Cursor", workWin)).toBe(false);
+  });
+
   test("Untitled (Workspace) is not a folder match", () => {
     expect(titleMatchesWorkspace("Untitled (Workspace)", "desk")).toBe(false);
     expect(titleMatchesWorkspace("● Untitled (Workspace)", "desk")).toBe(false);

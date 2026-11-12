@@ -94,6 +94,82 @@ describe("composer table plan", () => {
     expect(events[stopAt]?.payload).toMatchObject({ status: "completed", generation_id: "gen-1" });
   });
 
+  // r-cf2d0a37: tools and thoughts, then Cursor inserts "Briefly inform the user".
+  // The same tick used to stop the open generation as aborted. The protocol
+  // sentence cannot reopen a terminal card, so its later reply never completed.
+  test("protocol inform after tools does not abort the open turn", () => {
+    const prior = "18326b5d-6d34-4ff3-a3c5-c0415e099e2f";
+    const nextGen = "f422a6e7-8438-4de0-8749-2de83211c83f";
+    const protocol = "<timestamp>Thursday, Nov 12, 2026, 3:25 PM (UTC+8)</timestamp>\n<system_notification>The beginning of the above subagent result is already visible to the user.</system_notification>\n<user_query>Briefly inform the user about the task result and perform any follow-up actions (if needed). If there's no follow-ups needed, don't explicitly say that.</user_query>";
+    const open = [
+      bubble({ id: "u1", type: 1, text: "upload the package" }),
+      bubble({ id: "th", type: 2, thinking: "checking the directory", text: "" }),
+      bubble({ id: "tool", type: 2, toolName: "Shell", toolStatus: "completed", text: "", toolInput: { command: "echo" } }),
+    ];
+    const armed = planComposerTick(snap({
+      cid: "cid-1",
+      status: "generating",
+      generationId: prior,
+      bubbles: open,
+    }), [], emptyCursor()).cursor;
+    expect(armed.stopped).toBe(false);
+
+    const cut = planComposerTick(snap({
+      cid: "cid-1",
+      status: "aborted",
+      generationId: nextGen,
+      bubbles: [
+        ...open,
+        bubble({ id: "u2", type: 1, text: protocol, requestId: nextGen }),
+      ],
+    }), [], armed);
+    expect(cut.events.some((e) => e.hook === "stop")).toBe(false);
+    expect(cut.events.find((e) => e.hook === "beforeSubmitPrompt" && e.payload.bubble_id === "u2")?.payload.generation_id).toBe(nextGen);
+    expect(cut.cursor.stopped).toBe(false);
+
+    const replied = snap({
+      cid: "cid-1",
+      status: "aborted",
+      generationId: null,
+      bubbles: [
+        ...open,
+        bubble({ id: "u2", type: 1, text: protocol, requestId: nextGen }),
+        bubble({ id: "a2", type: 2, text: "the package is uploaded" }),
+      ],
+    });
+    const hold = planComposerTick(replied, [], cut.cursor);
+    const done = hold.events.some((e) => e.hook === "stop") ? hold : planComposerTick(replied, [], hold.cursor);
+    expect(done.events.find((e) => e.hook === "stop")?.payload).toMatchObject({
+      status: "completed",
+      generation_id: nextGen,
+    });
+  });
+
+  test("an operator follow-up with no assistant text still aborts the open turn", () => {
+    const open = [
+      bubble({ id: "u1", type: 1, text: "upload the package" }),
+      bubble({ id: "tool", type: 2, toolName: "Shell", toolStatus: "completed", text: "", toolInput: { command: "echo" } }),
+    ];
+    const armed = planComposerTick(snap({
+      cid: "cid-1",
+      status: "generating",
+      generationId: "gen-1",
+      bubbles: open,
+    }), [], emptyCursor()).cursor;
+    const { events } = planComposerTick(snap({
+      cid: "cid-1",
+      status: "aborted",
+      generationId: "gen-2",
+      bubbles: [
+        ...open,
+        bubble({ id: "u2", type: 1, text: "second" }),
+      ],
+    }), [], armed);
+    const stop = events.find((e) => e.hook === "stop");
+    expect(stop?.payload).toMatchObject({ status: "aborted", generation_id: "gen-1" });
+    expect(events.some((e) => e.hook === "beforeSubmitPrompt" && e.payload.prompt === "second")).toBe(true);
+  });
+
   test("uuid already swapped after the next user was emitted still flushes the previous body", () => {
     const armed = planComposerTick(snap({
       cid: "cid-1",

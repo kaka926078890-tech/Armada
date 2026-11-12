@@ -173,6 +173,13 @@ describe("Registry", () => {
     expect(reg.windowsForWorkspace("m-1", "/ws/b")).toEqual([]);
   });
 
+  test("windowsForWorkspace matches Windows slash and drive case", () => {
+    const { reg } = setup();
+    const a = fakeWs();
+    register(reg, a, { windowId: "w-win", openWorkspaces: ["C:\\Users\\PC\\Desktop\\work"] });
+    expect(reg.windowsForWorkspace("m-1", "c:/Users/PC/Desktop/work")).toEqual(["w-win"]);
+  });
+
   test("closing one of two windows keeps the other workspace", () => {
     const { reg } = setup();
     const a = fakeWs();

@@ -958,6 +958,31 @@ describe("Run dispatch", () => {
     ws.close();
   });
 
+  test("failed followup restores the completed card instead of marking it error", async () => {
+    const { ws, inbound, api } = await startWithExt({ os: "win32-x64" });
+    const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "hello" }) });
+    const { run } = await r.json() as any;
+    await new Promise((r2) => setTimeout(r2, 80));
+    const start = inbound.find((m) => m.type === "run.start");
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId: run.id, conversationId: "cid-1", transcriptPath: "/tmp/t.jsonl", promptMatch: true }));
+    await new Promise((r2) => setTimeout(r2, 60));
+    ws.send(JSON.stringify({
+      type: "run.event", runId: run.id, source: "hook", hookEventName: "stop",
+      payload: { status: "completed", conversation_id: "cid-1", generation_id: start.generation_id },
+      ts: Date.now(), seq: 1,
+    }));
+    await new Promise((r2) => setTimeout(r2, 60));
+    const f = await api(`/api/runs/${run.id}/followup`, { method: "POST", body: JSON.stringify({ prompt: "下一轮" }) });
+    expect(f.status).toBe(200);
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "rejected", reason: "CDP_CALL_TIMEOUT" }));
+    await new Promise((r2) => setTimeout(r2, 60));
+    const live = (await (await api(`/api/runs/${run.id}`)).json()) as any;
+    expect(live.status).toBe("completed");
+    expect(live.end_reason).toBe("completed");
+    ws.close();
+  });
+
   test("darwin run.start has no hub-issued generation_id", async () => {
     const { inbound, api } = await startWithExt();
     await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "hello" }) });

@@ -21,6 +21,7 @@
  *   2026-09-28 真机：文档是「行\\n\\n行」，innerText 把这一处空行画成五个换行。
  */
 
+import { request as httpRequest } from "http";
 import { parseAskInspect, parsePlanInspect, planInspectToAsk, type AskInspect } from "./askDetect";
 import { acquireCdpLock, CDP_LOCK_WAIT_MS } from "./cdpLock";
 import { pickCdpPage, titleMatchesWorkspace, workspaceFolderName } from "./cdpPage";
@@ -367,15 +368,61 @@ export const COMPOSER_ENTER_JS = `function (prompt) {
   return "OK";
 }`;
 
-async function defaultFetchJson(url: string, timeoutMs: number): Promise<any[]> {
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), timeoutMs);
-  try {
-    const r = await fetch(url, { signal: ctrl.signal });
-    return (await r.json()) as any[];
-  } finally {
-    clearTimeout(t);
-  }
+export type CdpListFail = "CDP_UNREACHABLE" | "CDP_PROBE_TIMEOUT";
+export type CdpProbe = "ready" | "down" | "unknown";
+
+/** 心跳：超时不带 cdpReady，中台保留上一拍。只有拒绝连接才写成 false。 */
+export function cdpReadyReport(probe: CdpProbe): { cdpReady?: boolean } {
+  if (probe === "unknown") return {};
+  return { cdpReady: probe === "ready" };
+}
+
+export function classifyFetchError(e: unknown): CdpListFail {
+  const code = (e as { code?: unknown })?.code;
+  const msg = e instanceof Error ? e.message : String(e);
+  const text = `${typeof code === "string" ? code : ""} ${msg}`;
+  if (/ECONNREFUSED|ENOTFOUND|EHOSTUNREACH/.test(text)) return "CDP_UNREACHABLE";
+  return "CDP_PROBE_TIMEOUT";
+}
+
+/** 每次新开 TCP。超时销毁 socket，不把半开连接留在全局 fetch 池里。 */
+function defaultFetchJson(url: string, timeoutMs: number): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn();
+    };
+    const req = httpRequest(url, {
+      agent: false,
+      headers: { connection: "close" },
+    }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on("data", (c: Buffer | string) => chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c)));
+      res.on("end", () => {
+        finish(() => {
+          try {
+            resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+          } catch (e) {
+            reject(e instanceof Error ? e : new Error(String(e)));
+          }
+        });
+      });
+    });
+    const timer = setTimeout(() => {
+      const err = Object.assign(new Error("CDP_PROBE_TIMEOUT"), { code: "CDP_PROBE_TIMEOUT" });
+      try { req.destroy(err); } catch { /* already gone */ }
+      // 到点就结束。不能等 close：Windows 上 9222 的响应体要 3 秒才到，
+      // close 若先于 end，会把已经成功的 200 判成超时，三次重试越过中台 10 秒注册闸。
+      finish(() => reject(err));
+    }, timeoutMs);
+    req.on("error", (e: Error) => {
+      finish(() => reject(e));
+    });
+    req.end();
+  });
 }
 
 async function nap(ms: number, sleep?: (n: number) => Promise<void>): Promise<void> {
@@ -391,18 +438,21 @@ export async function fetchJsonWithRetry(
   url: string,
   timeoutMs: number,
   opts?: { tries?: number; gapMs?: number; sleep?: (n: number) => Promise<void> },
-): Promise<{ ok: true; body: unknown } | { ok: false }> {
+): Promise<{ ok: true; body: unknown } | { ok: false; reason: CdpListFail }> {
   const tries = opts?.tries ?? 3;
   const gapMs = opts?.gapMs ?? 400;
+  let reason: CdpListFail = "CDP_PROBE_TIMEOUT";
   for (let i = 0; i < tries; i++) {
     try {
       return { ok: true, body: await fetchJson(url, timeoutMs) };
-    } catch {
-      if (i === tries - 1) return { ok: false };
+    } catch (e) {
+      const next = classifyFetchError(e);
+      if (next === "CDP_UNREACHABLE") reason = next;
+      if (i === tries - 1) return { ok: false, reason };
       await nap(gapMs, opts?.sleep);
     }
   }
-  return { ok: false };
+  return { ok: false, reason };
 }
 
 /** 口通不通：GET /json 300ms。不 pick workspace page（残实例是口都不通）。 */
@@ -420,21 +470,27 @@ export async function probeCdpReady(opts: {
   }
 }
 
-/** 注入前、注册、心跳都走这条：9222 闪断重试三次。一次超时不再把 cdpReady 打成 false。 */
+/**
+ * 注册和心跳探 9222。拒绝连接是 down。超时是 unknown：调用方不把 cdpReady 写成 false。
+ * 本机 /json 约 3 秒才返回，时限须盖住这一跳，否则永远报 unknown，中台不派发。
+ * 续聊拿到锁之后不靠这次探活决定成败。
+ */
 export async function probeCdpReadyForInject(opts: {
   port: number;
   fetchJson?: (url: string, timeoutMs: number) => Promise<unknown>;
   timeoutMs?: number;
   sleep?: (n: number) => Promise<void>;
-}): Promise<boolean> {
+}): Promise<CdpProbe> {
   const fetchJson = opts.fetchJson ?? defaultFetchJson;
   const got = await fetchJsonWithRetry(
     fetchJson,
     `http://127.0.0.1:${opts.port}/json`,
-    opts.timeoutMs ?? 300,
+    opts.timeoutMs ?? 4000,
     { sleep: opts.sleep },
   );
-  return got.ok && Array.isArray(got.body);
+  if (got.ok && Array.isArray(got.body)) return "ready";
+  if (!got.ok && got.reason === "CDP_UNREACHABLE") return "down";
+  return "unknown";
 }
 
 function defaultConnect(wsUrl: string, timeoutMs: number): Promise<CdpSession> {
@@ -870,16 +926,18 @@ async function connectWorkspacePage(
   const pastDeadline = () => typeof opts?.deadline === "number" && now() >= opts.deadline;
   if (pastDeadline()) return { ok: false, reason: "CDP_SCAN_BUDGET" };
   const url = `http://127.0.0.1:${deps.port}/json`;
+  // Windows 上同一端口的 /json 稳定约 3 秒。1.5 秒会在正文到达前拆掉连接，注入失败，新对话是空的。
+  const listMs = 4500;
   const listed = opts?.listOnce
     ? await (async () => {
       try {
-        return { ok: true as const, body: await fetchJson(url, 1500) };
-      } catch {
-        return { ok: false as const };
+        return { ok: true as const, body: await fetchJson(url, listMs) };
+      } catch (e) {
+        return { ok: false as const, reason: classifyFetchError(e) };
       }
     })()
-    : await fetchJsonWithRetry(fetchJson, url, 1500, { sleep: deps.sleep });
-  if (!listed.ok) return { ok: false, reason: "CDP_UNREACHABLE" };
+    : await fetchJsonWithRetry(fetchJson, url, listMs, { sleep: deps.sleep });
+  if (!listed.ok) return { ok: false, reason: listed.reason };
   const targets = listed.body as any[];
   const windowId = typeof deps.windowId === "string" ? deps.windowId.trim() : "";
   const timeoutMs = callBudget(deps);

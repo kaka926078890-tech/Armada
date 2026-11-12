@@ -1,6 +1,7 @@
 import { hasImageMarkers, stripImageMarkers } from "../../extension/src/imageMarkers";
 import { workspacePathsEqual } from "../../extension/src/workspacePath";
 import { CHATGPT_LOCAL_MACHINE, sameHost } from "./chatgptAttach";
+import { hookSubmitPrompt, isCursorProtocolUser } from "./outboundClaim";
 
 /** Header createdAt may land a few milliseconds around dispatch. */
 export const HEADER_CREATED_SKEW_MS = 5_000;
@@ -566,17 +567,24 @@ export function planComposerTick(
     const stopForNewUser = newUserAt > 0;
     if ((stopForNewUser || flushed) && !childStillBusy(children, next)) {
       const hadText = snap.bubbles.slice(0, cut).some((b) => b.type === 2 && !!b.text.trim() && next.assistants.includes(b.id));
-      next.stopped = true;
-      emit({
-        source: "db",
-        hook: "stop",
-        conversationId: snap.cid,
-        payload: {
-          status: hadText ? "completed" : snap.status === "error" ? "error" : "aborted",
-          conversation_id: snap.cid,
-          ...(priorGen ? { generation_id: priorGen } : {}),
-        },
-      });
+      const cutting = stopForNewUser ? snap.bubbles[newUserAt] : undefined;
+      const cuttingPrompt = hookSubmitPrompt({ prompt: cutting?.text ?? "" }) ?? "";
+      // Cursor 的协议句是同一轮的续写。还没有助手正文时收成 aborted，
+      // 这句不能把终态卡拉回来，后面的 completed 就进不了这张卡。
+      const protocolContinues = !hadText && snap.status !== "error" && isCursorProtocolUser(cuttingPrompt);
+      if (!protocolContinues) {
+        next.stopped = true;
+        emit({
+          source: "db",
+          hook: "stop",
+          conversationId: snap.cid,
+          payload: {
+            status: hadText ? "completed" : snap.status === "error" ? "error" : "aborted",
+            conversation_id: snap.cid,
+            ...(priorGen ? { generation_id: priorGen } : {}),
+          },
+        });
+      }
     }
   }
 

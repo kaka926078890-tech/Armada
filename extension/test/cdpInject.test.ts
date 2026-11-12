@@ -12,6 +12,7 @@ import {
   createFileMentionPaster,
   createComposerFinisher,
   createAskQuestionDriver,
+  cdpReadyReport,
   probeCdpReady,
   probeCdpReadyForInject,
   COMPOSER_FOCUS_JS,
@@ -392,11 +393,11 @@ describe("probeCdpReadyForInject", () => {
         if (n < 2) throw new Error("ECONNREFUSED");
         return [{ type: "page" }];
       },
-    })).toBe(true);
+    })).toBe("ready");
     expect(n).toBe(2);
   });
 
-  test("three throws stay down", async () => {
+  test("three connection refusals stay down", async () => {
     let n = 0;
     expect(await probeCdpReadyForInject({
       port: 9222,
@@ -405,8 +406,38 @@ describe("probeCdpReadyForInject", () => {
         n += 1;
         throw new Error("ECONNREFUSED");
       },
-    })).toBe(false);
+    })).toBe("down");
     expect(n).toBe(3);
+  });
+
+  test("a timeout stays unknown so the heartbeat can keep the previous ready bit", async () => {
+    expect(await probeCdpReadyForInject({
+      port: 9222,
+      sleep: async () => {},
+      fetchJson: async () => { throw new Error("CDP_PROBE_TIMEOUT"); },
+    })).toBe("unknown");
+    expect(cdpReadyReport("unknown")).toEqual({});
+    expect(cdpReadyReport("ready")).toEqual({ cdpReady: true });
+    expect(cdpReadyReport("down")).toEqual({ cdpReady: false });
+  });
+
+  test("a silent debug port times out on a fresh socket", async () => {
+    const sockets: import("net").Socket[] = [];
+    const server = createServer((socket) => {
+      sockets.push(socket);
+      socket.on("error", () => {});
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+    const addr = server.address();
+    const port = typeof addr === "object" && addr ? addr.port : 0;
+    try {
+      const started = Date.now();
+      expect(await probeCdpReadyForInject({ port, timeoutMs: 80, sleep: async () => {} })).toBe("unknown");
+      expect(Date.now() - started).toBeLessThan(2000);
+    } finally {
+      for (const s of sockets) s.destroy();
+      server.close();
+    }
   });
 });
 
@@ -414,6 +445,11 @@ describe("createCdpSubmitter", () => {
   test("CDP 不可达 → CDP_UNREACHABLE", async () => {
     const submit = createCdpSubmitter(deps({ fetchJson: async () => { throw new Error("ECONNREFUSED"); } }));
     expect(await submit("/Users/x/armada-test-ws", "hi")).toEqual({ ok: false, reason: "CDP_UNREACHABLE" });
+  });
+
+  test("a stalled /json list is a probe timeout, not a dead port", async () => {
+    const submit = createCdpSubmitter(deps({ fetchJson: async () => { throw new Error("CDP_PROBE_TIMEOUT"); } }));
+    expect(await submit("/Users/x/armada-test-ws", "hi")).toEqual({ ok: false, reason: "CDP_PROBE_TIMEOUT" });
   });
 
   test("无匹配窗口标题 → WINDOW_TARGET_NOT_FOUND", async () => {
@@ -1815,6 +1851,8 @@ describe("AskQuestion CDP driver", () => {
     const src = readFileSync(join(import.meta.dir, "../src/extension.ts"), "utf8");
     expect(src).not.toMatch(/probeCdpReady\(\{ port: config\.cdpPort \}\)/);
     expect(src.match(/probeCdpReadyForInject\(\{ port: config\.cdpPort \}\)/g)).toHaveLength(3);
+    expect(src).toMatch(/if \(probe === "down"\) return \{ ok: false, reason: "CDP_UNREACHABLE" \}/);
+    expect(src.match(/cdpReadyReport\(probe\)/g)).toHaveLength(2);
   });
 
   test("extension shares windowId CDP deps and returns image paste result object", () => {

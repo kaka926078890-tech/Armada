@@ -39,6 +39,8 @@ function publicRunError(reason: string): string {
 export class RunService {
   private cancelRequested = new Set<string>();
   private promoting = false;
+  /** 续聊把已结束的卡拉回 dispatched。注入失败时要回到原状态，不能把整张卡写成这次的错误。 */
+  private followupRestore = new Map<string, { status: string; end_reason: string | null }>();
   private limits: ConcurrencyLimits;
   private sessionEndReplaySeq = new Map<string, number>();
 
@@ -505,7 +507,7 @@ export class RunService {
     if (parseChatgptRoot(workspaceRoot)) return this.createChatgpt(machineId, workspaceRoot, prompt, opts);
     const m = this.registry.getMachine(machineId);
     if (!m || m.status !== "online") return { error: "MACHINE_OFFLINE" };
-    if (!JSON.parse(m.open_workspaces).includes(workspaceRoot)) return { error: "WORKSPACE_NOT_OPEN" };
+    if (!workspacePathIn(workspaceRoot, JSON.parse(m.open_workspaces) as string[])) return { error: "WORKSPACE_NOT_OPEN" };
     const windows = this.registry.windowsForWorkspace(machineId, workspaceRoot);
     if (windows.length === 0) return { error: "WORKSPACE_NOT_OPEN" };
     if (!windows.some((w) => this.registry.windowCdpReady(machineId, w) === true)) {
@@ -653,6 +655,7 @@ export class RunService {
     if (run.status !== "dispatched" && !recoverable) return;
     if (recoverable && this.denyReviveIfSlotBusy(machineId, run.id)) return;
     if (msg.status === "accepted") {
+      this.followupRestore.delete(run.id);
       this.setStatus(run.id, "binding", recoverable
         ? { ended_at: null, end_reason: null, started_at: Date.now() }
         : {}, "extension");
@@ -663,6 +666,16 @@ export class RunService {
       }
     } else {
       this.pendingFollowupPrompt.delete(run.id);
+      const prior = this.followupRestore.get(run.id);
+      this.followupRestore.delete(run.id);
+      if (prior && run.conversation_id && this.terminal(prior.status)) {
+        this.audit("extension", "run.followup.reject", run.id, {
+          reason: msg.reason ?? "REJECTED", restored: prior.status,
+        });
+        this.setStatus(run.id, prior.status, { end_reason: prior.end_reason }, "extension");
+        this.promoteNextQueued(machineId);
+        return;
+      }
       this.setStatus(run.id, "error", { end_reason: publicRunError(msg.reason ?? "REJECTED") }, "extension");
       this.promoteNextQueued(machineId);
     }
@@ -1385,6 +1398,7 @@ export class RunService {
       return { error: "PROMPT_COLLISION" };
     }
 
+    this.followupRestore.set(runId, { status: run.status, end_reason: run.end_reason ?? null });
     this.setStatus(runId, "dispatched", {
       ended_at: null, end_reason: null, started_at: Date.now(), window_id: win.windowId,
       prompt, attachments: JSON.stringify(attachmentIds),
@@ -1482,7 +1496,7 @@ export class RunService {
   private redispatchFailed(run: any, attachmentIds: string[]): { error?: string; run?: any } {
     const m = this.registry.getMachine(run.machine_id);
     if (!m || m.status !== "online") return { error: "MACHINE_OFFLINE" };
-    if (!JSON.parse(m.open_workspaces).includes(run.workspace_root)) return { error: "WORKSPACE_NOT_OPEN" };
+    if (!workspacePathIn(run.workspace_root, JSON.parse(m.open_workspaces) as string[])) return { error: "WORKSPACE_NOT_OPEN" };
     const windows = this.registry.windowsForWorkspace(run.machine_id, run.workspace_root);
     if (windows.length === 0) return { error: "WORKSPACE_NOT_OPEN" };
     if (!windows.some((w) => this.registry.windowCdpReady(run.machine_id, w) === true)) {
