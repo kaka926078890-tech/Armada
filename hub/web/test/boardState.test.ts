@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import {
   groupRuns, cardView, cardPromptLines, runMatchesPromptQuery, clipCardTitle, CARD_TITLE_MAX_CHARS, listWorkspaceSlots, encodeWorkspaceKey, decodeWorkspaceKey,
-  filterRunsByWorkspace, sortConversations, groupSlotsByMachine, isUnreadCompleted, isUnreadMessage,
+  filterRunsByWorkspace, sortConversations, sortCompletedCards, groupSlotsByMachine, isUnreadCompleted, isUnreadMessage,
   workspaceHasUnread, workspaceUnreadCount, formatUnreadCount, canArchiveRun, canRetryRun, isHubArchived,
   workspaceFolderName, workspaceHasLiveRun, resolveSelectedWorkspace, isUnreadNeedInput, cardChromeClass, cardChromeOf, columnHasAlert,
   applyMarkAllRead, isBoardUnread, shouldStampSelectedRun, unreadAlertDotClass, unreadBadgeClass,
@@ -183,6 +183,26 @@ describe("workspace slots and conversation filter", () => {
       { ...base, id: "live", status: "running", created_at: 1 },
     ]);
     expect(sorted.map((r) => r.id)).toEqual(["live", "new-done", "old-done"]);
+  });
+
+  test("completed column puts unread first, newest unviewed event above older ones", () => {
+    const seen = { ...base, id: "seen", status: "completed", created_at: 90, ended_at: 900 };
+    const oldUnread = { ...base, id: "old-unread", status: "completed", created_at: 10, ended_at: 100 };
+    const newerCreated = { ...base, id: "tie-newer", status: "completed", created_at: 30, ended_at: 200 };
+    const olderCreated = { ...base, id: "tie-older", status: "completed", created_at: 20, ended_at: 200 };
+    const again = { ...base, id: "again", status: "completed", created_at: 5, ended_at: 250 };
+    const sorted = sortCompletedCards(
+      [seen, oldUnread, olderCreated, newerCreated, again],
+      { seen: 900, again: 150 },
+    );
+    expect(sorted.map((r) => r.id)).toEqual(["again", "tie-newer", "tie-older", "old-unread", "seen"]);
+  });
+
+  test("completed column keeps read cards in their incoming order", () => {
+    const older = { ...base, id: "older", status: "completed", created_at: 1, ended_at: 50 };
+    const newer = { ...base, id: "newer", status: "completed", created_at: 2, ended_at: 80 };
+    const sorted = sortCompletedCards([older, newer], { older: 50, newer: 80 });
+    expect(sorted.map((r) => r.id)).toEqual(["older", "newer"]);
   });
 });
 

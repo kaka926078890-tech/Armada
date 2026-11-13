@@ -320,6 +320,26 @@ export function sortConversations(runs: RunRow[]): RunRow[] {
   });
 }
 
+/**
+ * 已完成列：未读在前。未读之间按还没看过的活动时间从新到旧
+ * （ended_at，否则 started_at，否则 created_at）。已读保持传入顺序。
+ */
+export function sortCompletedCards(runs: RunRow[], readMap: Record<string, number>): RunRow[] {
+  const unread: RunRow[] = [];
+  const read: RunRow[] = [];
+  for (const run of runs) {
+    if (isUnreadCompleted(run, readMap[run.id])) unread.push(run);
+    else read.push(run);
+  }
+  unread.sort((a, b) => {
+    const byEvent = runActivityTs(b) - runActivityTs(a);
+    if (byEvent !== 0) return byEvent;
+    if (b.created_at !== a.created_at) return b.created_at - a.created_at;
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  });
+  return unread.concat(read);
+}
+
 export function runActivityTs(run: RunRow): number {
   return run.ended_at ?? run.started_at ?? run.created_at;
 }

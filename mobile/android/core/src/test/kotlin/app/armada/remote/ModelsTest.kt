@@ -405,6 +405,22 @@ class ModelsTest {
     }
 
     @Test
+    fun completedColumnPutsUnreadFirstByUnviewedEvent() {
+        fun card(id: String, basis: Long, updatedAt: Long = basis) =
+            RunDto(id, "m1", "/a", "p", "completed", updatedAt = updatedAt, readBasis = basis)
+        val seen = card("seen", 900)
+        val oldUnread = card("old-unread", 100)
+        val tieB = card("tie-b", 200)
+        val tieA = card("tie-a", 200)
+        val again = card("again", 250)
+        val readAt = mapOf("seen" to 900.0, "again" to 150.0)
+        val sorted = sortCompletedCards(listOf(seen, oldUnread, tieB, again, tieA)) { isUnread(it, readAt) }
+        assertEquals(listOf("again", "tie-a", "tie-b", "old-unread", "seen"), sorted.map { it.runId })
+        val kept = sortCompletedCards(listOf(oldUnread, seen), { false })
+        assertEquals(listOf("old-unread", "seen"), kept.map { it.runId })
+    }
+
+    @Test
     fun outboundQueueLabelKeepsImageOnlyRows() {
         assertEquals("看图", outboundQueueLabel("看图", 0))
         assertEquals("[图片]", outboundQueueLabel("", 1))

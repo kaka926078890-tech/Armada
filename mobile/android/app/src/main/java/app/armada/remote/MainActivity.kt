@@ -545,7 +545,12 @@ fun WorkspaceScreen(vm: SessionVm, state: UiState, workspace: WorkspaceDto, onBa
     val hiddenRuns = state.board.hidden.filter(sameSlot)
     val boardRuns = if (showArchived) hiddenRuns else openRuns
     val columnRuns = if (showArchived) boardRuns else boardRuns.filter { it.column == tab }
-    val filtered = columnRuns.filter { runMatchesPromptQuery(it, query) }
+    val matched = columnRuns.filter { runMatchesPromptQuery(it, query) }
+    val filtered = if (!showArchived && tab == BoardColumn.Completed) {
+        sortCompletedCards(matched) { state.readRev >= 0 && vm.isUnread(it) }
+    } else {
+        matched
+    }
     val hiddenN = hiddenRuns.size
     fun archive(run: RunDto, hide: Boolean) {
         vm.hideLocal(run.runId, hide)

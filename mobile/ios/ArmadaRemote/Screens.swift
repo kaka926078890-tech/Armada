@@ -707,7 +707,11 @@ struct WorkspaceHome: View {
 
     var filtered: [RunDTO] {
         let columnRuns = showArchived ? boardRuns : boardRuns.filter { $0.column == tab }
-        return columnRuns.filter { $0.matchesPromptQuery(query) }
+        let matched = columnRuns.filter { $0.matchesPromptQuery(query) }
+        if !showArchived && tab == .completed {
+            return sortCompletedCards(matched, readAt: session.readAt)
+        }
+        return matched
     }
 
     var body: some View {

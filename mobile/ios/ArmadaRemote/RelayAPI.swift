@@ -297,6 +297,24 @@ func runMatchesMarkReadScope(_ run: RunDTO, _ scope: MarkReadScope) -> Bool {
     }
 }
 
+/// 已完成列：未读在前。未读之间按还没看过的活动时间从新到旧（readBasis，否则 updatedAt）。已读保持传入顺序。
+func sortCompletedCards(_ runs: [RunDTO], readAt: [String: Double]) -> [RunDTO] {
+    var unread: [RunDTO] = []
+    var seen: [RunDTO] = []
+    for run in runs {
+        if run.status == "completed" && runIsUnread(run, readAt: readAt) {
+            unread.append(run)
+        } else {
+            seen.append(run)
+        }
+    }
+    unread.sort { a, b in
+        if a.unreadBasis != b.unreadBasis { return a.unreadBasis > b.unreadBasis }
+        return a.runId < b.runId
+    }
+    return unread + seen
+}
+
 func runIsUnread(_ run: RunDTO, readAt: [String: Double]) -> Bool {
     let seen = readAt[run.runId]
     let basis = Double(run.unreadBasis)

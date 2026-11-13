@@ -324,6 +324,20 @@ fun shouldStampReadAt(seen: Double?, activityTs: Long?): Boolean {
     return (activityTs ?: 0L).toDouble() > seen
 }
 
+/**
+ * 已完成列：未读在前。未读之间按还没看过的活动时间从新到旧（readBasis，否则 updatedAt）。
+ * 已读保持传入顺序。
+ */
+fun sortCompletedCards(runs: List<RunDto>, isUnread: (RunDto) -> Boolean): List<RunDto> {
+    val unread = ArrayList<RunDto>()
+    val read = ArrayList<RunDto>()
+    for (run in runs) {
+        if (run.status == "completed" && isUnread(run)) unread.add(run) else read.add(run)
+    }
+    unread.sortWith(compareByDescending<RunDto> { unreadBasis(it) }.thenBy { it.runId })
+    return unread + read
+}
+
 fun isUnread(run: RunDto, readAt: Map<String, Double>): Boolean {
     val seen = readAt[run.runId]
     val basis = unreadBasis(run).toDouble()

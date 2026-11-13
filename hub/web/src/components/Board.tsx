@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { groupRuns, cardView, cardPromptLines, clipCardTitle, COLUMN_LABELS, canArchiveRun, canRetryRun, runDisplayName, runMatchesPromptQuery, cardChromeClass, cardChromeOf, columnHasAlert, unreadAlertDotClass, resumeStallCopy, type ColumnKey, type RunRow } from "../boardState";
+import { groupRuns, sortCompletedCards, cardView, cardPromptLines, clipCardTitle, COLUMN_LABELS, canArchiveRun, canRetryRun, runDisplayName, runMatchesPromptQuery, cardChromeClass, cardChromeOf, columnHasAlert, unreadAlertDotClass, resumeStallCopy, type ColumnKey, type RunRow } from "../boardState";
 import type { Machine } from "../types";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -77,7 +77,7 @@ export default function Board({ runs, selected, onSelect, showArchived, onHide, 
             {g[col].length === 0 && (
               <div className={`${UI_META} text-muted-foreground px-2 py-6 text-center`}>{searching ? "没有匹配" : "暂无"}</div>
             )}
-            {g[col].map((r) => {
+            {(col === "completed" ? sortCompletedCards(g[col], readMap) : g[col]).map((r) => {
               const v = cardView(r, now);
               const lines = cardPromptLines(r);
               const chrome = cardChromeOf(r, readMap[r.id]);
