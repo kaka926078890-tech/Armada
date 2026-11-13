@@ -89,9 +89,13 @@ final class PromptSpeech: ObservableObject {
 
     private var session = DictationSession()
     private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "zh-CN"))
-    private let engine = AVAudioEngine()
+    // 派发/续聊页一出现就构造引擎，或关掉页面时去读 inputNode / setActive(false)，
+    // 都会抢走共享音频会话，把正在播的音乐停下。只有真正开始听写才创建。
+    private var engine: AVAudioEngine?
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
+    private var tapInstalled = false
+    private var sessionOwned = false
     private var gen = 0
 
     func toggle() {
@@ -131,6 +135,7 @@ final class PromptSpeech: ObservableObject {
     }
 
     func release() {
+        guard listening || sessionOwned || engine != nil else { return }
         if listening { stop() } else { teardownEngine() }
     }
 
@@ -143,17 +148,25 @@ final class PromptSpeech: ObservableObject {
         }
         self.request = request
         let expected = gen
+        let engine = AVAudioEngine()
+        self.engine = engine
         do {
             let audio = AVAudioSession.sharedInstance()
-            try audio.setCategory(.record, mode: .measurement, options: .duckOthers)
-            try audio.setActive(true, options: .notifyOthersOnDeactivation)
+            // .record 会直接停掉其他音频，duckOthers 对它无效。playAndRecord 才能只压低。
+            try audio.setCategory(
+                .playAndRecord,
+                mode: .measurement,
+                options: [.duckOthers, .defaultToSpeaker, .allowBluetoothHFP]
+            )
+            try audio.setActive(true)
+            sessionOwned = true
             let input = engine.inputNode
             let format = input.outputFormat(forBus: 0)
             let req = request
-            input.removeTap(onBus: 0)
             input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
                 req.append(buffer)
             }
+            tapInstalled = true
             engine.prepare()
             try engine.start()
         } catch {
@@ -193,12 +206,23 @@ final class PromptSpeech: ObservableObject {
     }
 
     private func teardownEngine() {
+        let tapped = tapInstalled
+        let owned = sessionOwned
+        tapInstalled = false
+        sessionOwned = false
         task?.cancel()
         task = nil
         request?.endAudio()
         request = nil
-        if engine.isRunning { engine.stop() }
-        engine.inputNode.removeTap(onBus: 0)
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        if let engine {
+            if engine.isRunning { engine.stop() }
+            if tapped {
+                engine.inputNode.removeTap(onBus: 0)
+            }
+            self.engine = nil
+        }
+        if owned {
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        }
     }
 }
