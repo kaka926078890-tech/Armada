@@ -27,6 +27,8 @@ export type ComposerBubble = {
   subagentComposerId: string;
   /** User bubble `requestId`. This is the turn's generation, not `chatGenerationUUID`. */
   requestId: string;
+  /** Bubble `createdAt` in milliseconds. Empty-header order follows this, not key order. */
+  createdAt: number;
 };
 
 export type ComposerView = {
@@ -187,7 +189,17 @@ function parseBubble(id: string, raw: unknown): ComposerBubble {
     toolStatus: typeof tf.status === "string" ? tf.status : (typeof ad.status === "string" ? ad.status : ""),
     subagentComposerId: typeof ad.subagentComposerId === "string" ? ad.subagentComposerId : "",
     requestId: typeof o.requestId === "string" ? o.requestId.trim() : "",
+    createdAt: bubbleCreatedAt(o.createdAt),
   };
+}
+
+function bubbleCreatedAt(raw: unknown): number {
+  if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) return raw;
+  if (typeof raw === "string" && raw.trim()) {
+    const ms = Date.parse(raw);
+    if (Number.isFinite(ms) && ms > 0) return ms;
+  }
+  return 0;
 }
 
 export function parseComposer(cid: string, raw: unknown, bubbles: ComposerBubble[]): ComposerView | null {
@@ -357,7 +369,33 @@ export function readComposerView(db: Kv, cid: string): ComposerView | null {
     }
     bubbles.push(bubble);
   }
-  return parseComposer(cid, composer, bubbles);
+  return parseComposer(cid, composer, fromHeaders ? bubbles : orderFallbackBubbles(bubbles));
+}
+
+/** Key order is not time order. A new user id can sort before an older turn. */
+function orderFallbackBubbles(bubbles: ComposerBubble[]): ComposerBubble[] {
+  const groups: { at: number; items: ComposerBubble[] }[] = [];
+  const index = new Map<string, number>();
+  for (const b of bubbles) {
+    const parent = bubbleSplit(b.id)?.parent ?? b.id;
+    let slot = index.get(parent);
+    if (slot == null) {
+      slot = groups.length;
+      index.set(parent, slot);
+      groups.push({ at: 0, items: [] });
+    }
+    const group = groups[slot]!;
+    group.items.push(b);
+    if (!bubbleSplit(b.id) && b.createdAt) group.at = b.createdAt;
+  }
+  return groups
+    .map((group, i) => ({ group, i }))
+    .sort((a, b) => {
+      if (a.group.at && b.group.at && a.group.at !== b.group.at) return a.group.at - b.group.at;
+      if (a.group.at !== b.group.at) return a.group.at ? -1 : 1;
+      return a.i - b.i;
+    })
+    .flatMap((row) => row.group.items);
 }
 
 function childOf(cursor: ComposerCursor, cid: string): ChildCursor {
@@ -439,7 +477,17 @@ function bsp(snap: ComposerView, bubble: ComposerBubble, generationId?: string |
 
 type UnseenGroup = { start: number; end: number; gen: string | null };
 
-/** Unseen user bubbles, grouped when they share a requestId (one generation). */
+function nextUserIndex(bubbles: ComposerBubble[], from: number): number {
+  for (let j = from + 1; j < bubbles.length; j++) {
+    const b = bubbles[j];
+    if (b?.type === 1 && b.text.trim()) return j;
+  }
+  return bubbles.length;
+}
+
+/** Unseen user bubbles, grouped when they share a requestId (one generation).
+ *  The slice stops at the next user even when that user was already emitted.
+ *  A new id that sorts earlier must not swallow the older turn's reply. */
 function unseenTurnGroups(bubbles: ComposerBubble[], seenUsers: string[]): UnseenGroup[] {
   const idxs: number[] = [];
   for (let i = 0; i < bubbles.length; i++) {
@@ -447,12 +495,11 @@ function unseenTurnGroups(bubbles: ComposerBubble[], seenUsers: string[]): Unsee
     if (b?.type === 1 && b.text.trim() && !seenUsers.includes(b.id)) idxs.push(i);
   }
   const groups: UnseenGroup[] = [];
-  for (let n = 0; n < idxs.length; n++) {
-    const i = idxs[n]!;
+  for (const i of idxs) {
     const gen = bubbles[i]!.requestId.trim() || null;
-    const end = n + 1 < idxs.length ? idxs[n + 1]! : bubbles.length;
+    const end = nextUserIndex(bubbles, i);
     const prev = groups[groups.length - 1];
-    if (prev && gen && prev.gen === gen) {
+    if (prev && gen && prev.gen === gen && prev.end === i) {
       prev.end = end;
       continue;
     }
@@ -668,7 +715,12 @@ export function planComposerTick(
         next.generationId = gen;
         next.sawGeneration = true;
       }
-      if (live || hold) continue;
+      // No reply of its own yet. The composer's idle status still belongs to the previous turn.
+      const ownWork = slice.some(bubbleIsBody);
+      if (live || hold || !ownWork) {
+        if (!ownWork) next.stopped = false;
+        continue;
+      }
       if (!childStillBusy(children, next)) {
         const hadText = slice.some((b) => b.type === 2 && !!b.text.trim() && next.assistants.includes(b.id));
         next.stopped = true;
@@ -776,9 +828,10 @@ export function planComposerTick(
     const owned = turnSlice(snap.bubbles, next.generationId);
     const earlierHasBody = owned.owner > 0 && snap.bubbles.slice(0, owned.owner).some(bubbleIsBody);
     const sliceHasWork = owned.slice.some(bubbleIsBody);
-    // Idle composer status belongs to the turn that already has bubbles.
-    // A newer user with an empty slice has not finished, so that status must not close it.
-    if (!sliceHasWork && earlierHasBody) {
+    const watchedThisGen = !!(cursor.sawGeneration && next.generationId && cursor.generationId === next.generationId);
+    // Idle composer status belongs to a turn that already ran.
+    // A user we have not watched, or one whose slice is still empty while an older body exists, stays open.
+    if (!sliceHasWork && (earlierHasBody || !watchedThisGen)) {
       return { events, cursor: next };
     }
     for (const b of owned.slice) flushText(b, next.generationId);

@@ -11,7 +11,7 @@ import { createServer, type HubServer } from "../src/index";
 
 function bubble(partial: Partial<ComposerBubble> & { id: string }): ComposerBubble {
   return {
-    type: 2, text: "", thinking: "", toolName: "", toolStatus: "", subagentComposerId: "", requestId: "",
+    type: 2, text: "", thinking: "", toolName: "", toolStatus: "", subagentComposerId: "", requestId: "", createdAt: 0,
     ...partial,
   };
 }
@@ -188,6 +188,54 @@ describe("composer table plan", () => {
       status: "completed",
       generation_id: live,
     });
+  });
+
+  // r-cf2d0a37 17:39: key order put the new user before the previous reply.
+  // The stopped feed treated that reply as the new generation and completed in the same tick.
+  test("a new user ahead of an older reply stays running until its own body", () => {
+    const cursor = stoppedAfterFirstTurn();
+    const live = "5d7ad09d-a7b4-4016-9581-127f04dcb7d7";
+    const older = "我先看当前各仓检出的分支";
+    const view = snap({
+      cid: "cid-1",
+      status: "completed",
+      generationId: null,
+      bubbles: [
+        bubble({ id: "u-new", type: 1, text: "当前分支除开Finsafe", requestId: live }),
+        bubble({ id: "u1", type: 1, text: "first", requestId: "gen-1" }),
+        bubble({ id: "a1", type: 2, text: older }),
+      ],
+    });
+    const first = planComposerTick(view, [], cursor);
+    expect(first.events.some((e) => e.hook === "beforeSubmitPrompt" && e.payload.bubble_id === "u-new")).toBe(true);
+    expect(first.events.some((e) => e.hook === "afterAgentResponse")).toBe(false);
+    expect(first.events.some((e) => e.hook === "stop")).toBe(false);
+    expect(first.cursor.stopped).toBe(false);
+
+    const running = {
+      ...view,
+      generationId: live,
+      bubbles: [
+        view.bubbles[0]!,
+        bubble({ id: "a-new", type: 2, text: "这三条分支都应该提 PR" }),
+        ...view.bubbles.slice(1),
+      ],
+    };
+    const mid = planComposerTick(running, [], first.cursor);
+    expect(mid.events.some((e) => e.hook === "stop")).toBe(false);
+
+    const idle = { ...running, generationId: null, status: "aborted" };
+    const hold = planComposerTick(idle, [], mid.cursor);
+    const settled = hold.events.some((e) => e.hook === "stop") ? hold : planComposerTick(idle, [], hold.cursor);
+    expect(settled.events.find((e) => e.hook === "afterAgentResponse")?.payload).toMatchObject({
+      text: "这三条分支都应该提 PR",
+      generation_id: live,
+    });
+    expect(settled.events.find((e) => e.hook === "stop")?.payload).toMatchObject({
+      status: "completed",
+      generation_id: live,
+    });
+    expect(settled.events.some((e) => e.payload.text === older)).toBe(false);
   });
 
   test("an operator follow-up with no assistant text still aborts the open turn", () => {
@@ -518,6 +566,27 @@ describe("windows composer bind", () => {
       "short note",
       "the long report",
     ]);
+    db.close();
+  });
+
+  test("empty headers order a newer user after the older turn", () => {
+    const db = new Database(":memory:");
+    db.exec("CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value TEXT)");
+    db.query("INSERT INTO cursorDiskKV (key, value) VALUES (?1,?2)").run(`composerData:${cid}`, JSON.stringify({
+      status: "completed",
+      chatGenerationUUID: "",
+      fullConversationHeadersOnly: [],
+    }));
+    const put = (id: string, value: unknown) => {
+      db.query("INSERT INTO cursorDiskKV (key, value) VALUES (?1,?2)").run(`bubbleId:${cid}:${id}`, JSON.stringify(value));
+    };
+    const newer = "60aaa0c3-8be8-4d13-8354-1e5d0f4ed438";
+    const older = "ebdb0b4e-417f-4334-8b51-3d6d61865eee";
+    put(newer, { type: 1, text: "again", requestId: "5d7ad09d-a7b4-4016-9581-127f04dcb7d7", createdAt: "2026-11-12T09:39:40.718Z" });
+    put(older, { type: 1, text: "first", requestId: "f6663ddf-d1a7-4f44-8e38-72066ad7285e", createdAt: "2026-11-12T08:34:02.351Z" });
+    put(`${older}/s:1`, { type: 2, text: "old answer", createdAt: "2026-11-12T08:34:15.984Z" });
+    const view = readComposerView(db, cid);
+    expect(view?.bubbles.map((b) => b.id)).toEqual([older, `${older}/s:1`, newer]);
     db.close();
   });
 
