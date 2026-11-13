@@ -15,6 +15,7 @@ import {
   isLocalOwnedBoard,
   ownedRestoreStillCurrent,
   noShareIpCopy,
+  boardZoom,
   parseBoardSession,
   parseDesktopBoardRequest,
   boardFrameOrigin,
@@ -63,6 +64,11 @@ describe("parseDesktopBoardRequest", () => {
     expect(parseDesktopBoardRequest({ source: "armada-desktop", type: "need-token" })).toEqual({ type: "need-token" });
     expect(parseDesktopBoardRequest({ source: "armada-desktop", type: "theme", theme: "light" })).toEqual({ type: "theme", theme: "light" });
     expect(parseDesktopBoardRequest({ source: "armada-desktop", type: "theme", theme: "sepia" })).toBeNull();
+    expect(parseDesktopBoardRequest({ source: "armada-desktop", type: "font-scale", scale: 1.25 })).toEqual({ type: "font-scale", scale: 1.25 });
+    expect(parseDesktopBoardRequest({ source: "armada-desktop", type: "font-scale", scale: 1.5 })).toEqual({ type: "font-scale", scale: 1.5 });
+    expect(parseDesktopBoardRequest({ source: "armada-desktop", type: "font-scale", scale: 2 })).toBeNull();
+    expect(boardZoom(1)).toBe(1);
+    expect(boardZoom(1.1)).toBeNull();
   });
 
   test("parses run.alert with three ids", () => {
@@ -111,6 +117,8 @@ describe("parseDesktopBoardRequest", () => {
     expect(main).toMatch(/e\.origin !== currentBoardOrigin|!isTrustedBoardMessageOrigin\(e\.origin/);
     expect(main).not.toMatch(/postMessage\([^;]*,\s*"\*"\s*\)/);
     expect(main).toContain("hub_ui_theme");
+    expect(main).toContain("hub_ui_zoom");
+    expect(main).toContain("setZoom");
     expect(main).toContain("set_titlebar_theme");
     expect(main).toContain('meta[name="color-scheme"]');
   });

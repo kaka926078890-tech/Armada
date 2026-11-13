@@ -26,10 +26,19 @@ export type DesktopRunAlert = {
   body: string;
 };
 
+export type BoardZoom = 1 | 1.25 | 1.5;
+
 export type DesktopBoardRequest =
   | { type: DesktopBoardCommand }
   | { type: "theme"; theme: "light" | "dark" }
+  | { type: "font-scale"; scale: BoardZoom }
   | DesktopRunAlert;
+
+/** CSS zoom on the board document breaks mouse selection in WKWebView. These are page-zoom factors. */
+export function boardZoom(scale: unknown): BoardZoom | null {
+  if (scale === 1 || scale === 1.25 || scale === 1.5) return scale;
+  return null;
+}
 
 export type LandingMode = "create" | "join";
 
@@ -132,6 +141,11 @@ export function parseDesktopBoardRequest(data: unknown): DesktopBoardRequest | n
   }
   if (o.type === "theme" && (o.theme === "light" || o.theme === "dark")) {
     return { type: "theme", theme: o.theme };
+  }
+  if (o.type === "font-scale") {
+    const scale = boardZoom(o.scale);
+    if (!scale) return null;
+    return { type: "font-scale", scale };
   }
   if (o.type !== "run.alert") return null;
   if (

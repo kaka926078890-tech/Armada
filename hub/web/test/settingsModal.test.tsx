@@ -15,10 +15,11 @@ describe("settings chrome", () => {
     expect(app).not.toContain('aria-label="切换明亮/黑夜"');
   });
 
-  test("css zooms the page so type and spacing stay in proportion", () => {
+  test("detail text stays selectable: no css zoom on the page root", () => {
     const css = readFileSync(join(root, "src/index.css"), "utf8");
-    expect(css).toMatch(/data-font-scale="large"[^{]*\{[^}]*zoom:\s*1\.25/);
-    expect(css).toMatch(/data-font-scale="xlarge"[^{]*\{[^}]*zoom:\s*1\.5/);
+    expect(css).toMatch(/user-select:\s*text/);
+    expect(css).not.toMatch(/data-font-scale="large"[^{]*\{[^}]*zoom:/);
+    expect(css).not.toMatch(/data-font-scale="xlarge"[^{]*\{[^}]*zoom:/);
     expect(css).not.toMatch(/calc\(\d+px \* var\(--armada-text-scale\)\)/);
   });
 });

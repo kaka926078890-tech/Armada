@@ -10,10 +10,17 @@ describe("appearance layout stays coordinated when text scales", () => {
     const css = readFileSync(join(web, "src/index.css"), "utf8");
     expect(css).toMatch(/html\s*\{[^}]*font-size:\s*16px/);
     expect(css).not.toMatch(/html\s*\{[^}]*font-size:\s*calc\(16px \* var\(--armada-text-scale\)\)/);
-    expect(css).toMatch(/html\[data-font-scale="large"\][^{]*\{[^}]*zoom:\s*1\.25/);
-    expect(css).toMatch(/html\[data-font-scale="xlarge"\][^{]*\{[^}]*zoom:\s*1\.5/);
+    expect(css).toMatch(/user-select:\s*text/);
+    expect(css).not.toMatch(/html\[data-font-scale/);
+    expect(css).not.toMatch(/\bzoom:\s*1\.25/);
+    expect(css).not.toMatch(/\bzoom:\s*1\.5/);
     expect(css).not.toMatch(/transform:\s*scale\(/);
     expect(css).not.toMatch(/calc\(\d+px \* var\(--armada-text-scale\)\)/);
+    const theme = readFileSync(join(web, "src/theme.ts"), "utf8");
+    expect(theme).toContain('type: "font-scale"');
+    const main = readFileSync(join(repo, "desktop/src/main.ts"), "utf8");
+    expect(main).toContain("setZoom");
+    expect(main).toContain("hub_ui_zoom");
   });
 
   test("board actions sit in the sidebar footer, not a full-width header", () => {
@@ -79,6 +86,9 @@ describe("appearance layout stays coordinated when text scales", () => {
     expect(board).toContain("overflow-x-hidden");
     expect(board).not.toContain("min-w-[240px]");
     expect(board).not.toContain("overflow-x-auto");
+    expect(detail).toContain("select-text");
+    expect(detail).toContain("overflow-x-clip overflow-y-auto");
+    expect(detail).not.toContain("select-text overflow-x-hidden");
     expect(detail).toContain("followup-input");
     expect(detail).toContain("shrink-0 p-3 border-t");
   });

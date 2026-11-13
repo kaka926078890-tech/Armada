@@ -74,7 +74,7 @@ function DrawerShell({ children }: { children: ReactNode }) {
   };
 
   return (
-    <aside className="h-full min-h-0 shrink-0 overflow-hidden border-l border-border flex flex-col bg-background shadow-2xl relative max-w-full" style={{ width, maxWidth: "100%" }}>
+    <aside className="h-full min-h-0 shrink-0 overflow-clip border-l border-border flex flex-col bg-background shadow-2xl relative max-w-full" style={{ width, maxWidth: "100%" }}>
       <div
         role="separator"
         aria-orientation="vertical"
@@ -555,7 +555,7 @@ export default function RunDetail({
             loading: loadingOlderRef.current,
           })) loadOlder();
         }}
-        className="flex-1 min-h-0 min-w-0 w-full overflow-x-hidden overflow-y-auto px-4 py-4 [scrollbar-gutter:stable]"
+        className="flex-1 min-h-0 min-w-0 w-full select-text overflow-x-clip overflow-y-auto px-4 py-4 [scrollbar-gutter:stable]"
       >
         <div ref={contentRef} className="min-w-0 max-w-full">
         {hasOlder && (

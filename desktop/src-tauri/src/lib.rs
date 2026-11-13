@@ -35,6 +35,7 @@ pub fn run() {
             cursor::pick_workspace,
             run_alert::show_run_alert,
             titlebar::hub_ui_theme,
+            titlebar::hub_ui_zoom,
             titlebar::set_titlebar_theme
         ])
         .build(tauri::generate_context!())

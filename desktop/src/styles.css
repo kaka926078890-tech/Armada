@@ -350,6 +350,8 @@ body.board-open #landing {
   height: 100%;
   border: 0;
   background: #09090b;
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .err {

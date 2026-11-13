@@ -20,6 +20,7 @@ import {
   parseBoardSession,
   parseDesktopBoardRequest,
   boardFrameOrigin,
+  boardZoom,
   isTrustedBoardMessageOrigin,
   parsePastedJoin,
   fleetErrorCopy,
@@ -249,9 +250,25 @@ function clearBoardSession() {
   try { localStorage.removeItem(BOARD_SESSION_KEY); } catch { /* ignore */ }
 }
 
+function applyBoardZoom(scale: number) {
+  void import("@tauri-apps/api/webview")
+    .then(({ getCurrentWebview }) => getCurrentWebview().setZoom(scale))
+    .catch(() => {
+      /* browser preview has no webview zoom */
+    });
+}
+
 function openBoard(origin: string, token: string, fromNeedToken = false) {
   persistBoard(origin, token);
   currentBoardOrigin = boardFrameOrigin(origin);
+  void invoke<number>("hub_ui_zoom")
+    .then((scale) => {
+      const zoom = boardZoom(scale);
+      if (zoom) applyBoardZoom(zoom);
+    })
+    .catch(() => {
+      /* browser preview */
+    });
   if (!fromNeedToken) {
     reopenCount = 0;
     lastReopenAt = null;
@@ -417,6 +434,7 @@ function restoreWindowTheme() {
 }
 
 function leaveBoard() {
+  applyBoardZoom(1);
   clearBoardSession();
   currentBoardOrigin = null;
   const frame = boardEl();
@@ -619,6 +637,10 @@ window.addEventListener("DOMContentLoaded", () => {
     }
     if (req.type === "theme") {
       applyWindowTheme(req.theme);
+      return;
+    }
+    if (req.type === "font-scale") {
+      applyBoardZoom(req.scale);
       return;
     }
     if (req.type === "run.alert") {

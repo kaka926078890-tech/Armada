@@ -16,6 +16,22 @@ fn prefs_file() -> Option<PathBuf> {
     Some(PathBuf::from(home).join(".armada").join("ui-prefs.json"))
 }
 
+pub fn zoom_from_prefs_json(text: &str) -> f64 {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(text) else { return 1.0 };
+    match value.get("fontScale").and_then(|t| t.as_str()) {
+        Some("large") => 1.25,
+        Some("xlarge") => 1.5,
+        _ => 1.0,
+    }
+}
+
+#[tauri::command]
+pub fn hub_ui_zoom() -> f64 {
+    let Some(path) = prefs_file() else { return 1.0 };
+    let Ok(text) = fs::read_to_string(path) else { return 1.0 };
+    zoom_from_prefs_json(&text)
+}
+
 #[tauri::command]
 pub fn hub_ui_theme() -> Option<String> {
     let path = prefs_file()?;
@@ -66,7 +82,16 @@ fn set_window_appearance(window: &tauri::WebviewWindow, light: bool) {
 
 #[cfg(test)]
 mod tests {
-    use super::theme_from_prefs_json;
+    use super::{theme_from_prefs_json, zoom_from_prefs_json};
+
+    #[test]
+    fn reads_font_scale_as_page_zoom() {
+        assert_eq!(zoom_from_prefs_json(r#"{"fontScale":"large"}"#), 1.25);
+        assert_eq!(zoom_from_prefs_json(r#"{"fontScale":"xlarge","theme":"dark"}"#), 1.5);
+        assert_eq!(zoom_from_prefs_json(r#"{"fontScale":"normal"}"#), 1.0);
+        assert_eq!(zoom_from_prefs_json(r#"{"theme":"light"}"#), 1.0);
+        assert_eq!(zoom_from_prefs_json("not json"), 1.0);
+    }
 
     #[test]
     fn reads_light_and_dark_only() {

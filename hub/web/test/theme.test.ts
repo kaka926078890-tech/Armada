@@ -63,4 +63,17 @@ describe("fontScale", () => {
     applyFontScale("large");
     expect(el.dataset.fontScale).toBe("large");
   });
+
+  test("embedded board asks the shell for page zoom instead of css zoom", () => {
+    const messages: unknown[] = [];
+    const parent = { postMessage: (data: unknown) => { messages.push(data); } };
+    const prevWindow = globalThis.window;
+    (globalThis as { window: unknown }).window = { parent };
+    const el = { dataset: {} as Record<string, string> };
+    (globalThis as { document?: { documentElement: typeof el } }).document = { documentElement: el };
+    applyFontScale("xlarge");
+    expect(el.dataset.fontScale).toBe("xlarge");
+    expect(messages).toEqual([{ source: "armada-desktop", type: "font-scale", scale: 1.5 }]);
+    (globalThis as { window: unknown }).window = prevWindow;
+  });
 });

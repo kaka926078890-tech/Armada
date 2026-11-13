@@ -81,7 +81,7 @@ export default function FilePreview({
           </Button>
         ) : null}
       </div>
-      <div className="flex-1 overflow-y-auto px-4 py-4">
+      <div className="flex-1 select-text overflow-y-auto px-4 py-4">
         {loading ? <div className={`${UI_META} text-muted-foreground`}>正在读取…</div> : null}
         {error ? <div className={`${UI_TYPE} text-destructive`} role="alert">{error}</div> : null}
         {!loading && !error && markdown ? <AssistantMarkdown text={text} onOpenFile={onOpenFile} /> : null}

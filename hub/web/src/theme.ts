@@ -49,4 +49,9 @@ export function zoomForFontScale(scale: FontScale): number {
 export function applyFontScale(scale: FontScale): void {
   if (typeof document === "undefined") return;
   document.documentElement.dataset.fontScale = scale;
+  if (typeof window === "undefined" || window.parent === window) return;
+  window.parent.postMessage(
+    { source: "armada-desktop", type: "font-scale", scale: zoomForFontScale(scale) },
+    "*",
+  );
 }
