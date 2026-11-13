@@ -36,7 +36,7 @@ function publicRunError(reason: string): string {
   return reason;
 }
 
-/** 续聊被拒绝后卡片回到上一轮。操作员仍要在详情里看见这一轮没发出去。 */
+/** 续聊被拒绝后卡片进异常。上一轮正文还在，详情里仍要看见这一轮没发出去。 */
 function followupRejectText(reason: string): string {
   if (reason === "MENTION_CLICK:NO_MENU") return "续聊没有发出去。文件菜单没有出现，这一轮没有提交。";
   if (reason === "MENTION_CLICK:AMBIGUOUS") return "续聊没有发出去。文件菜单对上了不止一条，这一轮没有提交。";
@@ -49,8 +49,8 @@ export class RunService {
   private cancelRequested = new Set<string>();
   private promoting = false;
   /**
-   * 续聊在被接受之前只是一次尝试。拒绝时整份已提交状态原样放回，
-   * 不新写一次完成。prompt 和用户句也要等接受后才落卡。
+   * 续聊在被接受之前只是一次尝试。拒绝时卡片进异常，不新写一次完成。
+   * prompt 和用户句也要等接受后才落卡。
    */
   private followupRestore = new Map<string, {
     status: string;
@@ -1349,7 +1349,7 @@ export class RunService {
     });
   }
 
-  /** 拒绝没有提交这一轮。放回尝试之前的卡片，不记一次新的完成。 */
+  /** 拒绝没有提交这一轮。卡片进异常，不记一次新的完成。上一轮 prompt 与对话保留。 */
   private restoreFollowupAttempt(runId: string, prior: {
     status: string;
     end_reason: string | null;
@@ -1365,20 +1365,23 @@ export class RunService {
     const retired = attemptGen && attemptGen !== genOf(prior.live_generation_id)
       ? appendRetired(retiredBase, attemptGen)
       : retiredBase;
+    const endReason = publicRunError(reason);
+    const endedAt = Date.now();
     this.db.query(
-      `UPDATE runs SET status=?1, end_reason=?2, ended_at=?3, prompt=?4, attachments=?5,
-        started_at=?6, live_generation_id=?7, retired_generation_ids=?8 WHERE id=?9`,
+      `UPDATE runs SET status='error', end_reason=?1, ended_at=?2, prompt=?3, attachments=?4,
+        started_at=?5, live_generation_id=?6, retired_generation_ids=?7 WHERE id=?8`,
     ).run(
-      prior.status, prior.end_reason, prior.ended_at, prior.prompt, prior.attachments,
+      endReason, endedAt, prior.prompt, prior.attachments,
       prior.started_at, prior.live_generation_id, JSON.stringify(retired), runId,
     );
     this.blobs?.syncRefsFromRuns();
-    this.audit("extension", "run.followup.reject", runId, { reason, restored: prior.status });
+    this.audit("extension", "run.followup.reject", runId, { reason, restored: "error" });
+    this.audit("extension", "run.error", runId, { end_reason: endReason });
     this.recordFollowupRejection(runId, reason);
-    this.sse.broadcast(runId, { type: "run.status", runId, status: prior.status });
+    this.sse.broadcast(runId, { type: "run.status", runId, status: "error" });
   }
 
-  /** 拒绝不改终态，但详情要留下这一行，刷新之后仍然看得到。 */
+  /** 详情要留下这一行，刷新之后仍然看得到。 */
   private recordFollowupRejection(runId: string, reason: string): void {
     const run = this.get(runId);
     if (!run) return;

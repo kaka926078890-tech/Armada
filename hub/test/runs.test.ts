@@ -970,7 +970,7 @@ describe("Run dispatch", () => {
     ws.close();
   });
 
-  test("failed followup restores the completed card instead of marking it error", async () => {
+  test("failed followup marks the card error and keeps the previous prompt", async () => {
     const { ws, inbound, api } = await startWithExt({ os: "win32-x64" });
     const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "hello" }) });
     const { run } = await r.json() as any;
@@ -993,9 +993,10 @@ describe("Run dispatch", () => {
     ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "rejected", reason: "CDP_CALL_TIMEOUT" }));
     await new Promise((r2) => setTimeout(r2, 60));
     const live = (await (await api(`/api/runs/${run.id}`)).json()) as any;
-    expect(live.status).toBe("completed");
-    expect(live.end_reason).toBe("completed");
+    expect(live.status).toBe("error");
+    expect(live.end_reason).toBe("CDP_CALL_TIMEOUT");
     expect(live.prompt).toBe("hello");
+    expect(live.conversation_id).toBe("cid-1");
     const events = (await (await api(`/api/runs/${run.id}/events`)).json()) as any[];
     expect(events.some((e) => e.hook_event_name === "beforeSubmitPrompt" && JSON.parse(e.payload).prompt === "下一轮")).toBe(false);
     const rejected = events.find((e) => e.hook_event_name === "followupRejected");
