@@ -155,6 +155,33 @@ describe("Board unread chrome", () => {
     expect(actionsAt).toBeGreaterThan(titleAt);
   });
 
+  test("card shows the latest prompt under the first-dispatch title", () => {
+    const html = renderToStaticMarkup(
+      <Board
+        runs={[{
+          ...run,
+          title: "标准版Bot插件",
+          prompt: "我想在标准版做一个插件",
+          alert_prompt: "forcebuild启动Standard，我看看效果",
+        }]}
+        machines={[{ id: "m-1", name: "Mac-A", os: "darwin", cursor_version: null, extension_version: null, open_workspaces: "[]", status: "online", last_seen_at: 1 }]}
+        selected={null}
+        onSelect={() => {}}
+        showArchived={false}
+        onHide={() => {}}
+        onUnhide={() => {}}
+        readMap={{}}
+        onRename={() => {}}
+      />,
+    );
+    expect(html).toContain("标准版Bot插件");
+    expect(html).toContain("最近 ");
+    expect(html).toContain("forcebuild启动Standard，我看看效果");
+    expect(html).toContain("最初 ");
+    expect(html).toContain("我想在标准版做一个插件");
+    expect(html).toContain("搜索标题、最初或最近的提示词");
+  });
+
   test("card on a stale Windows extension does not repeat the vsix gap", () => {
     const html = renderToStaticMarkup(
       <Board

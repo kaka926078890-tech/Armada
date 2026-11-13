@@ -2346,6 +2346,36 @@ describe("relay HTTP map and snap fingerprint", () => {
     ws.close();
   });
 
+  test("persists alertPrompt so the phone can show the latest operator prompt", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    const headers = { authorization: `Bearer ${fleet.operatorToken}` };
+    const base = {
+      runId: "r-alert",
+      machineId: "m-1",
+      workspaceRoot: "/ws/a",
+      prompt: "最初这句",
+      title: "短标题",
+      status: "running",
+      updatedAt: 1,
+    };
+    ws.send(JSON.stringify({ type: "snap.run", run: base }));
+    await Bun.sleep(40);
+    ws.send(JSON.stringify({
+      type: "snap.run",
+      run: { ...base, alertPrompt: "最近这句", updatedAt: 2 },
+    }));
+    await Bun.sleep(40);
+    const got = await (await fetch(url(s, "/mobile/runs/r-alert"), { headers })).json() as { alertPrompt?: string };
+    expect(got.alertPrompt).toBe("最近这句");
+    ws.send(JSON.stringify({ type: "snap.run", run: { ...base, updatedAt: 3 } }));
+    await Bun.sleep(40);
+    const kept = await (await fetch(url(s, "/mobile/runs/r-alert"), { headers })).json() as { alertPrompt?: string };
+    expect(kept.alertPrompt).toBe("最近这句");
+    ws.close();
+  });
+
   test("persists chatgptThreadId without a Cursor conversationId", async () => {
     const s = start();
     const fleet = s.createFleet();

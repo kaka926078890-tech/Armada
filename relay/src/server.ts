@@ -360,6 +360,7 @@ export function createRelayServer(opts: {
     chatgptThreadId: string;
     attachments: unknown;
     readBasis: number | null;
+    alertPrompt: string;
   }): string {
     return JSON.stringify({
       status: input.status,
@@ -375,6 +376,7 @@ export function createRelayServer(opts: {
       chatgptThreadId: input.chatgptThreadId,
       attachments: input.attachments ?? [],
       readBasis: input.readBasis,
+      alertPrompt: input.alertPrompt,
     });
   }
 
@@ -410,6 +412,7 @@ export function createRelayServer(opts: {
         notified_status?: string | null;
         notified_ask_id?: string | null;
         attachments?: string | null;
+        alert_prompt?: string | null;
       }
       | undefined;
     if (!existing) {
@@ -428,6 +431,8 @@ export function createRelayServer(opts: {
       : (existing?.attachments ?? null);
     const attachmentsFp = attachmentsJson ? JSON.parse(attachmentsJson) : [];
     const readBasis = typeof snap.readBasis === "number" && Number.isFinite(snap.readBasis) ? snap.readBasis : null;
+    const incomingAlert = typeof snap.alertPrompt === "string" ? snap.alertPrompt.trim() : "";
+    const alertPrompt = incomingAlert || (typeof existing?.alert_prompt === "string" ? existing.alert_prompt : "") || null;
     const nextFp = runContentFp({
       status,
       prompt: snap.prompt,
@@ -442,6 +447,7 @@ export function createRelayServer(opts: {
       chatgptThreadId: chatgptThreadId ?? "",
       attachments: attachmentsFp,
       readBasis,
+      alertPrompt: alertPrompt ?? "",
     });
     if (existing) {
       const prevFp = runContentFp({
@@ -458,6 +464,7 @@ export function createRelayServer(opts: {
         chatgptThreadId: existing.chatgpt_thread_id ?? "",
         attachments: existing.attachments ? JSON.parse(existing.attachments) : [],
         readBasis: (existing as { read_basis?: number | null }).read_basis ?? null,
+        alertPrompt: existing.alert_prompt ?? "",
       });
       if (prevFp === nextFp) return existing;
     }
@@ -467,12 +474,12 @@ export function createRelayServer(opts: {
     };
     if (existing) {
       db.query(`UPDATE runs SET machine_id=?3, workspace_root=?4, prompt=?5, status=?6,
-        final_text=?7, error=?8, pending_ask=?9, outbound=?11, queue_message_default_behavior=?12, archived_at=?13, updated_at=?10, title=?14, conversation_id=?15, chatgpt_thread_id=?16, attachments=?17, read_basis=?18 WHERE id=?1 AND fleet_id=?2`)
-        .run(snap.runId, fleetId, snap.machineId, snap.workspaceRoot, snap.prompt, status, finalText, error, pendingAsk, now, outbound, queueMode, archivedAt, title, conversationId, chatgptThreadId, attachmentsJson, readBasis);
+        final_text=?7, error=?8, pending_ask=?9, outbound=?11, queue_message_default_behavior=?12, archived_at=?13, updated_at=?10, title=?14, conversation_id=?15, chatgpt_thread_id=?16, attachments=?17, read_basis=?18, alert_prompt=?19 WHERE id=?1 AND fleet_id=?2`)
+        .run(snap.runId, fleetId, snap.machineId, snap.workspaceRoot, snap.prompt, status, finalText, error, pendingAsk, now, outbound, queueMode, archivedAt, title, conversationId, chatgptThreadId, attachmentsJson, readBasis, alertPrompt);
     } else {
-      db.query(`INSERT INTO runs (id, fleet_id, machine_id, workspace_root, prompt, status, final_text, error, pending_ask, outbound, queue_message_default_behavior, archived_at, updated_at, created_at, title, conversation_id, chatgpt_thread_id, attachments, read_basis)
-        VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?11,?12,?13,?10,?10,?14,?15,?16,?17,?18)`)
-        .run(snap.runId, fleetId, snap.machineId, snap.workspaceRoot, snap.prompt, status, finalText, error, pendingAsk, now, outbound, queueMode, archivedAt, title, conversationId, chatgptThreadId, attachmentsJson, readBasis);
+      db.query(`INSERT INTO runs (id, fleet_id, machine_id, workspace_root, prompt, status, final_text, error, pending_ask, outbound, queue_message_default_behavior, archived_at, updated_at, created_at, title, conversation_id, chatgpt_thread_id, attachments, read_basis, alert_prompt)
+        VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?11,?12,?13,?10,?10,?14,?15,?16,?17,?18,?19)`)
+        .run(snap.runId, fleetId, snap.machineId, snap.workspaceRoot, snap.prompt, status, finalText, error, pendingAsk, now, outbound, queueMode, archivedAt, title, conversationId, chatgptThreadId, attachmentsJson, readBasis, alertPrompt);
     }
     const decided = notifyEdges(prev, {
       prompt: snap.prompt,
@@ -509,6 +516,7 @@ export function createRelayServer(opts: {
       attachments: row.attachments ? JSON.parse(row.attachments) : [],
       updatedAt: row.updated_at,
       ...(typeof row.read_basis === "number" ? { readBasis: row.read_basis } : {}),
+      ...(typeof row.alert_prompt === "string" && row.alert_prompt.trim() ? { alertPrompt: row.alert_prompt.trim() } : {}),
     };
   }
 

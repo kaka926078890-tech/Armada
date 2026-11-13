@@ -117,6 +117,43 @@ fun runDisplayTitle(title: String?, prompt: String, attachmentCount: Int): Strin
     return prompt
 }
 
+fun flatPrompt(text: String?): String = text.orEmpty().replace(Regex("\\s+"), " ").trim()
+
+data class CardPromptLines(val latest: String, val original: String)
+
+private val PENDING_OUTBOUND = setOf("injecting", "queued", "steered")
+
+/** 和中台卡片同一规则：最近一句优先看还在队列里的，和标题相同的不重复。 */
+fun cardPromptLines(
+    title: String?,
+    prompt: String,
+    alertPrompt: String?,
+    outbound: List<OutboundDto>?,
+    attachmentCount: Int,
+): CardPromptLines {
+    val display = flatPrompt(runDisplayTitle(title, prompt, attachmentCount))
+    val originalRaw = flatPrompt(prompt)
+    val pending = outbound.orEmpty().asReversed().firstOrNull {
+        it.state in PENDING_OUTBOUND && flatPrompt(it.prompt).isNotEmpty()
+    }
+    val latestRaw = flatPrompt(pending?.prompt).ifEmpty { flatPrompt(alertPrompt) }
+    val latest = if (latestRaw.isNotEmpty() && latestRaw != display) latestRaw else ""
+    val original = if (originalRaw.isNotEmpty() && originalRaw != display && originalRaw != latest) originalRaw else ""
+    return CardPromptLines(latest, original)
+}
+
+fun runMatchesPromptQuery(run: RunDto, query: String): Boolean {
+    val q = flatPrompt(query).lowercase()
+    if (q.isEmpty()) return true
+    val hay = buildList {
+        add(run.displayTitle)
+        add(run.prompt)
+        add(run.alertPrompt.orEmpty())
+        run.outbound.orEmpty().forEach { add(it.prompt) }
+    }
+    return hay.any { flatPrompt(it).lowercase().contains(q) }
+}
+
 fun canAcceptMoreAttachments(current: Int, adding: Int, max: Int = MAX_RUN_ATTACHMENTS): Boolean {
     return adding > 0 && current + adding <= max
 }
@@ -158,6 +195,7 @@ data class RunDto(
     val conversationId: String? = null,
     val chatgptThreadId: String? = null,
     val attachments: List<RunAttachmentDto> = emptyList(),
+    val alertPrompt: String? = null,
 ) {
     val isLive: Boolean
         get() = status in setOf("created", "queued", "dispatched", "binding", "running")
@@ -167,6 +205,7 @@ data class RunDto(
         get() = (outbound ?: emptyList()).filter { it.state == "queued" || (it.state == "injecting" && it.expectedMode == "queue") }
     val canFollowup: Boolean get() = pendingAsk == null && (!conversationId.isNullOrBlank() || !chatgptThreadId.isNullOrBlank())
     val displayTitle: String get() = runDisplayTitle(title, prompt, attachments.size)
+    val promptLines: CardPromptLines get() = cardPromptLines(title, prompt, alertPrompt, outbound, attachments.size)
     val showsRetry: Boolean
         get() = canRetry ?: (status in setOf("error", "unknown", "aborted"))
     val displayError: String?

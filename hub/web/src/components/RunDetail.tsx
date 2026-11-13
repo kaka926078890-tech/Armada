@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { api, getToken } from "../api";
 import type { Machine, RunEvent } from "../types";
-import { workspaceFolderName, runDisplayName, canRetryRun, CDP_NOT_READY_COPY, resumeStallCopy, type RunRow } from "../boardState";
+import { workspaceFolderName, runDisplayName, cardPromptLines, canRetryRun, CDP_NOT_READY_COPY, resumeStallCopy, type RunRow } from "../boardState";
 import ChatThread from "./ChatThread";
 import FilePreview from "./FilePreview";
 import { eventsToChat, mergePendingAsk, mergeOutboundChat, outboundUserText, queuedOutbound, stampOutboundImages, userMessageCaption, INITIAL_VISIBLE_TURNS, initialHiddenPrefixTurns, recentTurnsWindow, stampFallbackImageIds } from "../chatView";
@@ -423,6 +423,7 @@ export default function RunDetail({
   const chat = recentTurnsWindow(chatAll, hiddenPrefixTurns);
   const hasOlder = hiddenPrefixTurns > 0 || hasOlderEvents(events);
   const titleText = runDisplayName(run) || "图片";
+  const promptLines = cardPromptLines(run);
   const commitTitle = () => {
     const next = titleDraft.trim();
     setEditingTitle(false);
@@ -467,6 +468,12 @@ export default function RunDetail({
       </div>
       <div className={`px-4 py-2 ${UI_META} text-muted-foreground border-b border-border`}>
         <div className="truncate" title={run.workspace_root}>{workspaceFolderName(run.workspace_root)}</div>
+        {promptLines.latest ? (
+          <div className="mt-1 break-words line-clamp-3" title={promptLines.latest}>最近 {promptLines.latest}</div>
+        ) : null}
+        {promptLines.original ? (
+          <div className="mt-1 break-words line-clamp-2" title={promptLines.original}>最初 {promptLines.original}</div>
+        ) : null}
         {titleError && <div className="mt-1 text-destructive">{titleError}</div>}
         {!injectReady && <div className="mt-1 text-destructive">{CDP_NOT_READY_COPY}</div>}
         {resumeStallCopy(run.end_reason) && (

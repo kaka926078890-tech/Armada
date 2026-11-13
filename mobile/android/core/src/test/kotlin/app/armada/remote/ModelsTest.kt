@@ -48,6 +48,14 @@ class ModelsTest {
             RunAttachmentDto("a"),
             RunAttachmentDto("b"),
         )).displayTitle)
+        val followed = run("completed", title = "短标题").copy(prompt = "最初这句", alertPrompt = "最近这句")
+        assertEquals("最近这句", followed.promptLines.latest)
+        assertEquals("最初这句", followed.promptLines.original)
+        assertEquals("", run("completed").copy(alertPrompt = "do it").promptLines.latest)
+        assertTrue(runMatchesPromptQuery(followed, "短标"))
+        assertTrue(runMatchesPromptQuery(followed, "最初"))
+        assertTrue(runMatchesPromptQuery(followed, "最近这"))
+        assertFalse(runMatchesPromptQuery(followed, "没有"))
         assertTrue(canAcceptMoreAttachments(3, 1))
         assertFalse(canAcceptMoreAttachments(4, 1))
         val png = byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47)

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import {
-  groupRuns, cardView, clipCardTitle, CARD_TITLE_MAX_CHARS, listWorkspaceSlots, encodeWorkspaceKey, decodeWorkspaceKey,
+  groupRuns, cardView, cardPromptLines, runMatchesPromptQuery, clipCardTitle, CARD_TITLE_MAX_CHARS, listWorkspaceSlots, encodeWorkspaceKey, decodeWorkspaceKey,
   filterRunsByWorkspace, sortConversations, groupSlotsByMachine, isUnreadCompleted, isUnreadMessage,
   workspaceHasUnread, workspaceUnreadCount, formatUnreadCount, canArchiveRun, canRetryRun, isHubArchived,
   workspaceFolderName, workspaceHasLiveRun, resolveSelectedWorkspace, isUnreadNeedInput, cardChromeClass, cardChromeOf, columnHasAlert,
@@ -70,6 +70,45 @@ describe("cardView", () => {
   });
   test("operator title wins over prompt", () => {
     expect(cardView({ ...base, prompt: "第一句很长", title: "短标题" }, 5000).title).toBe("短标题");
+  });
+  test("card shows the latest prompt when it differs from the first title", () => {
+    const lines = cardPromptLines({
+      ...base,
+      prompt: "我想在标准版做一个插件",
+      alert_prompt: "forcebuild启动Standard，我看看效果",
+    });
+    expect(lines.latest).toBe("forcebuild启动Standard，我看看效果");
+    expect(lines.original).toBe("");
+  });
+  test("queued follow-up wins over the stored alert prompt", () => {
+    const lines = cardPromptLines({
+      ...base,
+      prompt: "第一句",
+      alert_prompt: "上一句",
+      outbound: [{ id: "o1", prompt: "上一句", expected_mode: "queue", state: "consumed", created_at: 1 }, { id: "o2", prompt: "刚派发的这句", expected_mode: "queue", state: "queued", created_at: 2 }],
+    });
+    expect(lines.latest).toBe("刚派发的这句");
+  });
+  test("renamed card keeps the original prompt when the latest line is something else", () => {
+    const lines = cardPromptLines({
+      ...base,
+      title: "看板标题",
+      prompt: "最初这句",
+      alert_prompt: "最近这句",
+    });
+    expect(lines.latest).toBe("最近这句");
+    expect(lines.original).toBe("最初这句");
+  });
+  test("same text as the title is not repeated", () => {
+    expect(cardPromptLines({ ...base, prompt: "第一句", alert_prompt: "第一句\n" })).toEqual({ latest: "", original: "" });
+  });
+  test("search matches title, original prompt, and latest prompt", () => {
+    const run = { ...base, title: "短标题", prompt: "最初这句", alert_prompt: "forcebuild看看" };
+    expect(runMatchesPromptQuery(run, "")).toBe(true);
+    expect(runMatchesPromptQuery(run, "短标")).toBe(true);
+    expect(runMatchesPromptQuery(run, "最初")).toBe(true);
+    expect(runMatchesPromptQuery(run, "FORCE")).toBe(true);
+    expect(runMatchesPromptQuery(run, "没有")).toBe(false);
   });
   test("running + pending_ask badge is 待处理", () => {
     expect(cardView({

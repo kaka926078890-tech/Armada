@@ -325,6 +325,20 @@ struct RunRow: View {
                     .foregroundStyle(hub.foreground)
                     .lineLimit(3)
                     .multilineTextAlignment(.leading)
+                if !run.promptLines.latest.isEmpty {
+                    Text("最近 \(run.promptLines.latest)")
+                        .font(.system(size: 12))
+                        .foregroundStyle(hub.mutedForeground)
+                        .lineLimit(3)
+                        .multilineTextAlignment(.leading)
+                }
+                if !run.promptLines.original.isEmpty {
+                    Text("最初 \(run.promptLines.original)")
+                        .font(.system(size: 12))
+                        .foregroundStyle(hub.mutedForeground)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                }
                 HStack(spacing: 6) {
                     if unread {
                         Circle()
@@ -673,6 +687,7 @@ struct WorkspaceHome: View {
     @State private var tab: BoardColumn = .completed
     @State private var showDispatch = false
     @State private var showArchived = false
+    @State private var query = ""
 
     private var boardRuns: [RunDTO] {
         session.runs(in: live, archived: showArchived)
@@ -691,8 +706,8 @@ struct WorkspaceHome: View {
     }
 
     var filtered: [RunDTO] {
-        if showArchived { return boardRuns }
-        return boardRuns.filter { $0.column == tab }
+        let columnRuns = showArchived ? boardRuns : boardRuns.filter { $0.column == tab }
+        return columnRuns.filter { $0.matchesPromptQuery(query) }
     }
 
     var body: some View {
@@ -745,6 +760,14 @@ struct WorkspaceHome: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
             }
+            TextField("搜索标题、最初或最近的提示词", text: $query)
+                .textFieldStyle(.plain)
+                .font(.system(size: 14))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(hub.muted, in: RoundedRectangle(cornerRadius: Hub.radius, style: .continuous))
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
             List {
                 if let err = session.lastError {
                     Text(err).foregroundStyle(.red).font(.caption)
@@ -757,7 +780,9 @@ struct WorkspaceHome: View {
                         .listRowBackground(Color.clear)
                 }
                 if filtered.isEmpty {
-                    Text(showArchived ? "还没有已隐藏的任务" : "这一列还没有任务").foregroundStyle(.secondary)
+                    Text(query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                         ? (showArchived ? "还没有已隐藏的任务" : "这一列还没有任务")
+                         : "没有匹配的任务").foregroundStyle(.secondary)
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
                 }
@@ -1383,6 +1408,18 @@ struct RunDetailView: View {
                         .font(.system(size: 12))
                         .foregroundStyle(hub.mutedForeground)
                         .lineLimit(1)
+                    if !run.promptLines.latest.isEmpty {
+                        Text("最近 \(run.promptLines.latest)")
+                            .font(.system(size: 12))
+                            .foregroundStyle(hub.mutedForeground)
+                            .lineLimit(3)
+                    }
+                    if !run.promptLines.original.isEmpty {
+                        Text("最初 \(run.promptLines.original)")
+                            .font(.system(size: 12))
+                            .foregroundStyle(hub.mutedForeground)
+                            .lineLimit(2)
+                    }
                     if let e = run.displayError { Text(RelayAPIError.operatorMessage(e)).foregroundStyle(hub.destructive) }
                     if slot?.canInject == false, run.displayError != "CDP_NOT_READY" {
                         Text(RelayAPIError.operatorMessage("CDP_NOT_READY")).foregroundStyle(hub.destructive)

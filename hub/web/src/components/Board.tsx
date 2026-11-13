@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { groupRuns, cardView, clipCardTitle, COLUMN_LABELS, canArchiveRun, canRetryRun, runDisplayName, cardChromeClass, cardChromeOf, columnHasAlert, unreadAlertDotClass, resumeStallCopy, type ColumnKey, type RunRow } from "../boardState";
+import { groupRuns, cardView, cardPromptLines, clipCardTitle, COLUMN_LABELS, canArchiveRun, canRetryRun, runDisplayName, runMatchesPromptQuery, cardChromeClass, cardChromeOf, columnHasAlert, unreadAlertDotClass, resumeStallCopy, type ColumnKey, type RunRow } from "../boardState";
 import type { Machine } from "../types";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -35,10 +35,13 @@ export default function Board({ runs, selected, onSelect, showArchived, onHide, 
   onRetry?: (id: string) => void;
   quietUnread?: boolean;
 }) {
-  const g = groupRuns(runs);
+  const [query, setQuery] = useState("");
+  const visible = runs.filter((r) => runMatchesPromptQuery(r, query));
+  const g = groupRuns(visible);
   const now = Date.now();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const searching = query.trim().length > 0;
   const startEdit = (r: RunRow) => {
     setDraft(runDisplayName(r));
     setEditingId(r.id);
@@ -51,7 +54,16 @@ export default function Board({ runs, selected, onSelect, showArchived, onHide, 
     onRename(id, t);
   };
   return (
-    <main className="flex-1 min-h-0 min-w-0 overflow-x-hidden flex gap-3 p-4">
+    <div className="flex-1 min-h-0 min-w-0 overflow-hidden flex flex-col">
+      <div className="px-4 pt-3">
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="搜索标题、最初或最近的提示词"
+          aria-label="搜索卡片"
+        />
+      </div>
+    <main className="flex-1 min-h-0 min-w-0 overflow-x-hidden flex gap-3 p-4 pt-3">
       {(Object.keys(COLUMN_LABELS) as ColumnKey[]).map((col) => (
         <section key={col} className="flex-1 min-w-0 min-h-0 overflow-hidden flex flex-col rounded-2xl bg-muted/30">
           <h2 className={`${UI_TYPE} font-medium tracking-tight text-foreground px-3 pb-2 pt-3 inline-flex items-center gap-1.5 whitespace-nowrap`}>
@@ -63,10 +75,11 @@ export default function Board({ runs, selected, onSelect, showArchived, onHide, 
           </h2>
           <div className="flex-1 min-h-0 overflow-x-hidden overflow-y-auto flex flex-col gap-2 px-2 pb-3">
             {g[col].length === 0 && (
-              <div className={`${UI_META} text-muted-foreground px-2 py-6 text-center`}>暂无</div>
+              <div className={`${UI_META} text-muted-foreground px-2 py-6 text-center`}>{searching ? "没有匹配" : "暂无"}</div>
             )}
             {g[col].map((r) => {
               const v = cardView(r, now);
+              const lines = cardPromptLines(r);
               const chrome = cardChromeOf(r, readMap[r.id]);
               const editing = editingId === r.id;
               return (
@@ -92,6 +105,16 @@ export default function Board({ runs, selected, onSelect, showArchived, onHide, 
                         {col === "running" ? <CardSpinner /> : null}
                         {v.elapsed}
                       </span>
+                      {lines.latest ? (
+                        <div className={`${UI_META} col-span-2 mt-1 text-muted-foreground break-words line-clamp-3`} title={lines.latest}>
+                          <span className="text-foreground/80">最近 </span>{lines.latest}
+                        </div>
+                      ) : null}
+                      {lines.original ? (
+                        <div className={`${UI_META} col-span-2 mt-0.5 text-muted-foreground break-words line-clamp-2`} title={lines.original}>
+                          <span className="text-foreground/80">最初 </span>{lines.original}
+                        </div>
+                      ) : null}
                       {resumeStallCopy(r.end_reason) && (
                         <div className={`${UI_META} col-span-2 text-amber-600 dark:text-amber-400 mt-1 line-clamp-3`}>{resumeStallCopy(r.end_reason)}</div>
                       )}
@@ -141,5 +164,6 @@ export default function Board({ runs, selected, onSelect, showArchived, onHide, 
         </section>
       ))}
     </main>
+    </div>
   );
 }

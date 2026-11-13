@@ -538,12 +538,14 @@ fun WorkspaceScreen(vm: SessionVm, state: UiState, workspace: WorkspaceDto, onBa
     var tab by remember { mutableStateOf(BoardColumn.Completed) }
     var showArchived by remember { mutableStateOf(false) }
     var showDispatch by remember { mutableStateOf(false) }
+    var query by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
     val sameSlot: (RunDto) -> Boolean = { it.machineId == workspace.machineId && it.workspaceRoot == workspace.workspaceRoot }
     val openRuns = state.board.runs.filter(sameSlot)
     val hiddenRuns = state.board.hidden.filter(sameSlot)
     val boardRuns = if (showArchived) hiddenRuns else openRuns
-    val filtered = if (showArchived) boardRuns else boardRuns.filter { it.column == tab }
+    val columnRuns = if (showArchived) boardRuns else boardRuns.filter { it.column == tab }
+    val filtered = columnRuns.filter { runMatchesPromptQuery(it, query) }
     val hiddenN = hiddenRuns.size
     fun archive(run: RunDto, hide: Boolean) {
         vm.hideLocal(run.runId, hide)
@@ -636,6 +638,13 @@ fun WorkspaceScreen(vm: SessionVm, state: UiState, workspace: WorkspaceDto, onBa
                     }
                 }
             }
+            IosTextField(
+                value = query,
+                onValueChange = { query = it },
+                placeholder = "搜索标题、最初或最近的提示词",
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                maxLines = 1,
+            )
             LazyColumn(Modifier.weight(1f)) {
                 state.lastError?.let { item { Text(it, color = StatusRed, modifier = Modifier.padding(20.dp), style = MaterialTheme.typography.bodySmall) } }
                 if (showArchived) {
@@ -650,7 +659,15 @@ fun WorkspaceScreen(vm: SessionVm, state: UiState, workspace: WorkspaceDto, onBa
                 }
                 if (filtered.isEmpty()) {
                     item {
-                        Text(if (showArchived) "还没有已隐藏的任务" else "这一列还没有任务", modifier = Modifier.padding(20.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            when {
+                                query.isNotBlank() -> "没有匹配的任务"
+                                showArchived -> "还没有已隐藏的任务"
+                                else -> "这一列还没有任务"
+                            },
+                            modifier = Modifier.padding(20.dp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 } else {
                     items(filtered, key = { it.runId }) { run ->
@@ -724,6 +741,24 @@ fun RunRow(run: RunDto, unread: Boolean) {
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(run.displayTitle, maxLines = 3, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            if (run.promptLines.latest.isNotEmpty()) {
+                Text(
+                    "最近 ${run.promptLines.latest}",
+                    maxLines = 3,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+            if (run.promptLines.original.isNotEmpty()) {
+                Text(
+                    "最初 ${run.promptLines.original}",
+                    maxLines = 2,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
             Row(
                 Modifier.padding(top = 8.dp).fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -1126,6 +1161,12 @@ fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String, onBack: () -> 
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                if (r.promptLines.latest.isNotEmpty()) {
+                    Text("最近 ${r.promptLines.latest}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                if (r.promptLines.original.isNotEmpty()) {
+                    Text("最初 ${r.promptLines.original}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 r.displayError?.let { Text(operatorMessage(it), color = StatusRed) }
                 if (slot?.canInject == false && r.displayError != "CDP_NOT_READY") Text(operatorMessage("CDP_NOT_READY"), color = StatusRed)
                 if (chatReady) DetailPromptCard(detailUserPrompt(r.prompt, chatTurns))

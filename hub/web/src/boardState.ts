@@ -3,7 +3,7 @@ import { LIVE_STATUSES, RETRY_STATUSES, isStatus } from "../../src/runStatus";
 export interface RunRow {
   id: string; machine_id: string; window_id: string | null; workspace_root: string;
   prompt: string; title?: string | null;
-  /** 最近一条操作员提示词。完成提醒用它；卡片标题仍走 title || prompt。 */
+  /** 最近一条已接受的操作员提示词。卡片副标题和完成提醒都用它；标题仍走 title || prompt。 */
   alert_prompt?: string | null;
   status: string; conversation_id: string | null;
   chatgpt_thread_id?: string | null;
@@ -26,9 +26,46 @@ export interface RunRow {
   queue_message_default_behavior?: string | null;
 }
 
-/** 卡片展示名：操作员改过的 title 优先，否则最近一次注入的 prompt。 */
+/** 卡片标题：操作员改过的 title 优先，否则第一次派发的 prompt。 */
 export function runDisplayName(run: Pick<RunRow, "title" | "prompt">): string {
   return (run.title ?? "").trim() || run.prompt.trim();
+}
+
+export function flatPrompt(text: string | null | undefined): string {
+  return (text ?? "").replace(/\s+/g, " ").trim();
+}
+
+const PENDING_OUTBOUND = new Set(["injecting", "queued", "steered"]);
+
+export type CardPromptLines = {
+  /** 和标题不同的最近一句。还在队列里的优先于已落库的 alert_prompt。 */
+  latest: string;
+  /** 标题被改过、且不同于最近一句时，露出第一次派发的 prompt。 */
+  original: string;
+};
+
+/** 看板用来认出这张卡的两句提示词。和标题相同的那句不重复。 */
+export function cardPromptLines(run: Pick<RunRow, "title" | "prompt" | "alert_prompt" | "outbound">): CardPromptLines {
+  const title = flatPrompt(runDisplayName(run));
+  const originalRaw = flatPrompt(run.prompt);
+  const pending = [...(run.outbound ?? [])].reverse().find((o) => PENDING_OUTBOUND.has(o.state) && flatPrompt(o.prompt));
+  const latestRaw = flatPrompt(pending?.prompt) || flatPrompt(run.alert_prompt);
+  const latest = latestRaw && latestRaw !== title ? latestRaw : "";
+  const original = originalRaw && originalRaw !== title && originalRaw !== latest ? originalRaw : "";
+  return { latest, original };
+}
+
+/** 空查询留全部。标题、最初 prompt、最近 prompt、还在队列里的句子都能命中。 */
+export function runMatchesPromptQuery(run: Pick<RunRow, "title" | "prompt" | "alert_prompt" | "outbound">, query: string): boolean {
+  const q = flatPrompt(query).toLowerCase();
+  if (!q) return true;
+  const hay = [
+    runDisplayName(run),
+    run.prompt,
+    run.alert_prompt ?? "",
+    ...(run.outbound ?? []).map((o) => o.prompt),
+  ];
+  return hay.some((s) => flatPrompt(s).toLowerCase().includes(q));
 }
 
 /** 五列卡片标题截取：约两行 CJK（列宽 ≥240px）。完整文案留给 hover / 详情。 */

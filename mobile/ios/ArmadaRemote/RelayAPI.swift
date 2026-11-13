@@ -125,6 +125,11 @@ struct ChatTurnDTO: Decodable {
     var text: String
 }
 
+func flatPrompt(_ text: String) -> String {
+    text.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
 struct RunDTO: Decodable, Identifiable, Hashable {
     var runId: String
     var machineId: String
@@ -141,6 +146,7 @@ struct RunDTO: Decodable, Identifiable, Hashable {
     var updatedAt: Int?
     var readBasis: Int?
     var title: String?
+    var alertPrompt: String?
     var conversationId: String?
     var chatgptThreadId: String?
     var attachments: [RunAttachment]?
@@ -170,6 +176,28 @@ struct RunDTO: Decodable, Identifiable, Hashable {
         if !prompt.isEmpty { return prompt }
         let n = attachments?.count ?? 0
         return n > 0 ? "[\(n) 张图片]" : prompt
+    }
+
+    /// 和中台卡片同一规则：最近一句优先看还在队列里的，和标题相同的不重复。
+    var promptLines: (latest: String, original: String) {
+        let display = flatPrompt(displayTitle)
+        let originalRaw = flatPrompt(prompt)
+        let pending = (outbound ?? []).reversed().first { row in
+            ["injecting", "queued", "steered"].contains(row.state) && !flatPrompt(row.prompt).isEmpty
+        }
+        let pendingText = pending.map { flatPrompt($0.prompt) } ?? ""
+        let latestRaw = pendingText.isEmpty ? flatPrompt(alertPrompt ?? "") : pendingText
+        let latest = !latestRaw.isEmpty && latestRaw != display ? latestRaw : ""
+        let original = !originalRaw.isEmpty && originalRaw != display && originalRaw != latest ? originalRaw : ""
+        return (latest, original)
+    }
+
+    func matchesPromptQuery(_ query: String) -> Bool {
+        let q = flatPrompt(query).lowercased()
+        if q.isEmpty { return true }
+        var hay = [displayTitle, prompt, alertPrompt ?? ""]
+        hay.append(contentsOf: (outbound ?? []).map(\.prompt))
+        return hay.contains { flatPrompt($0).lowercased().contains(q) }
     }
 
     var showsRetry: Bool {
