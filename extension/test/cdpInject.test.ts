@@ -590,6 +590,45 @@ describe("createCdpSubmitter", () => {
     expect(log.filter((c) => c.method === "Input.dispatchKeyEvent")).toHaveLength(2);
   });
 
+  test("stamp-read timeout is not logged as a composer timeout", async () => {
+    const lines: string[] = [];
+    const submit = createCdpSubmitter(deps({
+      windowId: "win-a",
+      callTimeoutMs: 40,
+      log: (s) => lines.push(s),
+      connect: async () => ({
+        call() { return new Promise(() => {}); },
+        close() {},
+      }),
+    }));
+    const r = await submit("/Users/x/armada-test-ws", "hi");
+    expect(r).toEqual({ ok: false, reason: "CDP_CALL_TIMEOUT" });
+    expect(lines).toContain("cdp phase: stamp-read CDP_CALL_TIMEOUT");
+    expect(lines.some((s) => s.includes("composer"))).toBe(false);
+  });
+
+  test("stamp-write timeout is not logged as a composer timeout", async () => {
+    const lines: string[] = [];
+    const submit = createCdpSubmitter(deps({
+      windowId: "win-a",
+      callTimeoutMs: 40,
+      log: (s) => lines.push(s),
+      connect: async () => ({
+        async call(_method, params) {
+          const expr = String(params?.expression ?? "");
+          if (expr.includes("setAttribute")) return new Promise(() => {});
+          if (expr.includes("getAttribute")) return { result: { value: null } };
+          return { result: { value: "OK" } };
+        },
+        close() {},
+      }),
+    }));
+    const r = await submit("/Users/x/armada-test-ws", "hi");
+    expect(r).toEqual({ ok: false, reason: "CDP_CALL_TIMEOUT" });
+    expect(lines).toContain("cdp phase: stamp-write CDP_CALL_TIMEOUT");
+    expect(lines.some((s) => s.includes("composer"))).toBe(false);
+  });
+
   test("WS 连接失败 → CDP_CONNECT_FAIL", async () => {
     const submit = createCdpSubmitter(deps({ connect: async () => { throw new Error("boom"); } }));
     const r = await submit("/Users/x/armada-test-ws", "hi");
@@ -628,10 +667,12 @@ describe("createCdpSubmitter", () => {
     const addr = server.address();
     const port = typeof addr === "object" && addr ? addr.port : 0;
     try {
+      const lines: string[] = [];
       const submit = createCdpSubmitter({
         port,
         callTimeoutMs: 80,
         sleep: async () => {},
+        log: (s) => lines.push(s),
         fetchJson: async () => [{
           type: "page",
           title: "hello.txt — armada-test-ws",
@@ -641,6 +682,8 @@ describe("createCdpSubmitter", () => {
       const started = Date.now();
       const r = await submit("/Users/x/armada-test-ws", "hi");
       expect(r).toEqual({ ok: false, reason: "CDP_CALL_TIMEOUT" });
+      expect(lines).toContain("cdp phase: composer CDP_CALL_TIMEOUT");
+      expect(lines.some((s) => s.startsWith("cdp phase: stamp-"))).toBe(false);
       expect(Date.now() - started).toBeLessThan(1000);
       await new Promise((resolve) => setTimeout(resolve, 200));
       expect(ended).toBeGreaterThan(0);

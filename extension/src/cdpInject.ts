@@ -1018,13 +1018,17 @@ async function connectWorkspacePage(
       if (!wrote) wrote = await writeStamp(chosen.session);
       if (!wrote) {
         chosen.session.close();
+        log("cdp phase: stamp-write CDP_CALL_TIMEOUT");
         return { ok: false, reason: "CDP_CALL_TIMEOUT" };
       }
       return { ok: true, session: chosen.session, wsUrl: chosen.wsUrl };
     }
     closeExcept(null);
     if (unstamped.length > 1) return { ok: false, reason: "WINDOW_TARGET_AMBIGUOUS" };
-    if (sawTimeout) return { ok: false, reason: "CDP_CALL_TIMEOUT" };
+    if (sawTimeout) {
+      log("cdp phase: stamp-read CDP_CALL_TIMEOUT");
+      return { ok: false, reason: "CDP_CALL_TIMEOUT" };
+    }
     return { ok: false, reason: "WINDOW_TARGET_NOT_FOUND" };
   }
   const picked = pickCdpPage(targets, workspaceRoot);
@@ -1281,6 +1285,7 @@ async function selectAllComposer(session: CdpSession): Promise<void> {
 
 export function createCdpSubmitter(deps: CdpSubmitterDeps) {
   const sleep = deps.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
+  const log = deps.log ?? (() => {});
 
   return async function submit(workspaceRoot: string, prompt: string, opts?: CdpSubmitOpts): Promise<CdpSubmitResult> {
     const hit = await connectWorkspacePage(deps, workspaceRoot);
@@ -1341,7 +1346,9 @@ export function createCdpSubmitter(deps: CdpSubmitterDeps) {
       if (e !== "OK") return { ok: false, reason: `ENTER_FAIL:${e}` };
       return { ok: true };
     } catch (e) {
-      return callFail(e);
+      const failed = callFail(e);
+      if (failed.reason === "CDP_CALL_TIMEOUT") log("cdp phase: composer CDP_CALL_TIMEOUT");
+      return failed;
     } finally {
       session.close();
     }
