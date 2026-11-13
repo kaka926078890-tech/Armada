@@ -985,6 +985,8 @@ fun DispatchSheet(vm: SessionVm, workspace: WorkspaceDto, followupRunId: String?
 @Composable
 fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String, onBack: () -> Unit, onOpenFile: (String) -> Unit = {}, onOpenChat: () -> Unit = {}) {
     var run by remember { mutableStateOf(state.board.runs.find { it.runId == runId } ?: state.board.hidden.find { it.runId == runId }) }
+    var chatTurns by remember { mutableStateOf<List<ChatTurnDto>>(emptyList()) }
+    var chatReady by remember { mutableStateOf(false) }
     var err by remember { mutableStateOf<String?>(null) }
     var showFollow by remember { mutableStateOf(false) }
     var copied by remember { mutableStateOf(false) }
@@ -1001,7 +1003,7 @@ fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String, onBack: () -> 
     fun adopt(fetched: RunDto) {
         run = coalesceFinalText(fetched, run)
     }
-    LaunchedEffect(runId) {
+    suspend fun reloadDetail() {
         try {
             adopt(vm.api().run(runId))
             vm.markOpened(runId)
@@ -1009,13 +1011,18 @@ fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String, onBack: () -> 
         } catch (e: Exception) {
             err = e.message
         }
+        runCatching { chatTurns = vm.api().chat(runId) }
+        chatReady = true
+    }
+    LaunchedEffect(runId) {
+        reloadDetail()
         while (true) {
             if (state.streamHealthy) {
                 delay(1000)
                 continue
             }
             delay(3000)
-            runCatching { adopt(vm.api().run(runId)) }
+            reloadDetail()
         }
     }
     val streamed = state.board.runs.find { it.runId == runId } ?: state.board.hidden.find { it.runId == runId }
@@ -1025,7 +1032,7 @@ fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String, onBack: () -> 
         adopt(next)
         if (state.watchingId == runId) vm.markOpened(runId)
         if (detailShouldReload(local, next)) {
-            runCatching { adopt(vm.api().run(runId)) }
+            reloadDetail()
         }
     }
     Scaffold(
@@ -1121,7 +1128,7 @@ fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String, onBack: () -> 
                 )
                 r.displayError?.let { Text(operatorMessage(it), color = StatusRed) }
                 if (slot?.canInject == false && r.displayError != "CDP_NOT_READY") Text(operatorMessage("CDP_NOT_READY"), color = StatusRed)
-                DetailPromptCard(r.prompt)
+                if (chatReady) DetailPromptCard(detailUserPrompt(r.prompt, chatTurns))
                 DetailReplyBlock(r.finalText, r.isLive, onOpenFile)
                 Text(
                     "查看对话记录",

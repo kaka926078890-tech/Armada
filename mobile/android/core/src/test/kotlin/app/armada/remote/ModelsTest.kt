@@ -153,6 +153,22 @@ class ModelsTest {
     }
 
     @Test
+    fun detailUserPromptUsesLastUserTurn() {
+        val turns = listOf(
+            ChatTurnDto("user", "帮我启动一下工作区GuoSen这个Demo的演示"),
+            ChatTurnDto("assistant", "好"),
+            ChatTurnDto("user", "  现在这个是客户返回的真实的接口数据？  "),
+            ChatTurnDto("assistant", "是。"),
+        )
+        assertEquals(
+            "现在这个是客户返回的真实的接口数据？",
+            detailUserPrompt("帮我启动一下工作区GuoSen这个Demo的演示", turns),
+        )
+        assertEquals("第一句", detailUserPrompt("第一句", emptyList()))
+        assertEquals("第一句", detailUserPrompt("第一句", listOf(ChatTurnDto("user", "  "))))
+    }
+
+    @Test
     fun keepListBodiesRetainsLocalFinalText() {
         val prior = listOf(run("completed", finalText = "FULL"))
         val incoming = listOf(run("completed", finalText = null))

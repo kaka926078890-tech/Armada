@@ -104,6 +104,11 @@ fun imageMagicMime(bytes: ByteArray): String? {
     return null
 }
 
+fun detailUserPrompt(cardPrompt: String, turns: List<ChatTurnDto>): String {
+    val last = turns.lastOrNull { it.role == "user" }?.text?.trim().orEmpty()
+    return if (last.isNotEmpty()) last else cardPrompt
+}
+
 fun runDisplayTitle(title: String?, prompt: String, attachmentCount: Int): String {
     val named = title?.trim().orEmpty()
     if (named.isNotEmpty()) return named

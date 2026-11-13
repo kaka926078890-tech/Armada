@@ -1333,6 +1333,12 @@ struct DetailReplyBlock: View {
     }
 }
 
+func detailUserPrompt(cardPrompt: String, turns: [ChatTurnDTO]) -> String {
+    let last = turns.last { $0.role == "user" }?.text
+        .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    return last.isEmpty ? cardPrompt : last
+}
+
 struct RunDetailView: View {
     @EnvironmentObject var session: Session
     @Environment(\.hub) private var hub
@@ -1341,6 +1347,8 @@ struct RunDetailView: View {
     @State private var err: String?
     @State private var mdHeight: CGFloat = 120
     @State private var promptHeight: CGFloat = 40
+    @State private var chatTurns: [ChatTurnDTO] = []
+    @State private var chatReady = false
     @State private var showDispatch = false
     @State private var copied = false
     @State private var filePath: String?
@@ -1379,7 +1387,12 @@ struct RunDetailView: View {
                     if slot?.canInject == false, run.displayError != "CDP_NOT_READY" {
                         Text(RelayAPIError.operatorMessage("CDP_NOT_READY")).foregroundStyle(hub.destructive)
                     }
-                    DetailPromptCard(text: run.prompt, contentHeight: $promptHeight)
+                    if chatReady {
+                        DetailPromptCard(
+                            text: detailUserPrompt(cardPrompt: run.prompt, turns: chatTurns),
+                            contentHeight: $promptHeight
+                        )
+                    }
                     DetailReplyBlock(text: run.finalText, isLive: run.isLive, height: $mdHeight, onWorkspaceFile: { filePath = $0 })
                     Button("查看对话记录") { showChat = true }
                         .font(.system(size: 13, weight: .medium))
@@ -1609,6 +1622,10 @@ struct RunDetailView: View {
         } catch {
             err = error.localizedDescription
         }
+        if let turns = try? await session.api().chat(runId: runId) {
+            chatTurns = turns
+        }
+        chatReady = true
     }
 }
 
