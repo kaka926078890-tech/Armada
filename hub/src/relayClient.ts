@@ -45,6 +45,8 @@ export type RunSnap = {
   workspaceRoot: string;
   prompt: string;
   title: string;
+  /** 完成提醒正文。卡片 title 不放这里。 */
+  alertPrompt?: string;
   conversationId: string | null;
   status: string;
   finalText?: string | null;
@@ -214,6 +216,9 @@ export function runToSnap(run: any, events: RunEvent[]): RunSnap {
     workspaceRoot: run.workspace_root,
     prompt: run.prompt ?? "",
     title: runDisplayName({ title: run.title, prompt: run.prompt ?? "" }),
+    ...(typeof run.alert_prompt === "string" && run.alert_prompt.trim()
+      ? { alertPrompt: run.alert_prompt.trim() }
+      : {}),
     conversationId: cid,
     status,
     finalText,

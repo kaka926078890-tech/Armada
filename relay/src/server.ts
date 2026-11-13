@@ -83,6 +83,7 @@ export type RunSnap = {
   workspaceRoot: string;
   prompt: string;
   title?: string | null;
+  alertPrompt?: string;
   conversationId?: string | null;
   status: string;
   finalText?: string | null;
@@ -475,6 +476,7 @@ export function createRelayServer(opts: {
     }
     const decided = notifyEdges(prev, {
       prompt: snap.prompt,
+      alertPrompt: typeof snap.alertPrompt === "string" ? snap.alertPrompt : undefined,
       status,
       pendingAsk: snap.pendingAsk,
       archived: archivedAt != null,

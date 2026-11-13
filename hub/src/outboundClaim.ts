@@ -58,6 +58,21 @@ export function hookSubmitPrompt(payload: any): string | null {
   return n || null;
 }
 
+/**
+ * 完成提醒要用的那句操作员提示词。
+ * 卡片 title / 第一次派发的 prompt 不在这里。系统通知、协议续聊、内部目录都不是这句。
+ */
+export function operatorAlertPrompt(raw: unknown): string | null {
+  if (typeof raw !== "string" || !raw.trim()) return null;
+  if (raw.includes("<system_notification>") && !raw.includes("<user_query>")) return null;
+  const extracted = hookSubmitPrompt({ prompt: raw });
+  if (!extracted) return null;
+  const text = stripImageMarkers(extracted);
+  if (!text || isCursorProtocolUser(text)) return null;
+  if (CURSOR_INTERNAL_CONTEXT_MARKERS.some((marker) => text.includes(marker))) return null;
+  return text;
+}
+
 /** 认领续发：去掉 Cursor 的图片包装。只剩图时 text 为空、imageOnly 为真。 */
 export function outboundClaimKey(raw: string): { text: string; imageOnly: boolean } | null {
   const text = stripImageMarkers(extractUserText(raw));

@@ -76,17 +76,22 @@ export function needInputBody(run: RunRow): string {
   return completionBody(run);
 }
 
+/** 提醒正文：最近一条操作员提示词。没有记录时才退回卡片上的 prompt，不用改过的标题。 */
+export function alertPromptOf(run: Pick<RunRow, "alert_prompt" | "prompt">): string {
+  return (run.alert_prompt || run.prompt || "").replace(/\s+/g, " ").trim();
+}
+
 export function completionHeadline(runs: RunRow[]): string {
   if (runs.length === 0) return BASE_TITLE;
   if (runs.length === 1) {
-    const t = (runs[0].title || runs[0].prompt).replace(/\s+/g, " ").trim().slice(0, 40);
+    const t = alertPromptOf(runs[0]).slice(0, 40);
     return `【完成】${t} — ${BASE_TITLE}     `;
   }
   return `【${runs.length} 个任务完成】${BASE_TITLE}     `;
 }
 
 export function completionBody(run: RunRow): string {
-  return (run.title || run.prompt).replace(/\s+/g, " ").trim().slice(0, 120);
+  return alertPromptOf(run).slice(0, 120);
 }
 
 let marqueeTimer: ReturnType<typeof setInterval> | null = null;

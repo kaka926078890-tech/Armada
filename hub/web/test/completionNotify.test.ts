@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { RunRow } from "../src/boardState";
 import {
-  BASE_TITLE, completionHeadline, shouldAlert, seedRunStatus, takeNewlyAlertable,
+  BASE_TITLE, completionHeadline, completionBody, shouldAlert, seedRunStatus, takeNewlyAlertable,
   seedAskStatus, takeNewlyNeedInput, NEED_INPUT_TITLE, needInputBody,
   alertTitle, alertBody, RESUME_STALL_TITLE,
 } from "../src/completionNotify";
@@ -57,6 +57,13 @@ describe("completionHeadline / shouldAlert", () => {
     expect(completionHeadline([{ ...base, prompt: "hello" }])).toContain("【完成】hello");
     expect(completionHeadline([base, { ...base, id: "r-2" }])).toContain("【2 个任务完成】");
     expect(completionHeadline([])).toBe(BASE_TITLE);
+  });
+
+  test("reminder uses the latest operator prompt, not the card title", () => {
+    const run = { ...base, title: "标准版Bot插件", prompt: "我想在标准版做一个插件", alert_prompt: "forcebuild启动Standard，我看看效果" };
+    expect(completionBody(run)).toBe("forcebuild启动Standard，我看看效果");
+    expect(completionHeadline([run])).toContain("forcebuild启动Standard");
+    expect(completionBody({ ...base, title: "看板标题", prompt: "第一句" })).toBe("第一句");
   });
 
   test("skip only when watching that run (detail open), even if tab would be hidden", () => {

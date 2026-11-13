@@ -26,6 +26,8 @@ export type NotifyPrev = {
 export type NotifySnap = {
   runId?: string;
   prompt?: string;
+  /** 最近一条操作员提示词。缺省时提醒仍用 prompt。 */
+  alertPrompt?: string;
   status: string;
   pendingAsk?: unknown;
   archived?: boolean;
@@ -53,11 +55,11 @@ export function askBody(snap: NotifySnap): string {
     const prompt = first && typeof first === "object" ? (first as { prompt?: unknown }).prompt : null;
     if (typeof prompt === "string" && prompt.trim()) return clip120(prompt);
   }
-  return clip120(snap.prompt ?? "");
+  return clip120(snap.alertPrompt || snap.prompt || "");
 }
 
 export function terminalBody(snap: NotifySnap): string {
-  return clip120(snap.prompt ?? "");
+  return clip120(snap.alertPrompt || snap.prompt || "");
 }
 
 export function notifyEdges(prev: NotifyPrev, snap: NotifySnap): {

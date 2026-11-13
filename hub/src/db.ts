@@ -66,6 +66,7 @@ export function openDb(home: string): Database {
   ensureColumn(db, "runs", "live_generation_id", "live_generation_id TEXT");
   ensureColumn(db, "runs", "retired_generation_ids", "retired_generation_ids TEXT NOT NULL DEFAULT '[]'");
   ensureColumn(db, "runs", "title", "title TEXT");
+  ensureColumn(db, "runs", "alert_prompt", "alert_prompt TEXT");
   ensureColumn(db, "runs", "pending_ask", "pending_ask TEXT");
   ensureColumn(db, "runs", "deferred_stop", "deferred_stop TEXT");
   ensureColumn(db, "runs", "chatgpt_thread_id", "chatgpt_thread_id TEXT");

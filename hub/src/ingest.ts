@@ -178,6 +178,7 @@ export function ingestEvent(db: Database, runs: RunService, sse: SseHub, machine
   }
   run = runs.get(runId) ?? run;
   if (msg.hookEventName === "beforeSubmitPrompt") {
+    runs.noteAlertPrompt(runId, msg.payload?.prompt);
     runs.tryArmLiveGeneration(runId, msg.hookEventName, msg.payload, cid);
     const claim = outboundClaimFromHook(msg.payload);
     if (claim) runs.claimOutbound(runId, claim.text, msg.ts ?? Date.now(), { imageOnly: claim.imageOnly });

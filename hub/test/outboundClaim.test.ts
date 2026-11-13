@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { extractUserText, transcriptUserPrompt, statusUserPrompt, hookSubmitPrompt, outboundClaimFromHook, outboundClaimKey, queueModeOf } from "../src/outboundClaim";
+import { extractUserText, transcriptUserPrompt, statusUserPrompt, hookSubmitPrompt, operatorAlertPrompt, outboundClaimFromHook, outboundClaimKey, queueModeOf } from "../src/outboundClaim";
 
 describe("outboundClaim", () => {
   test("extractUserText strips wrappers", () => {
@@ -20,6 +20,13 @@ describe("outboundClaim", () => {
   });
   test("hook submit prompt normalizes", () => {
     expect(hookSubmitPrompt({ prompt: "  排队句  " })).toBe("排队句");
+  });
+  test("alert prompt is the operator line, not a shell notice or protocol follow-up", () => {
+    expect(operatorAlertPrompt("代码改在哪里？")).toBe("代码改在哪里？");
+    expect(operatorAlertPrompt("<timestamp>Friday, Nov 13, 2026, 4:10 PM (UTC+8)</timestamp>\n<user_query>\n代码改在哪里？\n</user_query>")).toBe("代码改在哪里？");
+    expect(operatorAlertPrompt("<timestamp>Friday, Nov 13, 2026, 4:10 PM (UTC+8)</timestamp>\n<system_notification>\nThe following task has finished.\n</system_notification>")).toBeNull();
+    expect(operatorAlertPrompt("<user_query>Briefly inform the user about the task result and perform any follow-up actions.</user_query>")).toBeNull();
+    expect(operatorAlertPrompt("<user_query>\n<available_subagent_types>\nx\n</available_subagent_types>\n</user_query>")).toBeNull();
   });
   test("image followup claim strips markers and keeps a caption", () => {
     expect(outboundClaimKey("[Image]\n<image_files>a.png</image_files>\n看图")).toEqual({ text: "看图", imageOnly: false });

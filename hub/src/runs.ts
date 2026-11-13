@@ -25,7 +25,7 @@ import { BlobStore, parseAttachmentIds, type BlobMeta } from "./blobs";
 import { appendRetired, decideArm, decideStop, parseRetiredIds, isWindowsMachineOs, genOf, stopFromCursorSessionEnd, isResumeStallError } from "./generationOwnership";
 import { parsePendingAsk, continueAllowed, optionInAsk, isPlanAsk, mergePendingAskRecord, ASK_TEXT_MAX, ASK_SUBMIT_TIMEOUT_MS } from "./pendingAsk";
 import {
-  OUTBOUND_LIMIT, QUEUE_DRAIN_MS, hookSubmitPrompt, isCursorProtocolUser, queueModeOf, statusUserPrompt,
+  OUTBOUND_LIMIT, QUEUE_DRAIN_MS, hookSubmitPrompt, isCursorProtocolUser, operatorAlertPrompt, queueModeOf, statusUserPrompt,
 } from "./outboundClaim";
 import { matchRolloutTurn, parseChatgptRoot, readRollout, rolloutCardText, type RolloutTurn } from "./chatgptDesktop";
 
@@ -682,6 +682,7 @@ export class RunService {
         this.pendingFollowupPrompt.delete(run.id);
         this.db.query("UPDATE runs SET prompt=?1, attachments=?2 WHERE id=?3")
           .run(pending.prompt, JSON.stringify(pending.attachmentIds), run.id);
+        this.noteAlertPrompt(run.id, pending.prompt);
         this.blobs?.syncRefsFromRuns();
         this.recordFollowupPrompt(run, pending.prompt, pending.attachmentIds);
       }
@@ -1107,12 +1108,46 @@ export class RunService {
     this.promoteNextQueued(machineId);
   }
 
+  /** 记下最近一条操作员提示词。不改 title，也不改卡片上的 prompt。 */
+  noteAlertPrompt(runId: string, raw: unknown): void {
+    const text = operatorAlertPrompt(raw);
+    if (!text) return;
+    this.db.query("UPDATE runs SET alert_prompt=?1 WHERE id=?2 AND IFNULL(alert_prompt,'')!=?1").run(text, runId);
+  }
+
+  private latestOperatorPrompt(runId: string): string | null {
+    const rows = this.db.query(
+      `SELECT payload FROM run_events
+       WHERE run_id=?1 AND hook_event_name='beforeSubmitPrompt'
+       ORDER BY seq DESC LIMIT 24`,
+    ).all(runId) as { payload: string }[];
+    for (const row of rows) {
+      let payload: any;
+      try { payload = JSON.parse(row.payload); } catch { continue; }
+      const text = operatorAlertPrompt(payload?.prompt);
+      if (text) return text;
+    }
+    return null;
+  }
+
+  /** 旧卡片还没有 alert_prompt 时，从已经落库的用户句补上，避免下一次完成仍报第一句。 */
+  private ensureAlertPrompt(row: { id: string; prompt?: string; alert_prompt?: string | null }): string | null {
+    const current = typeof row.alert_prompt === "string" ? row.alert_prompt.trim() : "";
+    if (current) return current;
+    const found = this.latestOperatorPrompt(row.id) || (typeof row.prompt === "string" ? row.prompt.trim() : "");
+    if (!found) return null;
+    this.db.query("UPDATE runs SET alert_prompt=?1 WHERE id=?2 AND alert_prompt IS NULL").run(found, row.id);
+    return found;
+  }
+
   private hydrateRun(row: any): any {
     if (!row) return row;
+    const alertPrompt = this.ensureAlertPrompt(row);
     const { deferred_stop: _deferred, ...rest } = row;
     const mode = this.registry.getMachine(row.machine_id)?.queue_message_default_behavior ?? null;
     return {
       ...rest,
+      alert_prompt: alertPrompt,
       pending_ask: parsePendingAsk(row.pending_ask),
       outbound: this.listVisibleOutbound(row.id),
       image_donors: this.listImageDonors(row.id),
@@ -1429,6 +1464,7 @@ export class RunService {
     if (!normalizePrompt(prompt)) return { error: "EMPTY_PROMPT" };
     if (["dispatched", "binding", "queued", "running"].includes(run.status)) return { error: "CONVERSATION_BUSY" };
     this.db.query("UPDATE runs SET chatgpt_turn_id=NULL, prompt=?1 WHERE id=?2").run(prompt, run.id);
+    this.noteAlertPrompt(run.id, prompt);
     const status = this.chatgptSendBusy(run.machine_id) ? "queued" : "dispatched";
     const now = Date.now();
     this.setStatus(run.id, status, {

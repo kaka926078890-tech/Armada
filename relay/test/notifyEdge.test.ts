@@ -20,6 +20,16 @@ describe("notifyEdges terminal", () => {
     });
   });
 
+  test("terminal body is the latest operator prompt, not the first dispatch", () => {
+    const done = notifyEdges(emptyPrev, {
+      ...snap,
+      status: "completed",
+      prompt: "第一句",
+      alertPrompt: "代码改在哪里？",
+    });
+    expect(done.edges[0].body).toBe("代码改在哪里？");
+  });
+
   test("fires once when running becomes completed", () => {
     const first = notifyEdges(emptyPrev, { ...snap, status: "completed" });
     expect(first.edges.map((e) => e.kind)).toEqual(["completed"]);

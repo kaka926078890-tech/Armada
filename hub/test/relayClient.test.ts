@@ -209,7 +209,17 @@ describe("runToSnap", () => {
       status: "running", created_at: 1,
     }, []);
     expect(named.title).toBe("短标题");
+    expect(named.prompt).toBe("第一句很长");
+    expect(named.alertPrompt).toBeUndefined();
     expect(named.conversationId).toBe("cid-9");
+    const reminded = runToSnap({
+      id: "r-1", machine_id: "m-1", workspace_root: "/ws/a",
+      prompt: "第一句很长", title: "短标题", alert_prompt: "最近这句", conversation_id: "cid-9",
+      status: "completed", created_at: 1,
+    }, []);
+    expect(reminded.title).toBe("短标题");
+    expect(reminded.prompt).toBe("第一句很长");
+    expect(reminded.alertPrompt).toBe("最近这句");
     const fallback = runToSnap({
       id: "r-1", machine_id: "m-1", workspace_root: "/ws/a",
       prompt: "hi", status: "completed", created_at: 1,

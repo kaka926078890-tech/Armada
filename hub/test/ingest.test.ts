@@ -254,6 +254,35 @@ describe("event ingest", () => {
     ws.close();
   });
 
+  test("later operator prompt is what the reminder will say; the card title stays", async () => {
+    const { ws, api, runId } = await startBoundRun();
+    const renamed = await api(`/api/runs/${runId}`, { method: "PATCH", body: JSON.stringify({ title: "看板标题" }) });
+    expect(renamed.status).toBe(200);
+    ws.send(JSON.stringify(ev(runId, 1, "beforeSubmitPrompt", {
+      conversation_id: "cid-1",
+      prompt: "<timestamp>Friday, Nov 13, 2026, 4:10 PM (UTC+8)</timestamp>\n<user_query>\n代码改在哪里？\n</user_query>",
+    })));
+    ws.send(JSON.stringify(ev(runId, 2, "beforeSubmitPrompt", {
+      conversation_id: "cid-1",
+      prompt: "<user_query>Briefly inform the user about the task result and perform any follow-up actions.</user_query>",
+    })));
+    ws.send(JSON.stringify(ev(runId, 3, "beforeSubmitPrompt", {
+      conversation_id: "cid-1",
+      prompt: "<timestamp>Friday, Nov 13, 2026, 4:11 PM (UTC+8)</timestamp>\n<system_notification>\nThe following task has finished.\n</system_notification>",
+    })));
+    await new Promise((r) => setTimeout(r, 100));
+    const row = await (await api(`/api/runs/${runId}`)).json() as any;
+    expect(row.prompt).toBe("hi");
+    expect(row.title).toBe("看板标题");
+    expect(row.alert_prompt).toBe("代码改在哪里？");
+    hub!.db.query("UPDATE runs SET alert_prompt=NULL WHERE id=?1").run(runId);
+    const filled = await (await api(`/api/runs/${runId}`)).json() as any;
+    expect(filled.prompt).toBe("hi");
+    expect(filled.title).toBe("看板标题");
+    expect(filled.alert_prompt).toBe("代码改在哪里？");
+    ws.close();
+  });
+
   test("r-fc35e97f: retired preToolUse after completed does not reopen", async () => {
     const G1 = "f2fd16b2-08c8-4d64-bd40-6be3e637159e";
     const { ws, api, runId } = await startBoundRun();
