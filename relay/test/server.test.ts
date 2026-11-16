@@ -1029,6 +1029,62 @@ describe("relay serve", () => {
     ws.close();
   });
 
+  test("transcript reads and read stamps do not spend the followup bucket", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    autoHub(ws);
+    ws.addEventListener("message", (e) => {
+      const msg = JSON.parse(String(e.data));
+      if (msg.type === "cmd.chatGet") {
+        ws.send(JSON.stringify({
+          type: "cmd.result",
+          requestId: msg.requestId,
+          ok: true,
+          turns: [{ role: "user", text: "问" }, { role: "assistant", text: "答" }],
+        }));
+      }
+      if (msg.type === "cmd.readRunsPost") {
+        ws.send(JSON.stringify({
+          type: "cmd.result",
+          requestId: msg.requestId,
+          ok: true,
+          read: { seq: 1, readRuns: {} },
+        }));
+      }
+    });
+    ws.send(JSON.stringify({
+      type: "snap.run",
+      run: {
+        runId: "r-1",
+        machineId: "m-1",
+        workspaceRoot: "/Users/me/proj",
+        prompt: "hello fleet",
+        status: "running",
+        updatedAt: Date.now(),
+      },
+    }));
+    await Bun.sleep(40);
+    const headers = { authorization: `Bearer ${fleet.operatorToken}`, "content-type": "application/json" };
+    for (let i = 0; i < 21; i++) {
+      const chat = await fetch(url(s, "/mobile/runs/r-1/chat"), { headers });
+      expect(chat.status).toBe(200);
+      const stamp = await fetch(url(s, "/mobile/read-runs"), {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ baseSeq: 0, ops: [{ op: "stamp", runId: "r-1", at: i }] }),
+      });
+      expect(stamp.status).toBe(200);
+    }
+    const follow = await fetch(url(s, "/mobile/runs/r-1/followup"), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ prompt: "继续" }),
+    });
+    expect(follow.status).not.toBe(429);
+    ws.close();
+  });
+
   test("archive occupying is 409 INVALID_STATE and snap unchanged", async () => {
     const s = start();
     const fleet = s.createFleet();
@@ -1949,6 +2005,40 @@ describe("mobile stream", () => {
     expect(r.status).toBe(403);
     expect(await r.json()).toEqual({ error: "OPERATOR_REQUIRED" });
   });
+
+  test("op stream stays open past Bun's default 10s idle timeout", async () => {
+    const s = start({ ssePingMs: 1_000 });
+    const fleet = s.createFleet();
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    ws.send(JSON.stringify({
+      type: "snap.workspaces",
+      machines: [{ id: "m-1", name: "Mac", display_name: "Mac", os: "darwin", status: "online", open_workspaces: JSON.stringify(["/Users/me/proj"]) }],
+    }));
+    await Bun.sleep(30);
+    const ac = new AbortController();
+    const res = await fetch(url(s, "/mobile/stream"), {
+      headers: { authorization: `Bearer ${fleet.operatorToken}` },
+      signal: ac.signal,
+    });
+    expect(res.status).toBe(200);
+    const sse = openSse(res);
+    await sse.waitUntil((ev) => ev.some((e) => (e as { type?: string }).type === "workspaces"));
+    await Bun.sleep(11_000);
+    ws.send(JSON.stringify({
+      type: "snap.run",
+      run: {
+        runId: "r-still",
+        machineId: "m-1",
+        workspaceRoot: "/Users/me/proj",
+        prompt: "still here",
+        status: "running",
+        updatedAt: Date.now(),
+      },
+    }));
+    await sse.waitUntil((ev) => ev.some((e) => (e as { type?: string }).type === "run" && (e as { run?: { runId?: string } }).run?.runId === "r-still"), 3_000);
+    await sse.cancel();
+    ws.close();
+  }, 20_000);
 
   test("op stream is event-stream, dumps workspaces, then snap.run", async () => {
     const s = start();

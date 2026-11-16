@@ -1043,7 +1043,7 @@ fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String, onBack: () -> 
     fun adopt(fetched: RunDto) {
         run = coalesceFinalText(fetched, run)
     }
-    suspend fun reloadDetail() {
+    suspend fun reloadRun() {
         try {
             adopt(vm.api().run(runId))
             vm.markOpened(runId)
@@ -1051,6 +1051,9 @@ fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String, onBack: () -> 
         } catch (e: Exception) {
             err = e.message
         }
+    }
+    suspend fun reloadDetail() {
+        reloadRun()
         runCatching { chatTurns = vm.api().chat(runId) }
         chatReady = true
     }
@@ -1062,7 +1065,7 @@ fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String, onBack: () -> 
                 continue
             }
             delay(3000)
-            reloadDetail()
+            reloadRun()
         }
     }
     val streamed = state.board.runs.find { it.runId == runId } ?: state.board.hidden.find { it.runId == runId }

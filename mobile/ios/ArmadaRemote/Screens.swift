@@ -1551,7 +1551,7 @@ struct RunDetailView: View {
                 }
                 do { try await Task.sleep(nanoseconds: 3_000_000_000) } catch { break }
                 if Task.isCancelled { break }
-                await reload()
+                await reloadRun()
             }
         }
         .onChange(of: streamed) { _, next in
@@ -1654,7 +1654,7 @@ struct RunDetailView: View {
         }
     }
 
-    private func reload() async {
+    private func reloadRun() async {
         do {
             let fetched = try await session.api().run(id: runId)
             run = coalesceFinalText(fetched, prior: run)
@@ -1663,6 +1663,10 @@ struct RunDetailView: View {
         } catch {
             err = error.localizedDescription
         }
+    }
+
+    private func reload() async {
+        await reloadRun()
         if let turns = try? await session.api().chat(runId: runId) {
             chatTurns = turns
         }

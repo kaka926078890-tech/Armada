@@ -764,9 +764,7 @@ export function createRelayServer(opts: {
   app.post("/mobile/read-runs", async (c) => {
     const blocked = rejectPayload(c);
     if (blocked) return blocked;
-    const tok = (c as any).get("opToken") as string;
     const fleet = (c as any).get("fleet") as { id: string; hub_online: number };
-    if (!checkRate(tok)) return c.json({ error: "RATE_LIMIT" }, 429);
     if (fleet.hub_online !== 1) return c.json({ error: "HUB_OFFLINE" }, 503);
     const body = await c.req.json().catch(() => ({})) as { baseSeq?: unknown; ops?: unknown };
     const requestId = `r${++reqSeq}`;
@@ -1020,9 +1018,7 @@ export function createRelayServer(opts: {
   });
 
   app.get("/mobile/runs/:id/chat", async (c) => {
-    const tok = (c as any).get("opToken") as string;
     const fleet = (c as any).get("fleet") as { id: string; hub_online: number };
-    if (!checkRate(tok)) return c.json({ error: "RATE_LIMIT" }, 429);
     if (fleet.hub_online !== 1) return c.json({ error: "HUB_OFFLINE" }, 503);
     const runId = c.req.param("id");
     const row = db.query("SELECT id FROM runs WHERE id=?1 AND fleet_id=?2").get(runId, fleet.id);
@@ -1193,6 +1189,9 @@ export function createRelayServer(opts: {
   const server = Bun.serve<{ fleetId?: string; role?: string; streamId?: string }>({
     port: opts.port ?? 8780,
     hostname: opts.hostname ?? "127.0.0.1",
+    // Bun's default idleTimeout is 10s and SSE writes do not reset it.
+    // The phone then treats the stream as down and refetches the transcript.
+    idleTimeout: 0,
     fetch(req, srv) {
       const url = new URL(req.url);
       if (url.pathname === "/hub") {
