@@ -10,6 +10,10 @@ Armada 按 **面** 发版：扩展、桌面、iOS、Android 可以不同号。RE
 
 ## Unreleased
 
+---
+
+## 2026-11-16 — 扩展 0.4.61 · iOS TF 44 · Android 0.1.14 · 桌面 0.1.0
+
 ### 修复
 
 - 扩展宿主连本机调试口时不再走共享连接池。调试页连不上时回报连接失败，不再写成找不到窗口。
@@ -18,7 +22,7 @@ Armada 按 **面** 发版：扩展、桌面、iOS、Android 可以不同号。RE
 
 ### 操作员注意
 
-覆盖安装桌面 **Armada.app 0.1.0**（号不变，包内网页已换）。扩展仍是 **0.4.60**，这次不用 Reload。iOS 仍是 TestFlight **44**。Android 仍是 **0.1.14**。
+扩展装 **0.4.61**。Mac 和 Windows 都装 `armada-agent-0.4.61.vsix`，再 Reload。中台须 overlay 到含 `REQUIRED_EXTENSION_VERSION=0.4.61` 的包装 hub；只装 vsix、看板仍是 0.4.60 时，空闲 Reload 不会升级。同号会被跳过。桌面号仍是 **0.1.0**。iOS 仍是 TestFlight **44**。Android 仍是 **0.1.14**。
 
 ---
 
