@@ -4,9 +4,12 @@ import { join } from "path";
 import {
   UI_PREFS_DEFAULTS,
   QUIET_UNREAD_KEY,
+  DISPATCH_SEND_KEY,
   applyUiPrefsToLocalStorage,
   loadQuietUnread,
   saveQuietUnread,
+  loadDispatchSendChord,
+  saveDispatchSendChord,
   shouldMigrateLocal,
   shouldSeedReadRuns,
   localDiffersFromDefaults,
@@ -60,6 +63,31 @@ describe("quiet unread stays on this board", () => {
     expect(app).not.toContain("prefs.quietUnread");
     expect(app).not.toContain("migrated.quietUnread");
     expect(app).toContain("saveQuietUnread(next)");
+  });
+});
+
+describe("dispatch send chord stays on this board", () => {
+  test("missing or unknown storage is Shift+Enter", () => {
+    localStorage.removeItem(DISPATCH_SEND_KEY);
+    expect(loadDispatchSendChord()).toBe("shiftEnter");
+    localStorage.setItem(DISPATCH_SEND_KEY, "nope");
+    expect(loadDispatchSendChord()).toBe("shiftEnter");
+  });
+
+  test("enter round-trips and hub prefs do not overwrite it", () => {
+    saveDispatchSendChord("enter");
+    applyUiPrefsToLocalStorage({ ...UI_PREFS_DEFAULTS, theme: "light" });
+    expect(loadDispatchSendChord()).toBe("enter");
+    expect(localStorage.getItem(DISPATCH_SEND_KEY)).toBe("enter");
+    saveDispatchSendChord("shiftEnter");
+    expect(loadDispatchSendChord()).toBe("shiftEnter");
+  });
+
+  test("App does not write the chord through ui-prefs", () => {
+    const app = readFileSync(join(import.meta.dir, "../src/App.tsx"), "utf8");
+    expect(app).not.toMatch(/putUiPrefs\(\{[^}]*dispatchSendChord/);
+    expect(app).toContain("saveDispatchSendChord(next)");
+    expect(app).toContain("dispatchSendChord={dispatchSendChord}");
   });
 });
 

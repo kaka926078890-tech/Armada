@@ -3,7 +3,8 @@ import { api } from "../api";
 import { attachmentLimitMessage, mergeAttachmentFiles, isConsoleAttachment, MAX_CONSOLE_ATTACHMENTS } from "../attachments";
 import { ConsoleFilePicker } from "./ConsoleFilePicker";
 import { queueComposerCaretRestore, shouldRefocusComposerAfterSend, shouldRestoreComposerFocus } from "../composerFocus";
-import { endFollowupSend, isFollowupSendEnter, tryBeginFollowupSend } from "../followupSend";
+import { dispatchSendPlaceholder, endFollowupSend, isDispatchSendChord, tryBeginFollowupSend } from "../followupSend";
+import type { DispatchSendChord } from "../uiPrefs";
 import { CDP_NOT_READY_COPY } from "../boardState";
 import { appendSnippetBody } from "../promptSnippets";
 import type { PromptSnippet } from "../uiPrefs";
@@ -43,6 +44,7 @@ export function DispatchModal({
   machines, preset, presetLabel, activeOnWorkspace, onClose, onDone,
   snippets = [], saveSnippets, reloadSnippets,
   maxAttachments = MAX_CONSOLE_ATTACHMENTS,
+  dispatchSendChord = "shiftEnter",
 }: {
   machines: Machine[];
   preset?: { machineId: string; workspaceRoot: string };
@@ -54,6 +56,7 @@ export function DispatchModal({
   saveSnippets?: (next: PromptSnippet[]) => Promise<void>;
   reloadSnippets?: () => void;
   maxAttachments?: number;
+  dispatchSendChord?: DispatchSendChord;
 }) {
   const online = machines.filter((m) => m.status === "online");
   const [machineId, setMachineId] = useState(preset?.machineId ?? online[0]?.id ?? "");
@@ -154,7 +157,7 @@ export function DispatchModal({
           }}
         />
         <Textarea ref={promptRef} defaultValue="" onChange={(e) => setPrompt(e.target.value)} rows={8}
-          placeholder="写下要做的事。Enter 发送，Shift+Enter 换行"
+          placeholder={dispatchSendPlaceholder(dispatchSendChord)}
           className="w-full min-h-[8rem] max-h-[min(12rem,40vh)] overflow-y-auto resize-y field-sizing-fixed"
           style={{ fieldSizing: "fixed" }}
           onBlur={(e) => {
@@ -166,7 +169,7 @@ export function DispatchModal({
             ));
           }}
           onKeyDown={(e) => {
-            if (!isFollowupSendEnter(e)) return;
+            if (!isDispatchSendChord(e, dispatchSendChord)) return;
             e.preventDefault();
             e.nativeEvent.preventDefault();
             submitDispatch();

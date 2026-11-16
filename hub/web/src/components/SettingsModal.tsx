@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { FontScale, ThemeName } from "../theme";
 import { snippetOperatorMessage } from "../promptSnippets";
-import type { PromptSnippet } from "../uiPrefs";
+import type { DispatchSendChord, PromptSnippet } from "../uiPrefs";
 import { AddSnippetDialog } from "./PromptSnippetBar";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
@@ -14,6 +14,7 @@ export default function SettingsModal({
   theme, fontScale, onTheme, onFontScale, onClose,
   snippets = [], saveSnippets, reloadSnippets, snippetError = "",
   quietUnread = false, onQuietUnread, canMarkAllRead = false, onMarkAllRead,
+  dispatchSendChord = "shiftEnter", onDispatchSendChord,
   maxRunsPerMachine = 32, maxRunsPerWorkspace = 32, maxAttachments = 32, onRunLimits,
 }: {
   theme: ThemeName;
@@ -21,6 +22,8 @@ export default function SettingsModal({
   onTheme: (theme: ThemeName) => void;
   onFontScale: (scale: FontScale) => void;
   onClose: () => void;
+  dispatchSendChord?: DispatchSendChord;
+  onDispatchSendChord?: (next: DispatchSendChord) => void;
   snippets?: PromptSnippet[];
   saveSnippets?: (next: PromptSnippet[]) => Promise<void>;
   reloadSnippets?: () => void;
@@ -142,6 +145,28 @@ export default function SettingsModal({
             <Button type="button" variant={fontScale === "normal" ? "secondary" : "outline"} onClick={() => onFontScale("normal")}>正常</Button>
             <Button type="button" variant={fontScale === "large" ? "secondary" : "outline"} onClick={() => onFontScale("large")}>大</Button>
             <Button type="button" variant={fontScale === "xlarge" ? "secondary" : "outline"} onClick={() => onFontScale("xlarge")}>超大</Button>
+          </div>
+        </div>
+        <div>
+          <div className={`${UI_LABEL} mb-1.5`}>派发快捷键</div>
+          <p className={`${UI_META} text-muted-foreground mb-1.5`}>派发框里用这个键发出任务，另一个键换行。默认是 Shift+回车，避免输入时误派发。</p>
+          <div className="flex gap-1.5">
+            <Button
+              type="button"
+              variant={dispatchSendChord === "shiftEnter" ? "secondary" : "outline"}
+              aria-pressed={dispatchSendChord === "shiftEnter"}
+              onClick={() => onDispatchSendChord?.("shiftEnter")}
+            >
+              Shift+回车
+            </Button>
+            <Button
+              type="button"
+              variant={dispatchSendChord === "enter" ? "secondary" : "outline"}
+              aria-pressed={dispatchSendChord === "enter"}
+              onClick={() => onDispatchSendChord?.("enter")}
+            >
+              回车
+            </Button>
           </div>
         </div>
         <div>

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { endFollowupSend, isFollowupSendEnter, tryBeginFollowupSend } from "../src/followupSend";
+import { dispatchSendPlaceholder, endFollowupSend, isDispatchSendChord, isFollowupSendEnter, tryBeginFollowupSend } from "../src/followupSend";
 
 describe("isFollowupSendEnter", () => {
   test("Enter sends; Shift+Enter does not", () => {
@@ -22,6 +22,32 @@ describe("isFollowupSendEnter", () => {
     expect(isFollowupSendEnter({
       key: "Enter", shiftKey: false, nativeEvent: { keyCode: 229 },
     })).toBe(true);
+  });
+});
+
+describe("isDispatchSendChord", () => {
+  test("default chord sends on Shift+Enter and leaves bare Enter alone", () => {
+    expect(isDispatchSendChord({ key: "Enter", shiftKey: true }, "shiftEnter")).toBe(true);
+    expect(isDispatchSendChord({ key: "NumpadEnter", shiftKey: true }, "shiftEnter")).toBe(true);
+    expect(isDispatchSendChord({ key: "Enter", shiftKey: false }, "shiftEnter")).toBe(false);
+    expect(isDispatchSendChord({ key: "a", shiftKey: true }, "shiftEnter")).toBe(false);
+  });
+
+  test("enter chord sends on bare Enter", () => {
+    expect(isDispatchSendChord({ key: "Enter", shiftKey: false }, "enter")).toBe(true);
+    expect(isDispatchSendChord({ key: "Enter", shiftKey: true }, "enter")).toBe(false);
+  });
+
+  test("IME composition does not send in either chord", () => {
+    expect(isDispatchSendChord({ key: "Enter", shiftKey: true, isComposing: true }, "shiftEnter")).toBe(false);
+    expect(isDispatchSendChord({
+      key: "Enter", shiftKey: false, nativeEvent: { isComposing: true },
+    }, "enter")).toBe(false);
+  });
+
+  test("placeholder matches the chord", () => {
+    expect(dispatchSendPlaceholder("shiftEnter")).toContain("Shift+Enter 发送");
+    expect(dispatchSendPlaceholder("enter")).toContain("Enter 发送");
   });
 });
 

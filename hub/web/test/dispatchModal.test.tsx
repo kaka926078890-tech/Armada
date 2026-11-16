@@ -12,7 +12,7 @@ const machine: Machine = {
 };
 
 describe("DispatchModal prompt", () => {
-  test("documents Enter dispatch and Shift+Enter newline as markdown source", () => {
+  test("defaults to Shift+Enter send so a bare Enter stays a newline", () => {
     const html = renderToStaticMarkup(
       <DispatchModal
         machines={[machine]}
@@ -22,9 +22,23 @@ describe("DispatchModal prompt", () => {
         onDone={() => {}}
       />,
     );
+    expect(html).toContain("写下要做的事。Shift+Enter 发送，Enter 换行");
+    expect(html).not.toContain("Enter 发送，Shift+Enter 换行");
+  });
+
+  test("Enter send mode documents the opposite chord", () => {
+    const html = renderToStaticMarkup(
+      <DispatchModal
+        machines={[machine]}
+        preset={{ machineId: "m-1", workspaceRoot: "C:/ws" }}
+        activeOnWorkspace={0}
+        dispatchSendChord="enter"
+        onClose={() => {}}
+        onDone={() => {}}
+      />,
+    );
     expect(html).toContain("Enter 发送");
     expect(html).toContain("Shift+Enter 换行");
-    expect(html).toContain("写下要做的事");
   });
 
   test("cdp_ready false lists workspace but blocks dispatch with zombie copy", () => {

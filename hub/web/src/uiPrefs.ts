@@ -35,6 +35,18 @@ export const READ_SEEDED = "armada.readRuns.seeded.v1";
 export const WIDTH_KEY = "armada.detailWidth.v1";
 /** 消息免打扰只留在这块看板的 localStorage，不进 hub ui-prefs。 */
 export const QUIET_UNREAD_KEY = "armada.quietUnread.v1";
+/** 派发框发送键只留在这块看板。手机没有这个键，不进 hub ui-prefs。 */
+export const DISPATCH_SEND_KEY = "armada.dispatchSendChord.v1";
+export type DispatchSendChord = "enter" | "shiftEnter";
+
+export function loadDispatchSendChord(): DispatchSendChord {
+  try { return localStorage.getItem(DISPATCH_SEND_KEY) === "enter" ? "enter" : "shiftEnter"; }
+  catch { return "shiftEnter"; }
+}
+
+export function saveDispatchSendChord(chord: DispatchSendChord): void {
+  try { localStorage.setItem(DISPATCH_SEND_KEY, chord); } catch { /* ignore */ }
+}
 
 export function loadQuietUnread(): boolean {
   try { return localStorage.getItem(QUIET_UNREAD_KEY) === "1"; } catch { return false; }

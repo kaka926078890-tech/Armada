@@ -25,6 +25,7 @@ import { UI_META, UI_TYPE } from "./ui";
 import {
   WS_KEY, READ_KEY, READ_SEEDED,
   loadLocalUiPrefsMirror, applyUiPrefsToLocalStorage, loadQuietUnread, saveQuietUnread,
+  loadDispatchSendChord, saveDispatchSendChord, type DispatchSendChord,
   shouldMigrateLocal, shouldSeedReadRuns,
   type UiPrefs, type UiPrefsGetResponse, type PromptSnippet,
 } from "./uiPrefs";
@@ -99,6 +100,7 @@ export default function App() {
   const [maxRunsPerWorkspace, setMaxRunsPerWorkspace] = useState(32);
   const [maxAttachments, setMaxAttachments] = useState(32);
   const [quietUnread, setQuietUnread] = useState(loadQuietUnread);
+  const [dispatchSendChord, setDispatchSendChord] = useState<DispatchSendChord>(loadDispatchSendChord);
   const [snippets, setSnippets] = useState<PromptSnippet[]>([]);
   const [snippetError, setSnippetError] = useState("");
   const [cursorReload, setCursorReload] = useState<{
@@ -659,6 +661,7 @@ export default function App() {
           saveSnippets={saveSnippets}
           reloadSnippets={reloadSnippets}
           maxAttachments={maxAttachments}
+          dispatchSendChord={dispatchSendChord}
           onClose={() => setDispatchOpen(false)}
           onDone={() => { setDispatchOpen(false); refresh(); }}
         />
@@ -687,6 +690,11 @@ export default function App() {
           onQuietUnread={(next) => {
             saveQuietUnread(next);
             setQuietUnread(next);
+          }}
+          dispatchSendChord={dispatchSendChord}
+          onDispatchSendChord={(next) => {
+            saveDispatchSendChord(next);
+            setDispatchSendChord(next);
           }}
           canMarkAllRead={canMarkAllRead}
           onMarkAllRead={markAllRead}

@@ -55,10 +55,29 @@ describe("SettingsModal", () => {
     expect(html).toContain('aria-label="每次附件上限"');
     expect(html).toContain('aria-label="每台机器并发上限"');
     expect(html).toContain('value="32"');
+    expect(html).toContain("派发快捷键");
+    expect(html).toContain("Shift+回车");
+    expect(html).toContain("避免输入时误派发");
     expect(html).toContain("消息免打扰");
     expect(html).toContain("清除所有已读");
     expect(html).toContain("未读红点改为灰点");
     expect(html).toContain('disabled=""');
+  });
+
+  test("enter chord presses 回车 and leaves Shift+回车 unpressed", () => {
+    const html = renderToStaticMarkup(
+      <SettingsModal
+        theme="dark"
+        fontScale="normal"
+        onTheme={() => {}}
+        onFontScale={() => {}}
+        onClose={() => {}}
+        dispatchSendChord="enter"
+        onDispatchSendChord={() => {}}
+      />,
+    );
+    expect(html).toMatch(/aria-pressed="false"[^>]*>Shift\+回车</);
+    expect(html).toMatch(/aria-pressed="true"[^>]*>回车</);
   });
 
   test("quiet mode is pressed and clear-all is enabled when there is unread", () => {
