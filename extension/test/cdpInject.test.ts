@@ -15,6 +15,7 @@ import {
   cdpReadyReport,
   probeCdpReady,
   probeCdpReadyForInject,
+  cdpMessageText,
   COMPOSER_FOCUS_JS,
   COMPOSER_FOCUS_IMAGE_JS,
   COMPOSER_CHIP_COUNT_JS,
@@ -634,6 +635,28 @@ describe("createCdpSubmitter", () => {
     const r = await submit("/Users/x/armada-test-ws", "hi");
     expect(r.ok).toBe(false);
     expect(r.reason).toContain("CDP_CONNECT_FAIL");
+  });
+
+  test("有窗口章时连不上调试页 → CDP_CONNECT_FAIL，不是找不到窗口", async () => {
+    const submit = createCdpSubmitter(deps({
+      windowId: "sess-win-1",
+      connect: async () => { throw new Error("CDP_CONNECT_TIMEOUT"); },
+    }));
+    const r = await submit("C:\\Users\\PC\\Desktop\\work", "hi");
+    expect(r.ok).toBe(false);
+    expect(r.reason).toContain("CDP_CONNECT_FAIL");
+    expect(r.reason).not.toBe("WINDOW_TARGET_NOT_FOUND");
+  });
+
+  test("CDP websocket does not use the shared HTTP agent", () => {
+    const src = readFileSync(join(import.meta.dir, "../src/cdpInject.ts"), "utf8");
+    expect(src).toMatch(/new WebSocket\(wsUrl,\s*\{[^}]*agent:\s*false/);
+  });
+
+  test("Uint8Array CDP frame decodes as JSON text, not comma-separated bytes", () => {
+    const frame = new Uint8Array(Buffer.from('{"id":1,"result":{"result":{"type":"string","value":"stamp"}}}'));
+    expect(cdpMessageText(frame)).toContain('"value":"stamp"');
+    expect(cdpMessageText(frame)).not.toBe(String(frame));
   });
 
   test("a hung evaluate resets the socket when the peer ignores the close handshake", async () => {

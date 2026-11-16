@@ -493,11 +493,23 @@ export async function probeCdpReadyForInject(opts: {
   return "unknown";
 }
 
+/** `ws` 的 message 可能是 Buffer，也可能是 Uint8Array。后者的 String() 是逗号字节，JSON.parse 会抛，调用一直挂到超时。 */
+export function cdpMessageText(data: unknown): string | null {
+  if (typeof data === "string") return data;
+  if (Buffer.isBuffer(data)) return data.toString("utf8");
+  if (data instanceof ArrayBuffer) return Buffer.from(data).toString("utf8");
+  if (ArrayBuffer.isView(data)) return Buffer.from(data.buffer, data.byteOffset, data.byteLength).toString("utf8");
+  return null;
+}
+
 function defaultConnect(wsUrl: string, timeoutMs: number): Promise<CdpSession> {
   return new Promise((resolve, reject) => {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const WebSocket = require("ws");
-    const ws = new WebSocket(wsUrl);
+    // 与 /json 一样不进全局 agent。扩展宿主的共享连接池会把 127.0.0.1:9222 的升级请求挂住：
+    // 外面新建的连接几十毫秒能读到窗口章，宿主里的 evaluate 却每次顶满 4 秒。
+    // CDP 也不协商 permessage-deflate，避免压缩帧把应答留在解压队列里。
+    const ws = new WebSocket(wsUrl, { agent: false, perMessageDeflate: false });
     let mid = 0;
     const pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void }>();
     let gone = false;
@@ -541,7 +553,15 @@ function defaultConnect(wsUrl: string, timeoutMs: number): Promise<CdpSession> {
       });
     });
     ws.on("message", (data: unknown) => {
-      const d = JSON.parse(String(data));
+      const text = cdpMessageText(data);
+      if (text == null) return;
+      let d: { id?: number; error?: { message?: string }; result?: unknown };
+      try {
+        d = JSON.parse(text);
+      } catch {
+        return;
+      }
+      if (typeof d.id !== "number") return;
       const p = pending.get(d.id);
       if (!p) return;
       pending.delete(d.id);
@@ -947,6 +967,7 @@ async function connectWorkspacePage(
     );
     const opened: { session: CdpSession; stamp: string | null; title: string; wsUrl: string }[] = [];
     let sawTimeout = false;
+    let connectFail = "";
     const closeExcept = (keep: CdpSession | null) => {
       for (const o of opened) {
         if (o.session !== keep) o.session.close();
@@ -980,8 +1001,13 @@ async function connectWorkspacePage(
           title: typeof t.title === "string" ? t.title : "",
           wsUrl,
         });
-      } catch {
-        // 连不上或读失败当未盖章，不据此 AMBIGUOUS
+      } catch (e) {
+        // 连不上不当成未盖章，也不据此 AMBIGUOUS。一页都没打开时要把连接失败交出去，
+        // 不能写成 WINDOW_TARGET_NOT_FOUND（页在，只是这条调试连接没立起来）。
+        if (!connectFail) {
+          const msg = e instanceof Error ? e.message : String(e);
+          connectFail = msg.startsWith("CDP_CONNECT_FAIL:") ? msg : `CDP_CONNECT_FAIL:${msg}`;
+        }
       }
     }
     const writeStamp = async (session: CdpSession): Promise<boolean> => {
@@ -1029,6 +1055,7 @@ async function connectWorkspacePage(
       log("cdp phase: stamp-read CDP_CALL_TIMEOUT");
       return { ok: false, reason: "CDP_CALL_TIMEOUT" };
     }
+    if (opened.length === 0 && connectFail) return { ok: false, reason: connectFail };
     return { ok: false, reason: "WINDOW_TARGET_NOT_FOUND" };
   }
   const picked = pickCdpPage(targets, workspaceRoot);
