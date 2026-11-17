@@ -250,13 +250,18 @@ function isToolCallTail(tail: string): boolean {
  * order, then its `/t:call-` rows. Nested `fc_` fragments stay out.
  */
 function fallbackBubbleIds(db: Kv, cid: string): string[] {
-  const prefix = `bubbleId:${cid}:`;
+  // `LIKE 'prefix%'` cannot bound this UNIQUE index (LIKE is case-insensitive), so it
+  // scans every key in cursorDiskKV. On a multi-gigabyte state.vscdb that scan blocks
+  // the hub thread, and hide/list wait behind it. `:` + 1 = `;` is the exclusive end.
+  const start = `bubbleId:${cid}:`;
+  const end = `bubbleId:${cid};`;
   let rows: { key?: unknown }[] = [];
   try {
-    rows = db.query("SELECT key FROM cursorDiskKV WHERE key LIKE ?1").all(`${prefix}%`) as { key?: unknown }[];
+    rows = db.query("SELECT key FROM cursorDiskKV WHERE key >= ?1 AND key < ?2").all(start, end) as { key?: unknown }[];
   } catch {
     return [];
   }
+  const prefix = start;
   const parents: string[] = [];
   const steps = new Map<string, { n: number; id: string }[]>();
   const tools = new Map<string, string[]>();

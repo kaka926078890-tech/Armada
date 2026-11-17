@@ -4,7 +4,7 @@ import { describe, expect, test } from "bun:test";
 import {
   groupRuns, cardView, cardPromptLines, runMatchesPromptQuery, clipCardTitle, CARD_TITLE_MAX_CHARS, listWorkspaceSlots, encodeWorkspaceKey, decodeWorkspaceKey,
   filterRunsByWorkspace, sortConversations, sortCompletedCards, groupSlotsByMachine, isUnreadCompleted, isUnreadMessage,
-  workspaceHasUnread, workspaceUnreadCount, formatUnreadCount, canArchiveRun, canRetryRun, isHubArchived,
+  workspaceHasUnread, workspaceUnreadCount, formatUnreadCount, canArchiveRun, canRetryRun, isHubArchived, applyHideTickets,
   workspaceFolderName, workspaceHasLiveRun, resolveSelectedWorkspace, isUnreadNeedInput, cardChromeClass, cardChromeOf, columnHasAlert,
   applyMarkAllRead, isBoardUnread, shouldStampSelectedRun, unreadAlertDotClass, unreadBadgeClass,
   extensionLagNotice, REQUIRED_EXTENSION_VERSION, reloadPendingForMachine, resumeStallCopy, RESUME_STALL_REASON, type RunRow,
@@ -339,6 +339,19 @@ describe("unread dots", () => {
       { id: "m-1", name: "A.local", display_name: "办公室 Mac", os: "darwin", status: "online", open_workspaces: '["/ws/a"]' },
     ]);
     expect(slots[0].machineName).toBe("办公室 Mac");
+  });
+
+  test("a hide ticket stays off the board until a later list agrees", () => {
+    const other = { ...base, id: "r-2", status: "completed" };
+    const waiting = applyHideTickets([base, other], new Map([[base.id, "wait"]]));
+    expect(waiting.rows.map((r) => r.id)).toEqual(["r-2"]);
+    expect(waiting.tickets.get(base.id)).toBe("wait");
+    const stale = applyHideTickets([base, other], new Map([[base.id, "seen"]]));
+    expect(stale.rows.map((r) => r.id)).toEqual(["r-2"]);
+    expect(stale.tickets.get(base.id)).toBe("seen");
+    const agreed = applyHideTickets([other], stale.tickets);
+    expect(agreed.rows.map((r) => r.id)).toEqual(["r-2"]);
+    expect(agreed.tickets.size).toBe(0);
   });
 
   test("canArchiveRun forbids live statuses", () => {

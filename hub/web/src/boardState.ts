@@ -474,6 +474,25 @@ export function canArchiveRun(run: Pick<RunRow, "status">): boolean {
   return !LIVE.has(run.status);
 }
 
+/**
+ * `wait`: the operator hid the card; a list fetched before the archive commits must not put it back.
+ * `seen`: the archive succeeded; drop the ticket once a list no longer contains the id.
+ */
+export type HideTicket = "wait" | "seen";
+
+export function applyHideTickets<T extends { id: string }>(
+  rows: T[],
+  tickets: ReadonlyMap<string, HideTicket>,
+): { rows: T[]; tickets: Map<string, HideTicket> } {
+  if (tickets.size === 0) return { rows, tickets: new Map() };
+  const next = new Map(tickets);
+  const kept = rows.filter((row) => !next.has(row.id));
+  for (const [id, ticket] of next) {
+    if (ticket === "seen" && !rows.some((row) => row.id === id)) next.delete(id);
+  }
+  return { rows: kept, tickets: next };
+}
+
 /** 失败 / 未知 / 中止：同一张卡再派发或续上原对话。已取消、已完成不重试。 */
 export function canRetryRun(run: Pick<RunRow, "status">): boolean {
   return isStatus(run.status, RETRY_STATUSES);

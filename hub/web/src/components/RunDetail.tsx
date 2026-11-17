@@ -93,11 +93,11 @@ function DrawerShell({ children }: { children: ReactNode }) {
 }
 
 export default function RunDetail({
-  runId, onClose, onChanged, machines = [],
+  runId, onClose, onChanged, onHide, machines = [],
   snippets = [], saveSnippets, reloadSnippets,
   maxAttachments = MAX_CONSOLE_ATTACHMENTS,
 }: {
-  runId: string; onClose: () => void; onChanged: () => void; machines?: Machine[];
+  runId: string; onClose: () => void; onChanged: () => void; onHide: (id: string) => void; machines?: Machine[];
   snippets?: PromptSnippet[];
   saveSnippets?: (next: PromptSnippet[]) => Promise<void>;
   reloadSnippets?: () => void;
@@ -555,7 +555,7 @@ export default function RunDetail({
           {run.archived_at
             ? <Button variant="outline" onClick={() => { api.unarchive(run.id).then((res) => { if (res?.run) setRun(res.run); onChanged(); }); }}>取消隐藏</Button>
             : ["dispatched", "binding", "running", "created"].includes(run.status) ? null
-            : <Button variant="outline" onClick={() => api.archive(run.id).then(() => { onChanged(); onClose(); })}>隐藏</Button>}
+            : <Button variant="outline" onClick={() => onHide(run.id)}>隐藏</Button>}
           <Button variant="outline" onClick={() => {
             void (async () => {
               const r = await fetch("/api/audit/export", { headers: { authorization: `Bearer ${getToken()}` } });

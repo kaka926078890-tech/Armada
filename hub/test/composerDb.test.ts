@@ -535,6 +535,39 @@ describe("windows composer bind", () => {
   const cid = "251e2de9-fef2-4ef9-aadd-663258b24116";
   const bubbleId = "aa287f49-6f3b-4c12-972d-9da1fc11d66b";
 
+  test("empty headers read bubble keys by index range, not a full-table LIKE", () => {
+    const calls: { sql: string; args: unknown[] }[] = [];
+    const db = {
+      query(sql: string) {
+        return {
+          get(...args: unknown[]) {
+            calls.push({ sql, args });
+            const key = String(args[0] ?? "");
+            if (key.startsWith("bubbleId:")) {
+              return { value: JSON.stringify({ type: 1, text: "probe", requestId: "g" }) };
+            }
+            return {
+              value: JSON.stringify({
+                status: "completed",
+                chatGenerationUUID: "",
+                fullConversationHeadersOnly: [],
+              }),
+            };
+          },
+          all(...args: unknown[]) {
+            calls.push({ sql, args });
+            return [{ key: `bubbleId:${cid}:${bubbleId}` }];
+          },
+        };
+      },
+    };
+    const view = readComposerView(db, cid);
+    expect(view?.bubbles.map((b) => b.id)).toEqual([bubbleId]);
+    expect(calls.some((c) => c.sql.includes("LIKE"))).toBe(false);
+    const range = calls.find((c) => c.sql.includes("key >= ?1"));
+    expect(range?.args).toEqual([`bubbleId:${cid}:`, `bubbleId:${cid};`]);
+  });
+
   test("empty fullConversationHeadersOnly still reads bubbleId rows and ignores tool fragments", () => {
     const db = new Database(":memory:");
     db.exec("CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value TEXT)");

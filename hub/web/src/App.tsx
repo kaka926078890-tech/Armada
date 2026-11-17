@@ -8,7 +8,7 @@ import type { CursorReloadPendingView, RunRow } from "./boardState";
 import {
   decodeWorkspaceKey, encodeWorkspaceKey, filterRunsByWorkspace, listWorkspaceSlots, sortConversations,
   workspaceFolderName, resolveSelectedWorkspace, applyMarkAllRead, isBoardUnread, shouldStampSelectedRun,
-  BOARD_SSE_DEBOUNCE_MS, boardSseShouldRefresh,
+  BOARD_SSE_DEBOUNCE_MS, boardSseShouldRefresh, applyHideTickets, type HideTicket,
 } from "./boardState";
 import { applyPendingReads, localStampsToUpload, readSseShouldPull, takeReadBatches, type PendingRead } from "./readSync";
 import { applyAlertOpen } from "./alertOpen";
@@ -259,12 +259,16 @@ export default function App() {
     setSelectedRun(next.selectedRun);
   }, [runs, hiddenRuns]);
 
+  const hideTickets = useRef(new Map<string, HideTicket>());
+
   const refresh = useCallback(() => {
     if (!authed) return;
     Promise.all([api.machines(), api.runs(), api.runs({ archived: true }), api.getCursorReload().catch(() => null)])
       .then(([m, r, hidden, reload]) => {
+        const applied = applyHideTickets(Array.isArray(r) ? r : [], hideTickets.current);
+        hideTickets.current = applied.tickets;
         setMachines(m);
-        setRuns(Array.isArray(r) ? r : []);
+        setRuns(applied.rows);
         setHiddenRuns(Array.isArray(hidden) ? hidden : []);
         setCursorReload(cursorReloadFromApi(reload));
         setLoadError("");
@@ -274,6 +278,25 @@ export default function App() {
         setLoadError("看板加载失败（hub 不可达）");
       });
   }, [authed]);
+
+  const hideRun = useCallback((id: string) => {
+    hideTickets.current.set(id, "wait");
+    setRuns((rows) => rows.filter((row) => row.id !== id));
+    setSelectedRun((cur) => (cur === id ? null : cur));
+    api.archive(id).then((res) => {
+      if (!res?.run || res.error) {
+        hideTickets.current.delete(id);
+        refresh();
+        return;
+      }
+      hideTickets.current.set(id, "seen");
+      setHiddenRuns((rows) => (rows.some((row) => row.id === id) ? rows : [res.run, ...rows]));
+      refresh();
+    }).catch(() => {
+      hideTickets.current.delete(id);
+      refresh();
+    });
+  }, [refresh]);
 
   useEffect(() => {
     const on401 = () => {
@@ -624,8 +647,8 @@ export default function App() {
             showArchived={showArchived}
             readMap={readMap}
             quietUnread={quietUnread}
-            onHide={(id) => { api.archive(id).then(() => { setSelectedRun((cur) => cur === id ? null : cur); refresh(); }); }}
-            onUnhide={(id) => { api.unarchive(id).then(refresh); }}
+            onHide={hideRun}
+            onUnhide={(id) => { hideTickets.current.delete(id); api.unarchive(id).then(refresh); }}
             onRename={(id, prompt) => { api.renameRun(id, prompt).then(refresh); }}
             onRetry={(id) => { api.retry(id).then(refresh); }}
           />
@@ -641,6 +664,7 @@ export default function App() {
                   maxAttachments={maxAttachments}
                   onClose={() => setSelectedRun(null)}
                   onChanged={refresh}
+                  onHide={hideRun}
                   snippets={snippets}
                   saveSnippets={saveSnippets}
                   reloadSnippets={reloadSnippets}
