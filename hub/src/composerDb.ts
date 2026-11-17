@@ -27,6 +27,8 @@ export type ComposerBubble = {
   subagentComposerId: string;
   /** User bubble `requestId`. This is the turn's generation, not `chatGenerationUUID`. */
   requestId: string;
+  /** Set on the step row that closes the turn. Absent while the reply is still being written. */
+  turnDurationMs?: number;
 };
 
 export type ComposerView = {
@@ -187,6 +189,7 @@ function parseBubble(id: string, raw: unknown): ComposerBubble {
     toolStatus: typeof tf.status === "string" ? tf.status : (typeof ad.status === "string" ? ad.status : ""),
     subagentComposerId: typeof ad.subagentComposerId === "string" ? ad.subagentComposerId : "",
     requestId: typeof o.requestId === "string" ? o.requestId.trim() : "",
+    turnDurationMs: typeof o.turnDurationMs === "number" && o.turnDurationMs > 0 ? o.turnDurationMs : undefined,
   };
 }
 
@@ -443,6 +446,27 @@ function turnSlice(bubbles: ComposerBubble[], gen: string | null): { owner: numb
     }
   }
   return { owner, slice: bubbles.slice(owner + 1, end) };
+}
+
+function textTurnSettled(b: ComposerBubble): boolean {
+  return b.type === 2 && !!b.text.trim() && !b.toolName && (b.turnDurationMs ?? 0) > 0;
+}
+
+function toolStillRunning(b: ComposerBubble): boolean {
+  return !!b.toolName && b.toolStatus !== "completed" && b.toolStatus !== "error";
+}
+
+/**
+ * r-4900ac33: the reply step carries `turnDurationMs` while `chatGenerationUUID` stays
+ * set, so the uuid-cleared stop never runs and the card keeps spinning. A swap onto
+ * another generation must not treat the previous turn's duration as this turn finishing.
+ */
+function settledOpenTurn(snap: ComposerView, gen: string | null): { ok: boolean; owner: number; slice: ComposerBubble[] } {
+  const owned = turnSlice(snap.bubbles, gen);
+  const user = owned.owner >= 0 ? snap.bubbles[owned.owner] : undefined;
+  if (gen && user?.requestId && user.requestId !== gen) return { ok: false, owner: owned.owner, slice: owned.slice };
+  if (owned.slice.some(toolStillRunning)) return { ok: false, owner: owned.owner, slice: owned.slice };
+  return { ok: owned.slice.some(textTurnSettled), owner: owned.owner, slice: owned.slice };
 }
 
 function bsp(snap: ComposerView, bubble: ComposerBubble, generationId?: string | null): DbEvent {
@@ -840,7 +864,9 @@ export function planComposerTick(
     const freshWork = owned.slice.some((b) => bubbleIsBody(b) && !bodyAlreadyEmitted(b, cursor));
     // Idle composer status belongs to the turn that already has bubbles.
     // A newer user with no new body has not finished, so that status must not close it.
-    if (!freshWork && earlierHasBody) {
+    // A step that already recorded turnDurationMs is this turn's reply, even if that
+    // text was flushed on an earlier tick.
+    if (!freshWork && earlierHasBody && !settledOpenTurn(snap, next.generationId).ok) {
       return { events, cursor: next };
     }
     for (const b of owned.slice) flushText(b, next.generationId);
@@ -862,6 +888,25 @@ export function planComposerTick(
         ...(next.generationId ? { generation_id: next.generationId } : {}),
       },
     });
+  }
+  if (!next.stopped && !childBusy) {
+    const gen = snap.generationId ?? next.generationId;
+    const settled = settledOpenTurn(snap, gen);
+    if (settled.ok) {
+      const stopGen = snap.bubbles[settled.owner]?.requestId || gen;
+      for (const b of settled.slice) flushText(b, stopGen);
+      next.stopped = true;
+      emit({
+        source: "db",
+        hook: "stop",
+        conversationId: snap.cid,
+        payload: {
+          status: "completed",
+          conversation_id: snap.cid,
+          ...(stopGen ? { generation_id: stopGen } : {}),
+        },
+      });
+    }
   }
   return { events, cursor: next };
 }

@@ -69,6 +69,103 @@ describe("composer table plan", () => {
     expect(events.some((e) => e.hook === "afterAgentResponse" && e.payload.text === "finished")).toBe(true);
   });
 
+  // r-4900ac33: the reply step has turnDurationMs while chatGenerationUUID stays.
+  // Waiting for the uuid to clear left the card spinning and finalText empty.
+  test("a reply step with turnDurationMs stops while chatGenerationUUID remains", () => {
+    const armed = planComposerTick(snap({
+      cid: "cid-1",
+      status: "aborted",
+      generationId: "gen-1",
+      bubbles: [
+        bubble({ id: "u", type: 1, text: "那就测试", requestId: "gen-1" }),
+        bubble({ id: "tool", toolName: "Shell", toolStatus: "completed", toolInput: { command: "echo" } }),
+        bubble({ id: "s12", type: 2, text: "先看一眼" }),
+      ],
+    }), [], emptyCursor()).cursor;
+    expect(armed.stopped).toBe(false);
+
+    const done = planComposerTick(snap({
+      cid: "cid-1",
+      status: "aborted",
+      generationId: "gen-1",
+      bubbles: [
+        bubble({ id: "u", type: 1, text: "那就测试", requestId: "gen-1" }),
+        bubble({ id: "tool", toolName: "Shell", toolStatus: "completed", toolInput: { command: "echo" } }),
+        bubble({ id: "s12", type: 2, text: "先看一眼" }),
+        bubble({ id: "s32", type: 2, text: "补测跑完了。", turnDurationMs: 219447 }),
+      ],
+    }), [], armed);
+    const bodyAt = done.events.findIndex((e) => e.hook === "afterAgentResponse" && e.payload.text === "补测跑完了。");
+    const stopAt = done.events.findIndex((e) => e.hook === "stop");
+    expect(bodyAt).toBeGreaterThanOrEqual(0);
+    expect(stopAt).toBeGreaterThan(bodyAt);
+    expect(done.events[stopAt]?.payload).toMatchObject({ status: "completed", generation_id: "gen-1" });
+    expect(done.cursor.stopped).toBe(true);
+  });
+
+  test("an in-progress step without turnDurationMs does not stop", () => {
+    const { events, cursor } = planComposerTick(snap({
+      cid: "cid-1",
+      status: "aborted",
+      generationId: "gen-1",
+      bubbles: [
+        bubble({ id: "u", type: 1, text: "那就测试", requestId: "gen-1" }),
+        bubble({ id: "tool", toolName: "Shell", toolStatus: "completed", toolInput: { command: "echo" } }),
+        bubble({ id: "s12", type: 2, text: "先看一眼" }),
+      ],
+    }), [], emptyCursor());
+    expect(events.some((e) => e.hook === "stop")).toBe(false);
+    expect(cursor.stopped).toBe(false);
+  });
+
+  test("uuid clear after the reply was already emitted still stops that turn", () => {
+    const cursor = cursorFromEmitted([
+      { source: "db", hook: "beforeSubmitPrompt", payload: { prompt: "first", bubble_id: "u1", generation_id: "gen-1", conversation_id: "cid-1" } },
+      { source: "db", hook: "afterAgentResponse", payload: { text: "old", bubble_id: "a1", generation_id: "gen-1", conversation_id: "cid-1" } },
+      { source: "db", hook: "stop", payload: { status: "completed", generation_id: "gen-1", conversation_id: "cid-1" } },
+      { source: "db", hook: "beforeSubmitPrompt", payload: { prompt: "second", bubble_id: "u2", generation_id: "gen-2", conversation_id: "cid-1" } },
+      { source: "db", hook: "afterAgentResponse", payload: { text: "the reply", bubble_id: "s18", generation_id: "gen-2", conversation_id: "cid-1" } },
+    ]);
+    const { events } = planComposerTick(snap({
+      cid: "cid-1",
+      status: "completed",
+      generationId: null,
+      bubbles: [
+        bubble({ id: "u1", type: 1, text: "first", requestId: "gen-1" }),
+        bubble({ id: "a1", type: 2, text: "old" }),
+        bubble({ id: "u2", type: 1, text: "second", requestId: "gen-2" }),
+        bubble({ id: "s18", type: 2, text: "the reply", turnDurationMs: 101977 }),
+      ],
+    }), [], cursor);
+    expect(events.find((e) => e.hook === "stop")?.payload).toMatchObject({
+      status: "completed",
+      generation_id: "gen-2",
+    });
+  });
+
+  test("a generation swap does not stop on the previous turn's turnDurationMs", () => {
+    const armed = planComposerTick(snap({
+      cid: "cid-1",
+      status: "generating",
+      generationId: "gen-1",
+      bubbles: [
+        bubble({ id: "u1", type: 1, text: "check", requestId: "gen-1" }),
+        bubble({ id: "body", type: 2, text: "the real body" }),
+      ],
+    }), [], emptyCursor()).cursor;
+    const swapped = planComposerTick(snap({
+      cid: "cid-1",
+      status: "generating",
+      generationId: "gen-2",
+      bubbles: [
+        bubble({ id: "u1", type: 1, text: "check", requestId: "gen-1" }),
+        bubble({ id: "body", type: 2, text: "the real body", turnDurationMs: 5000 }),
+      ],
+    }), [], armed);
+    expect(swapped.events.some((e) => e.hook === "stop")).toBe(false);
+    expect(swapped.events.some((e) => e.hook === "afterAgentResponse")).toBe(false);
+  });
+
   test("a recovered turn flushes its text and stops the old generation before the next user", () => {
     const armed = planComposerTick(snap({
       cid: "cid-1",
@@ -687,7 +784,7 @@ describe("windows composer bind", () => {
     const call = `${bubbleId}/t:call-080fe9e1-e15f-4539-b136-2530bd70098e-0`;
     put(bubbleId, { type: 1, text: "do the thing", requestId: CURSOR_GEN });
     put(`${bubbleId}/s:1`, { type: 2, text: "", thinking: { text: "looking" } });
-    put(`${bubbleId}/s:10`, { type: 1, text: "the long report" });
+    put(`${bubbleId}/s:10`, { type: 1, text: "the long report", turnDurationMs: 219447 });
     put(`${bubbleId}/s:2`, { type: 2, text: "short note" });
     put(`${bubbleId}/s:3`, { type: 2, text: "tool said this", toolFormerData: { name: "read_file_v2", status: "completed" } });
     put(call, { type: 2, text: "", toolFormerData: { name: "read_file_v2", status: "completed" } });
@@ -701,6 +798,7 @@ describe("windows composer bind", () => {
       call,
     ]);
     expect(view?.bubbles.find((b) => b.id.endsWith("/s:10"))?.type).toBe(2);
+    expect(view?.bubbles.find((b) => b.id.endsWith("/s:10"))?.turnDurationMs).toBe(219447);
     const { events } = planComposerTick(view!, [], emptyCursor());
     expect(events.filter((e) => e.hook === "afterAgentThought").map((e) => e.payload.text)).toEqual(["looking"]);
     expect(events.filter((e) => e.hook === "preToolUse").map((e) => e.payload.tool_name)).toEqual(["read_file_v2"]);
