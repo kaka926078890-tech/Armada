@@ -418,7 +418,7 @@ export class Executor {
             return { needle: filename };
           });
         for (const item of fetched) {
-          const name = uniqueInboxFilename(item.id, item.name || "file");
+          const name = uniqueInboxFilename(item.id, runId, item.name || "file");
           needles.push(write(workspaceRoot, runId, name, item.blob.bytes).needle);
         }
         this.noteProgress(runId, "paste");

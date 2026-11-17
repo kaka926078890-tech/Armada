@@ -87,7 +87,7 @@
 
 ### 4.2 落盘
 
-`<workspace>/.armada/inbox/<runId>/<sha256前8位>-<safeName>`
+`<workspace>/.armada/inbox/<runId>/<sha256前8位>-<runId>-<safeName>`
 
 - 续聊同一 `runId` 目录。
 - 不自动删（对话中 Agent 还要 `Read`）；blob TTL 与仓内残留允许并存。v1.5 再扫 inbox。
@@ -178,7 +178,7 @@ hub → WS run.start {attachments:[{id,mime,name,size}]}
 | 项 | 影响 | 应对 | 状态 |
 | --- | --- | --- | --- |
 | `@` 菜单选择器随 Cursor 改版 | 高 | 计数失败不回车；重探针 | 3.18.25 已过 |
-| 同名文件菜单多项 | 中 | 文件名加 sha 前 8 位 | 已锁 |
+| 同名文件菜单多项 | 中 | 文件名含 sha 前 8 位和 runId。菜单仍只按文件名全等，不是恰好一行就不点 | 已锁 |
 | 旧扩展假失败 | 中 | 同步升级 | 接受 |
 | inbox 残留 | 低 | v1.5 扫描 | 未做 |
 | Windows `@` 菜单 | 高 | 发布前补探针；本 v1 先 macOS 真机 gate | 未做 |
@@ -203,3 +203,4 @@ hub → WS run.start {attachments:[{id,mime,name,size}]}
 | 日期 | 版本 | 变更 |
 | --- | --- | --- |
 | 2026-09-14 | 需求 v1 | 文件走工作区 `@` mention；图片保持芯片；剪贴板/回形针否决；真机探针收录 |
+| 2026-11-17 | 文件名 | 同一 blob 跨 run 再挂时 basename 加 runId。不在菜单多行时挑一行 |

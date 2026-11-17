@@ -5,8 +5,18 @@ import { join } from "path";
 import { materializeInboxFile, uniqueInboxFilename } from "../src/workspaceInbox";
 
 describe("workspaceInbox", () => {
-  test("unique name prefixes sha and strips path", () => {
-    expect(uniqueInboxFilename("abcdef012345", "../x/notes.txt")).toBe("abcdef01-notes.txt");
+  test("unique name prefixes sha and run, and strips path", () => {
+    expect(uniqueInboxFilename("abcdef012345", "r1", "../x/notes.txt")).toBe("abcdef01-r1-notes.txt");
+  });
+
+  test("the same blob on two runs does not share a basename", () => {
+    const sha = "299ede61d307b00e5d2e6b48ef4249599d563b064efed331c1d678f409218783";
+    const name = "OpenMausBot设计与技术实现参考-2026-11-16.md";
+    const a = uniqueInboxFilename(sha, "r-6a3bb21a-4c19-4e1b-9e2f-21725e19f587", name);
+    const b = uniqueInboxFilename(sha, "r-4900ac33-9397-442a-93a9-30d812dfb558", name);
+    expect(a).not.toBe(b);
+    expect(a).toBe(`299ede61-r-6a3bb21a-4c19-4e1b-9e2f-21725e19f587-${name}`);
+    expect(uniqueInboxFilename(sha, "r-4900ac33-9397-442a-93a9-30d812dfb558", name)).toBe(b);
   });
 
   test("writes only under inbox/runId", () => {

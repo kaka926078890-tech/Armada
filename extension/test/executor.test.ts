@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from "bun:test";
-import { mkdtempSync } from "fs";
+import { existsSync, mkdtempSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
@@ -172,6 +172,38 @@ describe("Executor image path", () => {
       type: "run.ack", runId: "r1", status: "rejected", reason: "WINDOW_TARGET_NOT_FOUND",
     });
     expect(clipboardWrites).toEqual([]);
+  });
+
+  test("the same blob on two runs is mentioned under two basenames", async () => {
+    const root = mkdtempSync(join(tmpdir(), "armada-inbox-run-"));
+    const needles: string[][] = [];
+    const { ex } = makeExec({
+      globalState: {
+        get: () => [root] as never,
+        update: async () => {},
+      },
+      fetchBlob: async () => ({ bytes: Buffer.from("same"), mime: "text/markdown" }),
+      autoSubmitFileMentions: async (_ws: string, names: string[]) => {
+        needles.push(names);
+        return { ok: true };
+      },
+      finishComposer: async () => ({ ok: true }),
+    });
+    workspaceFolderPaths = [root];
+    const att = [{
+      sha256: "299ede61d307b00e",
+      mime: "text/markdown",
+      id: "299ede61d307b00e",
+      name: "OpenMaus.md",
+    }];
+    await ex.startRun({ runId: "r-aaa", workspaceRoot: root, prompt: "a", attachments: att });
+    await ex.startRun({ runId: "r-bbb", workspaceRoot: root, prompt: "b", attachments: att });
+    expect(needles).toEqual([
+      ["299ede61-r-aaa-OpenMaus.md"],
+      ["299ede61-r-bbb-OpenMaus.md"],
+    ]);
+    expect(existsSync(join(root, ".armada/inbox/r-aaa/299ede61-r-aaa-OpenMaus.md"))).toBe(true);
+    expect(existsSync(join(root, ".armada/inbox/r-bbb/299ede61-r-bbb-OpenMaus.md"))).toBe(true);
   });
 
   test("file mention WINDOW_TARGET_AMBIGUOUS is not rewritten to FILE_MENTION_FAILED", async () => {
