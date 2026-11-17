@@ -14,6 +14,18 @@ Armada 按 **面** 发版：扩展、桌面、iOS、Android 可以不同号。RE
 
 ---
 
+## 2026-11-17 — 扩展 0.4.63 · iOS TF 45 · Android 0.1.14 · 桌面 0.1.0
+
+### 修复
+
+- Windows 续聊不再被上一轮的「已完成」立刻收口。新问题写进去、旧的 step 还排在后面时，卡片保持运行，输入框在这轮进入运行中后清掉。
+
+### 操作员注意
+
+扩展装 **0.4.63**。Mac 和 Windows 都装 `armada-agent-0.4.63.vsix`，再 Reload。中台须 overlay 到含 `REQUIRED_EXTENSION_VERSION=0.4.63` 的包装 hub；只装 vsix、看板仍是 0.4.62 时，空闲 Reload 不会升级。同号会被跳过。桌面号仍是 **0.1.0**。iOS 仍是 TestFlight **45**。Android 仍是 **0.1.14**。
+
+---
+
 ## 2026-11-17 — 扩展 0.4.62 · iOS TF 45 · Android 0.1.14 · 桌面 0.1.0
 
 ### 修复
