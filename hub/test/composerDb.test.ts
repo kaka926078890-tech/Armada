@@ -314,6 +314,67 @@ describe("composer table plan", () => {
     });
   });
 
+  // r-4900ac33 16:50:09: a shell task's system_notification arrives in the same
+  // tick as the reply. That bubble is not an operator follow-up. Closing the
+  // turn here marks the card completed and the desktop banners "任务完成"
+  // while the agent is still reading files.
+  test("a shell-finished notification does not complete a turn that already replied", () => {
+    const shell = "<timestamp>Tuesday, Nov 17, 2026, 4:50 PM (UTC+8)</timestamp>\n<system_notification>\nThe following task has finished. If you were already aware, ignore this notification and do not restate prior responses.\n</system_notification>";
+    const open = [
+      bubble({ id: "u1", type: 1, text: "落地处理一下", requestId: "gen-1" }),
+      bubble({ id: "tool", toolName: "Shell", toolStatus: "completed", toolInput: { command: "echo" } }),
+      bubble({ id: "body", type: 2, text: "两处都已落在新进程上。" }),
+    ];
+    const armed = planComposerTick(snap({
+      cid: "cid-1",
+      status: "generating",
+      generationId: "gen-1",
+      bubbles: open,
+    }), [], emptyCursor()).cursor;
+    expect(armed.stopped).toBe(false);
+
+    const continued = planComposerTick(snap({
+      cid: "cid-1",
+      status: "aborted",
+      generationId: "gen-2",
+      bubbles: [
+        ...open,
+        bubble({ id: "u2", type: 1, text: shell, requestId: "gen-2" }),
+      ],
+    }), [], armed);
+    expect(continued.events.some((e) => e.hook === "afterAgentResponse" && e.payload.text === "两处都已落在新进程上。")).toBe(true);
+    expect(continued.events.some((e) => e.hook === "stop")).toBe(false);
+    expect(continued.cursor.stopped).toBe(false);
+
+    const informed = `${shell}\n<user_query>Briefly inform the user about the task result and perform any follow-up actions (if needed).</user_query>`;
+    const replied = planComposerTick(snap({
+      cid: "cid-1",
+      status: "aborted",
+      generationId: "gen-2",
+      bubbles: [
+        ...open,
+        bubble({ id: "u2", type: 1, text: shell, requestId: "" }),
+        bubble({ id: "u3", type: 1, text: informed, requestId: "gen-2" }),
+        bubble({ id: "tail", type: 2, text: "已经核对过。", turnDurationMs: 8000 }),
+      ],
+    }), [], continued.cursor);
+    const done = replied.events.some((e) => e.hook === "stop") ? replied : planComposerTick(snap({
+      cid: "cid-1",
+      status: "aborted",
+      generationId: "gen-2",
+      bubbles: [
+        ...open,
+        bubble({ id: "u2", type: 1, text: shell, requestId: "" }),
+        bubble({ id: "u3", type: 1, text: informed, requestId: "gen-2" }),
+        bubble({ id: "tail", type: 2, text: "已经核对过。", turnDurationMs: 8000 }),
+      ],
+    }), [], replied.cursor);
+    expect(done.events.find((e) => e.hook === "stop")?.payload).toMatchObject({
+      status: "completed",
+      generation_id: "gen-2",
+    });
+  });
+
   test("an operator follow-up with no assistant text still aborts the open turn", () => {
     const open = [
       bubble({ id: "u1", type: 1, text: "upload the package" }),

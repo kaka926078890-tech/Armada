@@ -1,7 +1,7 @@
 import { hasImageMarkers, stripImageMarkers } from "../../extension/src/imageMarkers";
 import { workspacePathsEqual } from "../../extension/src/workspacePath";
 import { CHATGPT_LOCAL_MACHINE, sameHost } from "./chatgptAttach";
-import { hookSubmitPrompt, isCursorProtocolUser } from "./outboundClaim";
+import { operatorAlertPrompt } from "./outboundClaim";
 
 /** Header createdAt may land a few milliseconds around dispatch. */
 export const HEADER_CREATED_SKEW_MS = 5_000;
@@ -570,6 +570,9 @@ export function planComposerTick(
   const events: DbEvent[] = [];
   const emit = (ev: DbEvent) => events.push(ev);
   const flushedNow = new Set<string>();
+  // Shell-finished / protocol bubbles are the same turn. Stopping on them
+  // marks the card completed and the desktop banners while tools are still running.
+  let heldForContinuation = false;
   const flushText = (b: ComposerBubble, gen: string | null): boolean => {
     const text = b.text.trim();
     if (b.type !== 2 || !text || b.toolName) return false;
@@ -717,11 +720,14 @@ export function planComposerTick(
     if ((stopForNewUser || flushed) && !childStillBusy(children, next)) {
       const hadText = snap.bubbles.slice(0, cut).some((b) => b.type === 2 && !!b.text.trim() && next.assistants.includes(b.id));
       const cutting = stopForNewUser ? snap.bubbles[newUserAt] : undefined;
-      const cuttingPrompt = hookSubmitPrompt({ prompt: cutting?.text ?? "" }) ?? "";
-      // Cursor 的协议句是同一轮的续写。还没有助手正文时收成 aborted，
-      // 这句不能把终态卡拉回来，后面的 completed 就进不了这张卡。
-      const protocolContinues = !hadText && snap.status !== "error" && isCursorProtocolUser(cuttingPrompt);
-      if (!protocolContinues) {
+      // 系统通知和协议句是同一轮的续写。前面已经有助手正文也先不收口，
+      // 否则卡片变成完成，桌面立刻弹「任务完成」，这句后面的工具还在跑。
+      // 操作员自己的下一句仍收口。
+      const continuation = stopForNewUser
+        && snap.status !== "error"
+        && operatorAlertPrompt(cutting?.text ?? "") == null;
+      if (continuation) heldForContinuation = true;
+      else {
         next.stopped = true;
         emit({
           source: "db",
@@ -880,7 +886,7 @@ export function planComposerTick(
   const abortHold = uuidCleared && snap.status === "aborted" && !next.abortSeen;
   if (abortHold) next.abortSeen = true;
   if (snap.generationId) next.abortSeen = false;
-  if (uuidCleared && !abortHold && !next.stopped && !childBusy) {
+  if (uuidCleared && !abortHold && !next.stopped && !childBusy && !heldForContinuation) {
     const owned = turnSlice(snap.bubbles, next.generationId);
     const earlierHasBody = owned.owner > 0 && snap.bubbles.slice(0, owned.owner).some(bubbleIsBody);
     const freshWork = owned.slice.some((b) => bubbleIsBody(b) && !bodyAlreadyEmitted(b, cursor));
@@ -911,7 +917,7 @@ export function planComposerTick(
       },
     });
   }
-  if (!next.stopped && !childBusy) {
+  if (!next.stopped && !childBusy && !heldForContinuation) {
     const gen = snap.generationId ?? next.generationId;
     const settled = settledOpenTurn(snap, gen);
     if (settled.ok) {
