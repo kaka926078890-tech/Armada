@@ -4,7 +4,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { createServer, type HubServer } from "../src/index";
 import { Database } from "bun:sqlite";
-import { loadEventsForSnap, loadRelayConfig, RELAY_DUMP_LIMIT, runIdsForRelayDump, runToSnap } from "../src/relayClient";
+import { liveIdsForRelayReconcile, loadEventsForSnap, loadRelayConfig, RELAY_DUMP_LIMIT, runIdsForRelayDump, runToSnap } from "../src/relayClient";
 import { createRelayServer, type RelayServer } from "../../relay/src/server";
 import { encodeWorkspaceId } from "../../relay/src/uri";
 import type { RunEvent } from "../web/src/types";
@@ -230,6 +230,16 @@ describe("runToSnap", () => {
       id: "r-1", machine_id: "m-1", workspace_root: "/ws/a",
       prompt: "hi", conversation_id: "  ", status: "running", created_at: 1,
     }, []).conversationId).toBeNull();
+  });
+
+  test("liveIdsForRelayReconcile keeps live and unknown only", () => {
+    expect(liveIdsForRelayReconcile([
+      { id: "r-old", status: "running" },
+      { id: "c", status: "completed" },
+      { id: "u", status: "unknown" },
+      { id: "", status: "running" },
+      { id: "q", status: "queued" },
+    ])).toEqual(["r-old", "u", "q"]);
   });
 
   test("runIdsForRelayDump always includes live and unknown even past the list window", () => {
@@ -651,6 +661,8 @@ describe("hub outbound to relay", () => {
     expect(src).toContain("cursorReloadView");
     expect(src).toContain("dumpRuns");
     expect(src).toContain("runIdsForRelayDump");
+    expect(src).toContain("liveIdsForRelayReconcile");
+    expect(src).toContain("reconcileLive");
     const handler = readFileSync(join(import.meta.dir, "../src/relayCommandHandler.ts"), "utf8");
     for (const cmd of [
       "cmd.dispatch", "cmd.followup", "cmd.retry", "cmd.answer", "cmd.cancel",

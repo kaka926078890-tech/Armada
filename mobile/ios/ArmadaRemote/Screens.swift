@@ -428,6 +428,20 @@ struct FleetClusterHeader: View {
     }
 }
 
+struct FleetLiveMark: View {
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
+            let turns = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 0.9)
+            Circle()
+                .trim(from: 0.12, to: 0.78)
+                .stroke(Hub.live, style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+                .frame(width: 14, height: 14)
+                .rotationEffect(.degrees(turns / 0.9 * 360))
+        }
+        .accessibilityLabel("任务执行中")
+    }
+}
+
 struct FleetSlotRow: View {
     @EnvironmentObject var session: Session
     @Environment(\.hub) private var hub
@@ -447,7 +461,7 @@ struct FleetSlotRow: View {
                         .foregroundStyle(hub.foreground)
                         .lineLimit(1)
                     if session.hasLive(slot) {
-                        ProgressView().controlSize(.small)
+                        FleetLiveMark()
                     }
                     Spacer(minLength: 8)
                     if session.unreadCount(in: slot) > 0 {

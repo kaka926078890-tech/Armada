@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { createServer, type HubServer } from "../src/index";
-import { attachWithConfig } from "../src/relayAttach";
+import { attachWithConfig, rowsForRelayPoll } from "../src/relayAttach";
 import { createRelayServer, type RelayServer } from "../../relay/src/server";
 import { encodeWorkspaceId } from "../../relay/src/uri";
 import { REQUIRED_EXTENSION_VERSION } from "../web/src/boardState";
@@ -223,6 +223,14 @@ describe("relay attach (HTTP hub)", () => {
     expect(post.status).toBe(200);
     expect(await post.json()).toMatchObject({ needed: true, pending: { action: "when-idle" } });
     expect(Date.now() - t0).toBeLessThan(3000);
+  });
+
+  test("poll keeps a live card that sits past the newest page", () => {
+    const recent = Array.from({ length: 30 }, (_, i) => ({ id: `c-${i}`, status: "completed" }));
+    const picked = rowsForRelayPoll([...recent, { id: "r-old", status: "running" }, { id: "c-extra", status: "completed" }]);
+    expect(picked.map((row) => row.id)).toContain("r-old");
+    expect(picked.filter((row) => row.status === "completed")).toHaveLength(30);
+    expect(picked.map((row) => row.id)).not.toContain("c-extra");
   });
 
   test("attach command matrix matches client including Reload and ping", () => {

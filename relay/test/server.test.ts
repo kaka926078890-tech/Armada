@@ -803,6 +803,42 @@ describe("relay serve", () => {
     ws.close();
   });
 
+  test("open and hidden lists keep live cards past the recent page", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    const snap = (runId: string, status: string, archived: boolean) => {
+      ws.send(JSON.stringify({
+        type: "snap.run",
+        run: {
+          runId,
+          machineId: "m-1",
+          workspaceRoot: "/Users/me/proj",
+          prompt: runId,
+          status,
+          archived,
+          updatedAt: 1,
+        },
+      }));
+    };
+    snap("r-live", "running", false);
+    snap("r-hid-live", "running", true);
+    await Bun.sleep(20);
+    for (let i = 0; i < 50; i++) snap(`c-${i}`, "completed", false);
+    for (let i = 0; i < 50; i++) snap(`h-${i}`, "completed", true);
+    await Bun.sleep(80);
+    const headers = { authorization: `Bearer ${fleet.operatorToken}` };
+    const open = await (await fetch(url(s, "/mobile/runs?limit=50"), { headers })).json() as { runs: { runId: string }[] };
+    expect(open.runs.map((r) => r.runId)).toContain("r-live");
+    expect(open.runs.map((r) => r.runId)).not.toContain("r-hid-live");
+    expect(open.runs.filter((r) => r.runId.startsWith("c-"))).toHaveLength(50);
+    const hidden = await (await fetch(url(s, "/mobile/runs?view=hidden&limit=50"), { headers })).json() as { runs: { runId: string }[] };
+    expect(hidden.runs.map((r) => r.runId)).toContain("r-hid-live");
+    expect(hidden.runs.map((r) => r.runId)).not.toContain("r-live");
+    expect(hidden.runs.filter((r) => r.runId.startsWith("h-"))).toHaveLength(50);
+    ws.close();
+  });
+
   test("later snap omitting archived does not unhide", async () => {
     const s = start();
     const fleet = s.createFleet();

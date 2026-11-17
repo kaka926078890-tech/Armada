@@ -7,7 +7,7 @@ import { runDisplayName } from "../web/src/boardState";
 import type { RunEvent } from "../web/src/types";
 import { parseAttachmentIds } from "./blobs";
 import { canRetryStatus, LIVE_STATUSES, TERMINAL_STATUSES } from "./concurrency";
-import { createRelayCommandHandler, startRelayHeartbeat } from "./relayCommandHandler";
+import { createRelayCommandHandler, RELAY_HEARTBEAT_MS, startRelayHeartbeat } from "./relayCommandHandler";
 import { createDeskTunnel } from "./deskTunnel";
 import { cursorReloadView } from "./cursorReloadStore";
 import type { Registry } from "./registry";
@@ -159,9 +159,25 @@ function dumpActivityTs(row: RelayDumpRow): number {
 }
 
 /**
+ * Live and unknown cards the phone must keep even when they sit outside the
+ * recent page. A running card's `updated_at` stays put, so a later page of
+ * completed runs would otherwise hide it.
+ */
+export function liveIdsForRelayReconcile(rows: { id: string; status?: string }[]): string[] {
+  const live = new Set<string>([...LIVE_STATUSES, "unknown"]);
+  const ids: string[] = [];
+  for (const row of rows) {
+    const id = String(row.id ?? "");
+    if (!id || !live.has(String(row.status ?? ""))) continue;
+    ids.push(id);
+  }
+  return ids;
+}
+
+/**
  * Runs that must reconverge on hub↔relay open: every live/unknown card, plus the
  * same 50+50 window the phone lists. Stale `running` on relay after MACHINE_OFFLINE
- * is recovered here — live SSE `snap.run` is not durable across a dropped WS.
+ * is recovered here — one `snap.run` is not durable across a dropped WS.
  */
 export function runIdsForRelayDump(rows: RelayDumpRow[], limit = RELAY_DUMP_LIMIT): string[] {
   const live = new Set<string>(LIVE_STATUSES as readonly string[]);
@@ -252,6 +268,7 @@ export function startRelayClient(opts: {
   let stopped = false;
   let ws: WebSocket | null = null;
   let heartbeat: (() => void) | null = null;
+  let reconcileTimer: ReturnType<typeof setInterval> | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let backoff = 1000;
 
@@ -287,6 +304,20 @@ export function startRelayClient(opts: {
       "SELECT id, status, archived_at, ended_at, started_at, created_at FROM runs",
     ).all() as RelayDumpRow[];
     for (const id of runIdsForRelayDump(rows)) {
+      try { pushRun(id); } catch { /* one bad snap must not skip the rest */ }
+    }
+  };
+
+  const stopReconcile = () => {
+    if (reconcileTimer) clearInterval(reconcileTimer);
+    reconcileTimer = null;
+  };
+
+  /** Status changes push once. A missed frame stays wrong until the next heartbeat re-sends live cards. */
+  const reconcileLive = () => {
+    if (stopped || !ws || ws.readyState !== WebSocket.OPEN) return;
+    const rows = opts.db.query("SELECT id, status FROM runs").all() as { id: string; status: string }[];
+    for (const id of liveIdsForRelayReconcile(rows)) {
       try { pushRun(id); } catch { /* one bad snap must not skip the rest */ }
     }
   };
@@ -348,6 +379,8 @@ export function startRelayClient(opts: {
       dumpRuns();
       heartbeat?.();
       heartbeat = startRelayHeartbeat(next);
+      stopReconcile();
+      reconcileTimer = setInterval(reconcileLive, RELAY_HEARTBEAT_MS);
     });
     next.addEventListener("message", (e) => {
       let msg: any;
@@ -360,6 +393,7 @@ export function startRelayClient(opts: {
     });
     const retry = () => {
       heartbeat?.(); heartbeat = null;
+      stopReconcile();
       if (stopped) return;
       const wait = backoff;
       backoff = Math.min(MAX_BACKOFF_MS, backoff * 2);
@@ -378,6 +412,7 @@ export function startRelayClient(opts: {
       for (const t of pushSoon.values()) clearTimeout(t);
       pushSoon.clear();
       heartbeat?.();
+      stopReconcile();
       if (reconnectTimer) clearTimeout(reconnectTimer);
       try { ws?.close(); } catch { /* ignore */ }
     },

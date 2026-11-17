@@ -1,6 +1,26 @@
-import { hubWsUrl, loadEventsForSnap, loadRelayConfig, runToSnap, type RelayConfig, type RunSnap } from "./relayClient";
+import { hubWsUrl, liveIdsForRelayReconcile, loadEventsForSnap, loadRelayConfig, runToSnap, type RelayConfig, type RunSnap } from "./relayClient";
 import { createRelayCommandHandler, startRelayHeartbeat } from "./relayCommandHandler";
 import type { RunEvent } from "../web/src/types";
+
+/** Newest page, plus every live/unknown card that page would cut off. */
+export function rowsForRelayPoll<T extends { id?: string; status?: string }>(runs: T[], recentLimit = 30): T[] {
+  const keep = new Set(liveIdsForRelayReconcile(
+    runs.map((row) => ({ id: String(row?.id ?? ""), status: row?.status })),
+  ));
+  const seen = new Set<string>();
+  const out: T[] = [];
+  let recent = 0;
+  for (const row of runs) {
+    const id = typeof row?.id === "string" ? row.id : "";
+    if (!id || seen.has(id)) continue;
+    const forced = keep.has(id);
+    if (!forced && recent >= recentLimit) continue;
+    seen.add(id);
+    out.push(row);
+    if (!forced) recent += 1;
+  }
+  return out;
+}
 
 /** Attach a hub that only speaks HTTP/SSE (packaged 0.1.0) to a local relay. */
 export function startRelayAttach(opts: {
@@ -86,7 +106,7 @@ export function attachWithConfig(
       const runs = await (await hubFetch("/api/runs")).json().catch(() => null);
       if (!Array.isArray(runs)) return;
       const visible = new Set<string>();
-      for (const row of runs.slice(0, 30)) {
+      for (const row of rowsForRelayPoll(runs)) {
         if (typeof row?.id !== "string") continue;
         visible.add(row.id);
         const snap = loadEventsForSnap(String(row.status ?? "")) ? await snapOf(row.id) : null;

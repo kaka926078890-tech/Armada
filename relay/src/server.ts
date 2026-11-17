@@ -8,7 +8,7 @@ import { createDesktopGateway } from "./desktopGateway";
 import { createApnsSender, type ApnsConfig, type ApnsEnvironment } from "./apns";
 import { createFcmSender, isFcmToken, type FcmConfig } from "./fcm";
 import { notifyEdges, type NotifyEdge } from "./notifyEdge";
-import { canRetryStatus, followupOutcome, httpStatusForRunError } from "../../hub/src/concurrency";
+import { canRetryStatus, followupOutcome, httpStatusForRunError, LIVE_STATUSES, sqlStatusIn } from "../../hub/src/concurrency";
 import { MAX_BLOB_BYTES } from "../../hub/src/blobs";
 import { resolveAdminToken } from "./adminToken";
 import { applyBlobChunk, type BlobUploadSession } from "./blobUpload";
@@ -17,6 +17,8 @@ import { applyPromptChunk, isPromptChunkBody, type PromptUploadSession } from ".
 
 export const PROTOCOL_VERSION = 1;
 const MAX_BODY = MAX_OPERATOR_BODY;
+/** Live and unknown cards stay on the operator list past the recent page. */
+const OPERATOR_KEEP_SQL = sqlStatusIn([...LIVE_STATUSES, "unknown"]);
 const DISPATCH_TIMEOUT_MS = 15_000;
 const RATE_WINDOW_MS = 5 * 60 * 1000;
 const RATE_MAX = 20;
@@ -569,10 +571,22 @@ export function createRelayServer(opts: {
     sseBroadcast(fleetId, sseEvent(workspacesPayload(fleetId)));
   }
 
+  function listOperatorRuns(fleetId: string, hidden: boolean, limit: number): any[] {
+    const archived = hidden ? "archived_at IS NOT NULL" : "archived_at IS NULL";
+    const keep = db.query(
+      `SELECT * FROM runs WHERE fleet_id=?1 AND ${archived} AND status IN (${OPERATOR_KEEP_SQL}) ORDER BY updated_at DESC`,
+    ).all(fleetId) as any[];
+    const rest = db.query(
+      `SELECT * FROM runs WHERE fleet_id=?1 AND ${archived} AND status NOT IN (${OPERATOR_KEEP_SQL}) ORDER BY updated_at DESC LIMIT ?2`,
+    ).all(fleetId, limit) as any[];
+    return [...keep, ...rest];
+  }
+
   function streamRuns(fleetId: string): object[] {
-    const open = db.query("SELECT * FROM runs WHERE fleet_id=?1 AND archived_at IS NULL ORDER BY updated_at DESC LIMIT 50").all(fleetId);
-    const hidden = db.query("SELECT * FROM runs WHERE fleet_id=?1 AND archived_at IS NOT NULL ORDER BY updated_at DESC LIMIT 50").all(fleetId);
-    return [...open, ...hidden].map((row) => runToJson(row, true));
+    return [
+      ...listOperatorRuns(fleetId, false, 50),
+      ...listOperatorRuns(fleetId, true, 50),
+    ].map((row) => runToJson(row, true));
   }
 
   function sendHub(fleetId: string, msg: object): boolean {
@@ -991,8 +1005,7 @@ export function createRelayServer(opts: {
     const fleet = (c as any).get("fleet") as { id: string };
     const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 50) || 50, 1), 50);
     const hidden = c.req.query("view") === "hidden" || c.req.query("archived") === "1";
-    const filter = hidden ? "AND archived_at IS NOT NULL" : "AND archived_at IS NULL";
-    const rows = db.query(`SELECT * FROM runs WHERE fleet_id=?1 ${filter} ORDER BY updated_at DESC LIMIT ?2`).all(fleet.id, limit);
+    const rows = listOperatorRuns(fleet.id, hidden, limit);
     return c.json({ runs: rows.map((row) => runToJson(row, true)) });
   });
 
