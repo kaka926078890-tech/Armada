@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { askPollMany } from "../src/askDetect";
 import {
+  asksFromComposerRows,
   cursorStateDbPath,
+  extraBubbleIds,
   inspectStoredBubbles,
   mergeVisibleAndStoredAsks,
   tailBubbleIds,
@@ -71,6 +73,53 @@ describe("stored ask", () => {
         ],
       },
     ]);
+  });
+
+  test("a pending ask flushed before the header list is still reported", async () => {
+    const flushed = {
+      toolFormerData: {
+        name: "ask_question",
+        status: "completed",
+        additionalData: { status: "pending" },
+        params: JSON.stringify({
+          title: "确认四处修复口径",
+          questions: [{
+            id: "memory_policy",
+            prompt: "记忆策略按哪条做？",
+            options: [
+              { id: "explicit_only", label: "只记明确说的" },
+              { id: "habit_too", label: "习惯也记" },
+            ],
+          }],
+        }),
+      },
+    };
+    const composerRaw = JSON.stringify({ fullConversationHeadersOnly: [{ bubbleId: "old" }] });
+    const bubbles = new Map<string, string>([
+      ["old", JSON.stringify({ toolFormerData: { name: "Shell" } })],
+      ["ask-new", JSON.stringify(flushed)],
+    ]);
+    const hit = asksFromComposerRows("cid-1", composerRaw, bubbles, ["ask-new", "old"]);
+    expect(hit.state).toBe("pending");
+    if (hit.state !== "pending") return;
+    expect(hit.inspect.prompt).toBe("记忆策略按哪条做？");
+    const merged = mergeVisibleAndStoredAsks({ present: false }, [hit]);
+    const acts = askPollMany(
+      new Map([["r-1", { conversationId: "cid-1" }]]),
+      new Map(),
+      merged.presents,
+      merged.submittedCids,
+      () => "ask-1",
+    );
+    expect(acts.map((a) => a.type)).toEqual(["askQuestion"]);
+  });
+
+  test("header ids stay the tail; a newer unlisted bubble is appended after them", () => {
+    const header = ["old", "kept"];
+    expect(extraBubbleIds(header, ["ask-new", "kept", "old"])).toEqual(["ask-new"]);
+    expect(tailBubbleIds({
+      fullConversationHeadersOnly: [{ bubbleId: "kept" }, { bubbleId: "also" }],
+    })).toEqual(["kept", "also"]);
   });
 
   test("a pending row that is not in the header list is ignored", () => {

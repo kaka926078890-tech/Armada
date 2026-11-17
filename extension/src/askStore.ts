@@ -2,8 +2,10 @@ import { homedir } from "os";
 import { join } from "path";
 import type { AskInspect, AskInspectOption, AskInspectQuestion } from "./askDetect";
 
-/** Only the tail is an open question. A pending row outside the header list is a leftover. */
+/** Only the tail is an open question. A pending row outside the header list is a leftover, except a body flushed before the header is saved. */
 export const ASK_STORE_TAIL = 40;
+/** Cursor flushes the pending ask body with rootUnchanged, so the on-disk header list lags that row. */
+export const ASK_RECENT_ROWS = 8;
 
 export type DbAsk =
   | { cid: string; state: "pending"; inspect: AskInspect }
@@ -21,7 +23,7 @@ export function cursorStateDbPath(home: string, platform: string): string | null
   return null;
 }
 
-export function tailBubbleIds(composer: unknown, limit = ASK_STORE_TAIL): string[] {
+export function headerBubbleIds(composer: unknown): string[] {
   if (!composer || typeof composer !== "object") return [];
   const headers = (composer as { fullConversationHeadersOnly?: unknown }).fullConversationHeadersOnly;
   if (!Array.isArray(headers)) return [];
@@ -32,7 +34,24 @@ export function tailBubbleIds(composer: unknown, limit = ASK_STORE_TAIL): string
       : "";
     if (id) ids.push(id);
   }
-  return ids.slice(-limit);
+  return ids;
+}
+
+export function tailBubbleIds(composer: unknown, limit = ASK_STORE_TAIL): string[] {
+  return headerBubbleIds(composer).slice(-limit);
+}
+
+/** `newestFirst` is rowid order, newest at index 0. Ids already in the header list are not a new flush. */
+export function extraBubbleIds(headerIds: readonly string[], newestFirst: readonly string[]): string[] {
+  const known = new Set(headerIds);
+  const fresh: string[] = [];
+  for (const id of newestFirst) {
+    const trimmed = id.trim();
+    if (!trimmed || known.has(trimmed)) continue;
+    known.add(trimmed);
+    fresh.push(trimmed);
+  }
+  return fresh.reverse();
 }
 
 function letterAt(index: number): string {
@@ -133,8 +152,13 @@ export function inspectStoredBubbles(cid: string, bubbles: unknown[]): DbAsk {
   };
 }
 
+type SqlStmt = {
+  get: (key: string) => { value?: unknown } | null;
+  all: (...args: string[]) => { key?: unknown }[];
+};
+
 type SqlDb = {
-  prepare: (sql: string) => { get: (key: string) => { value?: unknown } | null };
+  prepare: (sql: string) => SqlStmt;
   close: () => void;
 };
 
@@ -178,6 +202,64 @@ export function mergeVisibleAndStoredAsks(cdp: AskInspect, stored: DbAsk[]): {
   return { presents, submittedCids, loadingCids };
 }
 
+function recentBubbleIds(db: SqlDb, cid: string): string[] {
+  const start = `bubbleId:${cid}:`;
+  const end = `bubbleId:${cid};`;
+  let rows: { key?: unknown }[] = [];
+  try {
+    rows = db.prepare(
+      `SELECT key FROM cursorDiskKV WHERE key >= ? AND key < ? ORDER BY rowid DESC LIMIT ${ASK_RECENT_ROWS}`,
+    ).all(start, end);
+  } catch {
+    return [];
+  }
+  const ids: string[] = [];
+  for (const row of rows) {
+    const key = typeof row.key === "string" ? row.key : "";
+    if (!key.startsWith(start)) continue;
+    const id = key.slice(start.length).trim();
+    if (id) ids.push(id);
+  }
+  return ids;
+}
+
+function bubbleMap(db: SqlDb, cid: string, ids: readonly string[]): Map<string, string> {
+  const get = db.prepare("SELECT value FROM cursorDiskKV WHERE key = ?");
+  const out = new Map<string, string>();
+  for (const id of ids) {
+    if (out.has(id)) continue;
+    const raw = cellText(get.get(`bubbleId:${cid}:${id}`)?.value);
+    if (raw) out.set(id, raw);
+  }
+  return out;
+}
+
+/** Header tail, then bubble rows flushed before the header list was saved. Newest of those rows is last. */
+export function asksFromComposerRows(
+  cid: string,
+  composerRaw: string | null,
+  bubblesById: ReadonlyMap<string, string>,
+  newestFirst: readonly string[],
+): DbAsk {
+  let composer: unknown = null;
+  if (composerRaw) {
+    try { composer = JSON.parse(composerRaw); } catch { return { cid, state: "loading" }; }
+  }
+  const headerIds = headerBubbleIds(composer);
+  const ids = [...tailBubbleIds(composer), ...extraBubbleIds(headerIds, newestFirst)];
+  if (!ids.length) return { cid, state: "none" };
+  const bubbles: unknown[] = [];
+  const seen = new Set<string>();
+  for (const id of ids) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const raw = bubblesById.get(id);
+    if (!raw) continue;
+    try { bubbles.push(JSON.parse(raw)); } catch { /* skip one bad row */ }
+  }
+  return inspectStoredBubbles(cid, bubbles);
+}
+
 /** null = the file could not be read. Do not treat that as "no question". */
 export async function readStoredAsks(cids: string[], home = homedir(), platform = process.platform): Promise<DbAsk[] | null> {
   const unique = [...new Set(cids.map((c) => c.trim()).filter(Boolean))];
@@ -195,22 +277,17 @@ export async function readStoredAsks(cids: string[], home = homedir(), platform 
     const get = db.prepare("SELECT value FROM cursorDiskKV WHERE key = ?");
     const out: DbAsk[] = [];
     for (const cid of unique) {
-      const composerCell = get.get(`composerData:${cid}`);
-      const composerRaw = cellText(composerCell?.value);
-      if (!composerRaw) {
-        out.push({ cid, state: "none" });
-        continue;
+      const composerRaw = cellText(get.get(`composerData:${cid}`)?.value);
+      const newestFirst = recentBubbleIds(db, cid);
+      let composer: unknown = null;
+      if (composerRaw) {
+        try { composer = JSON.parse(composerRaw); } catch { out.push({ cid, state: "loading" }); continue; }
       }
-      let composer: unknown;
-      try { composer = JSON.parse(composerRaw); } catch { out.push({ cid, state: "loading" }); continue; }
-      const bubbles: unknown[] = [];
-      for (const id of tailBubbleIds(composer)) {
-        const cell = get.get(`bubbleId:${cid}:${id}`);
-        const raw = cellText(cell?.value);
-        if (!raw) continue;
-        try { bubbles.push(JSON.parse(raw)); } catch { /* skip one bad row */ }
-      }
-      out.push(inspectStoredBubbles(cid, bubbles));
+      const ids = [
+        ...tailBubbleIds(composer),
+        ...extraBubbleIds(headerBubbleIds(composer), newestFirst),
+      ];
+      out.push(asksFromComposerRows(cid, composerRaw, bubbleMap(db, cid, ids), newestFirst));
     }
     return out;
   } catch {
