@@ -104,6 +104,15 @@ describe("settleFollowupComposer", () => {
     })).toMatchObject({ awaiting: false, draft: "看 sha abc123", clearFiles: false });
   });
 
+  test("surrounding space still counts as the sent text and clears", () => {
+    expect(settleFollowupComposer({
+      ...base,
+      draft: "看 sha abc123\n",
+      sawDispatched: true,
+      status: "completed",
+    })).toMatchObject({ awaiting: false, draft: "", clearFiles: true });
+  });
+
   test("an edit made while inject is in flight stays after accept", () => {
     expect(settleFollowupComposer({
       ...base,

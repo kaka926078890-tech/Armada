@@ -493,6 +493,73 @@ describe("composer table plan", () => {
     expect(events.some((e) => e.hook === "stop" && e.payload.generation_id === liveGen)).toBe(false);
   });
 
+  // r-5d82dd7b 13:16:40: follow-up landed while status was still the previous
+  // turn's completed, uuid already cleared, and an emitted step row sat after the
+  // new user. That tick emitted BSP and stop completed for the new generation.
+  test("a new user is not completed by an older step that sorts after it", () => {
+    const cursor = cursorFromEmitted([
+      { source: "db", hook: "beforeSubmitPrompt", payload: { prompt: "first", bubble_id: "u1", generation_id: "gen-old" } },
+      { source: "db", hook: "afterAgentResponse", payload: { text: "old reply", bubble_id: "a1", generation_id: "gen-old" } },
+      { source: "db", hook: "afterAgentResponse", payload: { text: "step", bubble_id: "a1/s:1", generation_id: "gen-old" } },
+      { source: "db", hook: "stop", payload: { status: "completed", generation_id: "gen-old" } },
+    ]);
+    const opened = planComposerTick(snap({
+      cid: "cid-1",
+      status: "completed",
+      generationId: null,
+      bubbles: [
+        bubble({ id: "u1", type: 1, text: "first", requestId: "gen-old" }),
+        bubble({ id: "a1", type: 2, text: "old reply" }),
+        bubble({ id: "u2", type: 1, text: "还有哪些没有进行测试？", requestId: "gen-new" }),
+        bubble({ id: "a1/s:1", type: 2, text: "step" }),
+      ],
+    }), [], cursor);
+    expect(opened.events.find((e) => e.hook === "beforeSubmitPrompt")?.payload).toMatchObject({
+      prompt: "还有哪些没有进行测试？",
+      generation_id: "gen-new",
+    });
+    expect(opened.events.some((e) => e.hook === "stop")).toBe(false);
+    expect(opened.cursor.stopped).toBe(false);
+
+    const answered = planComposerTick(snap({
+      cid: "cid-1",
+      status: "completed",
+      generationId: null,
+      bubbles: [
+        bubble({ id: "u1", type: 1, text: "first", requestId: "gen-old" }),
+        bubble({ id: "a1", type: 2, text: "old reply" }),
+        bubble({ id: "u2", type: 1, text: "还有哪些没有进行测试？", requestId: "gen-new" }),
+        bubble({ id: "a1/s:1", type: 2, text: "step" }),
+        bubble({ id: "a2", type: 2, text: "the new answer" }),
+      ],
+    }), [], opened.cursor);
+    expect(answered.events.find((e) => e.hook === "afterAgentResponse")?.payload).toMatchObject({
+      text: "the new answer",
+      generation_id: "gen-new",
+    });
+    expect(answered.events.find((e) => e.hook === "stop")?.payload).toMatchObject({
+      status: "completed",
+      generation_id: "gen-new",
+    });
+  });
+
+  test("a new user with no reply yet is not aborted by the previous completed status", () => {
+    const cursor = stoppedAfterFirstTurn();
+    const { events, cursor: next } = planComposerTick(snap({
+      cid: "cid-1",
+      status: "completed",
+      generationId: null,
+      bubbles: [
+        bubble({ id: "u1", type: 1, text: "first", requestId: "gen-1" }),
+        bubble({ id: "a1", type: 2, text: "done once" }),
+        bubble({ id: "u2", type: 1, text: "second", requestId: "gen-new" }),
+      ],
+    }), [], cursor);
+    expect(events.some((e) => e.hook === "beforeSubmitPrompt" && e.payload.prompt === "second")).toBe(true);
+    expect(events.some((e) => e.hook === "stop")).toBe(false);
+    expect(next.stopped).toBe(false);
+  });
+
   test("a Cursor turn that still holds chatGenerationUUID is armed and not stopped", () => {
     const cursor = stoppedAfterFirstTurn();
     const { events } = planComposerTick(snap({

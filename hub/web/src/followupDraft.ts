@@ -65,7 +65,7 @@ export function settleFollowupComposer(input: {
   }
   const sawDispatched = input.sawDispatched || input.status === "dispatched" || input.status === "queued";
   const keep = { awaiting: false, sawDispatched, draft: input.draft, clearFiles: false };
-  const unchanged = input.draft === input.sent;
+  const unchanged = input.draft.trim() === input.sent.trim();
   const accept = unchanged
     ? { awaiting: false, sawDispatched, draft: "", clearFiles: true }
     : { awaiting: false, sawDispatched, draft: input.draft, clearFiles: false };

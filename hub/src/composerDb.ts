@@ -411,6 +411,15 @@ function bubbleIsBody(b: ComposerBubble): boolean {
   return !!(b.thinking || b.toolName || (b.type === 2 && b.text.trim()));
 }
 
+/** Body the feed already emitted on an earlier tick. A later bubble order must not count it again. */
+function bodyAlreadyEmitted(b: ComposerBubble, cursor: ComposerCursor): boolean {
+  if (!bubbleIsBody(b)) return false;
+  if (b.thinking && !cursor.thoughts.includes(`${b.id}\0${b.thinking}`)) return false;
+  if (b.toolName && !cursor.tools.includes(b.id)) return false;
+  if (b.type === 2 && b.text.trim() && !b.toolName && !cursor.assistants.includes(b.id)) return false;
+  return true;
+}
+
 /** Bubbles after the user that owns `gen`, and before the next user. */
 function turnSlice(bubbles: ComposerBubble[], gen: string | null): { owner: number; slice: ComposerBubble[] } {
   let owner = -1;
@@ -720,6 +729,10 @@ export function planComposerTick(
       if (live || hold) continue;
       if (!childStillBusy(children, next)) {
         const hadText = slice.some((b) => b.type === 2 && !!b.text.trim() && next.assistants.includes(b.id));
+        const freshText = slice.some((b) => b.type === 2 && !!b.text.trim() && !b.toolName && !cursor.assistants.includes(b.id));
+        // r-5d82dd7b: status is still the previous turn's "completed", and a step
+        // row already emitted sits after the new user. That is not this turn's reply.
+        if (isLast && !freshText && doneStatus(snap.status)) continue;
         next.stopped = true;
         emit({
           source: "db",
@@ -824,10 +837,10 @@ export function planComposerTick(
   if (uuidCleared && !abortHold && !next.stopped && !childBusy) {
     const owned = turnSlice(snap.bubbles, next.generationId);
     const earlierHasBody = owned.owner > 0 && snap.bubbles.slice(0, owned.owner).some(bubbleIsBody);
-    const sliceHasWork = owned.slice.some(bubbleIsBody);
+    const freshWork = owned.slice.some((b) => bubbleIsBody(b) && !bodyAlreadyEmitted(b, cursor));
     // Idle composer status belongs to the turn that already has bubbles.
-    // A newer user with an empty slice has not finished, so that status must not close it.
-    if (!sliceHasWork && earlierHasBody) {
+    // A newer user with no new body has not finished, so that status must not close it.
+    if (!freshWork && earlierHasBody) {
       return { events, cursor: next };
     }
     for (const b of owned.slice) flushText(b, next.generationId);
