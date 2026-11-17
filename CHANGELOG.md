@@ -14,6 +14,18 @@ Armada 按 **面** 发版：扩展、桌面、iOS、Android 可以不同号。RE
 
 ---
 
+## 2026-11-17 — 扩展 0.4.64 · iOS TF 45 · Android 0.1.14 · 桌面 0.1.0
+
+### 修复
+
+- 被控 Cursor 弹出选择题、人还没在那台电脑上回答时，中台会出现「待处理」。以前问题气泡已经落盘、会话头还没写上这张卡时，中台一直不响。
+
+### 操作员注意
+
+扩展装 **0.4.64**。Mac 和 Windows 都装 `armada-agent-0.4.64.vsix`，再 Reload。中台须 overlay 到含 `REQUIRED_EXTENSION_VERSION=0.4.64` 的包装 hub；只装 vsix、看板仍是 0.4.63 时，空闲 Reload 不会升级。同号会被跳过。桌面号仍是 **0.1.0**。iOS 仍是 TestFlight **45**。Android 仍是 **0.1.14**。
+
+---
+
 ## 2026-11-17 — 扩展 0.4.63 · iOS TF 45 · Android 0.1.14 · 桌面 0.1.0
 
 ### 修复
