@@ -648,6 +648,65 @@ describe("createCdpSubmitter", () => {
     expect(r.reason).not.toBe("WINDOW_TARGET_NOT_FOUND");
   });
 
+  test("握手超时先拆掉套接字再连一次，时限盖住 Windows 上约 3 秒的升级", async () => {
+    const timeouts: number[] = [];
+    let n = 0;
+    const submit = createCdpSubmitter(deps({
+      connect: async (_url, timeoutMs) => {
+        timeouts.push(timeoutMs);
+        n += 1;
+        if (n === 1) throw new Error("CDP_CONNECT_TIMEOUT");
+        return mockSession(["OK", "OK", "OK"]);
+      },
+    }));
+    const r = await submit("/Users/x/armada-test-ws", "hi");
+    expect(r.ok).toBe(true);
+    expect(n).toBe(2);
+    expect(timeouts).toEqual([4500, 4500]);
+  });
+
+  test("连续两次握手超时仍是 CDP_CONNECT_FAIL，其它错误不重试", async () => {
+    let timeouts = 0;
+    const timed = createCdpSubmitter(deps({
+      connect: async () => {
+        timeouts += 1;
+        throw new Error("CDP_CONNECT_TIMEOUT");
+      },
+    }));
+    const timedResult = await timed("/Users/x/armada-test-ws", "hi");
+    expect(timedResult.reason).toBe("CDP_CONNECT_FAIL:CDP_CONNECT_TIMEOUT");
+    expect(timeouts).toBe(2);
+
+    let others = 0;
+    const other = createCdpSubmitter(deps({
+      connect: async () => {
+        others += 1;
+        throw new Error("boom");
+      },
+    }));
+    const otherResult = await other("/Users/x/armada-test-ws", "hi");
+    expect(otherResult.reason).toContain("CDP_CONNECT_FAIL:boom");
+    expect(others).toBe(1);
+  });
+
+  test("调试页地址改写到 127.0.0.1，避免 Windows 上 localhost 走 IPv6 把握手挂满", async () => {
+    const urls: string[] = [];
+    const submit = createCdpSubmitter(deps({
+      fetchJson: async () => [{
+        type: "page",
+        title: "hello.txt — armada-test-ws",
+        webSocketDebuggerUrl: "ws://localhost:9222/devtools/page/abc",
+      }],
+      connect: async (url) => {
+        urls.push(url);
+        return mockSession(["OK", "OK", "OK"]);
+      },
+    }));
+    const r = await submit("/Users/x/armada-test-ws", "hi");
+    expect(r.ok).toBe(true);
+    expect(urls).toEqual(["ws://127.0.0.1:9222/devtools/page/abc"]);
+  });
+
   test("CDP websocket does not use the shared HTTP agent", () => {
     const src = readFileSync(join(import.meta.dir, "../src/cdpInject.ts"), "utf8");
     expect(src).toMatch(/new WebSocket\(wsUrl,\s*\{[^}]*agent:\s*false/);

@@ -55,6 +55,50 @@ export interface CdpSubmitterDeps {
 /** 一次 CDP 调用的上限。Ask 轮询拿不到结果就当 unknown，下一拍再扫。 */
 export const CDP_CALL_TIMEOUT_MS = 4000;
 
+/**
+ * 调试页 WebSocket 升级的上限。与 /json 的 4500 对齐。
+ * Windows 上 9222 的响应约 3 秒才到，2 秒会把还能完成的握手记成 CDP_CONNECT_TIMEOUT。
+ */
+export const CDP_SOCKET_TIMEOUT_MS = 4500;
+
+/** Windows 上 localhost / ::1 会先走 IPv6，握手不拒绝、一直挂到超时。只改这两个环回名。 */
+export function debugSocketUrl(raw: string): string {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return raw;
+  }
+  if (url.protocol !== "ws:" && url.protocol !== "wss:") return raw;
+  const host = url.hostname.toLowerCase();
+  if (host !== "localhost" && host !== "::1") return raw;
+  url.hostname = "127.0.0.1";
+  return url.href;
+}
+
+/**
+ * 第一次握手超时先拆掉套接字再连一次。半开升级会占住 9222，同一次注入里的新连接才能完成。
+ * 拒绝连接或其它错误不重试。
+ */
+async function openDebugSocket(
+  connect: (wsUrl: string, timeoutMs: number) => Promise<CdpSession>,
+  wsUrl: string,
+): Promise<CdpSession> {
+  const url = debugSocketUrl(wsUrl);
+  try {
+    return await connect(url, CDP_SOCKET_TIMEOUT_MS);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg !== "CDP_CONNECT_TIMEOUT") throw e;
+    return await connect(url, CDP_SOCKET_TIMEOUT_MS);
+  }
+}
+
+function connectFailReason(e: unknown): string {
+  const msg = e instanceof Error ? e.message : String(e);
+  return msg.startsWith("CDP_CONNECT_FAIL:") ? msg : `CDP_CONNECT_FAIL:${msg}`;
+}
+
 export function withCallTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("CDP_CALL_TIMEOUT")), ms);
@@ -509,7 +553,7 @@ function defaultConnect(wsUrl: string, timeoutMs: number): Promise<CdpSession> {
     // 与 /json 一样不进全局 agent。扩展宿主的共享连接池会把 127.0.0.1:9222 的升级请求挂住：
     // 外面新建的连接几十毫秒能读到窗口章，宿主里的 evaluate 却每次顶满 4 秒。
     // CDP 也不协商 permessage-deflate，避免压缩帧把应答留在解压队列里。
-    const ws = new WebSocket(wsUrl, { agent: false, perMessageDeflate: false });
+    const ws = new WebSocket(wsUrl, { agent: false, family: 4, perMessageDeflate: false });
     let mid = 0;
     const pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void }>();
     let gone = false;
@@ -978,9 +1022,9 @@ async function connectWorkspacePage(
         closeExcept(null);
         return { ok: false, reason: "CDP_SCAN_BUDGET" };
       }
-      const wsUrl = String(t.webSocketDebuggerUrl);
+      const wsUrl = debugSocketUrl(String(t.webSocketDebuggerUrl));
       try {
-        const raw = await connect(wsUrl, 2000);
+        const raw = await openDebugSocket(connect, wsUrl);
         if (pastDeadline()) {
           raw.close();
           closeExcept(null);
@@ -1004,10 +1048,7 @@ async function connectWorkspacePage(
       } catch (e) {
         // 连不上不当成未盖章，也不据此 AMBIGUOUS。一页都没打开时要把连接失败交出去，
         // 不能写成 WINDOW_TARGET_NOT_FOUND（页在，只是这条调试连接没立起来）。
-        if (!connectFail) {
-          const msg = e instanceof Error ? e.message : String(e);
-          connectFail = msg.startsWith("CDP_CONNECT_FAIL:") ? msg : `CDP_CONNECT_FAIL:${msg}`;
-        }
+        if (!connectFail) connectFail = connectFailReason(e);
       }
     }
     const writeStamp = async (session: CdpSession): Promise<boolean> => {
@@ -1062,14 +1103,14 @@ async function connectWorkspacePage(
   if (!picked.ok) return picked;
   if (pastDeadline()) return { ok: false, reason: "CDP_SCAN_BUDGET" };
   try {
-    const raw = await connect(picked.wsUrl, 2000);
+    const raw = await openDebugSocket(connect, picked.wsUrl);
     if (pastDeadline()) {
       raw.close();
       return { ok: false, reason: "CDP_SCAN_BUDGET" };
     }
-    return { ok: true, session: budgetSession(raw, timeoutMs), wsUrl: picked.wsUrl };
+    return { ok: true, session: budgetSession(raw, timeoutMs), wsUrl: debugSocketUrl(picked.wsUrl) };
   } catch (e) {
-    return { ok: false, reason: `CDP_CONNECT_FAIL:${String(e)}` };
+    return { ok: false, reason: connectFailReason(e) };
   }
 }
 
@@ -1113,7 +1154,7 @@ export function createAskQuestionDriver(deps: CdpSubmitterDeps) {
     if (rememberedUrl) {
       const url = rememberedUrl;
       try {
-        const raw = await connect(url, 2000);
+        const raw = await openDebugSocket(connect, url);
         const session = budgetSession(raw, timeoutMs);
         if (windowId) {
           const stamp = await readWindowStamp(session, timeoutMs);
