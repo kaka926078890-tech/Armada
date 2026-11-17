@@ -11,6 +11,7 @@ import { ConsoleFilePicker } from "./ConsoleFilePicker";
 import { HubImageRow } from "./ImageThumb";
 import { endFollowupSend, isFollowupSendEnter, tryBeginFollowupSend } from "../followupSend";
 import { rejectedFollowupDraft, settleFollowupComposer } from "../followupDraft";
+import { FOLLOWUP_TRANSPORT_MISS, followupLandedAfterTransportError, isFollowupTransportError } from "../followupTransport";
 import { queueComposerCaretRestore, shouldRefocusComposerAfterSend, shouldRestoreComposerFocus } from "../composerFocus";
 import { WIDTH_KEY, type PromptSnippet } from "../uiPrefs";
 import { appendSnippetBody } from "../promptSnippets";
@@ -347,6 +348,17 @@ export default function RunDetail({
     setSending(true);
     setFollowupError("");
     const epoch = sendEpoch.current;
+    const sentAt = Date.now();
+    const startedBefore = run.started_at ?? null;
+    const acceptSend = (next?: RunRow) => {
+      if (next) setRun(next);
+      sentPromptRef.current = followup.trim();
+      sendAfterSeq.current = seqRef.current;
+      outboundAfterRef.current = Math.max(0, ...(run.outbound ?? []).map((row) => row.created_at));
+      sawDispatchedRef.current = false;
+      setAwaitingInject(true);
+      onChanged();
+    };
     void (async () => {
       try {
         const ids: string[] = [];
@@ -373,14 +385,25 @@ export default function RunDetail({
                   : r.error);
           return;
         }
-        if (r?.run) setRun(r.run);
-        sentPromptRef.current = followup.trim();
-        sendAfterSeq.current = seqRef.current;
-        outboundAfterRef.current = Math.max(0, ...(run.outbound ?? []).map((row) => row.created_at));
-        sawDispatchedRef.current = false;
-        setAwaitingInject(true);
-        onChanged();
-      } catch (err) { setFollowupError(String(err)); }
+        acceptSend(r?.run);
+      } catch (err) {
+        if (!isFollowupTransportError(err)) {
+          setFollowupError(String(err));
+          return;
+        }
+        let landed = false;
+        try {
+          const latest = await api.run(run.id) as RunRow & { error?: string };
+          landed = !latest?.error && followupLandedAfterTransportError({
+            prompt: followup.trim(),
+            sentAt,
+            before: { startedAt: startedBefore },
+            after: { startedAt: latest?.started_at, outbound: latest?.outbound },
+          });
+          if (landed) acceptSend(latest);
+        } catch { landed = false; }
+        if (!landed) setFollowupError(FOLLOWUP_TRANSPORT_MISS);
+      }
       finally {
         if (sendEpoch.current === epoch) {
           endFollowupSend(sendingRef);

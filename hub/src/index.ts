@@ -484,6 +484,10 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
   const server = Bun.serve<WsData>({
     port: opts.port ?? 7380,
     hostname: opts.hostname ?? "127.0.0.1",
+    // Bun's default idleTimeout is 10s. WKWebView keeps the board socket and
+    // reuses it; the next POST then fails as TypeError: Load failed after the
+    // handler has already committed. 0 disables the idle close (same as relay).
+    idleTimeout: 0,
     fetch(req, server) {
       const url = new URL(req.url);
       if (url.pathname === "/ws") {
