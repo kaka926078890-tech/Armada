@@ -454,6 +454,13 @@ function textTurnSettled(b: ComposerBubble): boolean {
   return b.type === 2 && !!b.text.trim() && !b.toolName && (b.turnDurationMs ?? 0) > 0;
 }
 
+/** `/s:<n>` belongs to its parent bubble. A step of another parent is not this turn. */
+function stepParent(id: string): string | null {
+  const split = bubbleSplit(id);
+  if (!split || !/^s:\d+$/.test(split.tail)) return null;
+  return split.parent;
+}
+
 function toolStillRunning(b: ComposerBubble): boolean {
   return !!b.toolName && b.toolStatus !== "completed" && b.toolStatus !== "error";
 }
@@ -468,7 +475,15 @@ function settledOpenTurn(snap: ComposerView, gen: string | null): { ok: boolean;
   const user = owned.owner >= 0 ? snap.bubbles[owned.owner] : undefined;
   if (gen && user?.requestId && user.requestId !== gen) return { ok: false, owner: owned.owner, slice: owned.slice };
   if (owned.slice.some(toolStillRunning)) return { ok: false, owner: owned.owner, slice: owned.slice };
-  return { ok: owned.slice.some(textTurnSettled), owner: owned.owner, slice: owned.slice };
+  const userId = user?.id ?? "";
+  // r-7a755f88: an older /s:n with turnDurationMs sorts after the new user when
+  // the header list is empty. That duration belongs to its own parent.
+  const settles = owned.slice.some((b) => {
+    if (!textTurnSettled(b)) return false;
+    const parent = stepParent(b.id);
+    return !parent || parent === userId;
+  });
+  return { ok: settles, owner: owned.owner, slice: owned.slice };
 }
 
 function bsp(snap: ComposerView, bubble: ComposerBubble, generationId?: string | null): DbEvent {
@@ -773,9 +788,11 @@ export function planComposerTick(
       if (!childStillBusy(children, next)) {
         const hadText = slice.some((b) => b.type === 2 && !!b.text.trim() && next.assistants.includes(b.id));
         const freshText = slice.some((b) => b.type === 2 && !!b.text.trim() && !b.toolName && !cursor.assistants.includes(b.id));
-        // r-5d82dd7b: status is still the previous turn's "completed", and a step
-        // row already emitted sits after the new user. That is not this turn's reply.
-        if (isLast && !freshText && doneStatus(snap.status)) continue;
+        // r-5d82dd7b / r-7a755f88: status is still the previous turn's completed
+        // or aborted, and a step row already emitted sits after the new user.
+        // That is not this turn's reply. Cursor leaves status at aborted after
+        // a normal turn, so completed/success alone does not cover it.
+        if (isLast && !freshText && (doneStatus(snap.status) || snap.status === "aborted")) continue;
         next.stopped = true;
         emit({
           source: "db",
@@ -934,6 +951,16 @@ export function planComposerTick(
           ...(stopGen ? { generation_id: stopGen } : {}),
         },
       });
+    }
+  }
+  // The follow-up was already closed before its /s:n row existed (r-7a755f88).
+  // Emit that step once it arrives. A step of any other parent stays out.
+  if (cursor.stopped) {
+    for (const b of snap.bubbles) {
+      const parent = stepParent(b.id);
+      if (!parent || !cursor.users.includes(parent)) continue;
+      const owner = snap.bubbles.find((u) => u.type === 1 && u.id === parent);
+      flushText(b, owner?.requestId.trim() || null);
     }
   }
   return { events, cursor: next };

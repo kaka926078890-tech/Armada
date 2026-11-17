@@ -728,6 +728,92 @@ describe("composer table plan", () => {
     });
   });
 
+  // r-7a755f88 18:10:56: header list empty, so the previous turn's /s:1
+  // (turnDurationMs already set) sorts after the follow-up. Composer status
+  // stays aborted. That tick emitted BSP and stop completed for the new
+  // generation, and the later /s:11 body never became afterAgentResponse.
+  test("an aborted composer does not complete a follow-up on an older step that sorts after it", () => {
+    const prompt = "给我一个提示词，可以定位完问题，并让他从Armada把消息发回你这个卡片";
+    const older = "后台那次全盘找日志的命令已经中止，没有影响结论。";
+    const userId = "a69e1442-59ec-444a-8e42-a9232784df9c";
+    const gen = "c5d3ee5d-30b6-4d47-a32c-f2b6897c46fa";
+    const cursor = cursorFromEmitted([
+      { source: "db", hook: "beforeSubmitPrompt", payload: { prompt: "first", bubble_id: "u1", generation_id: "gen-old" } },
+      { source: "db", hook: "afterAgentResponse", payload: { text: "done once", bubble_id: "a1", generation_id: "gen-old" } },
+      { source: "db", hook: "afterAgentResponse", payload: { text: older, bubble_id: "8dd0a101-44ec-4506-a44f-3dd4d8fd1321/s:1", generation_id: "gen-old" } },
+      { source: "db", hook: "stop", payload: { status: "completed", generation_id: "gen-old" } },
+    ]);
+    const base = [
+      bubble({ id: "u1", type: 1, text: "first", requestId: "gen-old" }),
+      bubble({ id: "a1", type: 2, text: "done once" }),
+      bubble({ id: userId, type: 1, text: prompt, requestId: gen }),
+    ];
+    const olderStep = bubble({
+      id: "8dd0a101-44ec-4506-a44f-3dd4d8fd1321/s:1", type: 2, text: older, turnDurationMs: 4484,
+    });
+    const opened = planComposerTick(snap({
+      cid: "cid-1", status: "aborted", generationId: null,
+      bubbles: [...base, olderStep],
+    }), [], cursor);
+    expect(opened.events.find((e) => e.hook === "beforeSubmitPrompt")?.payload).toMatchObject({
+      prompt, generation_id: gen,
+    });
+    expect(opened.events.some((e) => e.hook === "stop")).toBe(false);
+    expect(opened.cursor.stopped).toBe(false);
+
+    const tooling = planComposerTick(snap({
+      cid: "cid-1", status: "aborted", generationId: gen,
+      bubbles: [
+        ...base,
+        bubble({ id: `${userId}/t:call-f3b9`, toolName: "ripgrep_raw_search", toolStatus: "completed" }),
+        olderStep,
+      ],
+    }), [], opened.cursor);
+    expect(tooling.events.some((e) => e.hook === "preToolUse")).toBe(true);
+    expect(tooling.events.some((e) => e.hook === "stop")).toBe(false);
+    expect(tooling.cursor.stopped).toBe(false);
+
+    const answered = planComposerTick(snap({
+      cid: "cid-1", status: "aborted", generationId: null,
+      bubbles: [
+        ...base,
+        bubble({ id: `${userId}/t:call-f3b9`, toolName: "ripgrep_raw_search", toolStatus: "completed" }),
+        bubble({ id: `${userId}/s:11`, type: 2, text: "派到 Win Destop。", turnDurationMs: 60989 }),
+        olderStep,
+      ],
+    }), [], tooling.cursor);
+    const bodyAt = answered.events.findIndex((e) => e.hook === "afterAgentResponse" && e.payload.text === "派到 Win Destop。");
+    const stopAt = answered.events.findIndex((e) => e.hook === "stop");
+    expect(bodyAt).toBeGreaterThanOrEqual(0);
+    expect(stopAt).toBeGreaterThan(bodyAt);
+    expect(answered.events[stopAt]?.payload).toMatchObject({ status: "completed", generation_id: gen });
+  });
+
+  test("a step that lands after the follow-up was already stopped still reaches the card", () => {
+    const userId = "a69e1442-59ec-444a-8e42-a9232784df9c";
+    const gen = "c5d3ee5d-30b6-4d47-a32c-f2b6897c46fa";
+    const cursor = cursorFromEmitted([
+      { source: "db", hook: "beforeSubmitPrompt", payload: { prompt: "first", bubble_id: "u1", generation_id: "gen-old" } },
+      { source: "db", hook: "afterAgentResponse", payload: { text: "done once", bubble_id: "a1", generation_id: "gen-old" } },
+      { source: "db", hook: "stop", payload: { status: "completed", generation_id: "gen-old" } },
+      { source: "db", hook: "beforeSubmitPrompt", payload: { prompt: "给我一个提示词", bubble_id: userId, generation_id: gen } },
+      { source: "db", hook: "stop", payload: { status: "completed", generation_id: gen } },
+    ]);
+    const { events } = planComposerTick(snap({
+      cid: "cid-1", status: "aborted", generationId: gen,
+      bubbles: [
+        bubble({ id: "u1", type: 1, text: "first", requestId: "gen-old" }),
+        bubble({ id: "a1", type: 2, text: "done once" }),
+        bubble({ id: userId, type: 1, text: "给我一个提示词", requestId: gen }),
+        bubble({ id: `${userId}/s:11`, type: 2, text: "派到 Win Destop。", turnDurationMs: 60989 }),
+        bubble({ id: "8dd0a101-44ec-4506-a44f-3dd4d8fd1321/s:1", type: 2, text: "后台那次全盘找日志的命令已经中止，没有影响结论。", turnDurationMs: 4484 }),
+      ],
+    }), [], cursor);
+    expect(events.some((e) => e.hook === "afterAgentResponse" && e.payload.text === "派到 Win Destop。")).toBe(true);
+    expect(events.some((e) => e.hook === "afterAgentResponse" && String(e.payload.text).includes("全盘找日志"))).toBe(false);
+    expect(events.some((e) => e.hook === "stop")).toBe(false);
+  });
+
   test("a new user with no reply yet is not aborted by the previous completed status", () => {
     const cursor = stoppedAfterFirstTurn();
     const { events, cursor: next } = planComposerTick(snap({
