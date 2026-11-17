@@ -143,6 +143,33 @@ describe("composer table plan", () => {
     });
   });
 
+  // r-af47f349 s:29: the reply was stored as "……0.4." and the same step later
+  // grew to "……0.4.54 ……". The card had already shown the short snapshot.
+  test("a reply step that grows after the first flush emits the full text", () => {
+    const short = "所以不是没做。0.4.";
+    const full = "所以不是没做。0.4.54 为了避免迟到 jsonl 把还在跑的任务打成异常，把整条 jsonl 停跑都停了。";
+    const cursor = cursorFromEmitted([
+      { source: "db", hook: "beforeSubmitPrompt", payload: { prompt: "以前如果处理过", bubble_id: "u", generation_id: "gen-1", conversation_id: "cid-1" } },
+      { source: "db", hook: "afterAgentResponse", payload: { text: short, bubble_id: "s29", generation_id: "gen-1", conversation_id: "cid-1" } },
+    ]);
+    const grown = planComposerTick(snap({
+      cid: "cid-1",
+      status: "aborted",
+      generationId: "gen-1",
+      bubbles: [
+        bubble({ id: "u", type: 1, text: "以前如果处理过", requestId: "gen-1" }),
+        bubble({ id: "s29", type: 2, text: full, turnDurationMs: 96762 }),
+      ],
+    }), [], cursor);
+    const bodies = grown.events.filter((e) => e.hook === "afterAgentResponse" && e.payload.bubble_id === "s29");
+    expect(bodies.map((e) => e.payload.text)).toEqual([full]);
+    const bodyAt = grown.events.findIndex((e) => e.payload.text === full);
+    const stopAt = grown.events.findIndex((e) => e.hook === "stop");
+    expect(bodyAt).toBeGreaterThanOrEqual(0);
+    expect(stopAt).toBeGreaterThan(bodyAt);
+    expect(grown.events[stopAt]?.payload).toMatchObject({ status: "completed", generation_id: "gen-1" });
+  });
+
   test("a generation swap does not stop on the previous turn's turnDurationMs", () => {
     const armed = planComposerTick(snap({
       cid: "cid-1",

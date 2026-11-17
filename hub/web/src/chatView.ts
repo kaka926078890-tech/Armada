@@ -583,6 +583,7 @@ export function eventsToChat(events: RunEvent[]): ChatBlock[] {
   const children = new Map<string, ChildAcc>();
   const hookReplies: string[] = [];
   const hookThoughts: string[] = [];
+  const assistantByBubble = new Map<string, Extract<ChatBlock, { kind: "assistant" }>>();
 
   for (const ev of sorted) {
     const p = parsePayload(ev.payload);
@@ -607,6 +608,16 @@ export function eventsToChat(events: RunEvent[]): ChatBlock[] {
       hookThoughts.push(p.text);
     }
     const hb = hookBlocks(ev, p);
+    if (ev.hook_event_name === "afterAgentResponse" && typeof p?.bubble_id === "string" && hb[0]?.kind === "assistant") {
+      const prev = assistantByBubble.get(p.bubble_id);
+      // r-af47f349: the same step was stored as "……0.4." and later grew.
+      // Keep that bubble's place in the thread and show the longer text.
+      if (prev && hb[0].text.startsWith(prev.text) && hb[0].text.length > prev.text.length) {
+        prev.text = hb[0].text;
+        continue;
+      }
+      assistantByBubble.set(p.bubble_id, hb[0]);
+    }
     fromHooks.push(...hb);
     for (const b of hb) if (b.kind === "subagent") subFromHooks.push(b);
     // Hook 用户句一律进 pendingUsers，由 extraUsers uniqueUserText 收口。

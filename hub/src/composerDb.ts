@@ -53,6 +53,8 @@ export type ComposerCursor = {
   thoughts: string[];
   tools: string[];
   assistants: string[];
+  /** Last afterAgentResponse text for a bubble. A longer prefix is emitted again. */
+  assistantText: Record<string, string>;
   generationId: string | null;
   /** Generation id last placed on a beforeSubmitPrompt. */
   armedGen: string | null;
@@ -67,7 +69,7 @@ export type ComposerCursor = {
 
 export function emptyCursor(): ComposerCursor {
   return {
-    users: [], thoughts: [], tools: [], assistants: [],
+    users: [], thoughts: [], tools: [], assistants: [], assistantText: {},
     generationId: null, armedGen: null, sawGeneration: false, abortSeen: false, stopped: false,
     idleKey: "", children: {},
   };
@@ -569,15 +571,26 @@ export function planComposerTick(
   const emit = (ev: DbEvent) => events.push(ev);
   const flushedNow = new Set<string>();
   const flushText = (b: ComposerBubble, gen: string | null): boolean => {
-    if (b.type !== 2 || !b.text.trim() || b.toolName || next.assistants.includes(b.id)) return false;
-    next.assistants.push(b.id);
+    const text = b.text.trim();
+    if (b.type !== 2 || !text || b.toolName) return false;
+    const prev = next.assistantText[b.id];
+    if (prev === text) return false;
+    // r-af47f349 s:29: the first snapshot ended at "0.4." and the same step
+    // later grew. A different string is not this bubble filling in.
+    if (prev && !(text.startsWith(prev) && text.length > prev.length)) return false;
+    if (!prev && next.assistants.includes(b.id)) {
+      next.assistantText[b.id] = text;
+      return false;
+    }
+    next.assistantText[b.id] = text;
+    if (!next.assistants.includes(b.id)) next.assistants.push(b.id);
     flushedNow.add(b.id);
     emit({
       source: "db",
       hook: "afterAgentResponse",
       conversationId: snap.cid,
       payload: {
-        text: b.text,
+        text,
         conversation_id: snap.cid,
         bubble_id: b.id,
         ...(gen ? { generation_id: gen } : {}),
@@ -854,6 +867,15 @@ export function planComposerTick(
     next.children[child.cid] = cur;
   }
 
+  // An already-flushed step can still be growing. Emit the longer text on this
+  // tick, including after the card has stopped, so the detail is not stuck on
+  // the first snapshot.
+  for (let i = 0; i < snap.bubbles.length; i++) {
+    const b = snap.bubbles[i]!;
+    if (!next.assistantText[b.id]) continue;
+    flushText(b, generationOwning(snap.bubbles, i, snap.generationId));
+  }
+
   const uuidCleared = !snap.generationId && (next.sawGeneration || doneStatus(snap.status));
   const abortHold = uuidCleared && snap.status === "aborted" && !next.abortSeen;
   if (abortHold) next.abortSeen = true;
@@ -963,7 +985,14 @@ export function cursorFromEmitted(events: Emitted[]): ComposerCursor {
       if (!c.thoughts.includes(key)) c.thoughts.push(key);
     }
     if (ev.hook === "preToolUse" && bubble && !c.tools.includes(bubble)) c.tools.push(bubble);
-    if (ev.hook === "afterAgentResponse" && bubble && !c.assistants.includes(bubble)) c.assistants.push(bubble);
+    if (ev.hook === "afterAgentResponse" && bubble && typeof p.text === "string") {
+      const text = p.text.trim();
+      if (text) {
+        const prev = c.assistantText[bubble];
+        if (!prev || (text.startsWith(prev) && text.length > prev.length)) c.assistantText[bubble] = text;
+        if (!c.assistants.includes(bubble)) c.assistants.push(bubble);
+      }
+    }
     if (ev.hook === "subagentStart" && typeof p.conversation_id === "string") {
       if (!c.children[p.conversation_id]) c.children[p.conversation_id] = { texts: [], closed: false };
     }

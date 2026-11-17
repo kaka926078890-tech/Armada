@@ -1262,3 +1262,18 @@ describe("operatorChatTurns", () => {
     expect(turns).toEqual([{ role: "user", text: "在跑" }]);
   });
 });
+
+describe("composer reply that grew after the first flush", () => {
+  test("the same bubble id keeps the longer text as the only body", () => {
+    const short = "所以不是没做。0.4.";
+    const full = "所以不是没做。0.4.54 为了避免迟到 jsonl 把还在跑的任务打成异常。";
+    const blocks = eventsToChat([
+      ev({ seq: 1, source: "db", hook_event_name: "beforeSubmitPrompt", payload: JSON.stringify({ prompt: "以前如果处理过", bubble_id: "u" }) }),
+      ev({ seq: 2, source: "db", hook_event_name: "afterAgentResponse", payload: JSON.stringify({ text: short, bubble_id: "s29" }) }),
+      ev({ seq: 3, source: "db", hook_event_name: "afterAgentResponse", payload: JSON.stringify({ text: full, bubble_id: "s29" }) }),
+    ]);
+    const assistants = blocks.filter((b) => b.kind === "assistant");
+    expect(assistants.map((b) => b.kind === "assistant" ? b.text : "")).toEqual([full]);
+    expect(blocks.some((b) => b.kind === "thought" && b.text.includes("0.4."))).toBe(false);
+  });
+});
