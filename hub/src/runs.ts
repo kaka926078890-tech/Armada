@@ -690,11 +690,12 @@ export class RunService {
         ? { ended_at: null, end_reason: null, started_at: Date.now() }
         : {}, "extension");
     } else {
+      const pending = this.pendingFollowupPrompt.get(run.id);
       this.pendingFollowupPrompt.delete(run.id);
       const prior = this.followupRestore.get(run.id);
       this.followupRestore.delete(run.id);
       if (prior && run.conversation_id && this.terminal(prior.status)) {
-        this.restoreFollowupAttempt(run.id, prior, msg.reason ?? "REJECTED");
+        this.restoreFollowupAttempt(run.id, prior, msg.reason ?? "REJECTED", pending?.prompt);
         this.promoteNextQueued(machineId);
         return;
       }
@@ -1394,7 +1395,7 @@ export class RunService {
     started_at: number | null;
     live_generation_id: string | null;
     retired_generation_ids: string | null;
-  }, reason: string): void {
+  }, reason: string, attemptPrompt?: string): void {
     const attemptGen = genOf(this.get(runId)?.live_generation_id);
     const retiredBase = parseRetiredIds(prior.retired_generation_ids).ids;
     const retired = attemptGen && attemptGen !== genOf(prior.live_generation_id)
@@ -1412,19 +1413,24 @@ export class RunService {
     this.blobs?.syncRefsFromRuns();
     this.audit("extension", "run.followup.reject", runId, { reason, restored: "error" });
     this.audit("extension", "run.error", runId, { end_reason: endReason });
-    this.recordFollowupRejection(runId, reason);
+    this.recordFollowupRejection(runId, reason, attemptPrompt);
     this.sse.broadcast(runId, { type: "run.status", runId, status: "error" });
   }
 
-  /** 详情要留下这一行，刷新之后仍然看得到。 */
-  private recordFollowupRejection(runId: string, reason: string): void {
+  /** 详情要留下这一行，刷新之后仍然看得到。prompt 给输入框填回原文。 */
+  private recordFollowupRejection(runId: string, reason: string, attemptPrompt?: string): void {
     const run = this.get(runId);
     if (!run) return;
     const maxSeq = (this.db.query("SELECT COALESCE(MAX(seq),0) AS m FROM run_events WHERE run_id=?1").get(runId) as { m: number }).m;
     const minExt = (this.db.query("SELECT MIN(ext_seq) AS m FROM run_events WHERE machine_id=?1").get(run.machine_id) as { m: number | null }).m;
     const extSeq = minExt == null || minExt >= 0 ? -1 : minExt - 1;
     const ts = Date.now();
-    const body = { text: followupRejectText(reason), reason };
+    const prompt = typeof attemptPrompt === "string" ? attemptPrompt : "";
+    const body = {
+      text: followupRejectText(reason),
+      reason,
+      ...(prompt.trim() ? { prompt } : {}),
+    };
     this.db.query(
       `INSERT INTO run_events (run_id, seq, machine_id, ext_seq, source, hook_event_name, payload, ts, post_terminal)
        VALUES (?1,?2,?3,?4,'hub','followupRejected',?5,?6,0)`,

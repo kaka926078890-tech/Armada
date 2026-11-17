@@ -1002,6 +1002,7 @@ describe("Run dispatch", () => {
     const rejected = events.find((e) => e.hook_event_name === "followupRejected");
     expect(JSON.parse(rejected.payload).text).toContain("续聊没有发出去");
     expect(JSON.parse(rejected.payload).reason).toBe("CDP_CALL_TIMEOUT");
+    expect(JSON.parse(rejected.payload).prompt).toBe("下一轮");
     const after = hub!.db.query(
       "SELECT COUNT(*) AS n FROM audit WHERE target=?1 AND action='run.completed'",
     ).get(run.id) as { n: number };

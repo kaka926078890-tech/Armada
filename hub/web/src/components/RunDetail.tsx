@@ -10,6 +10,7 @@ import { attachmentLimitMessage, mergeAttachmentFiles, isConsoleAttachment, pars
 import { ConsoleFilePicker } from "./ConsoleFilePicker";
 import { HubImageRow } from "./ImageThumb";
 import { endFollowupSend, isFollowupSendEnter, tryBeginFollowupSend } from "../followupSend";
+import { rejectedFollowupDraft, settleFollowupComposer } from "../followupDraft";
 import { queueComposerCaretRestore, shouldRefocusComposerAfterSend, shouldRestoreComposerFocus } from "../composerFocus";
 import { WIDTH_KEY, type PromptSnippet } from "../uiPrefs";
 import { appendSnippetBody } from "../promptSnippets";
@@ -127,7 +128,13 @@ export default function RunDetail({
   const sendingRef = useRef(false);
   const followupRef = useRef<HTMLTextAreaElement>(null);
   const [sending, setSending] = useState(false);
+  const [awaitingInject, setAwaitingInject] = useState(false);
   const sendEpoch = useRef(0);
+  const sendAfterSeq = useRef(0);
+  const sentPromptRef = useRef("");
+  const outboundAfterRef = useRef(0);
+  const sawDispatchedRef = useRef(false);
+  const appliedRejectSeq = useRef(0);
   const seqRef = useRef(0);
   const tailReady = useRef(false);
   const windowInited = useRef<string | null>(null);
@@ -137,6 +144,14 @@ export default function RunDetail({
   const hiddenPrefixRef = useRef(0);
 
   useEffect(() => { reloadSnippets?.(); }, [runId, reloadSnippets]);
+
+  const [draftRunId, setDraftRunId] = useState(runId);
+  if (draftRunId !== runId) {
+    setDraftRunId(runId);
+    setAwaitingInject(false);
+    sawDispatchedRef.current = false;
+    appliedRejectSeq.current = 0;
+  }
 
   useEffect(() => {
     jumpedRef.current = null;
@@ -359,8 +374,11 @@ export default function RunDetail({
           return;
         }
         if (r?.run) setRun(r.run);
-        setFollowup("");
-        setFollowupFiles([]);
+        sentPromptRef.current = followup.trim();
+        sendAfterSeq.current = seqRef.current;
+        outboundAfterRef.current = Math.max(0, ...(run.outbound ?? []).map((row) => row.created_at));
+        sawDispatchedRef.current = false;
+        setAwaitingInject(true);
         onChanged();
       } catch (err) { setFollowupError(String(err)); }
       finally {
@@ -375,6 +393,33 @@ export default function RunDetail({
       }
     })();
   }, [followup, followupFiles, injectReady, onChanged, run]);
+
+  useEffect(() => {
+    if (events.some((ev) => ev.run_id !== runId)) return;
+    const pending = rejectedFollowupDraft(events);
+    if (!pending || pending.seq <= appliedRejectSeq.current) return;
+    appliedRejectSeq.current = pending.seq;
+    setFollowup((cur) => (cur.trim() ? cur : pending.prompt));
+  }, [events, runId]);
+
+  useEffect(() => {
+    if (!awaitingInject || draftRunId !== runId) return;
+    if (events.some((ev) => ev.run_id !== runId)) return;
+    const next = settleFollowupComposer({
+      awaiting: true,
+      sawDispatched: sawDispatchedRef.current,
+      status: run?.status,
+      sent: sentPromptRef.current,
+      draft: followup,
+      afterSeq: sendAfterSeq.current,
+      events,
+      outbound: (run?.outbound ?? []).filter((row) => row.created_at > outboundAfterRef.current),
+    });
+    sawDispatchedRef.current = next.sawDispatched;
+    if (!next.awaiting) setAwaitingInject(false);
+    if (next.draft !== followup) setFollowup(next.draft);
+    if (next.clearFiles) setFollowupFiles([]);
+  }, [awaitingInject, draftRunId, events, followup, run?.outbound, run?.status, runId]);
 
   if (missing) {
     return (
@@ -655,7 +700,7 @@ export default function RunDetail({
               placeholder={run.pending_ask ? (run.pending_ask.kind === "plan" ? "请先点上方 Build…" : "请先回答上方选择题…") : "接着说。Enter 发送，Shift+Enter 换行"}
               className="followup-input min-w-0 flex-1 min-h-[4.5rem] max-h-48 resize-y"
             />
-            <Button type="button" data-armada-send="" disabled={!injectReady || sending || (!followup.trim() && followupFiles.length === 0)} className="shrink-0" onMouseDown={(e) => e.preventDefault()} onClick={() => sendFollowup()}>发送</Button>
+            <Button type="button" data-armada-send="" disabled={!injectReady || sending || awaitingInject || (!followup.trim() && followupFiles.length === 0)} className="shrink-0" onMouseDown={(e) => e.preventDefault()} onClick={() => sendFollowup()}>发送</Button>
           </div>
           <ConsoleFilePicker
             files={followupFiles}
