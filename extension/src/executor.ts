@@ -100,7 +100,7 @@ export interface ExecutorDeps {
   autoSubmit?: (
     workspaceRoot: string,
     prompt: string,
-    opts?: { reclaim?: string[] },
+    opts?: { reclaim?: string[]; shouldAbort?: () => boolean },
   ) => Promise<boolean | { ok: boolean; reason?: string }>;
   imagePaste?: boolean;
   fetchBlob?: (id: string) => Promise<{ bytes: Buffer; mime: string }>;
@@ -109,6 +109,7 @@ export interface ExecutorDeps {
     prompt: string,
     steps: { bytes: Buffer; mime: string }[],
     autoSubmit: boolean,
+    shouldAbort?: () => boolean,
   ) => Promise<boolean | { ok: boolean; reason?: string }>;
   autoSubmitFileMentions?: (
     workspaceRoot: string,
@@ -118,6 +119,7 @@ export interface ExecutorDeps {
     workspaceRoot: string,
     prompt: string,
     autoSubmit: boolean,
+    shouldAbort?: () => boolean,
   ) => Promise<boolean | { ok: boolean; reason?: string }>;
   materializeFile?: (workspaceRoot: string, runId: string, name: string, bytes: Buffer) => { needle: string };
   autoEnter?: boolean;
@@ -131,6 +133,8 @@ export interface ExecutorDeps {
   armadaHome?: string;
   cursorBin?: () => string | null;
   spawnDetached?: (command: string, args: string[]) => void;
+  /** 操作员已取消、对话尚未出现时，贴图回车前停掉这次注入。 */
+  isCancelled?: (runId: string) => boolean;
   answerAskCdp?: (args: {
     workspaceRoot: string;
     action: "continue" | "skip" | "freeform";
@@ -189,6 +193,11 @@ function spawnCursorDetached(command: string, args: string[]): void {
 function autoSubmitOutcome(r: boolean | { ok: boolean; reason?: string }): { ok: boolean; reason?: string } {
   if (typeof r === "boolean") return { ok: r };
   return { ok: !!r.ok, reason: r.reason };
+}
+
+function keepInjectReason(reason: string | undefined, fallback: string): string {
+  if (reason === "CANCELLED" || isCdpHardFail(reason)) return reason ?? fallback;
+  return fallback;
 }
 
 function isDirtyComposer(reason?: string): boolean {
@@ -306,6 +315,10 @@ export class Executor {
       }
       await this.deps.globalState.update("armada.authorizedWorkspaces", [...this.authorizedWorkspaces(), msg.workspaceRoot]);
     }
+    if (this.injectCancelled(msg.runId)) {
+      this.rejectCancelled(msg.runId);
+      return;
+    }
     const lock = await this.acquireInjectLock();
     if (!lock.ok) {
       this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: "CDP_LOCK_TIMEOUT" });
@@ -313,9 +326,17 @@ export class Executor {
     }
     let pendingAdded = false;
     try {
+      if (this.injectCancelled(msg.runId)) {
+        this.rejectCancelled(msg.runId);
+        return;
+      }
       const down = await this.cdpDownReason();
       if (down) {
         this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: down });
+        return;
+      }
+      if (this.injectCancelled(msg.runId)) {
+        this.rejectCancelled(msg.runId);
         return;
       }
       // createNew = 空对话。newAgentChat 会把活动编辑器做成引用芯片（真机
@@ -323,6 +344,11 @@ export class Executor {
       const anchorAt = Date.now();
       await vscode.commands.executeCommand("composer.createNew");
       this.noteProgress(msg.runId, "inject");
+      if (this.injectCancelled(msg.runId)) {
+        this.rejectCancelled(msg.runId);
+        return;
+      }
+      const stop = () => this.injectCancelled(msg.runId);
       if (attachments.length) {
         const inj = await this.injectAttachments(msg.runId, msg.workspaceRoot, msg.prompt, attachments);
         if (!inj.ok) {
@@ -330,7 +356,7 @@ export class Executor {
           return;
         }
       } else {
-        const inj = await this.injectPrompt(msg.workspaceRoot, msg.prompt, 1500, this.reclaimFor("start"));
+        const inj = await this.injectPrompt(msg.workspaceRoot, msg.prompt, 1500, this.reclaimFor("start"), stop);
         this.noteInjectResult(msg.prompt, inj.submitted, inj.reason);
         if (!inj.submitted) {
           this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: inj.reason ?? "INJECT_FAILED" });
@@ -361,6 +387,14 @@ export class Executor {
     this.deps.send({ type: "run.progress", runId, phase });
   }
 
+  private injectCancelled(runId: string): boolean {
+    return this.deps.isCancelled?.(runId) === true;
+  }
+
+  private rejectCancelled(runId: string): void {
+    this.deps.send({ type: "run.ack", runId, status: "rejected", reason: "CANCELLED" });
+  }
+
   private async cdpDownReason(): Promise<string | null> {
     if (!this.deps.probeCdp) return null;
     const r = await this.deps.probeCdp();
@@ -376,7 +410,9 @@ export class Executor {
   ): Promise<{ ok: boolean; reason?: string }> {
     const images = attachments.filter(isImageAtt);
     const files = attachments.filter((a) => !isImageAtt(a));
+    const stop = () => this.injectCancelled(runId);
     try {
+      if (stop()) return { ok: false, reason: "CANCELLED" };
       if (images.length) {
         if (!this.deps.fetchBlob || !this.deps.autoSubmitImages) {
           return { ok: false, reason: "IMAGE_PASTE_FAILED" };
@@ -388,6 +424,7 @@ export class Executor {
           const blob = await this.deps.fetchBlob!(id);
           return { bytes: blob.bytes, mime: blob.mime || a.mime || "image/png" };
         }));
+        if (stop()) return { ok: false, reason: "CANCELLED" };
         const skipFinish = files.length > 0;
         this.noteProgress(runId, "paste");
         const img = autoSubmitOutcome(await this.deps.autoSubmitImages(
@@ -395,9 +432,10 @@ export class Executor {
           skipFinish ? "" : prompt,
           steps,
           skipFinish ? false : this.deps.autoEnter !== false,
+          stop,
         ));
         if (!img.ok) {
-          return { ok: false, reason: isCdpHardFail(img.reason) ? img.reason : "IMAGE_PASTE_FAILED" };
+          return { ok: false, reason: keepInjectReason(img.reason, "IMAGE_PASTE_FAILED") };
         }
       }
       if (files.length) {
@@ -421,17 +459,19 @@ export class Executor {
           const name = uniqueInboxFilename(item.id, runId, item.name || "file");
           needles.push(write(workspaceRoot, runId, name, item.blob.bytes).needle);
         }
+        if (stop()) return { ok: false, reason: "CANCELLED" };
         this.noteProgress(runId, "paste");
         const file = autoSubmitOutcome(await this.deps.autoSubmitFileMentions(workspaceRoot, needles));
         if (!file.ok) {
-          return { ok: false, reason: isCdpHardFail(file.reason) ? file.reason : "FILE_MENTION_FAILED" };
+          return { ok: false, reason: keepInjectReason(file.reason, "FILE_MENTION_FAILED") };
         }
+        if (stop()) return { ok: false, reason: "CANCELLED" };
         if (!this.deps.finishComposer) return { ok: false, reason: "FILE_MENTION_FAILED" };
         const fin = autoSubmitOutcome(await this.deps.finishComposer(
-          workspaceRoot, prompt, this.deps.autoEnter !== false,
+          workspaceRoot, prompt, this.deps.autoEnter !== false, stop,
         ));
         if (!fin.ok) {
-          return { ok: false, reason: isCdpHardFail(fin.reason) ? fin.reason : "FILE_MENTION_FAILED" };
+          return { ok: false, reason: keepInjectReason(fin.reason, "FILE_MENTION_FAILED") };
         }
       }
       return { ok: true };
@@ -449,12 +489,15 @@ export class Executor {
     prompt: string,
     pasteWaitMs: number,
     reclaim: string[] = [],
+    shouldAbort?: () => boolean,
   ): Promise<{ submitted: boolean; reason?: string }> {
     const vscode = vs();
+    if (shouldAbort?.()) return { submitted: false, reason: "CANCELLED" };
     if (this.deps.autoSubmit) {
       try {
-        const first = autoSubmitOutcome(await this.deps.autoSubmit(workspaceRoot, prompt, { reclaim }));
+        const first = autoSubmitOutcome(await this.deps.autoSubmit(workspaceRoot, prompt, { reclaim, shouldAbort }));
         if (first.ok) return { submitted: true };
+        if (first.reason === "CANCELLED") return { submitted: false, reason: "CANCELLED" };
         if (isDirtyComposer(first.reason)) return { submitted: false, reason: "NON_EMPTY_INPUT" };
         if (isCdpHardFail(first.reason)) return { submitted: false, reason: first.reason ?? "CDP_UNREACHABLE" };
         return { submitted: false, reason: first.reason ?? "INJECT_FAILED" };
@@ -462,7 +505,9 @@ export class Executor {
         return { submitted: false, reason: "INJECT_FAILED" };
       }
     }
+    if (shouldAbort?.()) return { submitted: false, reason: "CANCELLED" };
     await this.sleep(pasteWaitMs);
+    if (shouldAbort?.()) return { submitted: false, reason: "CANCELLED" };
     await vscode.env.clipboard.writeText(prompt);
     await vscode.commands.executeCommand("editor.action.clipboardPasteAction");
     return { submitted: true };
@@ -510,7 +555,9 @@ export class Executor {
           return;
         }
       } else {
-        const inj = await this.injectPrompt(msg.workspaceRoot, msg.prompt, 800, this.reclaimFor("followup"));
+        const inj = await this.injectPrompt(
+          msg.workspaceRoot, msg.prompt, 800, this.reclaimFor("followup"), () => this.injectCancelled(msg.runId),
+        );
         this.noteInjectResult(msg.prompt, inj.submitted, inj.reason);
         if (!inj.submitted) {
           this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: inj.reason ?? "INJECT_FAILED" });

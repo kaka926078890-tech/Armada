@@ -53,6 +53,37 @@ function makeExec(over: Partial<ConstructorParameters<typeof Executor>[0]> = {})
 const pngAtt = [{ sha256: "abc", mime: "image/png", id: "abc" }];
 
 describe("Executor image path", () => {
+  test("cancelled before paste does not create a chat or submit images", async () => {
+    let pasted = 0;
+    const { ex, acks } = makeExec({
+      isCancelled: () => true,
+      fetchBlob: async () => ({ bytes: Buffer.from("x"), mime: "image/png" }),
+      autoSubmitImages: async () => { pasted += 1; return true; },
+    });
+    await ex.startRun({ runId: "r1", workspaceRoot: "/ws/a", prompt: "see", attachments: pngAtt });
+    expect(pasted).toBe(0);
+    expect(commands).not.toContain("composer.createNew");
+    expect(acks.at(-1)).toEqual({ type: "run.ack", runId: "r1", status: "rejected", reason: "CANCELLED" });
+  });
+
+  test("cancel seen inside image paste rejects CANCELLED and does not bind", async () => {
+    let cancelled = false;
+    const pending: string[] = [];
+    const { ex, acks } = makeExec({
+      isCancelled: () => cancelled,
+      fetchBlob: async () => ({ bytes: Buffer.from("x"), mime: "image/png" }),
+      autoSubmitImages: async (_w, _p, _s, _auto, shouldAbort) => {
+        cancelled = true;
+        if (shouldAbort?.()) return { ok: false, reason: "CANCELLED" };
+        return true;
+      },
+      addPending: (run) => { pending.push(run.runId); },
+    });
+    await ex.startRun({ runId: "r1", workspaceRoot: "/ws/a", prompt: "see", attachments: pngAtt });
+    expect(pending).toEqual([]);
+    expect(acks.at(-1)).toEqual({ type: "run.ack", runId: "r1", status: "rejected", reason: "CANCELLED" });
+  });
+
   test("imagePaste=false with attachments rejects IMAGE_PASTE_DISABLED before newAgentChat", async () => {
     const { ex, acks } = makeExec({ imagePaste: false });
     await ex.startRun({ runId: "r1", workspaceRoot: "/ws/a", prompt: "see", attachments: pngAtt });

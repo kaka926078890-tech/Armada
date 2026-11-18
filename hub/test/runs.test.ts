@@ -688,6 +688,27 @@ describe("Run dispatch", () => {
     ws.close();
   });
 
+  test("cancel dispatched before ack sends run.cancel so the inject can stop", async () => {
+    const { ws, inbound, api } = await startWithExt();
+    const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "hello" }) });
+    const { run } = await r.json() as any;
+    expect(run.status).toBe("dispatched");
+    inbound.length = 0;
+    const cr = await api(`/api/runs/${run.id}/cancel`, { method: "POST" });
+    expect(cr.status).toBe(200);
+    await new Promise((r2) => setTimeout(r2, 80));
+    expect(((await (await api(`/api/runs/${run.id}`)).json()) as any).status).toBe("cancelled");
+    const cancel = inbound.find((m) => m.type === "run.cancel");
+    expect(cancel).toMatchObject({ runId: run.id });
+    expect(cancel.conversationId).toBeUndefined();
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    await new Promise((r2) => setTimeout(r2, 80));
+    const after = await (await api(`/api/runs/${run.id}`)).json() as any;
+    expect(after.status).toBe("cancelled");
+    expect(after.end_reason).toBe("cancelled");
+    ws.close();
+  });
+
   test("cancel binding without conversation_id still marks cancelled", async () => {
     const { ws, inbound, api } = await startWithExt();
     const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "hello" }) });

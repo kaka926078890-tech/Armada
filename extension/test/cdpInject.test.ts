@@ -1078,6 +1078,23 @@ describe("createImagePaster", () => {
     expect(insert?.params?.text).toBe("看图");
   });
 
+  test("cancel during image paste returns CANCELLED and does not Enter", async () => {
+    const log: CallLog[] = [];
+    const paste = createImagePaster(deps({
+      connect: async () => mockSession(["OK", "0", "OK", "1", "OK", "OK"], log),
+    }));
+    const r = await paste(
+      "/Users/x/armada-test-ws",
+      "看图",
+      [{ bytes: Buffer.from("x"), mime: "image/png" }],
+      () => {},
+      true,
+      () => log.some((c) => c.method === "Input.dispatchKeyEvent" && c.params?.key === "v"),
+    );
+    expect(r).toEqual({ ok: false, reason: "CANCELLED" });
+    expect(log.find((c) => c.method === "Input.insertText")).toBeUndefined();
+  });
+
   test("附图后的多行提示词同样按行写入", async () => {
     const log: CallLog[] = [];
     const paste = createImagePaster(deps({

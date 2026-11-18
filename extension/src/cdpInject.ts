@@ -1300,7 +1300,11 @@ export function createAskQuestionDriver(deps: CdpSubmitterDeps) {
   return { inspect, submit };
 }
 
-export type CdpSubmitOpts = { reclaim?: string[] };
+export type CdpSubmitOpts = { reclaim?: string[]; shouldAbort?: () => boolean };
+
+function aborted(shouldAbort?: () => boolean): { ok: false; reason: "CANCELLED" } | null {
+  return shouldAbort?.() ? { ok: false, reason: "CANCELLED" } : null;
+}
 
 function normDraft(s: string): string {
   return s.replace(/\s+/g, " ").trim();
@@ -1399,6 +1403,8 @@ export function createCdpSubmitter(deps: CdpSubmitterDeps) {
         return { ok: false, reason: "NO_INPUT_AFTER_RETRY" };
       }
 
+      const stopped = aborted(opts?.shouldAbort);
+      if (stopped) return stopped;
       if (owned || focused) {
         if (owned) await selectAllComposer(session);
         await insertComposerText(session, prompt);
@@ -1408,6 +1414,8 @@ export function createCdpSubmitter(deps: CdpSubmitterDeps) {
         if (v !== "OK") return { ok: false, reason: `VERIFY_FAIL:${v}` };
       }
 
+      const stoppedEnter = aborted(opts?.shouldAbort);
+      if (stoppedEnter) return stoppedEnter;
       const e = String(await session.call("Runtime.evaluate", {
         expression: `(${COMPOSER_ENTER_JS})(${JSON.stringify(prompt)})`, returnByValue: true,
       }).then((x) => x?.result?.value));
@@ -1436,6 +1444,7 @@ export function createImagePaster(deps: CdpSubmitterDeps) {
     steps: ImagePasteStep[],
     writeClipboard: (bytes: Buffer, mime: string) => void | Promise<void>,
     autoSubmit: boolean,
+    shouldAbort?: () => boolean,
   ): Promise<CdpSubmitResult> {
     const hit = await connectWorkspacePage(deps, workspaceRoot);
     if (!hit.ok) return hit;
@@ -1453,11 +1462,15 @@ export function createImagePaster(deps: CdpSubmitterDeps) {
       if (!focused) return { ok: false, reason: "NO_INPUT_AFTER_RETRY" };
 
       for (let i = 0; i < steps.length; i++) {
+        const stopped = aborted(shouldAbort);
+        if (stopped) return stopped;
         const step = steps[i]!;
         await writeClipboard(step.bytes, step.mime);
         let okChip = false;
         // 先数芯片：已经贴上的不得再 Cmd+V（探测失败也不连贴三张）。
         for (let retry = 0; retry < 3 && !okChip; retry++) {
+          const stoppedRetry = aborted(shouldAbort);
+          if (stoppedRetry) return stoppedRetry;
           const n = Number(await session.call("Runtime.evaluate", {
             expression: `(${COMPOSER_CHIP_COUNT_JS})()`, returnByValue: true,
           }).then((x) => x?.result?.value));
@@ -1485,6 +1498,8 @@ export function createImagePaster(deps: CdpSubmitterDeps) {
         if (!okChip) return { ok: false, reason: `CHIP_COUNT:${i + 1}` };
       }
 
+      const stopped = aborted(shouldAbort);
+      if (stopped) return stopped;
       if (prompt.trim()) {
         await insertComposerText(session, prompt);
         const v = String(await session.call("Runtime.evaluate", {
@@ -1492,6 +1507,8 @@ export function createImagePaster(deps: CdpSubmitterDeps) {
         }).then((x) => x?.result?.value));
         if (v !== "OK") return { ok: false, reason: `VERIFY_FAIL:${v}` };
       }
+      const stoppedEnter = aborted(shouldAbort);
+      if (stoppedEnter) return stoppedEnter;
       if (autoSubmit) {
         const e = String(await session.call("Runtime.evaluate", {
           expression: `(${COMPOSER_ENTER_JS})(${JSON.stringify(prompt)})`, returnByValue: true,
@@ -1640,6 +1657,7 @@ export function createComposerFinisher(deps: CdpSubmitterDeps) {
     workspaceRoot: string,
     prompt: string,
     autoSubmit: boolean,
+    shouldAbort?: () => boolean,
   ): Promise<CdpSubmitResult> {
     const hit = await connectWorkspacePage(deps, workspaceRoot);
     if (!hit.ok) return hit;
@@ -1656,6 +1674,8 @@ export function createComposerFinisher(deps: CdpSubmitterDeps) {
         }).then((x) => x?.result?.value));
         if (v !== "OK") return { ok: false, reason: `VERIFY_FAIL:${v}` };
       }
+      const stoppedEnter = aborted(shouldAbort);
+      if (stoppedEnter) return stoppedEnter;
       if (autoSubmit) {
         const e = String(await session.call("Runtime.evaluate", {
           expression: `(${COMPOSER_ENTER_JS})(${JSON.stringify(prompt)})`, returnByValue: true,

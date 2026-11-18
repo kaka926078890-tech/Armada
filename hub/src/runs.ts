@@ -776,7 +776,7 @@ export class RunService {
     const routed = this.resolveInjectWindow(run, { requireCdp: false });
     const windowId = routed.ok ? routed.windowId : null;
     let sent = false;
-    if (run.conversation_id && windowId) {
+    if (windowId && run.conversation_id) {
       if (windowId !== run.window_id) {
         this.db.query("UPDATE runs SET window_id=?1 WHERE id=?2").run(windowId, runId);
       }
@@ -785,6 +785,9 @@ export class RunService {
         this.answerAsk(runId, { request_id: ask.request_id, action: "skip" });
       }
       sent = this.registry.sendTo(run.machine_id, windowId, { type: "run.cancel", runId, conversationId: run.conversation_id });
+    } else if (windowId && run.status === "dispatched") {
+      // 还没有对话。run.start 已在贴图，不通知的话扩展会继续回车。
+      sent = this.registry.sendTo(run.machine_id, windowId, { type: "run.cancel", runId });
     }
     this.audit("operator", "run.cancel.requested", runId, { sent, windowId });
     this.setStatus(runId, "cancelled", { end_reason: "cancelled" }, "operator");

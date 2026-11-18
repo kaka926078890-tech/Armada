@@ -341,6 +341,7 @@ export function activate(context: vscode.ExtensionContext): void {
       windowsFeed?.forget(runId);
     },
     onInjected: (runId) => cancelWatcher.noteInjection(runId),
+    isCancelled: (runId) => cancelledRuns.has(runId),
     probeCdp: async () => {
       const probe = await probeCdpReadyForInject({ port: config.cdpPort });
       if (probe === "down") return { ok: false, reason: "CDP_UNREACHABLE" };
@@ -377,10 +378,10 @@ export function activate(context: vscode.ExtensionContext): void {
       const bytes = Buffer.from(await res.arrayBuffer());
       return { bytes, mime };
     },
-    autoSubmitImages: async (workspaceRoot, prompt, steps, autoSubmit) => {
+    autoSubmitImages: async (workspaceRoot, prompt, steps, autoSubmit, shouldAbort) => {
       const writer = createOsClipboardWriter();
       try {
-        const r = await imagePaster(workspaceRoot, prompt, steps, (b, m) => writer.write(b, m), autoSubmit);
+        const r = await imagePaster(workspaceRoot, prompt, steps, (b, m) => writer.write(b, m), autoSubmit, shouldAbort);
         if (!r.ok) log(`image paste failed: ${r.reason}`);
         else log("image paste ok");
         return r;
@@ -394,8 +395,8 @@ export function activate(context: vscode.ExtensionContext): void {
       else log("file mention ok");
       return r;
     },
-    finishComposer: async (workspaceRoot, prompt, autoSubmit) => {
-      const r = await composerFinisher(workspaceRoot, prompt, autoSubmit);
+    finishComposer: async (workspaceRoot, prompt, autoSubmit, shouldAbort) => {
+      const r = await composerFinisher(workspaceRoot, prompt, autoSubmit, shouldAbort);
       if (!r.ok) log(`composer finish failed: ${r.reason}`);
       else log("composer finish ok");
       return r;
