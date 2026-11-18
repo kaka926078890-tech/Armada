@@ -1209,6 +1209,74 @@ describe("event ingest", () => {
     ws.close();
   });
 
+  // Win PF39WTSM 2026-11-18 r-5d82dd7b: await 之后心跳超过 45s，sweep 写成
+  // unknown/MACHINE_OFFLINE。同一 generation 的 read_file 随后才到，被记成 post_terminal，
+  // stop 在 onStopEvent 入口被丢掉。夹具工具名和 generation 取自 seq 38421 / 38425。
+  test("same live generation after MACHINE_OFFLINE returns to running and its stop completes", async () => {
+    const { ws, api, runId } = await startBoundRun();
+    const live = "d0923af4-4f40-40ca-8406-aa6f207822da";
+    const cid = "cid-1";
+    ws.send(JSON.stringify({
+      type: "run.event", runId, source: "db", seq: 1, ts: Date.now(), hookEventName: "preToolUse",
+      payload: {
+        tool_name: "await", tool_input: {}, conversation_id: cid,
+        bubble_id: "94a1b5f3-9579-48c9-99dd-76f4afcf6138/t:call-3e14461f-7ee0-4161-9ee8-3f9cb3423f97-191\nfc_0ea589f8-cea4-908b-a6ae-5bdb7d2c783e_0",
+        generation_id: live,
+      },
+    }));
+    await new Promise((r) => setTimeout(r, 80));
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).live_generation_id).toBe(live);
+    hub!.runs.onMachineOffline("m-1");
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).status).toBe("unknown");
+    ws.send(JSON.stringify({
+      type: "run.event", runId, source: "db", seq: 2, ts: Date.now(), hookEventName: "preToolUse",
+      payload: {
+        tool_name: "read_file_v2",
+        tool_input: { path: "C:\\Users\\PC\\.cursor\\projects\\c-Users-PC-Desktop-work\\terminals\\805526.txt" },
+        conversation_id: cid,
+        bubble_id: "94a1b5f3-9579-48c9-99dd-76f4afcf6138/t:call-045999ba-17fa-4bac-bc60-4cfdcb8c0af1-192\nfc_b95a275f-47ff-9772-8aec-b76956b3c3fb_0",
+        generation_id: live,
+      },
+    }));
+    await new Promise((r) => setTimeout(r, 80));
+    const resumed = (await (await api(`/api/runs/${runId}`)).json()) as any;
+    expect(resumed.status).toBe("running");
+    expect(resumed.end_reason).toBeNull();
+    expect(resumed.live_generation_id).toBe(live);
+    const events = (await (await api(`/api/runs/${runId}/events`)).json()) as any[];
+    const resumedEv = events.find((e) => JSON.parse(e.payload).tool_name === "read_file_v2");
+    expect(resumedEv.post_terminal).toBe(0);
+    ws.send(JSON.stringify({
+      type: "run.event", runId, source: "db", seq: 3, ts: Date.now(), hookEventName: "stop",
+      payload: { status: "completed", conversation_id: cid, generation_id: live },
+    }));
+    await new Promise((r) => setTimeout(r, 80));
+    expect(((await (await api(`/api/runs/${runId}`)).json()) as any).status).toBe("completed");
+    ws.close();
+  });
+
+  test("other generation after MACHINE_OFFLINE stays unknown", async () => {
+    const { ws, api, runId } = await startBoundRun();
+    const live = "d0923af4-4f40-40ca-8406-aa6f207822da";
+    ws.send(JSON.stringify(ev(runId, 1, "preToolUse", {
+      conversation_id: "cid-1", generation_id: live, tool_name: "await", tool_input: {},
+    })));
+    await new Promise((r) => setTimeout(r, 80));
+    hub!.runs.onMachineOffline("m-1");
+    ws.send(JSON.stringify({
+      type: "run.event", runId, source: "db", seq: 2, ts: Date.now(), hookEventName: "preToolUse",
+      payload: {
+        tool_name: "read_file_v2", tool_input: {}, conversation_id: "cid-1",
+        generation_id: "836ee87e-798d-45db-a766-c6dac22b0382",
+      },
+    }));
+    await new Promise((r) => setTimeout(r, 80));
+    const after = (await (await api(`/api/runs/${runId}`)).json()) as any;
+    expect(after.status).toBe("unknown");
+    expect(after.end_reason).toBe("MACHINE_OFFLINE");
+    ws.close();
+  });
+
   test("dirty session-id generation does not arm or complete; child stop stays running", async () => {
     const { ws, api, runId } = await startBoundRun();
     ws.send(JSON.stringify(ev(runId, 1, "beforeSubmitPrompt", {

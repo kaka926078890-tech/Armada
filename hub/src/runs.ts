@@ -936,6 +936,35 @@ export class RunService {
     return true;
   }
 
+  /**
+   * 心跳超时把仍在跑的 generation 收成 unknown/MACHINE_OFFLINE 之后，
+   * 同一条 live generation 还在报 composer/hook 事件，说明对端没停。
+   * 拉回 running，随后的 stop 才能进 onStopEvent。不改 live generation，不改 started_at。
+   * 别的 generation、这扇窗已有别的占用中任务、BIND_TIMEOUT、操作员关闭都不走这里。
+   */
+  reopenAfterMachineOffline(runId: string, hookEventName: string | null, payload: any, eventCid: unknown): boolean {
+    const run = this.get(runId);
+    if (!run || run.status !== "unknown" || run.end_reason !== "MACHINE_OFFLINE") return false;
+    const live = genOf(run.live_generation_id);
+    const eventGen = genOf(payload?.generation_id);
+    if (!live || eventGen !== live) return false;
+    const owner = typeof run.conversation_id === "string" ? run.conversation_id : "";
+    const cid = typeof eventCid === "string" ? eventCid : "";
+    if (owner && cid && cid !== owner && payload?.parent_conversation_id !== owner) return false;
+    if (!["preToolUse", "afterAgentThought", "afterAgentResponse", "beforeSubmitPrompt", "stop"].includes(hookEventName ?? "")) {
+      return false;
+    }
+    if (run.window_id) {
+      const n = (this.db.query(
+        `SELECT COUNT(*) AS n FROM runs
+         WHERE machine_id=?1 AND window_id=?2 AND id!=?3 AND status IN (${sqlStatusIn(OCCUPYING_STATUSES)})`,
+      ).get(run.machine_id, run.window_id, runId) as { n: number }).n;
+      if (n > 0) return false;
+    }
+    this.setStatus(runId, "running", { ended_at: null, end_reason: null }, "extension");
+    return true;
+  }
+
   onStopEvent(runId: string, payload: any, opts?: { replayDeferred?: boolean }) {
     const run = this.get(runId);
     if (!run) return;
