@@ -54,13 +54,35 @@ describe("settleFollowupComposer", () => {
     events: [] as FollowupDraftEvent[],
   };
 
-  test("stays on the draft while inject has not finished", () => {
+  test("clears the text as soon as the hub accepts, before inject finishes", () => {
     expect(settleFollowupComposer({ ...base, status: "dispatched" })).toEqual({
       awaiting: true,
       sawDispatched: true,
-      draft: "看 sha abc123",
+      draft: "",
       clearFiles: false,
     });
+  });
+
+  test("a cleared box stays empty while inject is still in flight", () => {
+    expect(settleFollowupComposer({
+      ...base,
+      draft: "",
+      sawDispatched: true,
+      status: "dispatched",
+    })).toEqual({
+      awaiting: true,
+      sawDispatched: true,
+      draft: "",
+      clearFiles: false,
+    });
+  });
+
+  test("an edit typed while inject is in flight is not wiped", () => {
+    expect(settleFollowupComposer({
+      ...base,
+      draft: "看 sha abc123，再补一句",
+      status: "dispatched",
+    })).toMatchObject({ awaiting: true, draft: "看 sha abc123，再补一句", clearFiles: false });
   });
 
   test("an older error status does not drop the draft before dispatch is seen", () => {
@@ -71,6 +93,21 @@ describe("settleFollowupComposer", () => {
   test("rejection keeps the draft and the files", () => {
     expect(settleFollowupComposer({
       ...base,
+      sawDispatched: true,
+      status: "error",
+      events: [rejected(6)],
+    })).toEqual({
+      awaiting: false,
+      sawDispatched: true,
+      draft: "看 sha abc123",
+      clearFiles: false,
+    });
+  });
+
+  test("rejection after the box was cleared puts the sent text back", () => {
+    expect(settleFollowupComposer({
+      ...base,
+      draft: "",
       sawDispatched: true,
       status: "error",
       events: [rejected(6)],
@@ -128,5 +165,36 @@ describe("settleFollowupComposer", () => {
       status: "running",
       outbound: [{ prompt: "看 sha abc123", state: "queued", created_at: 9 }],
     })).toMatchObject({ awaiting: false, draft: "", clearFiles: true });
+  });
+
+  test("a live outbound still injecting clears the text and keeps the files", () => {
+    expect(settleFollowupComposer({
+      ...base,
+      status: "running",
+      outbound: [{ prompt: "看 sha abc123", state: "injecting", created_at: 9 }],
+    })).toEqual({
+      awaiting: true,
+      sawDispatched: false,
+      draft: "",
+      clearFiles: false,
+    });
+  });
+
+  test("after the box is cleared, a queued outbound still drops the files", () => {
+    expect(settleFollowupComposer({
+      ...base,
+      draft: "",
+      status: "running",
+      outbound: [{ prompt: "看 sha abc123", state: "queued", created_at: 9 }],
+    })).toMatchObject({ awaiting: false, draft: "", clearFiles: true });
+  });
+
+  test("a failed live outbound restores text that was already cleared", () => {
+    expect(settleFollowupComposer({
+      ...base,
+      draft: "",
+      status: "running",
+      outbound: [{ prompt: "看 sha abc123", state: "failed", created_at: 9 }],
+    })).toMatchObject({ awaiting: false, draft: "看 sha abc123", clearFiles: false });
   });
 });

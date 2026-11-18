@@ -218,6 +218,11 @@ export class RunService {
     });
   }
 
+  private outboundPrompt(id: string): string {
+    const row = this.db.query("SELECT prompt FROM run_outbound WHERE id=?1").get(id) as { prompt: string } | null;
+    return typeof row?.prompt === "string" ? row.prompt : "";
+  }
+
   private injectingOutbound(runId: string): {
     id: string; expected_mode: string; state: string;
   } | null {
@@ -661,7 +666,10 @@ export class RunService {
     if (injecting) {
       if (this.terminal(run.status) || run.status === "running") {
         if (this.terminal(run.status) || msg.status !== "accepted") {
+          const failedLive = run.status === "running" && msg.status !== "accepted";
+          const prompt = failedLive ? this.outboundPrompt(injecting.id) : "";
           this.setOutboundState(injecting.id, "failed");
+          if (failedLive) this.recordFollowupRejection(run.id, msg.reason ?? "REJECTED", prompt);
           if (run.status === "running") this.promoteNextQueued(machineId);
           return;
         }

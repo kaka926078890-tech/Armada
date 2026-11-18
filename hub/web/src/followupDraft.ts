@@ -64,24 +64,34 @@ export function settleFollowupComposer(input: {
     return { awaiting: false, sawDispatched: false, draft: input.draft, clearFiles: false };
   }
   const sawDispatched = input.sawDispatched || input.status === "dispatched" || input.status === "queued";
-  const keep = { awaiting: false, sawDispatched, draft: input.draft, clearFiles: false };
-  const unchanged = input.draft.trim() === input.sent.trim();
-  const accept = unchanged
-    ? { awaiting: false, sawDispatched, draft: "", clearFiles: true }
-    : { awaiting: false, sawDispatched, draft: input.draft, clearFiles: false };
+  const sent = input.sent.trim();
+  const draft = input.draft.trim();
+  // 框已空，或仍是刚发出的那句：失败时填回原文。操作员另写的内容留下。
+  const edited = draft !== "" && draft !== sent ? input.draft : null;
+  const keep = { awaiting: false, sawDispatched, draft: edited ?? input.sent, clearFiles: false };
+  const accept = edited != null
+    ? { awaiting: false, sawDispatched, draft: edited, clearFiles: false }
+    : { awaiting: false, sawDispatched, draft: "", clearFiles: true };
+  // 中台已收下这一轮，注入还在对端进行。先把字清掉，附件留到确认成功。
+  const release = { awaiting: true, sawDispatched, draft: edited ?? "", clearFiles: false };
   for (const ev of input.events) {
     if (ev.seq <= input.afterSeq) continue;
     if (ev.hook_event_name === "followupRejected") return keep;
     if (ev.hook_event_name === "beforeSubmitPrompt" && eventPrompt(ev).trim()) return accept;
   }
-  const outbound = [...(input.outbound ?? [])].reverse().find((row) => row.prompt === input.draft);
+  const outbound = [...(input.outbound ?? [])].reverse().find((row) => {
+    const prompt = row.prompt.trim();
+    return prompt === sent || (draft !== "" && prompt === draft);
+  });
   if (outbound?.state === "failed") return keep;
   if (outbound && (outbound.state === "queued" || outbound.state === "steered")) return accept;
+  if (outbound?.state === "injecting") return release;
   if (sawDispatched && (input.status === "error" || input.status === "aborted" || input.status === "cancelled")) {
     return keep;
   }
   if (sawDispatched && (input.status === "binding" || input.status === "running" || input.status === "completed")) {
     return accept;
   }
+  if (sawDispatched && (input.status === "dispatched" || input.status === "queued")) return release;
   return { awaiting: true, sawDispatched, draft: input.draft, clearFiles: false };
 }

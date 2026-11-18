@@ -1185,6 +1185,10 @@ describe("running followup outbound", () => {
     live = (await (await api(`/api/runs/${run.id}`)).json()) as any;
     expect(live.status).toBe("running");
     expect(live.outbound.find((o: any) => o.prompt === "第二条")).toBeUndefined();
+    const events = (await (await api(`/api/runs/${run.id}/events`)).json()) as any[];
+    const rejected = events.find((e) => e.hook_event_name === "followupRejected");
+    expect(JSON.parse(rejected.payload).prompt).toBe("第二条");
+    expect(JSON.parse(rejected.payload).reason).toBe("NON_EMPTY_INPUT");
     ws.close();
   });
 
