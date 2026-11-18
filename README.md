@@ -467,7 +467,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\armada-cursor.ps1 C:
 | `RUN_LIMIT` | **中台**：该机或该工作区已达并行上限，等一条结束或取消排队 |
 | `PROMPT_COLLISION` | **中台**：同工作区已有相同 prompt 在跑或排队，改文案后再派 |
 | `CONVERSATION_BUSY` | **中台**：该对话仍在排队/绑定，或有未回答的选择题。运行中可对同一张卡续发 |
-| `INJECT_SLOT_BUSY` | **中台**：正在向该机注入另一条任务，稍后再续聊 |
+| `INJECT_SLOT_BUSY` | 旧中台才会返回。当前续聊在注入槽忙时先记下，槽空后打进同一条对话 |
 | `OUTBOUND_LIMIT` | **中台**：该卡待消化续发已达 8 条 |
 | `OUTBOUND_TEXT_ONLY` | **中台**：旧版本拒绝运行中发图。当前中台运行中续发可以附图 |
 | `WINDOW_BUSY` | **中台**：关了 `ARMADA_MULTI_RUN_PER_WINDOW` 时，该窗口已有占用项则 409。默认会开新窗再注入。同卡 running 续聊仍走 followup |

@@ -166,6 +166,10 @@ struct RunDTO: Decodable, Identifiable, Hashable {
         (outbound ?? []).filter { $0.state == "queued" || ($0.state == "injecting" && $0.expectedMode == "queue") }
     }
 
+    var heldOutbound: [OutboundDTO] {
+        (outbound ?? []).filter { $0.state == "held" }
+    }
+
     var canFollowup: Bool {
         pendingAsk == nil && (!(conversationId ?? "").isEmpty || !(chatgptThreadId ?? "").isEmpty)
     }
@@ -183,7 +187,7 @@ struct RunDTO: Decodable, Identifiable, Hashable {
         let display = flatPrompt(displayTitle)
         let originalRaw = flatPrompt(prompt)
         let pending = (outbound ?? []).reversed().first { row in
-            ["injecting", "queued", "steered"].contains(row.state) && !flatPrompt(row.prompt).isEmpty
+            ["injecting", "queued", "steered", "held"].contains(row.state) && !flatPrompt(row.prompt).isEmpty
         }
         let pendingText = pending.map { flatPrompt($0.prompt) } ?? ""
         let latestRaw = pendingText.isEmpty ? flatPrompt(alertPrompt ?? "") : pendingText

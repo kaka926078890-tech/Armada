@@ -722,6 +722,7 @@ fun RunRow(run: RunDto, unread: Boolean) {
     val cap = when {
         run.pendingAsk != null && run.status == "running" -> "待处理"
         run.queuedOutbound.isNotEmpty() -> "队列 ${run.queuedOutbound.size}"
+        run.heldOutbound.isNotEmpty() -> "等待注入"
         else -> statusLabel(run.status)
     }
     val badgeColor = when {
@@ -1186,6 +1187,15 @@ fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String, onBack: () -> 
                     modifier = Modifier.clickable { onOpenChat() },
                 )
                 r.pendingAsk?.let { AskBlock(vm, runId, it) { runCatching { adopt(vm.api().run(runId)) } } }
+                if (r.heldOutbound.isNotEmpty()) {
+                    Column(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surface).border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(10.dp)).padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text("等待打进 Composer", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        r.heldOutbound.forEach { Text(outboundQueueLabel(it.prompt, it.attachmentIds.size), fontSize = 13.sp) }
+                    }
+                }
                 if (r.queuedOutbound.isNotEmpty()) {
                     Column(
                         Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surface).border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(10.dp)).padding(12.dp),

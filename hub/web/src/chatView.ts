@@ -853,6 +853,11 @@ function isQueueMode(mode: string): boolean {
   return mode === "queue";
 }
 
+/** 还没打进 Composer。不进 Cursor 托盘。 */
+export function heldOutbound(outbound: OutboundRow[] | null | undefined): OutboundRow[] {
+  return (outbound ?? []).filter((o) => o.state === "held");
+}
+
 /** 托盘：queue 配置下 injecting/queued。steer/unknown 不进托盘。 */
 export function queuedOutbound(outbound: OutboundRow[] | null | undefined): OutboundRow[] {
   return (outbound ?? []).filter((o) =>

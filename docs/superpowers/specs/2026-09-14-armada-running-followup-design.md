@@ -151,7 +151,7 @@ COUNT(*) dispatched/binding on machine
 | `running` 且无 `pending_ask`、有 cid、有文字或附图 | 201；outbound `injecting`；**status 仍 `running`** |
 | `queued` / `dispatched` / `binding` | 409 `CONVERSATION_BUSY` |
 | `pending_ask` | 409 `CONVERSATION_BUSY` |
-| 注入槽忙 | 409 `INJECT_SLOT_BUSY`；不插 outbound |
+| 注入槽忙 | 收下，outbound `held`（不占槽、不进 Cursor 托盘）。槽空后按入队顺序打进原来的对话。运行中仍 `running`；终态卡在打出去之前保持终态 |
 | 终态 | 现网：`dispatched` + 可签发 hub gen（Win / live 空） |
 
 SSE：`run.outbound` `{ runId, outboundId, state, expected_mode, prompt }`。
@@ -224,7 +224,7 @@ Windows 认领后：`attachHubGeneration("hub_windows")` **并且** `registry.se
 ```text
 POST followup (status=running, 纯文本)
   → pending_ask / 未 bind → 409 CONVERSATION_BUSY
-  → 槽忙 → 409 INJECT_SLOT_BUSY
+  → 槽忙 → outbound held；槽空后 promote 再发 run.followup
   → insert outbound injecting；send run.followup（不带新 hub gen）
   → Ext: openComposer(cid) + COMPOSER_ENTER_JS
        禁止 addPending / bindKnown / FollowupStopGuard.arm / 二次 run.bound
@@ -259,7 +259,7 @@ queued 在 drain 后 120s 仍未认领（含人手删 Cursor 队列）
 
 | 失败 | 行为 | 指标 |
 | --- | --- | --- |
-| `INJECT_SLOT_BUSY` | 不写 outbound | 无假托盘 |
+| 注入槽忙 | outbound `held`，详情写「等待打进 Composer」 | 不写成 Cursor 已排队 |
 | `NON_EMPTY_INPUT` / CDP / `FOLLOWUP_FAILED` | outbound `failed`；run 仍 running | 输入框保留原文 |
 | `openComposer` throw | 同上 | 现网 reason，不新码 `FOLLOWUP_FOCUS` |
 | stop 与 injecting 重叠 | injecting **不**闸 stop；失败 → failed；成功且 queue → `queued`，若已有 deferred_stop 则继续 drain；steer 成功 → 立即重放 deferred completed | — |

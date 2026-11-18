@@ -167,6 +167,19 @@ describe("settleFollowupComposer", () => {
     })).toMatchObject({ awaiting: false, draft: "", clearFiles: true });
   });
 
+  test("a followup waiting for the inject slot clears the text and keeps the files", () => {
+    expect(settleFollowupComposer({
+      ...base,
+      status: "running",
+      outbound: [{ prompt: "看 sha abc123", state: "held", created_at: 9 }],
+    })).toEqual({
+      awaiting: true,
+      sawDispatched: false,
+      draft: "",
+      clearFiles: false,
+    });
+  });
+
   test("a live outbound still injecting clears the text and keeps the files", () => {
     expect(settleFollowupComposer({
       ...base,

@@ -162,6 +162,29 @@ export class RunService {
     return injectingRuns + injectingOutbound;
   }
 
+  /** 已收下、还没打进 Composer。不占注入槽。 */
+  private heldCount(machineId: string): number {
+    return (this.db.query(
+      `SELECT COUNT(*) AS n FROM run_outbound o JOIN runs r ON r.id=o.run_id
+       WHERE r.machine_id=?1 AND o.state='held'`,
+    ).get(machineId) as { n: number }).n;
+  }
+
+  private nextDispatchSeq(machineId: string): number {
+    const runMax = (this.db.query(
+      `SELECT COALESCE(MAX(dispatch_seq), 0) AS n FROM runs WHERE machine_id=?1`,
+    ).get(machineId) as { n: number }).n;
+    const outMax = (this.db.query(
+      `SELECT COALESCE(MAX(o.enqueue_seq), 0) AS n FROM run_outbound o JOIN runs r ON r.id=o.run_id
+       WHERE r.machine_id=?1`,
+    ).get(machineId) as { n: number }).n;
+    return Math.max(runMax, outMax) + 1;
+  }
+
+  private slotFreeForNewInject(machineId: string): boolean {
+    return this.injectSlotCount(machineId) === 0 && this.heldCount(machineId) === 0;
+  }
+
   private hasOutstandingOutbound(runId: string): boolean {
     return !!(this.db.query(
       `SELECT 1 AS n FROM run_outbound WHERE run_id=?1 AND state IN ('queued','steered') LIMIT 1`,
@@ -170,14 +193,14 @@ export class RunService {
 
   private unconsumedOutboundCount(runId: string): number {
     return (this.db.query(
-      `SELECT COUNT(*) AS n FROM run_outbound WHERE run_id=?1 AND state IN ('injecting','queued','steered')`,
+      `SELECT COUNT(*) AS n FROM run_outbound WHERE run_id=?1 AND state IN ('injecting','queued','steered','held','sending')`,
     ).get(runId) as { n: number }).n;
   }
 
   private hasOutboundCollision(runId: string, prompt: string, attachmentIds: string[] = []): boolean {
     const key = normalizePrompt(prompt);
     const rows = this.db.query(
-      `SELECT prompt, attachments FROM run_outbound WHERE run_id=?1 AND state IN ('injecting','queued','steered')`,
+      `SELECT prompt, attachments FROM run_outbound WHERE run_id=?1 AND state IN ('injecting','queued','steered','held','sending')`,
     ).all(runId) as { prompt: string; attachments: string }[];
     if (key) return rows.some((r) => normalizePrompt(r.prompt) === key);
     if (!attachmentIds.length) return false;
@@ -190,7 +213,7 @@ export class RunService {
   }[] {
     const rows = this.db.query(
       `SELECT id, prompt, attachments, expected_mode, state, created_at FROM run_outbound
-       WHERE run_id=?1 AND state IN ('injecting','queued','steered') ORDER BY id ASC`,
+       WHERE run_id=?1 AND state IN ('injecting','queued','steered','held') ORDER BY id ASC`,
     ).all(runId) as { id: string; prompt: string; attachments: string; expected_mode: string; state: string; created_at: number }[];
     return rows.map((r) => {
       const attachment_ids = parseAttachmentIds(r.attachments);
@@ -249,7 +272,7 @@ export class RunService {
 
   private failUnconsumedOutbound(runId: string): void {
     const rows = this.db.query(
-      `SELECT id FROM run_outbound WHERE run_id=?1 AND state IN ('injecting','queued','steered')`,
+      `SELECT id FROM run_outbound WHERE run_id=?1 AND state IN ('injecting','queued','steered','held','sending')`,
     ).all(runId) as { id: string }[];
     for (const r of rows) this.setOutboundState(r.id, "failed");
   }
@@ -395,10 +418,17 @@ export class RunService {
     const toFail: { id: string; error: string }[] = [];
     try {
       if (this.injectSlotCount(machineId) !== 0) return;
-      const rows = this.db.query(
-        `SELECT * FROM runs WHERE machine_id=?1 AND status='queued' ORDER BY dispatch_seq ASC`,
-      ).all(machineId) as any[];
-      for (const row of rows) {
+      const jobs = this.listInjectJobs(machineId);
+      for (const job of jobs) {
+        if (this.injectSlotCount(machineId) !== 0) break;
+        if (job.kind === "held") {
+          if (this.promoteHeld(job.id, machineId)) break;
+          continue;
+        }
+        const row = this.db.query(
+          "SELECT * FROM runs WHERE id=?1 AND status='queued'",
+        ).get(job.id) as any;
+        if (!row) continue;
         const m = this.registry.getMachine(machineId);
         const open = m ? JSON.parse(m.open_workspaces) as string[] : [];
         if (!workspacePathIn(row.workspace_root, open)) {
@@ -410,9 +440,7 @@ export class RunService {
           continue;
         }
         const startWin = this.findStartWindow(machineId, row.workspace_root);
-        if (!startWin) {
-          continue;
-        }
+        if (!startWin) continue;
         const now = Date.now();
         this.db.query(`UPDATE runs SET status='dispatched', queued_at=NULL, started_at=?1, window_id=?2 WHERE id=?3`)
           .run(now, startWin, row.id);
@@ -427,6 +455,64 @@ export class RunService {
       this.promoting = false;
     }
     for (const { id, error } of toFail) this.setStatus(id, "error", { end_reason: error });
+  }
+
+  private listInjectJobs(machineId: string): { kind: "run" | "held"; id: string; seq: number }[] {
+    const runs = this.db.query(
+      `SELECT id, COALESCE(dispatch_seq, 0) AS seq FROM runs WHERE machine_id=?1 AND status='queued'`,
+    ).all(machineId) as { id: string; seq: number }[];
+    const held = this.db.query(
+      `SELECT o.id AS id, COALESCE(o.enqueue_seq, 0) AS seq FROM run_outbound o
+       JOIN runs r ON r.id=o.run_id WHERE r.machine_id=?1 AND o.state='held'`,
+    ).all(machineId) as { id: string; seq: number }[];
+    return [
+      ...runs.map((row) => ({ kind: "run" as const, id: row.id, seq: row.seq })),
+      ...held.map((row) => ({ kind: "held" as const, id: row.id, seq: row.seq })),
+    ].sort((a, b) => a.seq - b.seq);
+  }
+
+  /** @returns 这一条已经占上注入槽。 */
+  private promoteHeld(id: string, machineId: string): boolean {
+    const row = this.db.query(
+      `SELECT o.id, o.run_id, o.prompt, o.attachments, r.status, r.machine_id, r.window_id, r.workspace_root, r.conversation_id
+       FROM run_outbound o JOIN runs r ON r.id=o.run_id
+       WHERE o.id=?1 AND o.state='held'`,
+    ).get(id) as {
+      id: string; run_id: string; prompt: string; attachments: string; status: string;
+      machine_id: string; window_id: string | null; workspace_root: string; conversation_id: string | null;
+    } | null;
+    if (!row) return false;
+    const open = JSON.parse(this.registry.getMachine(machineId)?.open_workspaces ?? "[]") as string[];
+    if (!workspacePathIn(row.workspace_root, open)) {
+      if (this.registry.workspaceDropped(machineId, row.workspace_root)) this.failHeld(row, "WORKSPACE_NOT_OPEN");
+      else this.requestOpenWindow(machineId, row.workspace_root);
+      return false;
+    }
+    const routed = this.resolveInjectWindow(row, { requireCdp: true });
+    if (!routed.ok) return false;
+    const attachmentIds = parseAttachmentIds(row.attachments);
+    if (row.status === "running") return this.sendLiveFollowup(row, routed.windowId, attachmentIds);
+    if (!this.terminal(row.status) || !row.conversation_id) {
+      this.failHeld(row, "INVALID_STATE");
+      return false;
+    }
+    // sending：离开等待队列，但附图还要留到 ack。不占注入槽。
+    this.setOutboundState(row.id, "sending");
+    const run = this.get(row.run_id);
+    if (!run) return false;
+    this.dispatchTerminalFollowup(run, row.prompt, attachmentIds, routed.windowId);
+    return true;
+  }
+
+  private failHeld(row: { id: string; run_id: string; prompt: string }, reason: string): void {
+    this.setOutboundState(row.id, "failed");
+    this.recordFollowupRejection(row.run_id, reason, row.prompt);
+  }
+
+  /** 终态续聊已经开始打。删掉等待行，避免广播 failed 把输入框填回来。附图改挂在 runs 上。 */
+  private dropSending(runId: string): void {
+    this.db.query("DELETE FROM run_outbound WHERE run_id=?1 AND state='sending'").run(runId);
+    this.blobs?.syncRefsFromRuns();
   }
 
   private startMessage(row: { id: string; workspace_root: string; prompt: string; attachments?: string; live_generation_id?: string | null }, now: number) {
@@ -512,9 +598,7 @@ export class RunService {
     if (this.countOccupying(machineId) >= this.limits.maxPerMachine) return { error: "RUN_LIMIT" };
     if (this.countOccupying(machineId, workspaceRoot) >= this.limits.maxPerWorkspace) return { error: "RUN_LIMIT" };
     if (this.hasPromptCollision(machineId, workspaceRoot, prompt, [])) return { error: "PROMPT_COLLISION" };
-    const nextSeq = ((this.db.query(
-      `SELECT COALESCE(MAX(dispatch_seq), 0) AS n FROM runs WHERE machine_id=?1`,
-    ).get(machineId) as { n: number }).n) + 1;
+    const nextSeq = this.nextDispatchSeq(machineId);
     const id = `r-${randomUUID()}`;
     const status = this.chatgptSendBusy(machineId) ? "queued" : "dispatched";
     const now = Date.now();
@@ -565,12 +649,10 @@ export class RunService {
       if (sameWindowActive) return { error: "WINDOW_BUSY" };
     }
 
-    const nextSeq = ((this.db.query(
-      `SELECT COALESCE(MAX(dispatch_seq), 0) AS n FROM runs WHERE machine_id=?1`,
-    ).get(machineId) as { n: number }).n) + 1;
+    const nextSeq = this.nextDispatchSeq(machineId);
 
     const id = `r-${randomUUID()}`;
-    const slotFree = this.injectSlotCount(machineId) === 0;
+    const slotFree = this.slotFreeForNewInject(machineId);
     const canStartNow = slotFree && !!startWin;
     const status = canStartNow ? "dispatched" : "queued";
     const now = Date.now();
@@ -694,6 +776,7 @@ export class RunService {
         this.blobs?.syncRefsFromRuns();
         this.recordFollowupPrompt(run, pending.prompt, pending.attachmentIds);
       }
+      this.dropSending(run.id);
       this.setStatus(run.id, "binding", recoverable
         ? { ended_at: null, end_reason: null, started_at: Date.now() }
         : {}, "extension");
@@ -702,6 +785,7 @@ export class RunService {
       this.pendingFollowupPrompt.delete(run.id);
       const prior = this.followupRestore.get(run.id);
       this.followupRestore.delete(run.id);
+      this.dropSending(run.id);
       if (prior && run.conversation_id && this.terminal(prior.status)) {
         this.restoreFollowupAttempt(run.id, prior, msg.reason ?? "REJECTED", pending?.prompt);
         this.promoteNextQueued(machineId);
@@ -1043,6 +1127,7 @@ export class RunService {
     const machines = new Set<string>();
     const d = this.db.query("SELECT id, machine_id, created_at, started_at FROM runs WHERE status='dispatched'").all() as any[];
     for (const r of d) if (age(r) > DISPATCH_TIMEOUT_MS) {
+      this.dropSending(r.id);
       this.setStatus(r.id, "error", { end_reason: "DISPATCH_TIMEOUT" });
       machines.add(r.machine_id);
     }
@@ -1137,6 +1222,13 @@ export class RunService {
   }
 
   onMachineOffline(machineId: string) {
+    const parked = this.db.query(
+      `SELECT o.id, o.run_id, o.prompt, r.status FROM run_outbound o JOIN runs r ON r.id=o.run_id
+       WHERE r.machine_id=?1 AND o.state='held'`,
+    ).all(machineId) as { id: string; run_id: string; prompt: string; status: string }[];
+    for (const row of parked) {
+      if (this.terminal(row.status)) this.failHeld(row, "MACHINE_OFFLINE");
+    }
     const rows = this.db.query(
       `SELECT id, status FROM runs WHERE machine_id=?1 AND status IN (${sqlStatusIn(OCCUPYING_STATUSES)})`
     ).all(machineId) as any[];
@@ -1524,7 +1616,7 @@ export class RunService {
 
   /**
    * 续聊:同一张卡片回到 dispatched,事件继续追加。不新建 child run。
-   * 本卡仍占用中 → CONVERSATION_BUSY；注入槽被其它 run 占用 → INJECT_SLOT_BUSY。
+   * 本卡仍占用中 → CONVERSATION_BUSY。注入槽忙则先记 held，槽空再打。
    * 同工作区其它卡已在 running 不拦：注入串行、生成并行。
    */
   followup(runId: string, prompt: string, attachmentIds: string[] = []): { error?: string; run?: any } {
@@ -1535,11 +1627,19 @@ export class RunService {
     if (run.end_reason === "OPERATOR_CLOSED") return { error: "CLOSED" };
     if (run.status === "running") return this.followupWhileRunning(run, prompt, attachmentIds);
     if ((OCCUPYING_STATUSES as readonly string[]).includes(run.status)) return { error: "CONVERSATION_BUSY" };
-    if (this.injectSlotCount(run.machine_id) > 0) return { error: "INJECT_SLOT_BUSY" };
+    const ready = this.readyFollowup(run, prompt, attachmentIds);
+    if (ready.error) return ready;
+    if (!this.slotFreeForNewInject(run.machine_id)) {
+      if (this.unconsumedOutboundCount(run.id) >= OUTBOUND_LIMIT) return { error: "OUTBOUND_LIMIT" };
+      if (this.hasOutboundCollision(run.id, prompt, attachmentIds)) return { error: "PROMPT_COLLISION" };
+      return this.insertHeld(run, prompt, attachmentIds);
+    }
+    return this.dispatchTerminalFollowup(run, prompt, attachmentIds, ready.windowId!);
+  }
+
+  private readyFollowup(run: any, prompt: string, attachmentIds: string[]): { error?: string; windowId?: string } {
     const routed = this.resolveInjectWindow(run, { requireCdp: true });
     if (!routed.ok) return { error: routed.error };
-    const win = { windowId: routed.windowId };
-
     if (this.blobs && attachmentIds.length) {
       const checked = this.blobs.metas(attachmentIds);
       if (checked.error) return { error: checked.error };
@@ -1547,11 +1647,29 @@ export class RunService {
       return { error: "ATTACHMENT_NOT_FOUND" };
     }
     if (!normalizePrompt(prompt) && attachmentIds.length === 0) return { error: "EMPTY_PROMPT" };
-    if (this.hasPromptCollision(run.machine_id, run.workspace_root, prompt, attachmentIds, runId)) {
+    if (this.hasPromptCollision(run.machine_id, run.workspace_root, prompt, attachmentIds, run.id)) {
       return { error: "PROMPT_COLLISION" };
     }
+    return { windowId: routed.windowId };
+  }
 
-    this.followupRestore.set(runId, {
+  // shortcut: 终态卡上的 held 没有单独的取消按钮，槽空就发出去。要取消再加一笔。
+  private insertHeld(run: { id: string; machine_id: string }, prompt: string, attachmentIds: string[]) {
+    const expected_mode = queueModeOf(this.registry.getMachine(run.machine_id)?.queue_message_default_behavior);
+    const id = `o-${randomUUID()}`;
+    const seq = this.nextDispatchSeq(run.machine_id);
+    this.db.query(
+      `INSERT INTO run_outbound (id, run_id, prompt, attachments, expected_mode, state, created_at, enqueue_seq)
+       VALUES (?1,?2,?3,?4,?5,'held',?6,?7)`,
+    ).run(id, run.id, prompt, JSON.stringify(attachmentIds), expected_mode, Date.now(), seq);
+    this.blobs?.syncRefsFromRuns();
+    this.broadcastOutbound(run.id, { id, state: "held", expected_mode, prompt });
+    this.audit("hub", "run.followup.held", run.id, { outboundId: id, prompt: prompt.slice(0, 80) });
+    return { run: this.get(run.id) };
+  }
+
+  private dispatchTerminalFollowup(run: any, prompt: string, attachmentIds: string[], windowId: string) {
+    this.followupRestore.set(run.id, {
       status: run.status,
       end_reason: run.end_reason ?? null,
       prompt: run.prompt,
@@ -1561,49 +1679,72 @@ export class RunService {
       live_generation_id: run.live_generation_id ?? null,
       retired_generation_ids: run.retired_generation_ids ?? null,
     });
-    this.setStatus(runId, "dispatched", {
-      ended_at: null, end_reason: null, started_at: Date.now(), window_id: win.windowId,
+    this.setStatus(run.id, "dispatched", {
+      ended_at: null, end_reason: null, started_at: Date.now(), window_id: windowId,
     });
     // Mac live 非空不得退役，等 owner BSP rearm。live 已空（含完成后续聊）签发 hub gen：
     // 协议续轮若吞掉 composer BSP，synth stop 会盖上已退役 gen → STOP_GEN_RETIRED 卡死运行中。
     const os = this.registry.getMachine(run.machine_id)?.os;
     if (isWindowsMachineOs(os) || !genOf(run.live_generation_id)) {
-      this.attachHubGeneration(runId, isWindowsMachineOs(os) ? "hub_windows" : "hub_unarmed");
+      this.attachHubGeneration(run.id, isWindowsMachineOs(os) ? "hub_windows" : "hub_unarmed");
     }
-    this.cancelRequested.delete(runId);
-    this.pendingFollowupPrompt.set(runId, { prompt, attachmentIds });
-
-    const live = this.get(runId);
+    this.cancelRequested.delete(run.id);
+    this.pendingFollowupPrompt.set(run.id, { prompt, attachmentIds });
+    const live = this.get(run.id);
     const gen = genOf(live?.live_generation_id);
+    this.sendFollowup(live ?? run, windowId, prompt, attachmentIds, gen);
+    this.audit("hub", "run.followup", run.id, { prompt: prompt.slice(0, 80) });
+    return { run: this.get(run.id) };
+  }
+
+  private sendFollowup(
+    run: { id: string; machine_id: string; conversation_id: string | null; workspace_root: string },
+    windowId: string,
+    prompt: string,
+    attachmentIds: string[],
+    generationId?: string | null,
+    live?: boolean,
+  ): void {
     const attachments = this.wsAttachments(attachmentIds);
-    this.registry.sendTo(run.machine_id, win.windowId, {
-      type: "run.followup", runId, conversationId: run.conversation_id, workspaceRoot: run.workspace_root, prompt,
-      ...(attachments && attachments.length ? { attachments } : {}),
-      ...(gen ? { generation_id: gen } : {}),
+    this.registry.sendTo(run.machine_id, windowId, {
+      type: "run.followup",
+      runId: run.id,
+      conversationId: run.conversation_id,
+      workspaceRoot: run.workspace_root,
+      prompt,
+      ...(live ? { live: true } : {}),
+      ...(attachments?.length ? { attachments } : {}),
+      ...(generationId ? { generation_id: generationId } : {}),
     });
-    this.audit("hub", "run.followup", runId, { prompt: prompt.slice(0, 80) });
-    return { run: this.get(runId) };
+  }
+
+  private sendLiveFollowup(
+    row: { id: string; run_id: string; prompt: string; machine_id: string; conversation_id: string | null; workspace_root: string },
+    windowId: string,
+    attachmentIds: string[],
+  ): boolean {
+    const expected_mode = queueModeOf(this.registry.getMachine(row.machine_id)?.queue_message_default_behavior);
+    const now = Date.now();
+    this.db.query(
+      "UPDATE run_outbound SET state='injecting', expected_mode=?1, created_at=?2 WHERE id=?3",
+    ).run(expected_mode, now, row.id);
+    this.blobs?.syncRefsFromRuns();
+    this.broadcastOutbound(row.run_id, { id: row.id, state: "injecting", expected_mode, prompt: row.prompt });
+    this.sendFollowup(
+      { id: row.run_id, machine_id: row.machine_id, conversation_id: row.conversation_id, workspace_root: row.workspace_root },
+      windowId, row.prompt, attachmentIds, null, true,
+    );
+    this.audit("hub", "run.followup.live", row.run_id, { outboundId: row.id, expected_mode, prompt: row.prompt.slice(0, 80) });
+    return true;
   }
 
   private followupWhileRunning(run: any, prompt: string, attachmentIds: string[]): { error?: string; run?: any } {
     if (parsePendingAsk(run.pending_ask)) return { error: "CONVERSATION_BUSY" };
-    if (this.blobs && attachmentIds.length) {
-      const checked = this.blobs.metas(attachmentIds);
-      if (checked.error) return { error: checked.error };
-    } else if (attachmentIds.length && !this.blobs) {
-      return { error: "ATTACHMENT_NOT_FOUND" };
-    }
-    if (!normalizePrompt(prompt) && attachmentIds.length === 0) return { error: "EMPTY_PROMPT" };
-    if (this.injectSlotCount(run.machine_id) > 0) return { error: "INJECT_SLOT_BUSY" };
-    if (this.hasPromptCollision(run.machine_id, run.workspace_root, prompt, attachmentIds, run.id)) {
-      return { error: "PROMPT_COLLISION" };
-    }
+    const ready = this.readyFollowup(run, prompt, attachmentIds);
+    if (ready.error) return ready;
     if (this.hasOutboundCollision(run.id, prompt, attachmentIds)) return { error: "PROMPT_COLLISION" };
     if (this.unconsumedOutboundCount(run.id) >= OUTBOUND_LIMIT) return { error: "OUTBOUND_LIMIT" };
-    const routed = this.resolveInjectWindow(run, { requireCdp: true });
-    if (!routed.ok) return { error: routed.error };
-    const win = { windowId: routed.windowId };
-
+    if (!this.slotFreeForNewInject(run.machine_id)) return this.insertHeld(run, prompt, attachmentIds);
     const expected_mode = queueModeOf(this.registry.getMachine(run.machine_id)?.queue_message_default_behavior);
     const id = `o-${randomUUID()}`;
     const now = Date.now();
@@ -1613,16 +1754,7 @@ export class RunService {
     ).run(id, run.id, prompt, JSON.stringify(attachmentIds), expected_mode, now);
     this.blobs?.syncRefsFromRuns();
     this.broadcastOutbound(run.id, { id, state: "injecting", expected_mode, prompt });
-    const attachments = this.wsAttachments(attachmentIds);
-    this.registry.sendTo(run.machine_id, win.windowId, {
-      type: "run.followup",
-      runId: run.id,
-      conversationId: run.conversation_id,
-      workspaceRoot: run.workspace_root,
-      prompt,
-      live: true,
-      ...(attachments?.length ? { attachments } : {}),
-    });
+    this.sendFollowup(run, ready.windowId!, prompt, attachmentIds, null, true);
     this.audit("hub", "run.followup.live", run.id, { outboundId: id, expected_mode, prompt: prompt.slice(0, 80) });
     return { run: this.get(run.id) };
   }
@@ -1676,10 +1808,8 @@ export class RunService {
       ).get(run.machine_id, win.windowId);
       if (sameWindowActive) return { error: "WINDOW_BUSY" };
     }
-    const nextSeq = ((this.db.query(
-      `SELECT COALESCE(MAX(dispatch_seq), 0) AS n FROM runs WHERE machine_id=?1`,
-    ).get(run.machine_id) as { n: number }).n) + 1;
-    const slotFree = this.injectSlotCount(run.machine_id) === 0;
+    const nextSeq = this.nextDispatchSeq(run.machine_id);
+    const slotFree = this.slotFreeForNewInject(run.machine_id);
     const canStartNow = slotFree && !!startWin;
     const now = Date.now();
     this.cancelRequested.delete(run.id);

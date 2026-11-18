@@ -84,6 +84,7 @@ export function openDb(home: string): Database {
     created_at INTEGER NOT NULL
   )`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_run_outbound_run_state ON run_outbound(run_id, state)`);
+  ensureColumn(db, "run_outbound", "enqueue_seq", "enqueue_seq INTEGER");
   db.exec(`CREATE TABLE IF NOT EXISTS blobs (
     sha256 TEXT PRIMARY KEY,
     mime TEXT NOT NULL,

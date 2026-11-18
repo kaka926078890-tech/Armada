@@ -368,6 +368,7 @@ struct RunRow: View {
     private var caption: String {
         if run.pendingAsk != nil && run.status == "running" { return "待处理" }
         if !run.queuedOutbound.isEmpty { return "队列 \(run.queuedOutbound.count)" }
+        if !run.heldOutbound.isEmpty { return "等待注入" }
         return statusLabel(run.status)
     }
 
@@ -1455,6 +1456,25 @@ struct RunDetailView: View {
                         .buttonStyle(.plain)
                     if let ask = run.pendingAsk {
                         AskView(runId: runId, ask: ask) { await reload() }
+                    }
+                    if !run.heldOutbound.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("等待打进 Composer")
+                                .font(.system(size: 12))
+                                .foregroundStyle(hub.mutedForeground)
+                            ForEach(run.heldOutbound) { q in
+                                Text(q.queueLabel)
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(hub.foreground)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                        .background(hub.card, in: RoundedRectangle(cornerRadius: Hub.radius, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: Hub.radius, style: .continuous)
+                                .strokeBorder(hub.border, lineWidth: 1)
+                        }
                     }
                     if !run.queuedOutbound.isEmpty {
                         VStack(alignment: .leading, spacing: 6) {

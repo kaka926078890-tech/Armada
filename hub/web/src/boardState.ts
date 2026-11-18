@@ -35,7 +35,7 @@ export function flatPrompt(text: string | null | undefined): string {
   return (text ?? "").replace(/\s+/g, " ").trim();
 }
 
-const PENDING_OUTBOUND = new Set(["injecting", "queued", "steered"]);
+const PENDING_OUTBOUND = new Set(["injecting", "queued", "steered", "held"]);
 
 export type CardPromptLines = {
   /** 和标题不同的最近一句。还在队列里的优先于已落库的 alert_prompt。 */

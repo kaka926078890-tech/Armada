@@ -802,8 +802,8 @@ describe("Run dispatch", () => {
     ws.close();
   });
 
-  test("followup while another run is injecting → 409 INJECT_SLOT_BUSY without changing completed card", async () => {
-    const { ws, api } = await startWithExt({ extensionVersion: "0.4.0" });
+  test("followup while another run is injecting waits, then injects the same card", async () => {
+    const { ws, inbound, api } = await startWithExt({ extensionVersion: "0.4.0" });
     const r1 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "a" }) });
     const { run: a } = await r1.json() as any;
     ws.send(JSON.stringify({ type: "run.ack", runId: a.id, status: "accepted" }));
@@ -814,10 +814,21 @@ describe("Run dispatch", () => {
     const r2 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "b" }) });
     const { run: b } = await r2.json() as any;
     expect(b.status).toBe("dispatched");
+    inbound.length = 0;
     const f = await api(`/api/runs/${a.id}/followup`, { method: "POST", body: JSON.stringify({ prompt: "续" }) });
-    expect(f.status).toBe(409);
-    expect(((await f.json()) as any).error).toBe("INJECT_SLOT_BUSY");
-    expect(((await (await api(`/api/runs/${a.id}`)).json()) as any).status).toBe("completed");
+    expect(f.status).toBe(200);
+    const held = await f.json() as any;
+    expect(held.run.status).toBe("completed");
+    expect(held.run.outbound?.[0]).toMatchObject({ prompt: "续", state: "held" });
+    expect(inbound.find((m) => m.type === "run.followup")).toBeUndefined();
+    ws.send(JSON.stringify({ type: "run.ack", runId: b.id, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId: b.id, conversationId: "cid-b", transcriptPath: null, promptMatch: true }));
+    await new Promise((r) => setTimeout(r, 150));
+    expect(((await (await api(`/api/runs/${a.id}`)).json()) as any).status).toBe("dispatched");
+    expect(inbound.find((m) => m.type === "run.followup")).toMatchObject({
+      runId: a.id, conversationId: "cid-a", prompt: "续",
+    });
+    expect(inbound.find((m) => m.type === "run.followup").live).toBeUndefined();
     ws.close();
   });
 
@@ -1165,8 +1176,8 @@ describe("running followup outbound", () => {
     ws.close();
   });
 
-  test("A2 occupying dispatched still 409; A3 running followup does not insert hub BSP", async () => {
-    const { wsA, inboundA, wsB, inboundB, api } = await startTwoWindows();
+  test("running followup waits for the inject slot, then sends without a hub generation", async () => {
+    const { wsA, inboundA, wsB, api } = await startTwoWindows();
     const r1 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "a" }) });
     const { run } = await r1.json() as any;
     wsA.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
@@ -1175,21 +1186,88 @@ describe("running followup outbound", () => {
     const dispatched = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/b", prompt: "b" }) });
     const { run: b } = await dispatched.json() as any;
     expect(b.status).toBe("dispatched");
+    inboundA.length = 0;
     const busy = await api(`/api/runs/${run.id}/followup`, { method: "POST", body: JSON.stringify({ prompt: "续" }) });
-    expect(busy.status).toBe(409);
-    expect(((await busy.json()) as any).error).toBe("INJECT_SLOT_BUSY");
+    expect(busy.status).toBe(201);
+    const held = await busy.json() as any;
+    expect(held.run.status).toBe("running");
+    expect(held.run.outbound?.[0]).toMatchObject({ prompt: "续", state: "held" });
+    expect(inboundA.find((m) => m.type === "run.followup")).toBeUndefined();
     wsB.send(JSON.stringify({ type: "run.ack", runId: b.id, status: "accepted" }));
     wsB.send(JSON.stringify({ type: "run.bound", runId: b.id, conversationId: "cid-b", transcriptPath: null, promptMatch: true }));
-    await new Promise((x) => setTimeout(x, 80));
-    inboundA.length = 0;
-    inboundB.length = 0;
-    const f = await api(`/api/runs/${run.id}/followup`, { method: "POST", body: JSON.stringify({ prompt: "续" }) });
-    expect(f.status).toBe(201);
+    await new Promise((x) => setTimeout(x, 120));
+    const follow = inboundA.find((m) => m.type === "run.followup" && m.runId === run.id);
+    expect(follow).toMatchObject({ prompt: "续", live: true });
+    expect(follow.generation_id).toBeUndefined();
     const events = (await (await api(`/api/runs/${run.id}/events`)).json()) as any[];
     expect(events.some((e) => e.hook_event_name === "beforeSubmitPrompt" && JSON.parse(e.payload).prompt === "续")).toBe(false);
-    expect(inboundA.find((m) => m.type === "run.followup" && m.runId === run.id)?.generation_id).toBeUndefined();
+    const live = (await (await api(`/api/runs/${run.id}`)).json()) as any;
+    expect(live.status).toBe("running");
+    expect(live.outbound.find((o: any) => o.prompt === "续").state).toBe("injecting");
     wsA.close();
     wsB.close();
+  });
+
+  test("held followup does not block stop; after the slot frees it reopens the same card", async () => {
+    const { ws, inbound, api } = await startWithExt({ extensionVersion: "0.4.0", os: "win32-x64" });
+    const r1 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "a" }) });
+    const { run: a } = await r1.json() as any;
+    const r2 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "b" }) });
+    const { run: b } = await r2.json() as any;
+    expect(b.status).toBe("queued");
+    const g1 = inbound.find((m) => m.type === "run.start" && m.runId === a.id)?.generation_id as string;
+    expect(typeof g1).toBe("string");
+    ws.send(JSON.stringify({ type: "run.ack", runId: a.id, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId: a.id, conversationId: "cid-a", transcriptPath: "/tmp/t.jsonl", promptMatch: true }));
+    await new Promise((x) => setTimeout(x, 150));
+    expect(((await (await api(`/api/runs/${b.id}`)).json()) as any).status).toBe("dispatched");
+    inbound.length = 0;
+    const held = await api(`/api/runs/${a.id}/followup`, { method: "POST", body: JSON.stringify({ prompt: "续" }) });
+    expect(held.status).toBe(201);
+    expect(((await held.json()) as any).run.outbound?.[0].state).toBe("held");
+    ws.send(JSON.stringify({
+      type: "run.event", runId: a.id, source: "hook", hookEventName: "stop",
+      payload: { status: "completed", conversation_id: "cid-a", generation_id: g1 },
+      ts: Date.now(), seq: 4,
+    }));
+    await new Promise((x) => setTimeout(x, 80));
+    const stopped = (await (await api(`/api/runs/${a.id}`)).json()) as any;
+    expect(stopped.status).toBe("completed");
+    expect(stopped.outbound.find((o: any) => o.prompt === "续").state).toBe("held");
+    expect(inbound.find((m) => m.type === "run.followup")).toBeUndefined();
+    ws.send(JSON.stringify({ type: "run.ack", runId: b.id, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId: b.id, conversationId: "cid-b", transcriptPath: null, promptMatch: true }));
+    await new Promise((x) => setTimeout(x, 150));
+    const follow = inbound.find((m) => m.type === "run.followup" && m.runId === a.id);
+    expect(follow).toMatchObject({ conversationId: "cid-a", prompt: "续" });
+    expect(follow.live).toBeUndefined();
+    expect(typeof follow.generation_id).toBe("string");
+    expect(((await (await api(`/api/runs/${a.id}`)).json()) as any).status).toBe("dispatched");
+    ws.close();
+  });
+
+  test("held followup injects before a run queued behind it", async () => {
+    const { ws, inbound, api } = await startWithExt({ extensionVersion: "0.4.0" });
+    const r1 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "a" }) });
+    const { run: a } = await r1.json() as any;
+    ws.send(JSON.stringify({ type: "run.ack", runId: a.id, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId: a.id, conversationId: "cid-a", transcriptPath: null, promptMatch: true }));
+    await new Promise((x) => setTimeout(x, 80));
+    const first = await api(`/api/runs/${a.id}/followup`, { method: "POST", body: JSON.stringify({ prompt: "一" }) });
+    expect(first.status).toBe(201);
+    const second = await api(`/api/runs/${a.id}/followup`, { method: "POST", body: JSON.stringify({ prompt: "二" }) });
+    expect(second.status).toBe(201);
+    expect(((await second.json()) as any).run.outbound.find((o: any) => o.prompt === "二").state).toBe("held");
+    const r2 = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "b" }) });
+    const { run: b } = await r2.json() as any;
+    expect(b.status).toBe("queued");
+    inbound.length = 0;
+    ws.send(JSON.stringify({ type: "run.ack", runId: a.id, status: "accepted" }));
+    await new Promise((x) => setTimeout(x, 120));
+    expect(inbound.find((m) => m.type === "run.followup")).toMatchObject({ runId: a.id, prompt: "二", live: true });
+    expect(inbound.find((m) => m.type === "run.start" && m.prompt === "b")).toBeUndefined();
+    expect(((await (await api(`/api/runs/${b.id}`)).json()) as any).status).toBe("queued");
+    ws.close();
   });
 
   test("A6 onRunAck running injecting does not set binding or error", async () => {

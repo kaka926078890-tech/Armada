@@ -85,7 +85,7 @@ export function settleFollowupComposer(input: {
   });
   if (outbound?.state === "failed") return keep;
   if (outbound && (outbound.state === "queued" || outbound.state === "steered")) return accept;
-  if (outbound?.state === "injecting") return release;
+  if (outbound?.state === "injecting" || outbound?.state === "held") return release;
   if (sawDispatched && (input.status === "error" || input.status === "aborted" || input.status === "cancelled")) {
     return keep;
   }

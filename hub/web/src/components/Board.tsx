@@ -127,6 +127,9 @@ export default function Board({ runs, selected, onSelect, showArchived, onHide, 
                       {r.status === "queued" && (
                         <div className={`${UI_META} col-span-2 text-muted-foreground mt-1`}>排队中</div>
                       )}
+                      {r.outbound?.some((o) => o.state === "held") && (
+                        <div className={`${UI_META} col-span-2 text-muted-foreground mt-1`}>等待打进 Composer</div>
+                      )}
                       {r.status === "running" && r.pending_ask ? (
                         <div className={`${UI_META} col-span-2 mt-1 text-muted-foreground`}>待处理</div>
                       ) : null}

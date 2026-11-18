@@ -121,7 +121,7 @@ fun flatPrompt(text: String?): String = text.orEmpty().replace(Regex("\\s+"), " 
 
 data class CardPromptLines(val latest: String, val original: String)
 
-private val PENDING_OUTBOUND = setOf("injecting", "queued", "steered")
+private val PENDING_OUTBOUND = setOf("injecting", "queued", "steered", "held")
 
 /** 和中台卡片同一规则：最近一句优先看还在队列里的，和标题相同的不重复。 */
 fun cardPromptLines(
@@ -203,6 +203,8 @@ data class RunDto(
     val showsArchive: Boolean get() = !isLive && !isArchived
     val queuedOutbound: List<OutboundDto>
         get() = (outbound ?: emptyList()).filter { it.state == "queued" || (it.state == "injecting" && it.expectedMode == "queue") }
+    val heldOutbound: List<OutboundDto>
+        get() = (outbound ?: emptyList()).filter { it.state == "held" }
     val canFollowup: Boolean get() = pendingAsk == null && (!conversationId.isNullOrBlank() || !chatgptThreadId.isNullOrBlank())
     val displayTitle: String get() = runDisplayTitle(title, prompt, attachments.size)
     val promptLines: CardPromptLines get() = cardPromptLines(title, prompt, alertPrompt, outbound, attachments.size)

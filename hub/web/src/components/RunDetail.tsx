@@ -4,7 +4,7 @@ import type { Machine, RunEvent } from "../types";
 import { workspaceFolderName, runDisplayName, cardPromptLines, canRetryRun, CDP_NOT_READY_COPY, resumeStallCopy, type RunRow } from "../boardState";
 import ChatThread from "./ChatThread";
 import FilePreview from "./FilePreview";
-import { eventsToChat, mergePendingAsk, mergeOutboundChat, outboundUserText, queuedOutbound, stampOutboundImages, userMessageCaption, INITIAL_VISIBLE_TURNS, initialHiddenPrefixTurns, recentTurnsWindow, stampFallbackImageIds } from "../chatView";
+import { eventsToChat, mergePendingAsk, mergeOutboundChat, outboundUserText, heldOutbound, queuedOutbound, stampOutboundImages, userMessageCaption, INITIAL_VISIBLE_TURNS, initialHiddenPrefixTurns, recentTurnsWindow, stampFallbackImageIds } from "../chatView";
 import { collectEventPages, mergeEvents, createForwardGate, EVENT_PAGE_SIZE, hasOlderEvents, olderEventsQuery, shouldLoadOlder, prependPreserveScroll, stickAfterContentResize } from "../loadEvents";
 import { attachmentLimitMessage, mergeAttachmentFiles, isConsoleAttachment, parseRunAttachmentIds, MAX_CONSOLE_ATTACHMENTS } from "../attachments";
 import { ConsoleFilePicker } from "./ConsoleFilePicker";
@@ -488,6 +488,7 @@ export default function RunDetail({
     parseRunAttachmentIds(run.attachments),
   );
   const queued = queuedOutbound(run.outbound);
+  const held = heldOutbound(run.outbound);
   const chat = recentTurnsWindow(chatAll, hiddenPrefixTurns);
   const hasOlder = hiddenPrefixTurns > 0 || hasOlderEvents(events);
   const titleText = runDisplayName(run) || "图片";
@@ -656,6 +657,23 @@ export default function RunDetail({
             return true;
           } : undefined}
         />
+        {held.length > 0 && (
+          <div className="mt-3 rounded-lg border border-border bg-card/60 px-3 py-2" aria-label="Waiting to inject">
+            <div className={`${UI_META} text-muted-foreground mb-1`}>等待打进 Composer</div>
+            <div className="flex flex-col gap-1.5">
+              {held.map((q) => {
+                const ids = q.attachment_ids ?? [];
+                const caption = userMessageCaption(outboundUserText(q.prompt, ids.length), ids);
+                return (
+                  <div key={q.id} className={`${UI_TYPE} text-foreground leading-relaxed`}>
+                    {ids.length ? <div className={caption ? "mb-1.5" : undefined}><HubImageRow ids={ids} /></div> : null}
+                    {caption}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
         {queued.length > 0 && (
           <div className="mt-3 rounded-lg border border-border bg-card/60 px-3 py-2" aria-label="Queued messages">
             <div className={`${UI_META} text-muted-foreground mb-1`}>

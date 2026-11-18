@@ -188,7 +188,7 @@ export class BlobStore {
   syncRefsFromRuns(now = Date.now()): void {
     const runRows = this.db.query("SELECT attachments FROM runs").all() as { attachments: string }[];
     const outRows = this.db.query(
-      "SELECT attachments FROM run_outbound WHERE state IN ('injecting','queued','steered','consumed')",
+      "SELECT attachments FROM run_outbound WHERE state IN ('injecting','queued','steered','consumed','held','sending')",
     ).all() as { attachments: string }[];
     const counts = new Map<string, number>();
     for (const r of [...runRows, ...outRows]) {
