@@ -569,6 +569,38 @@ describe("relay serve", () => {
     ws.close();
   });
 
+  test("snap.workspaces keeps a Windows path injectable when cdp_ready is true", async () => {
+    const s = start();
+    const fleet = s.createFleet();
+    const ws = await connectHub(s, fleet.fleet, fleet.hubSecret);
+    const root = "c:\\Users\\PC\\Desktop\\work";
+    ws.send(JSON.stringify({
+      type: "snap.workspaces",
+      machines: [{
+        id: "m-44ff077a-eb79-4b54-aa16-112d1749b5b1",
+        name: "Win Destop",
+        display_name: "Win Destop",
+        os: "win32-x64",
+        status: "online",
+        open_workspaces: JSON.stringify([root]),
+        cdp_ready: true,
+      }],
+    }));
+    await Bun.sleep(50);
+    const list = await (await fetch(url(s, "/mobile/workspaces"), {
+      headers: { authorization: `Bearer ${fleet.operatorToken}` },
+    })).json() as any;
+    expect(list.workspaces).toHaveLength(1);
+    expect(list.workspaces[0]).toMatchObject({
+      workspaceId: encodeWorkspaceId("m-44ff077a-eb79-4b54-aa16-112d1749b5b1", root),
+      workspaceRoot: root,
+      label: "work",
+      online: true,
+      cdpReady: true,
+    });
+    ws.close();
+  });
+
   test("snap.workspaces keeps ChatGPT projects beside Cursor folders", async () => {
     const s = start();
     const fleet = s.createFleet();

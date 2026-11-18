@@ -261,6 +261,8 @@ export function startRelayClient(opts: {
   sse: SseHub;
   listMachines?: () => unknown[];
   maxAttachments?: () => number;
+  /** Test hook. Production uses the relay heartbeat interval. */
+  reconcileMs?: number;
 }): { stop: () => void } | null {
   const cfg = loadRelayConfig(opts.home);
   if (!cfg) return null;
@@ -313,9 +315,10 @@ export function startRelayClient(opts: {
     reconcileTimer = null;
   };
 
-  /** Status changes push once. A missed frame stays wrong until the next heartbeat re-sends live cards. */
+  /** Status changes push once. The heartbeat re-sends live cards and the workspace list, so a missed cdp_ready frame cannot leave the phone on CDP_NOT_READY. */
   const reconcileLive = () => {
     if (stopped || !ws || ws.readyState !== WebSocket.OPEN) return;
+    try { pushWorkspaces(); } catch { /* one bad workspace snap must not skip live cards */ }
     const rows = opts.db.query("SELECT id, status FROM runs").all() as { id: string; status: string }[];
     for (const id of liveIdsForRelayReconcile(rows)) {
       try { pushRun(id); } catch { /* one bad snap must not skip the rest */ }
@@ -380,7 +383,7 @@ export function startRelayClient(opts: {
       heartbeat?.();
       heartbeat = startRelayHeartbeat(next);
       stopReconcile();
-      reconcileTimer = setInterval(reconcileLive, RELAY_HEARTBEAT_MS);
+      reconcileTimer = setInterval(reconcileLive, opts.reconcileMs ?? RELAY_HEARTBEAT_MS);
     });
     next.addEventListener("message", (e) => {
       let msg: any;

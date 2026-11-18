@@ -38,7 +38,7 @@ export interface HubServer {
   stop: () => void;
 }
 
-export function createServer(opts: { port?: number; hostname?: string; home?: string; concurrency?: ConcurrencyLimits; vsixSearchDirs?: string[]; fileReadTimeoutMs?: number; chatgpt?: boolean; composerCursorPath?: string | null } = {}): HubServer {
+export function createServer(opts: { port?: number; hostname?: string; home?: string; concurrency?: ConcurrencyLimits; vsixSearchDirs?: string[]; fileReadTimeoutMs?: number; chatgpt?: boolean; composerCursorPath?: string | null; relayReconcileMs?: number } = {}): HubServer {
   const home = ARMADA_HOME(opts.home);
   const token = loadToken(home);
   const db = openDb(home);
@@ -523,6 +523,7 @@ export function createServer(opts: { port?: number; hostname?: string; home?: st
     home, hubPort: port, token, registry, runs, db, sse,
     listMachines: () => chatgpt.machines(registry.listMachines()),
     maxAttachments: () => blobs.maxAttachmentsSnapshot(),
+    reconcileMs: opts.relayReconcileMs,
   });
   return {
     server, db, registry, runs, token,

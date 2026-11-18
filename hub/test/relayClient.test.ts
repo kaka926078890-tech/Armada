@@ -336,6 +336,60 @@ describe("hub outbound to relay", () => {
     ext.close();
   });
 
+  test("heartbeat re-pushes Windows cdp_ready after a missed workspace snap", async () => {
+    const winRoot = "c:\\Users\\PC\\Desktop\\work";
+    const relayHome = mkdtempSync(join(tmpdir(), "armada-relay-"));
+    const hubHome = mkdtempSync(join(tmpdir(), "armada-hub-"));
+    relay = createRelayServer({
+      port: 0, hostname: "127.0.0.1", home: relayHome,
+      publicBase: "http://127.0.0.1", adminToken: "adm",
+    });
+    const fleet = relay.createFleet();
+    writeFileSync(join(hubHome, "relay.json"), JSON.stringify({
+      relay: `http://127.0.0.1:${relay.port}`, fleet: fleet.fleet, secret: fleet.hubSecret,
+    }), { mode: 0o600 });
+    hub = createServer({ port: 0, home: hubHome, relayReconcileMs: 200 });
+    const ext: WebSocket = await new Promise((res, rej) => {
+      const w = new WebSocket(`ws://127.0.0.1:${hub!.port}/ws?token=${hub!.token}`);
+      w.onopen = () => res(w);
+      w.onerror = rej;
+    });
+    ext.send(JSON.stringify({
+      type: "register", machineId: "m-win", windowId: "w-win", name: "Win Destop", os: "win32-x64",
+      openWorkspaces: [winRoot], cdpReady: true,
+    }));
+    const headers = { authorization: `Bearer ${fleet.operatorToken}` };
+    const phone = async () => await (await fetch(`http://127.0.0.1:${relay!.port}/mobile/workspaces`, { headers })).json() as {
+      workspaces: Array<{ workspaceRoot: string; cdpReady: boolean; online: boolean }>;
+    };
+    await waitUntil(async () => {
+      const j = await phone();
+      const slot = j.workspaces?.find((w) => w.workspaceRoot === winRoot);
+      return slot?.cdpReady === true && slot.online === true;
+    });
+    const relayDb = new Database(join(relayHome, "relay.db"));
+    const stuck = JSON.stringify([{
+      machineId: "m-win", workspaceRoot: winRoot, label: "work", machineName: "Win Destop",
+      os: "win32-x64", online: true, cdpReady: false,
+    }]);
+    let sawStuck = false;
+    const t0 = Date.now();
+    while (Date.now() - t0 < 1500) {
+      relayDb.query("UPDATE fleets SET workspaces=?1 WHERE id=?2").run(stuck, fleet.fleet);
+      const j = await phone();
+      const slot = j.workspaces?.find((w) => w.workspaceRoot === winRoot);
+      if (slot?.cdpReady === false) { sawStuck = true; break; }
+    }
+    expect(sawStuck).toBe(true);
+    await waitUntil(async () => {
+      const j = await phone();
+      const slot = j.workspaces?.find((w) => w.workspaceRoot === winRoot);
+      return slot?.cdpReady === true && slot.online === true;
+    });
+    relayDb.close();
+    ext.close();
+  }, 10000);
+
   test("mobile dispatch and followup keep an 8k prompt without HUB_TIMEOUT", async () => {
     const relayHome = mkdtempSync(join(tmpdir(), "armada-relay-"));
     const hubHome = mkdtempSync(join(tmpdir(), "armada-hub-"));
