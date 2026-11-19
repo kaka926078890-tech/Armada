@@ -66,6 +66,51 @@ describe("Executor image path", () => {
     expect(acks.at(-1)).toEqual({ type: "run.ack", runId: "r1", status: "rejected", reason: "CANCELLED" });
   });
 
+  test("a previous cancel is cleared once the next followup holds the inject lock", async () => {
+    const cancelled = new Set(["r1"]);
+    const { ex, acks } = makeExec({
+      isCancelled: (id) => cancelled.has(id),
+      releaseCancel: (id) => { cancelled.delete(id); },
+      autoSubmit: async () => true,
+    });
+    await ex.followup({
+      runId: "r1", conversationId: "c1", prompt: "现在是什么进度？", workspaceRoot: "/ws/a",
+    });
+    expect(cancelled.has("r1")).toBe(false);
+    expect(acks.at(-1)).toEqual({ type: "run.ack", runId: "r1", status: "accepted" });
+  });
+
+  test("a previous cancel is cleared once the next start holds the inject lock", async () => {
+    const cancelled = new Set(["r1"]);
+    const { ex, acks } = makeExec({
+      isCancelled: (id) => cancelled.has(id),
+      releaseCancel: (id) => { cancelled.delete(id); },
+      autoSubmit: async () => true,
+    });
+    await ex.startRun({ runId: "r1", workspaceRoot: "/ws/a", prompt: "再来" });
+    expect(commands).toContain("composer.createNew");
+    expect(acks.at(-1)).toEqual({ type: "run.ack", runId: "r1", status: "accepted" });
+  });
+
+  test("cancel observed during this followup stays latched if the set is cleared", async () => {
+    const cancelled = new Set<string>();
+    const { ex, acks } = makeExec({
+      isCancelled: (id) => cancelled.has(id),
+      releaseCancel: (id) => { cancelled.delete(id); },
+      autoSubmit: async (_w, _p, opts) => {
+        cancelled.add("r1");
+        expect(opts?.shouldAbort?.()).toBe(true);
+        cancelled.delete("r1");
+        expect(opts?.shouldAbort?.()).toBe(true);
+        return { ok: false, reason: "CANCELLED" };
+      },
+    });
+    await ex.followup({
+      runId: "r1", conversationId: "c1", prompt: "继续", workspaceRoot: "/ws/a",
+    });
+    expect(acks.at(-1)).toEqual({ type: "run.ack", runId: "r1", status: "rejected", reason: "CANCELLED" });
+  });
+
   test("cancel seen inside image paste rejects CANCELLED and does not bind", async () => {
     let cancelled = false;
     const pending: string[] = [];

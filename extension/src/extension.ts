@@ -344,6 +344,7 @@ export function activate(context: vscode.ExtensionContext): void {
     },
     onInjected: (runId) => cancelWatcher.noteInjection(runId),
     isCancelled: (runId) => cancelledRuns.has(runId),
+    releaseCancel: (runId) => noteRunReopened(cancelledRuns, runId),
     probeCdp: async () => {
       const probe = await probeCdpReadyForInject({ port: config.cdpPort });
       if (probe === "down") return { ok: false, reason: "CDP_UNREACHABLE" };
@@ -836,7 +837,6 @@ export function activate(context: vscode.ExtensionContext): void {
           break;
         }
         case "run.followup":
-          noteRunReopened(cancelledRuns, msg.runId);
           noteHubGeneration(lastGenerationId, msg.runId, msg.generation_id);
           void executor.followup(msg);
           break;

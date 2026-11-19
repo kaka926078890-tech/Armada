@@ -135,6 +135,8 @@ export interface ExecutorDeps {
   spawnDetached?: (command: string, args: string[]) => void;
   /** 操作员已取消、对话尚未出现时，贴图回车前停掉这次注入。 */
   isCancelled?: (runId: string) => boolean;
+  /** 这次调用开始时标记已在，说明是上一轮取消。拿到锁之后清掉，同一张卡才能再注入。 */
+  releaseCancel?: (runId: string) => void;
   answerAskCdp?: (args: {
     workspaceRoot: string;
     action: "continue" | "skip" | "freeform";
@@ -315,10 +317,7 @@ export class Executor {
       }
       await this.deps.globalState.update("armada.authorizedWorkspaces", [...this.authorizedWorkspaces(), msg.workspaceRoot]);
     }
-    if (this.injectCancelled(msg.runId)) {
-      this.rejectCancelled(msg.runId);
-      return;
-    }
+    const priorCancel = this.injectCancelled(msg.runId);
     const lock = await this.acquireInjectLock();
     if (!lock.ok) {
       this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: "CDP_LOCK_TIMEOUT" });
@@ -326,7 +325,8 @@ export class Executor {
     }
     let pendingAdded = false;
     try {
-      if (this.injectCancelled(msg.runId)) {
+      const stop = this.openAttempt(msg.runId, priorCancel);
+      if (stop()) {
         this.rejectCancelled(msg.runId);
         return;
       }
@@ -335,7 +335,7 @@ export class Executor {
         this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: down });
         return;
       }
-      if (this.injectCancelled(msg.runId)) {
+      if (stop()) {
         this.rejectCancelled(msg.runId);
         return;
       }
@@ -344,13 +344,12 @@ export class Executor {
       const anchorAt = Date.now();
       await vscode.commands.executeCommand("composer.createNew");
       this.noteProgress(msg.runId, "inject");
-      if (this.injectCancelled(msg.runId)) {
+      if (stop()) {
         this.rejectCancelled(msg.runId);
         return;
       }
-      const stop = () => this.injectCancelled(msg.runId);
       if (attachments.length) {
-        const inj = await this.injectAttachments(msg.runId, msg.workspaceRoot, msg.prompt, attachments);
+        const inj = await this.injectAttachments(msg.runId, msg.workspaceRoot, msg.prompt, attachments, stop);
         if (!inj.ok) {
           this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: inj.reason ?? "IMAGE_PASTE_FAILED" });
           return;
@@ -391,6 +390,19 @@ export class Executor {
     return this.deps.isCancelled?.(runId) === true;
   }
 
+  /**
+   * `prior` 为真：标记是这次调用之前留下的，拿到锁后清掉。
+   * 调用开始之后才出现的取消留在闭包里，后面的 release 抹不掉这一次。
+   */
+  private openAttempt(runId: string, prior: boolean): () => boolean {
+    if (prior) this.deps.releaseCancel?.(runId);
+    let latched = false;
+    return () => {
+      if (this.injectCancelled(runId)) latched = true;
+      return latched;
+    };
+  }
+
   private rejectCancelled(runId: string): void {
     this.deps.send({ type: "run.ack", runId, status: "rejected", reason: "CANCELLED" });
   }
@@ -407,10 +419,10 @@ export class Executor {
     workspaceRoot: string,
     prompt: string,
     attachments: { id?: string; sha256?: string; mime?: string; name?: string }[],
+    stop: () => boolean,
   ): Promise<{ ok: boolean; reason?: string }> {
     const images = attachments.filter(isImageAtt);
     const files = attachments.filter((a) => !isImageAtt(a));
-    const stop = () => this.injectCancelled(runId);
     try {
       if (stop()) return { ok: false, reason: "CANCELLED" };
       if (images.length) {
@@ -535,6 +547,7 @@ export class Executor {
       this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: "IMAGE_PASTE_DISABLED" });
       return;
     }
+    const priorCancel = this.injectCancelled(msg.runId);
     const lock = await this.acquireInjectLock();
     if (!lock.ok) {
       this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: "CDP_LOCK_TIMEOUT" });
@@ -546,17 +559,22 @@ export class Executor {
         this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: down });
         return;
       }
+      const stop = this.openAttempt(msg.runId, priorCancel);
+      if (stop()) {
+        this.rejectCancelled(msg.runId);
+        return;
+      }
       this.noteProgress(msg.runId, "inject");
       await vscode.commands.executeCommand("composer.openComposer", msg.conversationId);
       if (attachments.length) {
-        const inj = await this.injectAttachments(msg.runId, msg.workspaceRoot, msg.prompt, attachments);
+        const inj = await this.injectAttachments(msg.runId, msg.workspaceRoot, msg.prompt, attachments, stop);
         if (!inj.ok) {
           this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: inj.reason ?? "IMAGE_PASTE_FAILED" });
           return;
         }
       } else {
         const inj = await this.injectPrompt(
-          msg.workspaceRoot, msg.prompt, 800, this.reclaimFor("followup"), () => this.injectCancelled(msg.runId),
+          msg.workspaceRoot, msg.prompt, 800, this.reclaimFor("followup"), stop,
         );
         this.noteInjectResult(msg.prompt, inj.submitted, inj.reason);
         if (!inj.submitted) {
