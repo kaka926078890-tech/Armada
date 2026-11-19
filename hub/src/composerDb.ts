@@ -313,11 +313,45 @@ function fallbackBubbleIds(db: Kv, cid: string): string[] {
   return out;
 }
 
-function loadBubble(db: Kv, cid: string, id: string): ComposerBubble | null {
+function loadBubble(db: Kv, cid: string, id: string): { bubble: ComposerBubble; createdAt: number | null } | null {
   const bubbleCell = db.query("SELECT value FROM cursorDiskKV WHERE key=?1").get(`bubbleId:${cid}:${id}`) as { value?: unknown } | null;
   const text = cellText(bubbleCell?.value);
   if (!text) return null;
-  try { return parseBubble(id, JSON.parse(text)); } catch { return null; }
+  try {
+    const raw = JSON.parse(text);
+    const at = asRecord(raw)?.createdAt;
+    const ms = typeof at === "number" ? at : typeof at === "string" ? Date.parse(at) : NaN;
+    return { bubble: parseBubble(id, raw), createdAt: Number.isFinite(ms) ? ms : null };
+  } catch { return null; }
+}
+
+/**
+ * Fallback ids come out in key order, which is uuid order. r-ac71f2e4: the 14:07
+ * user sorted after every later turn, so it stayed the open turn and stop never fired.
+ * Turns follow the parent row's createdAt; a group without one keeps its slot.
+ */
+function orderTurnsByCreatedAt(rows: { bubble: ComposerBubble; createdAt: number | null }[]): ComposerBubble[] {
+  const groups: { parent: string; at: number | null; rows: ComposerBubble[] }[] = [];
+  const byParent = new Map<string, (typeof groups)[number]>();
+  for (const row of rows) {
+    const parent = bubbleSplit(row.bubble.id)?.parent ?? row.bubble.id;
+    let g = byParent.get(parent);
+    if (!g) {
+      g = { parent, at: null, rows: [] };
+      byParent.set(parent, g);
+      groups.push(g);
+    }
+    if (row.bubble.id === parent && row.createdAt != null) g.at = row.createdAt;
+    else if (g.at == null && g.rows.length === 0 && row.createdAt != null) g.at = row.createdAt;
+    g.rows.push(row.bubble);
+  }
+  let carry = -Infinity;
+  const keyed = groups.map((g, i) => {
+    if (g.at != null) carry = g.at;
+    return { g, at: carry, i };
+  });
+  keyed.sort((a, b) => a.at - b.at || a.i - b.i);
+  return keyed.flatMap((k) => k.g.rows);
 }
 
 /** Empty-header child row. Tool rows that already contain text stay out: noteBubble would emit them as a reply. */
@@ -355,18 +389,19 @@ export function readComposerView(db: Kv, cid: string): ComposerView | null {
   // PF39WTSM 2026-11-11: the header list stays empty while bubbleId rows hold the turn.
   const fromHeaders = ids.length > 0;
   const bubbleIds = fromHeaders ? ids : fallbackBubbleIds(db, cid);
-  const bubbles: ComposerBubble[] = [];
+  const rows: { bubble: ComposerBubble; createdAt: number | null }[] = [];
   for (const id of bubbleIds) {
-    const bubble = loadBubble(db, cid, id);
-    if (!bubble) continue;
+    const loaded = loadBubble(db, cid, id);
+    if (!loaded) continue;
     if (!fromHeaders && bubbleSplit(id)) {
-      const child = fallbackChild(id, bubble);
+      const child = fallbackChild(id, loaded.bubble);
       if (!child) continue;
-      bubbles.push(child);
+      rows.push({ bubble: child, createdAt: loaded.createdAt });
       continue;
     }
-    bubbles.push(bubble);
+    rows.push(loaded);
   }
+  const bubbles = fromHeaders ? rows.map((r) => r.bubble) : orderTurnsByCreatedAt(rows);
   return parseComposer(cid, composer, bubbles);
 }
 

@@ -943,6 +943,53 @@ describe("windows composer bind", () => {
     db.close();
   });
 
+  test("empty headers order turns by createdAt, not bubble id (r-ac71f2e4)", () => {
+    const db = new Database(":memory:");
+    db.exec("CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value TEXT)");
+    const setComposer = (gen: string) => db.query("INSERT OR REPLACE INTO cursorDiskKV (key, value) VALUES (?1,?2)").run(`composerData:${cid}`, JSON.stringify({
+      status: "aborted",
+      chatGenerationUUID: gen,
+      fullConversationHeadersOnly: [],
+      subagentComposerIds: [],
+    }));
+    const put = (id: string, value: unknown) => {
+      db.query("INSERT INTO cursorDiskKV (key, value) VALUES (?1,?2)").run(`bubbleId:${cid}:${id}`, JSON.stringify(value));
+    };
+    const merge = "fda5ce29-799d-46c8-9d94-ac041c2b6464";
+    const note = "12b6f6f6-501a-429d-bdf5-7e8e9451419f";
+    const mergeGen = "1a76fe6e-d346-42d8-9165-e711eb453882";
+    const noteGen = "54460902-63be-41e2-8bd8-873de32d4486";
+    put(merge, { type: 1, text: "Findesk可以合并的先合并", requestId: mergeGen, createdAt: "2026-11-19T06:07:53.837Z" });
+    put(`${merge}/s:1`, { type: 2, text: "合并完了", turnDurationMs: 298000, createdAt: "2026-11-19T06:12:52.000Z" });
+    put(note, {
+      type: 1,
+      text: "<system_notification>subagent done</system_notification>\n<user_query>Perform any necessary follow-up actions in response to the subagent completion above.</user_query>",
+      createdAt: "2026-11-19T06:51:37.170Z",
+    });
+
+    setComposer("");
+    expect(readComposerView(db, cid)!.bubbles.map((b) => b.id)).toEqual([merge, `${merge}/s:1`, note]);
+
+    const prior = cursorFromEmitted([
+      { source: "db", hook: "beforeSubmitPrompt", payload: { prompt: "Findesk可以合并的先合并", bubble_id: merge, generation_id: mergeGen, conversation_id: cid } },
+      { source: "db", hook: "afterAgentResponse", payload: { text: "合并完了", bubble_id: `${merge}/s:1`, generation_id: mergeGen, conversation_id: cid } },
+      { source: "db", hook: "stop", payload: { status: "completed", generation_id: mergeGen, conversation_id: cid } },
+      { source: "db", hook: "beforeSubmitPrompt", payload: { prompt: "<system_notification>", bubble_id: note, conversation_id: cid } },
+    ]);
+    setComposer(noteGen);
+    const armed = planComposerTick(readComposerView(db, cid)!, [], prior);
+    const rearmed = armed.events.filter((e) => e.hook === "beforeSubmitPrompt");
+    expect(rearmed.map((e) => e.payload.bubble_id)).not.toContain(merge);
+    expect(armed.events.some((e) => e.hook === "stop")).toBe(false);
+
+    put(`${note}/s:1`, { type: 2, text: "HTML 报告已经写好", turnDurationMs: 280000, createdAt: "2026-11-19T06:56:10.000Z" });
+    expect(readComposerView(db, cid)!.bubbles.map((b) => b.id)).toEqual([merge, `${merge}/s:1`, note, `${note}/s:1`]);
+    setComposer("");
+    const done = planComposerTick(readComposerView(db, cid)!, [], armed.cursor);
+    expect(done.events.find((e) => e.hook === "stop")?.payload).toMatchObject({ status: "completed", generation_id: noteGen });
+    db.close();
+  });
+
   test("empty headers read s: text and thinking, and empty tool calls", () => {
     const db = new Database(":memory:");
     db.exec("CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value TEXT)");
