@@ -64,10 +64,17 @@ export function pickOpenWindowExecutor(
   return other?.windowId ?? null;
 }
 
+/** Reload Window 掉线后，新 session 通常几秒内重新 register。 */
+export const RELOAD_GRACE_MS = 15_000;
+
+type ReloadGrace = { root: string; until: number };
+
 export class Registry {
   private conns = new Map<string, Conn>();
   /** Workspaces this process has seen on a live socket. Cleared when the machine has no connections. */
   private everOpen = new Map<string, Set<string>>();
+  /** Roots whose socket dropped and have not come back. Heartbeat removal does not enter this map. */
+  private reloadGrace = new Map<string, ReloadGrace[]>();
   public onMachineOffline: (machineId: string) => void = () => {};
   public onMachinesChanged: () => void = () => {};
   public onRegistered: (machineId: string, windowId: string) => void = () => {};
@@ -209,10 +216,45 @@ export class Registry {
     }
     for (const w of next) seen.add(w);
     const prev = this.storedWorkspaces(machineId);
+    this.dropReloadGrace(machineId, next);
     if (!workspaceListChanged(prev, next)) return false;
     this.db.query("UPDATE machines SET open_workspaces=?1 WHERE id=?2")
       .run(JSON.stringify(next), machineId);
     return true;
+  }
+
+  /**
+   * 套接字关掉后，这些根已经不在任何活窗口上。
+   * 心跳里拿掉工作区不会走这里，那种关闭仍然马上是 WORKSPACE_NOT_OPEN。
+   */
+  private noteSocketWorkspacesGone(machineId: string, roots: string[], now: number): void {
+    const open = this.storedWorkspaces(machineId);
+    const list = this.reloadGrace.get(machineId) ?? [];
+    for (const root of roots) {
+      if (workspacePathIn(root, open)) continue;
+      const hit = list.find((g) => workspacePathsEqual(g.root, root));
+      const until = now + RELOAD_GRACE_MS;
+      if (hit) hit.until = until;
+      else list.push({ root, until });
+    }
+    if (list.length) this.reloadGrace.set(machineId, list);
+  }
+
+  private dropReloadGrace(machineId: string, open: string[]): void {
+    const list = this.reloadGrace.get(machineId);
+    if (!list) return;
+    const next = list.filter((g) => !workspacePathIn(g.root, open));
+    if (next.length === 0) this.reloadGrace.delete(machineId);
+    else this.reloadGrace.set(machineId, next);
+  }
+
+  /** waiting: 窗口刚掉线。expired: 宽限过了还没回来。none: 没有这条掉线记录。 */
+  reloadGap(machineId: string, workspaceRoot: string, now = Date.now()): "waiting" | "expired" | "none" {
+    const list = this.reloadGrace.get(machineId);
+    const hit = list?.find((g) => workspacePathsEqual(g.root, workspaceRoot));
+    if (!hit) return "none";
+    if (workspacePathIn(workspaceRoot, this.storedWorkspaces(machineId))) return "none";
+    return now < hit.until ? "waiting" : "expired";
   }
 
   /** True only if this process already saw the root on a live socket and it is gone from the union. */
@@ -229,12 +271,14 @@ export class Registry {
     const key = ws.data.connKey;
     if (key && this.conns.get(key)?.ws === ws) {
       const mid = ws.data.machineId;
+      const goneRoots = this.conns.get(key)?.openWorkspaces ?? [];
       const prevReady = mid ? this.machineCdpReady(mid) : null;
       this.conns.delete(key);
       if (mid) {
         const still = [...this.conns.values()].some((c) => c.machineId === mid);
         if (!still) this.everOpen.delete(mid);
         const wsChanged = this.refreshMachineWorkspaces(mid);
+        this.noteSocketWorkspacesGone(mid, goneRoots, Date.now());
         const readyChanged = this.machineCdpReady(mid) !== prevReady;
         if (wsChanged || readyChanged) this.onMachinesChanged();
       }

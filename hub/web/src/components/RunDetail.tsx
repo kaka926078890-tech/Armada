@@ -379,9 +379,10 @@ export default function RunDetail({
               ? (run.pending_ask ? (run.pending_ask.kind === "plan" ? "请先点上方 Build。" : "请先回答上方选择题，续聊暂不可用。") : "该对话仍在排队或绑定，结束后才能续聊。")
               : r.error === "OUTBOUND_TEXT_ONLY"
                 ? "运行中续发暂只支持纯文本。"
-                : r.error === "OUTBOUND_LIMIT"
+                  : r.error === "OUTBOUND_LIMIT"
                   ? "待消化续发已达上限，等 Cursor 消化后再发。"
                   : r.error === "CDP_NOT_READY" ? CDP_NOT_READY_COPY
+                  : r.error === "WORKSPACE_NOT_OPEN" ? "工作区没有打开。"
                   : r.error);
           return;
         }

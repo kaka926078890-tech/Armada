@@ -42,6 +42,7 @@ function followupRejectText(reason: string): string {
   if (reason === "MENTION_CLICK:AMBIGUOUS") return "续聊没有发出去。文件菜单对上了不止一条，这一轮没有提交。";
   if (reason.startsWith("MENTION_CLICK")) return "续聊没有发出去。文件没有挂上，这一轮没有提交。";
   if (reason === "CDP_CALL_TIMEOUT" || reason === "CDP_NOT_READY") return "续聊没有发出去。注入没有完成，这一轮没有提交。";
+  if (reason === "WORKSPACE_NOT_OPEN") return "续聊没有发出去。工作区窗口不在，这一轮没有提交。";
   return `续聊没有发出去。这一轮没有提交（${reason}）。`;
 }
 
@@ -432,11 +433,9 @@ export class RunService {
         const m = this.registry.getMachine(machineId);
         const open = m ? JSON.parse(m.open_workspaces) as string[] : [];
         if (!workspacePathIn(row.workspace_root, open)) {
-          if (this.registry.workspaceDropped(row.machine_id ?? machineId, row.workspace_root)) {
-            toFail.push({ id: row.id, error: "WORKSPACE_NOT_OPEN" });
-          } else {
-            this.requestOpenWindow(machineId, row.workspace_root);
-          }
+          const gone = this.absentWorkspace(machineId, row.workspace_root);
+          if (gone === "fail") toFail.push({ id: row.id, error: "WORKSPACE_NOT_OPEN" });
+          else if (gone === "open") this.requestOpenWindow(machineId, row.workspace_root);
           continue;
         }
         const startWin = this.findStartWindow(machineId, row.workspace_root);
@@ -484,8 +483,9 @@ export class RunService {
     if (!row) return false;
     const open = JSON.parse(this.registry.getMachine(machineId)?.open_workspaces ?? "[]") as string[];
     if (!workspacePathIn(row.workspace_root, open)) {
-      if (this.registry.workspaceDropped(machineId, row.workspace_root)) this.failHeld(row, "WORKSPACE_NOT_OPEN");
-      else this.requestOpenWindow(machineId, row.workspace_root);
+      const gone = this.absentWorkspace(machineId, row.workspace_root);
+      if (gone === "fail") this.failHeld(row, "WORKSPACE_NOT_OPEN");
+      else if (gone === "open") this.requestOpenWindow(machineId, row.workspace_root);
       return false;
     }
     const routed = this.resolveInjectWindow(row, { requireCdp: true });
@@ -1120,7 +1120,16 @@ export class RunService {
     return genOf(payload?.generation_id) === live;
   }
 
+  /** 套接字刚掉线：等窗口回来。宽限过了或心跳里拿掉工作区：失败。否则请别的窗口打开。 */
+  private absentWorkspace(machineId: string, workspaceRoot: string, now = Date.now()): "wait" | "fail" | "open" {
+    const gap = this.registry.reloadGap(machineId, workspaceRoot, now);
+    if (gap === "waiting") return "wait";
+    if (gap === "expired" || this.registry.workspaceDropped(machineId, workspaceRoot)) return "fail";
+    return "open";
+  }
+
   sweepTimeouts(now = Date.now()) {
+    this.failExpiredReloadHolds(now);
     // 超时锚点 = 最近一次派发时刻:续聊会把 started_at 重置。
     // 若用 created_at,老卡片 followup 后会立刻 BIND_TIMEOUT(真机:created 8:41,续聊 9:05,1s 后进未知)。
     const age = (r: { created_at: number; started_at: number | null }) => now - (r.started_at ?? r.created_at);
@@ -1161,6 +1170,21 @@ export class RunService {
     this.replayCursorSessionEndStops();
     for (const machineId of this.sweepOrphanRunning()) machines.add(machineId);
     for (const machineId of machines) this.promoteNextQueued(machineId);
+  }
+
+  /** 重载宽限过了窗口还没回来：挂起的续聊记失败，输入框可以填回原文。 */
+  private failExpiredReloadHolds(now: number): void {
+    const rows = this.db.query(
+      `SELECT o.id, o.run_id, o.prompt, r.machine_id, r.workspace_root
+       FROM run_outbound o JOIN runs r ON r.id=o.run_id
+       WHERE o.state='held'`,
+    ).all() as { id: string; run_id: string; prompt: string; machine_id: string; workspace_root: string }[];
+    for (const row of rows) {
+      const open = JSON.parse(this.registry.getMachine(row.machine_id)?.open_workspaces ?? "[]") as string[];
+      if (workspacePathIn(row.workspace_root, open)) continue;
+      if (this.registry.reloadGap(row.machine_id, row.workspace_root, now) !== "expired") continue;
+      this.failHeld(row, "WORKSPACE_NOT_OPEN");
+    }
   }
 
   /**
@@ -1629,7 +1653,7 @@ export class RunService {
     if ((OCCUPYING_STATUSES as readonly string[]).includes(run.status)) return { error: "CONVERSATION_BUSY" };
     const ready = this.readyFollowup(run, prompt, attachmentIds);
     if (ready.error) return ready;
-    if (!this.slotFreeForNewInject(run.machine_id)) {
+    if (ready.hold || !this.slotFreeForNewInject(run.machine_id)) {
       if (this.unconsumedOutboundCount(run.id) >= OUTBOUND_LIMIT) return { error: "OUTBOUND_LIMIT" };
       if (this.hasOutboundCollision(run.id, prompt, attachmentIds)) return { error: "PROMPT_COLLISION" };
       return this.insertHeld(run, prompt, attachmentIds);
@@ -1637,19 +1661,33 @@ export class RunService {
     return this.dispatchTerminalFollowup(run, prompt, attachmentIds, ready.windowId!);
   }
 
-  private readyFollowup(run: any, prompt: string, attachmentIds: string[]): { error?: string; windowId?: string } {
-    const routed = this.resolveInjectWindow(run, { requireCdp: true });
-    if (!routed.ok) return { error: routed.error };
+  private followupPayloadError(run: any, prompt: string, attachmentIds: string[]): string | undefined {
     if (this.blobs && attachmentIds.length) {
       const checked = this.blobs.metas(attachmentIds);
-      if (checked.error) return { error: checked.error };
+      if (checked.error) return checked.error;
     } else if (attachmentIds.length && !this.blobs) {
-      return { error: "ATTACHMENT_NOT_FOUND" };
+      return "ATTACHMENT_NOT_FOUND";
     }
-    if (!normalizePrompt(prompt) && attachmentIds.length === 0) return { error: "EMPTY_PROMPT" };
+    if (!normalizePrompt(prompt) && attachmentIds.length === 0) return "EMPTY_PROMPT";
     if (this.hasPromptCollision(run.machine_id, run.workspace_root, prompt, attachmentIds, run.id)) {
-      return { error: "PROMPT_COLLISION" };
+      return "PROMPT_COLLISION";
     }
+    return undefined;
+  }
+
+  private readyFollowup(run: any, prompt: string, attachmentIds: string[]): { error?: string; windowId?: string; hold?: boolean } {
+    const routed = this.resolveInjectWindow(run, { requireCdp: true });
+    if (!routed.ok) {
+      // 窗口 Reload：套接字先断，新 session 几秒后才 register。先挂起，不要当成工作区已关。
+      if (routed.error === "WORKSPACE_NOT_OPEN" && this.registry.reloadGap(run.machine_id, run.workspace_root) === "waiting") {
+        const payloadError = this.followupPayloadError(run, prompt, attachmentIds);
+        if (payloadError) return { error: payloadError };
+        return { hold: true };
+      }
+      return { error: routed.error };
+    }
+    const payloadError = this.followupPayloadError(run, prompt, attachmentIds);
+    if (payloadError) return { error: payloadError };
     return { windowId: routed.windowId };
   }
 
@@ -1744,7 +1782,7 @@ export class RunService {
     if (ready.error) return ready;
     if (this.hasOutboundCollision(run.id, prompt, attachmentIds)) return { error: "PROMPT_COLLISION" };
     if (this.unconsumedOutboundCount(run.id) >= OUTBOUND_LIMIT) return { error: "OUTBOUND_LIMIT" };
-    if (!this.slotFreeForNewInject(run.machine_id)) return this.insertHeld(run, prompt, attachmentIds);
+    if (ready.hold || !this.slotFreeForNewInject(run.machine_id)) return this.insertHeld(run, prompt, attachmentIds);
     const expected_mode = queueModeOf(this.registry.getMachine(run.machine_id)?.queue_message_default_behavior);
     const id = `o-${randomUUID()}`;
     const now = Date.now();

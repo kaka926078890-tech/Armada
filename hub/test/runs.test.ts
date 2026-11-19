@@ -4,6 +4,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import type { ConcurrencyLimits } from "../src/concurrency";
 import { createServer, type HubServer } from "../src/index";
+import { RELOAD_GRACE_MS } from "../src/registry";
 
 let hub: HubServer | null = null;
 afterEach(() => { hub?.stop(); hub = null; });
@@ -326,6 +327,75 @@ describe("Run dispatch", () => {
     expect(((await (await api(`/api/runs/${next.id}`)).json()) as any).status).toBe("dispatched");
     expect(inbound.filter((m) => m.type === "run.start").map((m) => m.prompt)).toEqual(["a"]);
     ws.close();
+  });
+
+  test("followup during window reload is held, then injected on the new session", async () => {
+    const { wsA, inboundA, wsB, api } = await startTwoWindows();
+    const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "a" }) });
+    const { run } = await r.json() as any;
+    wsA.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    wsA.send(JSON.stringify({ type: "run.bound", runId: run.id, conversationId: "cid-1", transcriptPath: null, promptMatch: true }));
+    wsA.send(JSON.stringify({ type: "run.event", runId: run.id, source: "hook", hookEventName: "stop", payload: { status: "completed" }, ts: Date.now(), seq: 1 }));
+    await new Promise((r2) => setTimeout(r2, 150));
+    expect(((await (await api(`/api/runs/${run.id}`)).json()) as any).status).toBe("completed");
+    inboundA.length = 0;
+    await new Promise<void>((resolve) => {
+      wsA.addEventListener("close", () => resolve());
+      wsA.close();
+    });
+    await new Promise((r2) => setTimeout(r2, 50));
+    expect(hub!.registry.reloadGap("m-1", "/ws/a")).toBe("waiting");
+    const f = await api(`/api/runs/${run.id}/followup`, { method: "POST", body: JSON.stringify({ prompt: "会不会影响卡执行口子" }) });
+    expect(f.status).toBe(200);
+    const held = await f.json() as any;
+    expect(held.run.status).toBe("completed");
+    expect(held.run.outbound?.[0]).toMatchObject({ prompt: "会不会影响卡执行口子", state: "held" });
+    hub!.runs.promoteNextQueued("m-1");
+    const still = (await (await api(`/api/runs/${run.id}`)).json()) as any;
+    expect(still.status).toBe("completed");
+    expect(still.outbound?.[0]?.state).toBe("held");
+    const wsC: WebSocket = await new Promise((res, rej) => {
+      const w = new WebSocket(`ws://127.0.0.1:${hub!.port}/ws?token=${hub!.token}`);
+      w.onopen = () => res(w); w.onerror = rej;
+    });
+    const inboundC: any[] = [];
+    wsC.addEventListener("message", (e) => inboundC.push(JSON.parse(String(e.data))));
+    wsC.send(JSON.stringify({
+      type: "register", machineId: "m-1", windowId: "w-3", name: "Mac-A",
+      os: "darwin-arm64", openWorkspaces: ["/ws/a"], extensionVersion: "0.4.67", cdpReady: true,
+    }));
+    await new Promise((r2) => setTimeout(r2, 150));
+    expect(((await (await api(`/api/runs/${run.id}`)).json()) as any).status).toBe("dispatched");
+    expect(inboundC.find((m) => m.type === "run.followup")).toMatchObject({
+      runId: run.id, conversationId: "cid-1", prompt: "会不会影响卡执行口子",
+    });
+    wsB.close();
+    wsC.close();
+  });
+
+  test("reload grace expiry fails the held followup", async () => {
+    const { ws, api } = await startWithExt({ extensionVersion: "0.4.0" });
+    const r = await api("/api/runs", { method: "POST", body: JSON.stringify({ machineId: "m-1", workspaceRoot: "/ws/a", prompt: "a" }) });
+    const { run } = await r.json() as any;
+    ws.send(JSON.stringify({ type: "run.ack", runId: run.id, status: "accepted" }));
+    ws.send(JSON.stringify({ type: "run.bound", runId: run.id, conversationId: "cid-1", transcriptPath: null, promptMatch: true }));
+    ws.send(JSON.stringify({ type: "run.event", runId: run.id, source: "hook", hookEventName: "stop", payload: { status: "completed" }, ts: Date.now(), seq: 1 }));
+    await new Promise((r2) => setTimeout(r2, 150));
+    await new Promise<void>((resolve) => {
+      ws.addEventListener("close", () => resolve());
+      ws.close();
+    });
+    await new Promise((r2) => setTimeout(r2, 50));
+    const f = await api(`/api/runs/${run.id}/followup`, { method: "POST", body: JSON.stringify({ prompt: "续" }) });
+    expect(f.status).toBe(200);
+    hub!.runs.sweepTimeouts(Date.now() + RELOAD_GRACE_MS + 1000);
+    const after = (await (await api(`/api/runs/${run.id}`)).json()) as any;
+    expect(after.status).toBe("completed");
+    expect(after.outbound ?? []).toEqual([]);
+    const events = (await (await api(`/api/runs/${run.id}/events`)).json()) as any[];
+    const rejected = events.find((e) => e.hook_event_name === "followupRejected");
+    expect(JSON.parse(rejected.payload).reason).toBe("WORKSPACE_NOT_OPEN");
+    expect(JSON.parse(rejected.payload).text).toContain("工作区窗口不在");
   });
 
   test("queued other-root is not WORKSPACE_NOT_OPEN when a sibling window registers first after hub restart", async () => {
