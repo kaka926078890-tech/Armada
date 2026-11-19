@@ -320,7 +320,7 @@ struct RunRow: View {
                 .fill(hubEdge(runRowChrome(run, unread: unread), hub: hub))
                 .frame(width: 3)
             VStack(alignment: .leading, spacing: 8) {
-                Text(run.displayTitle)
+                Text(run.cardHeadline)
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(hub.foreground)
                     .lineLimit(3)
@@ -1414,7 +1414,7 @@ struct RunDetailView: View {
                 if let run {
                     if let err { Text(err).foregroundStyle(hub.destructive) }
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(run.displayTitle)
+                        Text(run.cardHeadline)
                             .font(.system(size: 14, weight: .medium))
                             .foregroundStyle(hub.foreground)
                             .lineLimit(2)

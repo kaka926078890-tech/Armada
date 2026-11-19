@@ -182,18 +182,23 @@ struct RunDTO: Decodable, Identifiable, Hashable {
         return n > 0 ? "[\(n) 张图片]" : prompt
     }
 
-    /// 和中台卡片同一规则：最近一句优先看还在队列里的，和标题相同的不重复。
-    var promptLines: (latest: String, original: String) {
-        let display = flatPrompt(displayTitle)
-        let originalRaw = flatPrompt(prompt)
+    /// 卡片主文案。有续聊就用最近一句，否则才用标题或第一句。
+    var cardHeadline: String {
         let pending = (outbound ?? []).reversed().first { row in
             ["injecting", "queued", "steered", "held"].contains(row.state) && !flatPrompt(row.prompt).isEmpty
         }
         let pendingText = pending.map { flatPrompt($0.prompt) } ?? ""
-        let latestRaw = pendingText.isEmpty ? flatPrompt(alertPrompt ?? "") : pendingText
-        let latest = !latestRaw.isEmpty && latestRaw != display ? latestRaw : ""
-        let original = !originalRaw.isEmpty && originalRaw != display && originalRaw != latest ? originalRaw : ""
-        return (latest, original)
+        let latest = pendingText.isEmpty ? flatPrompt(alertPrompt ?? "") : pendingText
+        if !latest.isEmpty { return latest }
+        return displayTitle
+    }
+
+    /// 主文案已经是最近一句。这里只在第一句不同时露出最初。
+    var promptLines: (latest: String, original: String) {
+        let headline = flatPrompt(cardHeadline)
+        let originalRaw = flatPrompt(prompt)
+        let original = !originalRaw.isEmpty && originalRaw != headline ? originalRaw : ""
+        return ("", original)
     }
 
     func matchesPromptQuery(_ query: String) -> Bool {

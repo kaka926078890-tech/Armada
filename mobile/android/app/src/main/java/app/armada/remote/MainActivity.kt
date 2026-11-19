@@ -746,7 +746,7 @@ fun RunRow(run: RunDto, unread: Boolean) {
         )
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(run.displayTitle, maxLines = 3, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            Text(run.cardHeadline, maxLines = 3, fontSize = 14.sp, fontWeight = FontWeight.Medium)
             if (run.promptLines.latest.isNotEmpty()) {
                 Text(
                     "最近 ${run.promptLines.latest}",
@@ -1154,7 +1154,7 @@ fun RunDetailScreen(vm: SessionVm, state: UiState, runId: String, onBack: () -> 
             else {
                 err?.let { Text(it, color = StatusRed) }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(r.displayTitle, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 2, modifier = Modifier.weight(1f))
+                    Text(r.cardHeadline, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 3, modifier = Modifier.weight(1f))
                     Spacer(Modifier.width(8.dp))
                     Text(
                         statusLabel(r.status),

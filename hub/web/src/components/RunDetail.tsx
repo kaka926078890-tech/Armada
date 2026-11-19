@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { api, getToken } from "../api";
 import type { Machine, RunEvent } from "../types";
-import { workspaceFolderName, runDisplayName, cardPromptLines, canRetryRun, CDP_NOT_READY_COPY, resumeStallCopy, type RunRow } from "../boardState";
+import { workspaceFolderName, cardHeadline, runDisplayName, cardPromptLines, canRetryRun, CDP_NOT_READY_COPY, resumeStallCopy, type RunRow } from "../boardState";
 import ChatThread from "./ChatThread";
 import FilePreview from "./FilePreview";
 import { eventsToChat, mergePendingAsk, mergeOutboundChat, outboundUserText, heldOutbound, queuedOutbound, stampOutboundImages, userMessageCaption, INITIAL_VISIBLE_TURNS, initialHiddenPrefixTurns, recentTurnsWindow, stampFallbackImageIds } from "../chatView";
@@ -491,7 +491,7 @@ export default function RunDetail({
   const held = heldOutbound(run.outbound);
   const chat = recentTurnsWindow(chatAll, hiddenPrefixTurns);
   const hasOlder = hiddenPrefixTurns > 0 || hasOlderEvents(events);
-  const titleText = runDisplayName(run) || "图片";
+  const titleText = cardHeadline(run) || "图片";
   const promptLines = cardPromptLines(run);
   const commitTitle = () => {
     const next = titleDraft.trim();
@@ -525,11 +525,11 @@ export default function RunDetail({
         ) : (
           <button
             type="button"
-            className={`font-medium ${UI_TYPE} truncate text-left min-w-0 flex-1 hover:text-primary`}
+            className={`font-medium ${UI_TYPE} line-clamp-3 break-words text-left min-w-0 flex-1 hover:text-primary`}
             title={`${titleText}（点击修改标题）`}
             onClick={() => { setTitleDraft(runDisplayName(run)); setEditingTitle(true); }}
           >
-            {titleText.length > 36 ? `${titleText.slice(0, 36)}…` : titleText}
+            {titleText}
           </button>
         )}
         <span className={`text-[12px] shrink-0 ${active ? "text-sky-400" : "text-muted-foreground"}`}>{STATUS[run.status] ?? run.status}</span>
@@ -537,9 +537,6 @@ export default function RunDetail({
       </div>
       <div className={`px-4 py-2 ${UI_META} text-muted-foreground border-b border-border`}>
         <div className="truncate" title={run.workspace_root}>{workspaceFolderName(run.workspace_root)}</div>
-        {promptLines.latest ? (
-          <div className="mt-1 break-words line-clamp-3" title={promptLines.latest}>最近 {promptLines.latest}</div>
-        ) : null}
         {promptLines.original ? (
           <div className="mt-1 break-words line-clamp-2" title={promptLines.original}>最初 {promptLines.original}</div>
         ) : null}

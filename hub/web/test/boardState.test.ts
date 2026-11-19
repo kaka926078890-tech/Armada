@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import {
-  groupRuns, cardView, cardPromptLines, runMatchesPromptQuery, clipCardTitle, CARD_TITLE_MAX_CHARS, listWorkspaceSlots, encodeWorkspaceKey, decodeWorkspaceKey,
+  groupRuns, cardView, cardHeadline, cardPromptLines, runMatchesPromptQuery, clipCardTitle, CARD_TITLE_MAX_CHARS, listWorkspaceSlots, encodeWorkspaceKey, decodeWorkspaceKey,
   filterRunsByWorkspace, sortConversations, sortCompletedCards, groupSlotsByMachine, isUnreadCompleted, isUnreadMessage,
   workspaceHasUnread, workspaceUnreadCount, formatUnreadCount, canArchiveRun, canRetryRun, isHubArchived, applyHideTickets,
   workspaceFolderName, workspaceHasLiveRun, resolveSelectedWorkspace, isUnreadNeedInput, cardChromeClass, cardChromeOf, columnHasAlert,
@@ -68,38 +68,31 @@ describe("cardView", () => {
   test("empty prompt with attachments titles [N 个附件]", () => {
     expect(cardView({ ...base, prompt: "", attachments: JSON.stringify(["a", "b"]) }, 5000).title).toBe("[2 个附件]");
   });
-  test("operator title wins over prompt", () => {
+  test("operator title wins over prompt when there is no later sentence", () => {
     expect(cardView({ ...base, prompt: "第一句很长", title: "短标题" }, 5000).title).toBe("短标题");
   });
-  test("card shows the latest prompt when it differs from the first title", () => {
-    const lines = cardPromptLines({
+  test("card headline is the latest prompt, not the first sentence or the title", () => {
+    const run = {
       ...base,
+      title: "看板标题",
       prompt: "我想在标准版做一个插件",
       alert_prompt: "forcebuild启动Standard，我看看效果",
-    });
-    expect(lines.latest).toBe("forcebuild启动Standard，我看看效果");
-    expect(lines.original).toBe("");
+    };
+    expect(cardHeadline(run)).toBe("forcebuild启动Standard，我看看效果");
+    expect(cardView(run, 5000).title).toBe("forcebuild启动Standard，我看看效果");
+    expect(cardPromptLines(run)).toEqual({ latest: "", original: "我想在标准版做一个插件" });
   });
   test("queued follow-up wins over the stored alert prompt", () => {
-    const lines = cardPromptLines({
+    const run = {
       ...base,
       prompt: "第一句",
       alert_prompt: "上一句",
       outbound: [{ id: "o1", prompt: "上一句", expected_mode: "queue", state: "consumed", created_at: 1 }, { id: "o2", prompt: "刚派发的这句", expected_mode: "queue", state: "queued", created_at: 2 }],
-    });
-    expect(lines.latest).toBe("刚派发的这句");
+    };
+    expect(cardHeadline(run)).toBe("刚派发的这句");
+    expect(cardPromptLines(run).original).toBe("第一句");
   });
-  test("renamed card keeps the original prompt when the latest line is something else", () => {
-    const lines = cardPromptLines({
-      ...base,
-      title: "看板标题",
-      prompt: "最初这句",
-      alert_prompt: "最近这句",
-    });
-    expect(lines.latest).toBe("最近这句");
-    expect(lines.original).toBe("最初这句");
-  });
-  test("same text as the title is not repeated", () => {
+  test("same text as the first prompt is not repeated under the card", () => {
     expect(cardPromptLines({ ...base, prompt: "第一句", alert_prompt: "第一句\n" })).toEqual({ latest: "", original: "" });
   });
   test("search matches title, original prompt, and latest prompt", () => {

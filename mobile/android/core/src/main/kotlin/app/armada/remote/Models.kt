@@ -123,7 +123,23 @@ data class CardPromptLines(val latest: String, val original: String)
 
 private val PENDING_OUTBOUND = setOf("injecting", "queued", "steered", "held")
 
-/** 和中台卡片同一规则：最近一句优先看还在队列里的，和标题相同的不重复。 */
+/** 卡片主文案。有续聊就用最近一句，否则才用标题或第一句。 */
+fun runCardHeadline(
+    title: String?,
+    prompt: String,
+    alertPrompt: String?,
+    outbound: List<OutboundDto>?,
+    attachmentCount: Int,
+): String {
+    val pending = outbound.orEmpty().asReversed().firstOrNull {
+        it.state in PENDING_OUTBOUND && flatPrompt(it.prompt).isNotEmpty()
+    }
+    val latest = flatPrompt(pending?.prompt).ifEmpty { flatPrompt(alertPrompt) }
+    if (latest.isNotEmpty()) return latest
+    return runDisplayTitle(title, prompt, attachmentCount)
+}
+
+/** 主文案已经是最近一句。这里只在第一句不同时露出最初。 */
 fun cardPromptLines(
     title: String?,
     prompt: String,
@@ -131,15 +147,10 @@ fun cardPromptLines(
     outbound: List<OutboundDto>?,
     attachmentCount: Int,
 ): CardPromptLines {
-    val display = flatPrompt(runDisplayTitle(title, prompt, attachmentCount))
+    val headline = flatPrompt(runCardHeadline(title, prompt, alertPrompt, outbound, attachmentCount))
     val originalRaw = flatPrompt(prompt)
-    val pending = outbound.orEmpty().asReversed().firstOrNull {
-        it.state in PENDING_OUTBOUND && flatPrompt(it.prompt).isNotEmpty()
-    }
-    val latestRaw = flatPrompt(pending?.prompt).ifEmpty { flatPrompt(alertPrompt) }
-    val latest = if (latestRaw.isNotEmpty() && latestRaw != display) latestRaw else ""
-    val original = if (originalRaw.isNotEmpty() && originalRaw != display && originalRaw != latest) originalRaw else ""
-    return CardPromptLines(latest, original)
+    val original = if (originalRaw.isNotEmpty() && originalRaw != headline) originalRaw else ""
+    return CardPromptLines("", original)
 }
 
 fun runMatchesPromptQuery(run: RunDto, query: String): Boolean {
@@ -207,6 +218,7 @@ data class RunDto(
         get() = (outbound ?: emptyList()).filter { it.state == "held" }
     val canFollowup: Boolean get() = pendingAsk == null && (!conversationId.isNullOrBlank() || !chatgptThreadId.isNullOrBlank())
     val displayTitle: String get() = runDisplayTitle(title, prompt, attachments.size)
+    val cardHeadline: String get() = runCardHeadline(title, prompt, alertPrompt, outbound, attachments.size)
     val promptLines: CardPromptLines get() = cardPromptLines(title, prompt, alertPrompt, outbound, attachments.size)
     val showsRetry: Boolean
         get() = canRetry ?: (status in setOf("error", "unknown", "aborted"))

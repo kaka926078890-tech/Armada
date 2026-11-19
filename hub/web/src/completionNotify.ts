@@ -1,4 +1,4 @@
-import { resumeStallCopy, type RunRow } from "./boardState";
+import { flatPrompt, latestOperatorPrompt, resumeStallCopy, type RunRow } from "./boardState";
 import { requestDesktopAlert } from "./desktopBridge";
 
 export const BASE_TITLE = "Armada";
@@ -76,9 +76,9 @@ export function needInputBody(run: RunRow): string {
   return completionBody(run);
 }
 
-/** 提醒正文：最近一条操作员提示词。没有记录时才退回卡片上的 prompt，不用改过的标题。 */
-export function alertPromptOf(run: Pick<RunRow, "alert_prompt" | "prompt">): string {
-  return (run.alert_prompt || run.prompt || "").replace(/\s+/g, " ").trim();
+/** 提醒正文和卡片主文案同一句。没有最近一句时才退回第一次派发的 prompt，不用改过的标题。 */
+export function alertPromptOf(run: Pick<RunRow, "alert_prompt" | "prompt" | "outbound">): string {
+  return latestOperatorPrompt(run) || flatPrompt(run.prompt);
 }
 
 export function completionHeadline(runs: RunRow[]): string {

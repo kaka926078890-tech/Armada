@@ -3,7 +3,7 @@ import { LIVE_STATUSES, RETRY_STATUSES, isStatus } from "../../src/runStatus";
 export interface RunRow {
   id: string; machine_id: string; window_id: string | null; workspace_root: string;
   prompt: string; title?: string | null;
-  /** 最近一条已接受的操作员提示词。卡片副标题和完成提醒都用它；标题仍走 title || prompt。 */
+  /** 最近一条已接受的操作员提示词。卡片主文案和完成提醒都用它，不用标题或第一句。 */
   alert_prompt?: string | null;
   status: string; conversation_id: string | null;
   chatgpt_thread_id?: string | null;
@@ -26,7 +26,7 @@ export interface RunRow {
   queue_message_default_behavior?: string | null;
 }
 
-/** 卡片标题：操作员改过的 title 优先，否则第一次派发的 prompt。 */
+/** 改标题时存的名字。卡片上看见的主文案不走这里。 */
 export function runDisplayName(run: Pick<RunRow, "title" | "prompt">): string {
   return (run.title ?? "").trim() || run.prompt.trim();
 }
@@ -38,21 +38,29 @@ export function flatPrompt(text: string | null | undefined): string {
 const PENDING_OUTBOUND = new Set(["injecting", "queued", "steered", "held"]);
 
 export type CardPromptLines = {
-  /** 和标题不同的最近一句。还在队列里的优先于已落库的 alert_prompt。 */
+  /** 主文案已经是最近一句，这里留空，避免再画一行「最近」。 */
   latest: string;
-  /** 标题被改过、且不同于最近一句时，露出第一次派发的 prompt。 */
+  /** 和主文案不同的第一次派发 prompt。 */
   original: string;
 };
 
-/** 看板用来认出这张卡的两句提示词。和标题相同的那句不重复。 */
-export function cardPromptLines(run: Pick<RunRow, "title" | "prompt" | "alert_prompt" | "outbound">): CardPromptLines {
-  const title = flatPrompt(runDisplayName(run));
-  const originalRaw = flatPrompt(run.prompt);
+/** 还在队列里的续聊优先于已经落库的 alert_prompt。 */
+export function latestOperatorPrompt(run: Pick<RunRow, "alert_prompt" | "outbound">): string {
   const pending = [...(run.outbound ?? [])].reverse().find((o) => PENDING_OUTBOUND.has(o.state) && flatPrompt(o.prompt));
-  const latestRaw = flatPrompt(pending?.prompt) || flatPrompt(run.alert_prompt);
-  const latest = latestRaw && latestRaw !== title ? latestRaw : "";
-  const original = originalRaw && originalRaw !== title && originalRaw !== latest ? originalRaw : "";
-  return { latest, original };
+  return flatPrompt(pending?.prompt) || flatPrompt(run.alert_prompt);
+}
+
+/** 卡片和完成提醒认的那句。有续聊就用最近一句，否则才退回标题或第一句。 */
+export function cardHeadline(run: Pick<RunRow, "title" | "prompt" | "alert_prompt" | "outbound">): string {
+  return latestOperatorPrompt(run) || flatPrompt(runDisplayName(run));
+}
+
+/** 主文案之外还要露出的第一句。和主文案相同的不重复。 */
+export function cardPromptLines(run: Pick<RunRow, "title" | "prompt" | "alert_prompt" | "outbound">): CardPromptLines {
+  const headline = flatPrompt(cardHeadline(run));
+  const originalRaw = flatPrompt(run.prompt);
+  const original = originalRaw && originalRaw !== headline ? originalRaw : "";
+  return { latest: "", original };
 }
 
 /** 空查询留全部。标题、最初 prompt、最近 prompt、还在队列里的句子都能命中。 */
@@ -123,7 +131,7 @@ export function cardView(run: RunRow, now: number): { title: string; elapsed: st
         return Array.isArray(p) ? p : [];
       } catch { return []; }
     })();
-  const named = runDisplayName(run);
+  const named = cardHeadline(run);
   const title = named || (ids.length ? `[${ids.length} 个附件]` : named);
 
   const from = run.started_at ?? run.created_at;

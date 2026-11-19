@@ -49,7 +49,8 @@ class ModelsTest {
             RunAttachmentDto("b"),
         )).displayTitle)
         val followed = run("completed", title = "短标题").copy(prompt = "最初这句", alertPrompt = "最近这句")
-        assertEquals("最近这句", followed.promptLines.latest)
+        assertEquals("最近这句", followed.cardHeadline)
+        assertEquals("", followed.promptLines.latest)
         assertEquals("最初这句", followed.promptLines.original)
         assertEquals("", run("completed").copy(alertPrompt = "do it").promptLines.latest)
         assertTrue(runMatchesPromptQuery(followed, "短标"))

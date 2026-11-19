@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { groupRuns, sortCompletedCards, cardView, cardPromptLines, clipCardTitle, COLUMN_LABELS, canArchiveRun, canRetryRun, runDisplayName, runMatchesPromptQuery, cardChromeClass, cardChromeOf, columnHasAlert, unreadAlertDotClass, resumeStallCopy, type ColumnKey, type RunRow } from "../boardState";
+import { groupRuns, sortCompletedCards, cardView, cardPromptLines, COLUMN_LABELS, canArchiveRun, canRetryRun, runDisplayName, runMatchesPromptQuery, cardChromeClass, cardChromeOf, columnHasAlert, unreadAlertDotClass, resumeStallCopy, type ColumnKey, type RunRow } from "../boardState";
 import type { Machine } from "../types";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -100,16 +100,11 @@ export default function Board({ runs, selected, onSelect, showArchived, onHide, 
                     </CardContent>
                   ) : (
                     <button onClick={() => onSelect(r.id)} className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 px-3 py-2.5 text-left">
-                      <div className={`${UI_TYPE} min-w-0 font-medium leading-snug text-foreground break-words line-clamp-2`} title={v.title}>{clipCardTitle(v.title)}</div>
+                      <div className={`${UI_TYPE} min-w-0 font-medium leading-snug text-foreground break-words line-clamp-3`} title={v.title}>{v.title}</div>
                       <span className={`inline-flex items-center gap-1 pt-0.5 text-muted-foreground whitespace-nowrap ${UI_META}`}>
                         {col === "running" ? <CardSpinner /> : null}
                         {v.elapsed}
                       </span>
-                      {lines.latest ? (
-                        <div className={`${UI_META} col-span-2 mt-1 text-muted-foreground break-words line-clamp-3`} title={lines.latest}>
-                          <span className="text-foreground/80">最近 </span>{lines.latest}
-                        </div>
-                      ) : null}
                       {lines.original ? (
                         <div className={`${UI_META} col-span-2 mt-0.5 text-muted-foreground break-words line-clamp-2`} title={lines.original}>
                           <span className="text-foreground/80">最初 </span>{lines.original}

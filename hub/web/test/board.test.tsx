@@ -145,17 +145,16 @@ describe("Board unread chrome", () => {
       />,
     );
     expect(html).toMatch(/data-slot="card"[^>]*\bshrink-0\b/);
-    expect(html).toMatch(/line-clamp-2/);
+    expect(html).toMatch(/line-clamp-3/);
     expect(html).toContain(`title="${prompt}"`);
-    expect(html).toContain(`>${"超长提示词".repeat(8)}…<`);
-    expect(html).not.toMatch(new RegExp(`>${prompt}<`));
+    expect(html).toContain(`>${prompt}<`);
     const titleAt = html.indexOf("超长提示词");
     const actionsAt = html.indexOf("改标题");
     expect(titleAt).toBeGreaterThan(-1);
     expect(actionsAt).toBeGreaterThan(titleAt);
   });
 
-  test("card shows the latest prompt under the first-dispatch title", () => {
+  test("card headline is the latest prompt and the first sentence sits underneath", () => {
     const html = renderToStaticMarkup(
       <Board
         runs={[{
@@ -174,9 +173,9 @@ describe("Board unread chrome", () => {
         onRename={() => {}}
       />,
     );
-    expect(html).toContain("标准版Bot插件");
-    expect(html).toContain("最近 ");
     expect(html).toContain("forcebuild启动Standard，我看看效果");
+    expect(html).not.toContain("最近 ");
+    expect(html).not.toContain("标准版Bot插件");
     expect(html).toContain("最初 ");
     expect(html).toContain("我想在标准版做一个插件");
     expect(html).toContain("搜索标题、最初或最近的提示词");
