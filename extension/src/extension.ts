@@ -17,6 +17,7 @@ import { collectTranscriptViews, collectTranscriptTails, matchTranscriptToPendin
 import { TranscriptDirWatcher, debounceLeading, watchTranscriptDir, watchFileSize, TRANSCRIPT_WATCHDOG_MS, TRANSCRIPT_WATCH_DEBOUNCE_MS } from "./transcriptWatch";
 import { createExtSeq } from "./extSeq";
 import { hubRunsNeedingTranscriptFollow, shouldArmFollowupStopOnAdopt } from "./adoptRuns";
+import { noteRunReopened } from "./runCancel";
 import { noteOwnerBsp, clearGeneration, synthesizedStopPayload, noteHubGeneration, onFollowupBindGeneration } from "./generationStamp";
 import { parseAskInspect, askPollMany, askQuestionsKey, coalesceAskInspect, isAskUnknown, ASK_MISS_LIMIT } from "./askDetect";
 import { closeAskReader, mergeVisibleAndStoredAsks, readStoredAsks } from "./askStore";
@@ -25,7 +26,7 @@ import { enrichPlanAsk, planDirsFor } from "./planFile";
 import { PENDING_RELOAD_ATTEMPT_NAME, PENDING_RELOAD_NAME, decideReloadFire, decideWindowReload, highestInstalledArmadaAgent, highestInstalledVsix, mergeReloadAttempt, noteReloadCommandSettled, parsePendingReload, parseReloadAttempt, reloadAttemptBlocksWindow, windowHasInFlightArmadaRun, windowHasOpenComposerTurn, windowHasRecentSettle, type ReloadFireState } from "../../desktop-core/src/cursorReload";
 import { readWorkspaceFile } from "./workspaceFileRead";
 
-const EXTENSION_VERSION = "0.4.65";
+const EXTENSION_VERSION = "0.4.66";
 
 let client: { dispose: () => void } | null = null;
 
@@ -125,6 +126,7 @@ export function activate(context: vscode.ExtensionContext): void {
       if (payload?.role === "user") {
         followupStopGuard.onUser(runId);
         stopSent.delete(runId);
+        noteRunReopened(cancelledRuns, runId);
       }
       core.enqueue({ type: "run.event", runId, source: "transcript", payload, ts: Date.now(), seq: nextExtSeq() });
       // jsonl turn_ended is the durable idle signal. Cursor stop/AAR hooks can miss
@@ -629,6 +631,7 @@ export function activate(context: vscode.ExtensionContext): void {
           log(`adopt skip re-arm ${t.runId}`);
         }
         stopSent.delete(t.runId);
+        noteRunReopened(cancelledRuns, t.runId);
         noteHubGeneration(lastGenerationId, t.runId, t.liveGenerationId);
         tailer.attach(t.runId, path, { fromEnd: true });
         ensureSizeWatch(t.runId, path);
@@ -833,6 +836,7 @@ export function activate(context: vscode.ExtensionContext): void {
           break;
         }
         case "run.followup":
+          noteRunReopened(cancelledRuns, msg.runId);
           noteHubGeneration(lastGenerationId, msg.runId, msg.generation_id);
           void executor.followup(msg);
           break;
