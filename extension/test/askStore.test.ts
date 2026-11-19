@@ -1,4 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
+import { mkdtempSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import { askPollMany } from "../src/askDetect";
 import {
   asksFromComposerRows,
@@ -6,6 +10,8 @@ import {
   extraBubbleIds,
   inspectStoredBubbles,
   mergeVisibleAndStoredAsks,
+  newestBubbleIds,
+  RECENT_BUBBLE_SQL,
   tailBubbleIds,
 } from "../src/askStore";
 
@@ -217,5 +223,38 @@ describe("stored ask", () => {
     expect(askPollMany(bound, prev, [], [], () => "x", 1, [], [], [], [], true)).toEqual([
       { type: "askQuestionResolved", runId: "r-1", request_id: "ask-1" },
     ]);
+  });
+
+  test("newest bubble ids follow rowid, not UUID key order", () => {
+    const prefix = "bubbleId:cid-1:";
+    const ids = newestBubbleIds([
+      { key: `${prefix}zzz-old`, rid: 1 },
+      { key: `${prefix}aaa-new`, rid: 50 },
+      { key: `${prefix}mmm`, rid: 20 },
+      { key: "other:1", rid: 99 },
+    ], prefix, 2);
+    expect(ids).toEqual(["aaa-new", "mmm"]);
+  });
+
+  test("recent bubble lookup uses the key index and does not sort the whole table by rowid", () => {
+    const dir = mkdtempSync(join(tmpdir(), "armada-ask-scan-"));
+    const db = new Database(join(dir, "state.vscdb"));
+    db.exec("CREATE TABLE cursorDiskKV (key TEXT UNIQUE ON CONFLICT REPLACE, value BLOB)");
+    const ins = db.prepare("INSERT INTO cursorDiskKV (key, value) VALUES (?, ?)");
+    const cid = "cid-1";
+    const start = `bubbleId:${cid}:`;
+    const end = `bubbleId:${cid};`;
+    const tx = db.transaction(() => {
+      for (let i = 0; i < 12; i++) ins.run(`${start}m${String(i).padStart(2, "0")}`, "x");
+      ins.run(`${start}aaa-new`, "ask");
+      for (let i = 0; i < 4000; i++) ins.run(`composerData:other-${i}`, "y");
+    });
+    tx();
+    const plan = db.prepare(`EXPLAIN QUERY PLAN ${RECENT_BUBBLE_SQL}`).all(start, end) as { detail: string }[];
+    expect(plan.some((row) => row.detail.includes("TEMP B-TREE"))).toBe(false);
+    expect(plan.some((row) => row.detail.includes("sqlite_autoindex_cursorDiskKV_1"))).toBe(true);
+    const rows = db.prepare(RECENT_BUBBLE_SQL).all(start, end) as { key: string; rid: number }[];
+    expect(newestBubbleIds(rows, start)[0]).toBe("aaa-new");
+    db.close();
   });
 });

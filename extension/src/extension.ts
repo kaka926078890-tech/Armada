@@ -19,7 +19,7 @@ import { createExtSeq } from "./extSeq";
 import { hubRunsNeedingTranscriptFollow, shouldArmFollowupStopOnAdopt } from "./adoptRuns";
 import { noteOwnerBsp, clearGeneration, synthesizedStopPayload, noteHubGeneration, onFollowupBindGeneration } from "./generationStamp";
 import { parseAskInspect, askPollMany, askQuestionsKey, coalesceAskInspect, isAskUnknown, ASK_MISS_LIMIT } from "./askDetect";
-import { mergeVisibleAndStoredAsks, readStoredAsks } from "./askStore";
+import { closeAskReader, mergeVisibleAndStoredAsks, readStoredAsks } from "./askStore";
 import { createWindowsComposerFeed, openWindowsComposerDb } from "./windowsComposerFeed";
 import { enrichPlanAsk, planDirsFor } from "./planFile";
 import { PENDING_RELOAD_ATTEMPT_NAME, PENDING_RELOAD_NAME, decideReloadFire, decideWindowReload, highestInstalledArmadaAgent, highestInstalledVsix, mergeReloadAttempt, noteReloadCommandSettled, parsePendingReload, parseReloadAttempt, reloadAttemptBlocksWindow, windowHasInFlightArmadaRun, windowHasOpenComposerTurn, windowHasRecentSettle, type ReloadFireState } from "../../desktop-core/src/cursorReload";
@@ -892,6 +892,7 @@ export function activate(context: vscode.ExtensionContext): void {
       clearInterval(spoolPoll);
       clearInterval(transcriptPoll);
       clearInterval(askPoll);
+      closeAskReader();
       dirWatch.dispose();
       for (const stop of sizeWatches.values()) stop();
       sizeWatches.clear();

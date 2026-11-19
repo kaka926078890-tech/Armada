@@ -1,11 +1,23 @@
+import { existsSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
+import { Worker } from "node:worker_threads";
 import type { AskInspect, AskInspectOption, AskInspectQuestion } from "./askDetect";
 
 /** Only the tail is an open question. A pending row outside the header list is a leftover, except a body flushed before the header is saved. */
 export const ASK_STORE_TAIL = 40;
 /** Cursor flushes the pending ask body with rootUnchanged, so the on-disk header list lags that row. */
 export const ASK_RECENT_ROWS = 8;
+/**
+ * Key range on the UNIQUE index. Do not `ORDER BY rowid` here: SQLite then builds a
+ * temp b-tree of every bubble in the conversation. On a multi-gigabyte state.vscdb that
+ * sort runs on the extension host and the 15s heartbeat misses the hub's 45s sweep.
+ * Row order is applied in `newestBubbleIds` after the index range returns.
+ */
+export const RECENT_BUBBLE_SQL =
+  "SELECT key, rowid AS rid FROM cursorDiskKV WHERE key >= ? AND key < ?";
+/** A slow disk read must not pin the host thread. The next poll retries. */
+const ASK_READ_TIMEOUT_MS = 1_500;
 
 export type DbAsk =
   | { cid: string; state: "pending"; inspect: AskInspect }
@@ -154,7 +166,7 @@ export function inspectStoredBubbles(cid: string, bubbles: unknown[]): DbAsk {
 
 type SqlStmt = {
   get: (key: string) => { value?: unknown } | null;
-  all: (...args: string[]) => { key?: unknown }[];
+  all: (...args: string[]) => { key?: unknown; rid?: unknown }[];
 };
 
 type SqlDb = {
@@ -202,25 +214,37 @@ export function mergeVisibleAndStoredAsks(cdp: AskInspect, stored: DbAsk[]): {
   return { presents, submittedCids, loadingCids };
 }
 
+/** Highest rowid first. Key sort is not insertion order: bubble ids are random UUIDs. */
+export function newestBubbleIds(
+  rows: readonly { key?: unknown; rid?: unknown }[],
+  prefix: string,
+  limit = ASK_RECENT_ROWS,
+): string[] {
+  const ranked: { id: string; rid: number }[] = [];
+  for (const row of rows) {
+    const key = typeof row.key === "string" ? row.key : "";
+    if (!key.startsWith(prefix)) continue;
+    const id = key.slice(prefix.length).trim();
+    const rid = typeof row.rid === "number" ? row.rid
+      : typeof row.rid === "bigint" ? Number(row.rid)
+      : NaN;
+    if (!id || !Number.isFinite(rid)) continue;
+    ranked.push({ id, rid });
+  }
+  ranked.sort((a, b) => b.rid - a.rid);
+  return ranked.slice(0, limit).map((row) => row.id);
+}
+
 function recentBubbleIds(db: SqlDb, cid: string): string[] {
   const start = `bubbleId:${cid}:`;
   const end = `bubbleId:${cid};`;
-  let rows: { key?: unknown }[] = [];
+  let rows: { key?: unknown; rid?: unknown }[] = [];
   try {
-    rows = db.prepare(
-      `SELECT key FROM cursorDiskKV WHERE key >= ? AND key < ? ORDER BY rowid DESC LIMIT ${ASK_RECENT_ROWS}`,
-    ).all(start, end);
+    rows = db.prepare(RECENT_BUBBLE_SQL).all(start, end);
   } catch {
     return [];
   }
-  const ids: string[] = [];
-  for (const row of rows) {
-    const key = typeof row.key === "string" ? row.key : "";
-    if (!key.startsWith(start)) continue;
-    const id = key.slice(start.length).trim();
-    if (id) ids.push(id);
-  }
-  return ids;
+  return newestBubbleIds(rows, start);
 }
 
 function bubbleMap(db: SqlDb, cid: string, ids: readonly string[]): Map<string, string> {
@@ -260,8 +284,8 @@ export function asksFromComposerRows(
   return inspectStoredBubbles(cid, bubbles);
 }
 
-/** null = the file could not be read. Do not treat that as "no question". */
-export async function readStoredAsks(cids: string[], home = homedir(), platform = process.platform): Promise<DbAsk[] | null> {
+/** null = the file could not be read. Do not treat that as "no question". Runs in the ask worker. */
+export async function readStoredAsksSync(cids: string[], home = homedir(), platform = process.platform): Promise<DbAsk[] | null> {
   const unique = [...new Set(cids.map((c) => c.trim()).filter(Boolean))];
   if (!unique.length) return [];
   const path = cursorStateDbPath(home, platform);
@@ -269,7 +293,7 @@ export async function readStoredAsks(cids: string[], home = homedir(), platform 
   let db: SqlDb;
   try {
     const { DatabaseSync } = await import("node:sqlite");
-    db = new DatabaseSync(path, { readOnly: true }) as SqlDb;
+    db = new DatabaseSync(path, { readOnly: true, timeout: 300 }) as SqlDb;
   } catch {
     return null;
   }
@@ -295,4 +319,75 @@ export async function readStoredAsks(cids: string[], home = homedir(), platform 
   } finally {
     try { db.close(); } catch { /* already closed */ }
   }
+}
+
+type AskWorkerMsg = { id?: number; asks?: DbAsk[] | null };
+let askWorker: Worker | null = null;
+let askInflight = false;
+let askSeq = 0;
+const askWaiters = new Map<number, (asks: DbAsk[] | null) => void>();
+
+function askWorkerFile(): string {
+  return join(__dirname, "askReadWorker.js");
+}
+
+function askReader(): Worker | null {
+  if (!existsSync(askWorkerFile())) return null;
+  if (askWorker) return askWorker;
+  const child = new Worker(askWorkerFile());
+  child.on("message", (msg: AskWorkerMsg) => {
+    const done = askWaiters.get(msg.id ?? -1);
+    if (!done) return;
+    askWaiters.delete(msg.id ?? -1);
+    done(msg.asks ?? null);
+  });
+  const fail = () => {
+    askInflight = false;
+    for (const done of askWaiters.values()) done(null);
+    askWaiters.clear();
+    askWorker = null;
+  };
+  child.on("error", fail);
+  child.on("exit", fail);
+  askWorker = child;
+  return child;
+}
+
+/** Drop the ask worker when the extension deactivates. */
+export function closeAskReader(): void {
+  const child = askWorker;
+  askWorker = null;
+  askInflight = false;
+  for (const done of askWaiters.values()) done(null);
+  askWaiters.clear();
+  void child?.terminate();
+}
+
+/**
+ * Ask rows are read off the extension host thread. The host keeps sending heartbeats
+ * while state.vscdb is scanned. A read still running returns null; the next poll retries.
+ */
+export function readStoredAsks(cids: string[], home = homedir(), platform = process.platform): Promise<DbAsk[] | null> {
+  const child = askReader();
+  if (!child) return readStoredAsksSync(cids, home, platform);
+  if (askInflight) return Promise.resolve(null);
+  askInflight = true;
+  const id = ++askSeq;
+  return new Promise((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve(null);
+    }, ASK_READ_TIMEOUT_MS);
+    askWaiters.set(id, (asks) => {
+      clearTimeout(timer);
+      askInflight = false;
+      if (!settled) {
+        settled = true;
+        resolve(asks);
+      }
+    });
+    child.postMessage({ id, cids, home, platform });
+  });
 }
