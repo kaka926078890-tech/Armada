@@ -525,11 +525,11 @@ export default function RunDetail({
         ) : (
           <button
             type="button"
-            className={`font-medium ${UI_TYPE} line-clamp-3 break-words text-left min-w-0 flex-1 hover:text-primary`}
+            className="min-w-0 flex-1 overflow-hidden text-left hover:text-primary"
             title={`${titleText}（点击修改标题）`}
             onClick={() => { setTitleDraft(runDisplayName(run)); setEditingTitle(true); }}
           >
-            {titleText}
+            <span className={`block w-full truncate font-medium ${UI_TYPE}`}>{titleText}</span>
           </button>
         )}
         <span className={`text-[12px] shrink-0 ${active ? "text-sky-400" : "text-muted-foreground"}`}>{STATUS[run.status] ?? run.status}</span>

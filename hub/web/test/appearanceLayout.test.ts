@@ -91,6 +91,8 @@ describe("appearance layout stays coordinated when text scales", () => {
     expect(detail).not.toContain("select-text overflow-x-hidden");
     expect(detail).toContain("followup-input");
     expect(detail).toContain("shrink-0 p-3 border-t");
+    expect(detail).toContain("block w-full truncate");
+    expect(detail).not.toContain("line-clamp-3");
   });
 
   test("hub and App share cursor vsix reload controls on the machine region", () => {
