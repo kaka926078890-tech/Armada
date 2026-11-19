@@ -550,6 +550,57 @@ describe("composer table plan", () => {
     expect(done.events.find((e) => e.hook === "stop")?.payload.status).toBe("completed");
   });
 
+  test("an idle stop carries the armed generation, not an older thought's (r-ac71f2e4)", () => {
+    const cursor = cursorFromEmitted([
+      { source: "db", hook: "beforeSubmitPrompt", payload: { prompt: "old", bubble_id: "u1", generation_id: "gen-old", conversation_id: "cid-1" } },
+      { source: "db", hook: "afterAgentResponse", payload: { text: "finished", bubble_id: "a1", generation_id: "gen-old", conversation_id: "cid-1" } },
+      { source: "db", hook: "stop", payload: { status: "completed", generation_id: "gen-old", conversation_id: "cid-1" } },
+      { source: "db", hook: "beforeSubmitPrompt", payload: { prompt: "old", bubble_id: "u1", generation_id: "gen-live", conversation_id: "cid-1" } },
+      { source: "db", hook: "afterAgentThought", payload: { text: "old thought", bubble_id: "t1", generation_id: "gen-old", conversation_id: "cid-1" } },
+    ]);
+    expect(cursor.armedGen).toBe("gen-live");
+    expect(cursor.generationId).toBe("gen-old");
+    const { events } = planComposerTick(snap({
+      cid: "cid-1",
+      status: "completed",
+      generationId: null,
+      bubbles: [
+        bubble({ id: "u1", type: 1, text: "old", requestId: "gen-old" }),
+        bubble({ id: "a1", type: 2, text: "finished", turnDurationMs: 20 }),
+      ],
+    }), [], cursor);
+    expect(events.find((e) => e.hook === "stop")?.payload.generation_id).toBe("gen-live");
+  });
+
+  test("a child whose launch tool already failed does not keep the parent running (r-ac71f2e4)", () => {
+    const cursor = cursorFromEmitted([
+      { source: "db", hook: "beforeSubmitPrompt", payload: { prompt: "分析", bubble_id: "u", generation_id: "gen", conversation_id: "parent" } },
+      { source: "db", hook: "afterAgentResponse", payload: { text: "报告写好了", bubble_id: "a", generation_id: "gen", conversation_id: "parent" } },
+      { source: "db", hook: "subagentStart", payload: { conversation_id: "child", parent_conversation_id: "parent" } },
+      { source: "subagent-transcript", hook: null, payload: { __subagent_cid: "child", role: "assistant", message: { content: [{ type: "text", text: "blocked" }] } } },
+    ]);
+    const parent = snap({
+      cid: "parent",
+      status: "completed",
+      generationId: null,
+      subagentIds: ["child"],
+      bubbles: [
+        bubble({ id: "u", type: 1, text: "分析", requestId: "gen" }),
+        bubble({ id: "task", toolName: "task_v2", toolStatus: "error", subagentComposerId: "child" }),
+        bubble({ id: "a", type: 2, text: "报告写好了", turnDurationMs: 1000 }),
+      ],
+    });
+    const child = snap({
+      cid: "child",
+      status: "none",
+      generationId: "stuck-gen",
+      bubbles: [bubble({ id: "c", type: 2, text: "blocked" })],
+    });
+    const { events } = planComposerTick(parent, [child], cursor);
+    expect(events.find((e) => e.hook === "stop")?.payload).toMatchObject({ status: "completed", generation_id: "gen" });
+    expect(events.find((e) => e.payload.type === "turn_ended")?.payload.status).toBe("error");
+  });
+
   test("parent stop waits while the child still has its own uuid", () => {
     const parent = snap({
       cid: "parent",
@@ -1000,6 +1051,40 @@ describe("windows composer bind", () => {
     setComposer("");
     const done = planComposerTick(readComposerView(db, cid)!, [], armed.cursor);
     expect(done.events.find((e) => e.hook === "stop")?.payload).toMatchObject({ status: "completed", generation_id: noteGen });
+    db.close();
+  });
+
+  test("empty headers keep claude tool rows and drop their fragments", () => {
+    const db = new Database(":memory:");
+    db.exec("CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value TEXT)");
+    db.query("INSERT INTO cursorDiskKV (key, value) VALUES (?1,?2)").run(`composerData:${cid}`, JSON.stringify({
+      status: "completed",
+      chatGenerationUUID: "",
+      fullConversationHeadersOnly: [],
+      subagentComposerIds: [],
+    }));
+    const tool = `${bubbleId}/t:toolu_vrtx_01HB1DfsiEzQRKiKCmZ8VarU`;
+    const put = (id: string, value: unknown) => {
+      db.query("INSERT INTO cursorDiskKV (key, value) VALUES (?1,?2)").run(`bubbleId:${cid}:${id}`, JSON.stringify(value));
+    };
+    put(bubbleId, { type: 1, text: "分析", requestId: CURSOR_GEN, createdAt: "2026-11-19T06:46:10.619Z" });
+    put(tool, {
+      type: 2,
+      text: "",
+      toolFormerData: {
+        name: "task_v2",
+        status: "error",
+        additionalData: { status: "error", subagentComposerId: "63aa8de0-4c30-46c9-8779-e0d7da327d4a" },
+      },
+    });
+    put(`${tool}/fc_59065b3b`, { type: 2, text: "fragment" });
+    const view = readComposerView(db, cid);
+    expect(view?.bubbles.map((b) => b.id)).toEqual([bubbleId, tool]);
+    expect(view?.bubbles[1]).toMatchObject({
+      toolName: "task_v2",
+      toolStatus: "error",
+      subagentComposerId: "63aa8de0-4c30-46c9-8779-e0d7da327d4a",
+    });
     db.close();
   });
 

@@ -257,7 +257,7 @@ function bubbleRest(key: string, prefix: string): string {
   return key.startsWith(prefix) ? key.slice(prefix.length) : "";
 }
 
-/** First `/` or `\` in a bubble key suffix. Tool calls use `t:call-`; Windows text uses `s:<n>`. */
+/** First `/` or `\` in a bubble key suffix. Tool calls use `t:call-` or `t:toolu_`; Windows text uses `s:<n>`. */
 function bubbleSplit(rest: string): { parent: string; tail: string } | null {
   const slash = rest.indexOf("/");
   const back = rest.indexOf("\\");
@@ -266,13 +266,14 @@ function bubbleSplit(rest: string): { parent: string; tail: string } | null {
   return { parent: rest.slice(0, cut), tail: rest.slice(cut + 1) };
 }
 
+/** Composer rows are `t:call-`. Claude rows are `t:toolu_` / `t:toolu_bdrk_`. Nested fragments are a second split, not this tail. */
 function isToolCallTail(tail: string): boolean {
-  return tail.startsWith("t:call-") && !tail.includes("/") && !tail.includes("\\");
+  return tail.startsWith("t:") && !tail.includes("/") && !tail.includes("\\");
 }
 
 /**
  * Header list empty: parent rows, then that parent's `/s:<n>` steps in numeric
- * order, then its `/t:call-` rows. Nested `fc_` fragments stay out.
+ * order, then its `/t:` tool rows. Nested `fc_` fragments stay out.
  */
 function fallbackBubbleIds(db: Kv, cid: string): string[] {
   // `LIKE 'prefix%'` cannot bound this UNIQUE index (LIKE is case-insensitive), so it
@@ -622,13 +623,28 @@ export function readComposerHead(db: Kv, cid: string): { generationId: string | 
   return { generationId: gen, idleKey: composerIdleKey(status, gen, ids) };
 }
 
-function childStillBusy(children: ComposerView[], cursor: ComposerCursor): boolean {
+/**
+ * r-ac71f2e4: a blocked subagent keeps chatGenerationUUID and status "none" forever.
+ * The parent tool row is already error or completed, so that leftover uuid is not work.
+ */
+function childReleaseStatus(parent: ComposerView, cid: string): "error" | "success" | null {
+  const tool = parent.bubbles.find((b) =>
+    b.subagentComposerId === cid && (b.toolStatus === "completed" || b.toolStatus === "error"));
+  if (!tool) return null;
+  return tool.toolStatus === "error" ? "error" : "success";
+}
+
+function childStillBusy(parent: ComposerView, children: ComposerView[], cursor: ComposerCursor): boolean {
   for (const child of children) {
     const cur = childOf(cursor, child.cid);
-    if (child.generationId) return true;
+    const released = childReleaseStatus(parent, child.cid) != null;
+    if (child.generationId && !released) return true;
     const sawWork = cur.texts.length > 0 || !!child.generationId;
-    const closing = !cur.closed && !child.generationId && (
-      doneStatus(child.status) || (sawWork && (child.status === "aborted" || child.status === "error"))
+    const closing = !cur.closed && (
+      released
+      || (!child.generationId && (
+        doneStatus(child.status) || (sawWork && (child.status === "aborted" || child.status === "error"))
+      ))
     );
     if (closing) continue;
     if (!cur.closed && !doneStatus(child.status)) return true;
@@ -793,7 +809,7 @@ export function planComposerTick(
       if (flushText(b, priorGen) || flushedNow.has(b.id)) flushed = true;
     }
     const stopForNewUser = newUserAt > 0;
-    if ((stopForNewUser || flushed) && !childStillBusy(children, next)) {
+    if ((stopForNewUser || flushed) && !childStillBusy(snap, children, next)) {
       const hadText = snap.bubbles.slice(0, cut).some((b) => b.type === 2 && !!b.text.trim() && next.assistants.includes(b.id));
       const cutting = stopForNewUser ? snap.bubbles[newUserAt] : undefined;
       // 系统通知和协议句是同一轮的续写。前面已经有助手正文也先不收口，
@@ -846,7 +862,7 @@ export function planComposerTick(
         next.sawGeneration = true;
       }
       if (live || hold) continue;
-      if (!childStillBusy(children, next)) {
+      if (!childStillBusy(snap, children, next)) {
         const hadText = slice.some((b) => b.type === 2 && !!b.text.trim() && next.assistants.includes(b.id));
         const freshText = slice.some((b) => b.type === 2 && !!b.text.trim() && !b.toolName && !cursor.assistants.includes(b.id));
         // r-5d82dd7b / r-7a755f88: status is still the previous turn's completed
@@ -914,7 +930,8 @@ export function planComposerTick(
   let childBusy = false;
   for (const child of children) {
     const cur = childOf(next, child.cid);
-    if (child.generationId) childBusy = true;
+    const released = childReleaseStatus(snap, child.cid);
+    if (child.generationId && !released) childBusy = true;
     for (const b of child.bubbles) {
       if (b.type !== 2 || !b.text.trim() || cur.texts.includes(b.text)) continue;
       cur.texts.push(b.text);
@@ -932,7 +949,10 @@ export function planComposerTick(
     }
     // shortcut: a child with no uuid and no text stays open, so the parent stop waits. Upgrade if a child never receives chatGenerationUUID.
     const sawWork = cur.texts.length > 0 || !!child.generationId;
-    if (!cur.closed && !child.generationId && (doneStatus(child.status) || (sawWork && (child.status === "aborted" || child.status === "error")))) {
+    const selfDone = !child.generationId && (
+      doneStatus(child.status) || (sawWork && (child.status === "aborted" || child.status === "error"))
+    );
+    if (!cur.closed && (released || selfDone)) {
       cur.closed = true;
       emit({
         source: "subagent-transcript",
@@ -942,7 +962,7 @@ export function planComposerTick(
           __subagent_cid: child.cid,
           parent_conversation_id: snap.cid,
           type: "turn_ended",
-          status: doneStatus(child.status) ? "success" : child.status,
+          status: released ?? (doneStatus(child.status) ? "success" : child.status),
         },
       });
     } else if (!cur.closed && !doneStatus(child.status)) {
@@ -991,7 +1011,9 @@ export function planComposerTick(
       payload: {
         status: stopStatus,
         conversation_id: snap.cid,
-        ...(next.generationId ? { generation_id: next.generationId } : {}),
+        // r-ac71f2e4: a later thought can carry an older turn's requestId.
+        // The armed submit is the generation decideStop compares to live.
+        ...((next.armedGen || next.generationId) ? { generation_id: next.armedGen || next.generationId } : {}),
       },
     });
   }
@@ -999,8 +1021,9 @@ export function planComposerTick(
     const gen = snap.generationId ?? next.generationId;
     const settled = settledOpenTurn(snap, gen);
     if (settled.ok) {
-      const stopGen = snap.bubbles[settled.owner]?.requestId || gen;
-      for (const b of settled.slice) flushText(b, stopGen);
+      const ownerGen = snap.bubbles[settled.owner]?.requestId || gen;
+      const stopGen = snap.generationId ? ownerGen : (next.armedGen || ownerGen);
+      for (const b of settled.slice) flushText(b, ownerGen);
       next.stopped = true;
       emit({
         source: "db",
