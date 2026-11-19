@@ -87,6 +87,9 @@ describe("appearance layout stays coordinated when text scales", () => {
     expect(board).not.toContain("min-w-[240px]");
     expect(board).not.toContain("overflow-x-auto");
     expect(detail).toContain("select-text");
+    expect(detail).toContain("data-armada-copy");
+    expect(detail).toContain("releaseFieldForTextSelection");
+    expect(detail).toContain("takeSelectablePointerBlur");
     expect(detail).toContain("overflow-x-clip overflow-y-auto");
     expect(detail).not.toContain("select-text overflow-x-hidden");
     expect(detail).toContain("followup-input");

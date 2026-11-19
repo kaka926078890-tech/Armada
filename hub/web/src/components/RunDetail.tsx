@@ -12,7 +12,7 @@ import { HubImageRow } from "./ImageThumb";
 import { endFollowupSend, isFollowupSendEnter, tryBeginFollowupSend } from "../followupSend";
 import { rejectedFollowupDraft, settleFollowupComposer } from "../followupDraft";
 import { FOLLOWUP_TRANSPORT_MISS, followupLandedAfterTransportError, isFollowupTransportError } from "../followupTransport";
-import { queueComposerCaretRestore, shouldRefocusComposerAfterSend, shouldRestoreComposerFocus } from "../composerFocus";
+import { queueComposerCaretRestore, releaseFieldForTextSelection, shouldRefocusComposerAfterSend, shouldRestoreComposerFocus, takeSelectablePointerBlur } from "../composerFocus";
 import { WIDTH_KEY, type PromptSnippet } from "../uiPrefs";
 import { appendSnippetBody } from "../promptSnippets";
 import { PromptSnippetBar } from "./PromptSnippetBar";
@@ -76,7 +76,16 @@ function DrawerShell({ children }: { children: ReactNode }) {
   };
 
   return (
-    <aside className="h-full min-h-0 shrink-0 overflow-clip border-l border-border flex flex-col bg-background shadow-2xl relative max-w-full" style={{ width, maxWidth: "100%" }}>
+    <aside
+      className="h-full min-h-0 shrink-0 overflow-clip border-l border-border flex flex-col bg-background shadow-2xl relative max-w-full"
+      style={{ width, maxWidth: "100%" }}
+      onPointerDownCapture={(e) => {
+        const node = e.target instanceof Node ? e.target : null;
+        const target = node instanceof Element ? node : node?.parentElement ?? null;
+        const active = document.activeElement;
+        releaseFieldForTextSelection(active instanceof HTMLElement ? active : null, target);
+      }}
+    >
       <div
         role="separator"
         aria-orientation="vertical"
@@ -536,7 +545,7 @@ export default function RunDetail({
         <span className={`text-[12px] shrink-0 ${active ? "text-sky-400" : "text-muted-foreground"}`}>{STATUS[run.status] ?? run.status}</span>
         <Button type="button" variant="ghost" size="icon-sm" className="ml-auto" onClick={onClose} aria-label="关闭">✕</Button>
       </div>
-      <div className={`px-4 py-2 ${UI_META} text-muted-foreground border-b border-border`}>
+      <div data-armada-copy="" className={`px-4 py-2 ${UI_META} text-muted-foreground border-b border-border`}>
         <div className="truncate" title={run.workspace_root}>{workspaceFolderName(run.workspace_root)}</div>
         {promptLines.original ? (
           <div className="mt-1 break-words line-clamp-2" title={promptLines.original}>最初 {promptLines.original}</div>
@@ -622,6 +631,7 @@ export default function RunDetail({
             loading: loadingOlderRef.current,
           })) loadOlder();
         }}
+        data-armada-copy=""
         className="flex-1 min-h-0 min-w-0 w-full select-text overflow-x-clip overflow-y-auto px-4 py-4 [scrollbar-gutter:stable]"
       >
         <div ref={contentRef} className="min-w-0 max-w-full">
@@ -715,11 +725,13 @@ export default function RunDetail({
               onChange={(e) => setFollowup(e.target.value)}
               onBlur={(e) => {
                 const el = e.currentTarget;
-                queueComposerCaretRestore(el, (active) => (
-                  sendingRef.current
+                const selecting = takeSelectablePointerBlur();
+                queueComposerCaretRestore(el, (active) => {
+                  if (selecting) return false;
+                  return sendingRef.current
                     ? shouldRefocusComposerAfterSend(active, null)
-                    : shouldRestoreComposerFocus(active)
-                ));
+                    : shouldRestoreComposerFocus(active);
+                });
               }}
               onPaste={(e) => {
                 const items = [...e.clipboardData.files];
