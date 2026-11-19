@@ -1,4 +1,5 @@
 import { hasImageMarkers, stripImageMarkers } from "../../extension/src/imageMarkers";
+import { stripLeadingInboxMentions, TRANSCRIPT_BIND_WINDOW_MS } from "../../extension/src/transcriptBind";
 import { workspacePathsEqual } from "../../extension/src/workspacePath";
 import { CHATGPT_LOCAL_MACHINE, sameHost } from "./chatgptAttach";
 import { operatorAlertPrompt } from "./outboundClaim";
@@ -27,6 +28,8 @@ export type ComposerBubble = {
   subagentComposerId: string;
   /** User bubble `requestId`. This is the turn's generation, not `chatGenerationUUID`. */
   requestId: string;
+  /** User bubble `startedAtMs`. Used to pick the dispatch turn when a later follow-up sorts first. */
+  startedAtMs?: number;
   /** Set on the step row that closes the turn. Absent while the reply is still being written. */
   turnDurationMs?: number;
 };
@@ -76,11 +79,18 @@ export function emptyCursor(): ComposerCursor {
 }
 
 export function promptsMatch(runPrompt: string, bubble: string, attachmentCount = 0): boolean {
-  const a = stripImageMarkers(bubble);
-  const b = stripImageMarkers(runPrompt ?? "");
+  // Cursor writes an attached file as `@.armada/inbox/<run>/<file> ` in front of the prompt.
+  // jsonl bind already strips that; the composer table must use the same text.
+  const a = stripLeadingInboxMentions(stripImageMarkers(bubble));
+  const b = stripLeadingInboxMentions(stripImageMarkers(runPrompt ?? ""));
   if (a && a === b) return true;
   if (!a && attachmentCount > 0 && (hasImageMarkers(bubble) || !b)) return true;
   return false;
+}
+
+/** Retry resets started_at. The header window follows that dispatch, not the original created_at. */
+export function composerBindAnchor(run: { created_at: number; started_at?: number | null }): number {
+  return run.started_at ?? run.created_at;
 }
 
 /** One connected machine on this host. Two matches is not a guess. */
@@ -191,8 +201,19 @@ function parseBubble(id: string, raw: unknown): ComposerBubble {
     toolStatus: typeof tf.status === "string" ? tf.status : (typeof ad.status === "string" ? ad.status : ""),
     subagentComposerId: typeof ad.subagentComposerId === "string" ? ad.subagentComposerId : "",
     requestId: typeof o.requestId === "string" ? o.requestId.trim() : "",
+    startedAtMs: typeof o.startedAtMs === "number" && o.startedAtMs > 0 ? o.startedAtMs : undefined,
     turnDurationMs: typeof o.turnDurationMs === "number" && o.turnDurationMs > 0 ? o.turnDurationMs : undefined,
   };
+}
+
+/** Dispatch prompt is the earliest user bubble. A later follow-up can sort first by bubble id. */
+export function dispatchUserText(bubbles: ComposerBubble[]): string | null {
+  const users = bubbles.filter((b) => b.type === 1 && b.text.trim());
+  if (users.length === 0) return null;
+  const timed = users.filter((b) => typeof b.startedAtMs === "number");
+  if (timed.length !== users.length) return users[0]!.text;
+  timed.sort((a, b) => a.startedAtMs! - b.startedAtMs! || a.id.localeCompare(b.id));
+  return timed[0]!.text;
 }
 
 export function parseComposer(cid: string, raw: unknown, bubbles: ComposerBubble[]): ComposerView | null {
@@ -221,13 +242,12 @@ export function readHeaderCandidates(db: Kv, sinceMs: number): HeaderCandidate[]
   for (const row of rows) {
     if (!row.composerId || row.isSubagent === 1) continue;
     const view = readComposerView(db, row.composerId);
-    const first = view?.bubbles.find((b) => b.type === 1 && b.text.trim()) ?? null;
     out.push({
       composerId: row.composerId,
       createdAt: Number(row.createdAt) || 0,
       isSubagent: false,
       workspacePath: workspacePathFromHeader(cellText(row.value) || row.value),
-      firstUserText: first ? first.text : null,
+      firstUserText: view ? dispatchUserText(view.bubbles) : null,
     });
   }
   return out;
@@ -565,9 +585,15 @@ export function composerFeedWatches(run: {
   status: string;
   conversation_id: string | null;
   end_reason?: string | null;
-}): boolean {
+  created_at?: number | null;
+  started_at?: number | null;
+}, now = Date.now()): boolean {
   if (run.status === "dispatched" || run.status === "binding" || run.status === "running") return true;
   if (run.end_reason === "OPERATOR_CLOSED") return false;
+  if (run.status === "unknown" && run.end_reason === "BIND_TIMEOUT" && !run.conversation_id?.trim()) {
+    const anchor = run.started_at ?? run.created_at;
+    return typeof anchor === "number" && now - anchor < TRANSCRIPT_BIND_WINDOW_MS;
+  }
   if (!run.conversation_id?.trim()) return false;
   return run.status === "completed" || run.status === "error" || run.status === "aborted" || run.status === "cancelled";
 }

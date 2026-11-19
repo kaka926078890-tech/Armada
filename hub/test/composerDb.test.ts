@@ -3,8 +3,9 @@ import { Database } from "bun:sqlite";
 import { mkdtempSync } from "fs";
 import { hostname, tmpdir } from "os";
 import { join } from "path";
+import { TRANSCRIPT_BIND_WINDOW_MS } from "../../extension/src/transcriptBind";
 import {
-  composerFeedWatches, cursorFromEmitted, emptyCursor, matchComposer, matchComposerByCreatedAt, planComposerTick, readComposerView, readHeaderCandidates,
+  composerBindAnchor, composerFeedWatches, cursorFromEmitted, dispatchUserText, emptyCursor, matchComposer, matchComposerByCreatedAt, planComposerTick, readComposerView, readHeaderCandidates,
   type ComposerBubble, type ComposerView,
 } from "../src/composerDb";
 import { createServer, type HubServer } from "../src/index";
@@ -866,6 +867,18 @@ describe("composer feed watch", () => {
     expect(composerFeedWatches({ status: "completed", conversation_id: "cid", end_reason: "OPERATOR_CLOSED" })).toBe(false);
     expect(composerFeedWatches({ status: "completed", conversation_id: null, end_reason: "completed" })).toBe(false);
     expect(composerFeedWatches({ status: "queued", conversation_id: "cid" })).toBe(false);
+    const started = 1_000_000;
+    expect(composerFeedWatches({
+      status: "unknown", conversation_id: null, end_reason: "BIND_TIMEOUT", started_at: started, created_at: 1,
+    }, started + 60_000)).toBe(true);
+    expect(composerFeedWatches({
+      status: "unknown", conversation_id: null, end_reason: "BIND_TIMEOUT", started_at: started, created_at: 1,
+    }, started + TRANSCRIPT_BIND_WINDOW_MS)).toBe(false);
+    expect(composerFeedWatches({
+      status: "unknown", conversation_id: null, end_reason: "MACHINE_OFFLINE", started_at: started, created_at: 1,
+    }, started)).toBe(false);
+    expect(composerBindAnchor({ created_at: 1, started_at: started })).toBe(started);
+    expect(composerBindAnchor({ created_at: 1, started_at: null })).toBe(1);
   });
 });
 
@@ -1103,6 +1116,73 @@ describe("composer header bind", () => {
     ];
     expect(matchComposer(headers, run, new Set())).toBe("ok");
     expect(matchComposer([...headers, { ...headers[1]!, composerId: "also" }], run, new Set())).toBeNull();
+  });
+
+  test("inbox file chip in front of the prompt still binds that prompt", () => {
+    const prompt = "帮忙格式化一下这个小说的格式，调整成更加符合看小说的阅读习惯，而且把无关小说的内容做一下删除，包括但不限于打赏等内容";
+    const chip = "@.armada/inbox/r-e4992caf-a504-4298-92ea-b1fa076b112c/0f3eacff-r-e4992caf-a504-4298-92ea-b1fa076b112c-鹏程万里一二未删减整理.txt ";
+    const started = 1_795_071_908_000;
+    const run = { prompt, workspaceRoot: "/Users/apple/Desktop/desk/generative-ui-customer", createdAt: started };
+    const headers = [
+      {
+        composerId: "1855f0d1-98ef-4751-b808-d82162361e4e",
+        createdAt: started - 600_000,
+        isSubagent: false,
+        workspacePath: run.workspaceRoot,
+        firstUserText: chip + prompt,
+      },
+      {
+        composerId: "3c0d9f35-b08d-43d1-8884-e33d91fa2751",
+        createdAt: started,
+        isSubagent: false,
+        workspacePath: run.workspaceRoot,
+        firstUserText: chip + prompt,
+      },
+    ];
+    expect(matchComposer(headers, run, new Set())).toBe("3c0d9f35-b08d-43d1-8884-e33d91fa2751");
+    expect(matchComposer(headers, { ...run, createdAt: started - 600_000 }, new Set())).toBeNull();
+    expect(matchComposer([{
+      composerId: "readme", createdAt: started, isSubagent: false,
+      workspacePath: run.workspaceRoot, firstUserText: "@README.md " + prompt,
+    }], run, new Set())).toBeNull();
+  });
+
+  test("a later follow-up that sorts first is not the dispatch prompt", () => {
+    const prompt = "帮忙格式化一下这个小说的格式，调整成更加符合看小说的阅读习惯，而且把无关小说的内容做一下删除，包括但不限于打赏等内容";
+    const chip = "@.armada/inbox/r-e4992caf-a504-4298-92ea-b1fa076b112c/0f3eacff-r-e4992caf-a504-4298-92ea-b1fa076b112c-鹏程万里一二未删减整理.txt ";
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE composerHeaders (composerId TEXT PRIMARY KEY, createdAt INTEGER, isSubagent INTEGER, value TEXT);
+      CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value TEXT);
+    `);
+    const cid = "3c0d9f35-b08d-43d1-8884-e33d91fa2751";
+    const started = 1_795_071_908_763;
+    db.query("INSERT INTO composerHeaders (composerId, createdAt, isSubagent, value) VALUES (?1,?2,0,?3)").run(
+      cid, started, JSON.stringify({ workspaceIdentifier: { uri: { fsPath: "/Users/apple/Desktop/desk/generative-ui-customer" } } }),
+    );
+    db.query("INSERT INTO cursorDiskKV (key, value) VALUES (?1,?2)").run(`composerData:${cid}`, JSON.stringify({
+      status: "completed",
+      fullConversationHeadersOnly: [],
+      subagentComposerIds: [],
+    }));
+    const follow = "3cb60800-e9e5-4c2f-8ae3-e54fba5393fc";
+    const original = "7cc549a2-12a9-40ef-b3ac-ad6dd9c02626";
+    db.query("INSERT INTO cursorDiskKV (key, value) VALUES (?1,?2)").run(`bubbleId:${cid}:${follow}`, JSON.stringify({
+      type: 1, text: "新文件在哪里", startedAtMs: started + 240_000,
+    }));
+    db.query("INSERT INTO cursorDiskKV (key, value) VALUES (?1,?2)").run(`bubbleId:${cid}:${original}`, JSON.stringify({
+      type: 1, text: chip + prompt, startedAtMs: started,
+    }));
+    const headers = readHeaderCandidates(db, started - 5_000);
+    expect(headers[0]?.firstUserText).toBe(chip + prompt);
+    expect(dispatchUserText([
+      { id: follow, type: 1, text: "新文件在哪里", thinking: "", toolName: "", toolStatus: "", subagentComposerId: "", requestId: "", startedAtMs: started + 240_000 },
+      { id: original, type: 1, text: chip + prompt, thinking: "", toolName: "", toolStatus: "", subagentComposerId: "", requestId: "", startedAtMs: started },
+    ])).toBe(chip + prompt);
+    expect(matchComposer(headers, {
+      prompt, workspaceRoot: "/Users/apple/Desktop/desk/generative-ui-customer", createdAt: started,
+    }, new Set())).toBe(cid);
+    db.close();
   });
 });
 

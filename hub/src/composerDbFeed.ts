@@ -4,7 +4,7 @@ import { homedir, hostname } from "os";
 import { join } from "path";
 import { parseAttachmentIds } from "./blobs";
 import {
-  composerFeedWatches, cursorFromEmitted, matchComposer, pickLocalMachineId, planComposerTick,
+  composerBindAnchor, composerFeedWatches, cursorFromEmitted, HEADER_CREATED_SKEW_MS, matchComposer, pickLocalMachineId, planComposerTick,
   readComposerHead, readComposerView, readHeaderCandidates, seedCursor,
   type ComposerCursor, type ComposerView,
 } from "./composerDb";
@@ -31,6 +31,7 @@ type RunLite = {
   status: string;
   conversation_id: string | null;
   created_at: number;
+  started_at: number | null;
   attachments: string | null;
   end_reason: string | null;
 };
@@ -81,10 +82,10 @@ export function startComposerFeed(opts: {
       return;
     }
     const runs = (opts.hub.query(
-      `SELECT id, workspace_root, prompt, status, conversation_id, created_at, attachments, end_reason
+      `SELECT id, workspace_root, prompt, status, conversation_id, created_at, started_at, attachments, end_reason
        FROM runs
        WHERE machine_id=?1 AND archived_at IS NULL
-         AND status IN ('dispatched','binding','running','completed','error','aborted','cancelled')`,
+         AND status IN ('dispatched','binding','running','completed','error','aborted','cancelled','unknown')`,
     ).all(localId) as RunLite[]).filter((r) => composerFeedWatches(r));
     const active = new Set(runs.map((r) => r.id));
     for (const id of cursors.keys()) if (!active.has(id)) cursors.delete(id);
@@ -92,16 +93,18 @@ export function startComposerFeed(opts: {
     const db = open();
     if (!db) return;
 
-    const pending = runs.filter((r) => !r.conversation_id && (r.status === "dispatched" || r.status === "binding"));
+    const pending = runs.filter((r) => !r.conversation_id && (
+      r.status === "dispatched" || r.status === "binding" || r.end_reason === "BIND_TIMEOUT"
+    ));
     if (pending.length) {
-      const since = Math.min(...pending.map((r) => r.created_at)) - 5_000;
+      const since = Math.min(...pending.map((r) => composerBindAnchor(r))) - HEADER_CREATED_SKEW_MS;
       const headers = readHeaderCandidates(db, since);
       const bound = new Set(runs.map((r) => r.conversation_id).filter((x): x is string => !!x));
       for (const run of pending) {
         const cid = matchComposer(headers, {
           prompt: run.prompt,
           workspaceRoot: run.workspace_root,
-          createdAt: run.created_at,
+          createdAt: composerBindAnchor(run),
           attachmentCount: parseAttachmentIds(run.attachments).length,
         }, bound);
         if (!cid) continue;
