@@ -100,7 +100,7 @@ export interface ExecutorDeps {
   autoSubmit?: (
     workspaceRoot: string,
     prompt: string,
-    opts?: { reclaim?: string[]; shouldAbort?: () => boolean },
+    opts?: { reclaim?: string[]; shouldAbort?: () => boolean; onProgress?: () => void },
   ) => Promise<boolean | { ok: boolean; reason?: string }>;
   imagePaste?: boolean;
   fetchBlob?: (id: string) => Promise<{ bytes: Buffer; mime: string }>;
@@ -110,6 +110,7 @@ export interface ExecutorDeps {
     steps: { bytes: Buffer; mime: string }[],
     autoSubmit: boolean,
     shouldAbort?: () => boolean,
+    onProgress?: () => void,
   ) => Promise<boolean | { ok: boolean; reason?: string }>;
   autoSubmitFileMentions?: (
     workspaceRoot: string,
@@ -120,6 +121,7 @@ export interface ExecutorDeps {
     prompt: string,
     autoSubmit: boolean,
     shouldAbort?: () => boolean,
+    onProgress?: () => void,
   ) => Promise<boolean | { ok: boolean; reason?: string }>;
   materializeFile?: (workspaceRoot: string, runId: string, name: string, bytes: Buffer) => { needle: string };
   autoEnter?: boolean;
@@ -355,7 +357,7 @@ export class Executor {
           return;
         }
       } else {
-        const inj = await this.injectPrompt(msg.workspaceRoot, msg.prompt, 1500, this.reclaimFor("start"), stop);
+        const inj = await this.injectPrompt(msg.runId, msg.workspaceRoot, msg.prompt, 1500, this.reclaimFor("start"), stop);
         this.noteInjectResult(msg.prompt, inj.submitted, inj.reason);
         if (!inj.submitted) {
           this.deps.send({ type: "run.ack", runId: msg.runId, status: "rejected", reason: inj.reason ?? "INJECT_FAILED" });
@@ -445,6 +447,7 @@ export class Executor {
           steps,
           skipFinish ? false : this.deps.autoEnter !== false,
           stop,
+          () => this.noteProgress(runId, "paste"),
         ));
         if (!img.ok) {
           return { ok: false, reason: keepInjectReason(img.reason, "IMAGE_PASTE_FAILED") };
@@ -481,6 +484,7 @@ export class Executor {
         if (!this.deps.finishComposer) return { ok: false, reason: "FILE_MENTION_FAILED" };
         const fin = autoSubmitOutcome(await this.deps.finishComposer(
           workspaceRoot, prompt, this.deps.autoEnter !== false, stop,
+          () => this.noteProgress(runId, "text"),
         ));
         if (!fin.ok) {
           return { ok: false, reason: keepInjectReason(fin.reason, "FILE_MENTION_FAILED") };
@@ -497,6 +501,7 @@ export class Executor {
   }
 
   private async injectPrompt(
+    runId: string,
     workspaceRoot: string,
     prompt: string,
     pasteWaitMs: number,
@@ -507,7 +512,11 @@ export class Executor {
     if (shouldAbort?.()) return { submitted: false, reason: "CANCELLED" };
     if (this.deps.autoSubmit) {
       try {
-        const first = autoSubmitOutcome(await this.deps.autoSubmit(workspaceRoot, prompt, { reclaim, shouldAbort }));
+        const first = autoSubmitOutcome(await this.deps.autoSubmit(workspaceRoot, prompt, {
+          reclaim,
+          shouldAbort,
+          onProgress: () => this.noteProgress(runId, "text"),
+        }));
         if (first.ok) return { submitted: true };
         if (first.reason === "CANCELLED") return { submitted: false, reason: "CANCELLED" };
         if (isDirtyComposer(first.reason)) return { submitted: false, reason: "NON_EMPTY_INPUT" };
@@ -574,7 +583,7 @@ export class Executor {
         }
       } else {
         const inj = await this.injectPrompt(
-          msg.workspaceRoot, msg.prompt, 800, this.reclaimFor("followup"), stop,
+          msg.runId, msg.workspaceRoot, msg.prompt, 800, this.reclaimFor("followup"), stop,
         );
         this.noteInjectResult(msg.prompt, inj.submitted, inj.reason);
         if (!inj.submitted) {

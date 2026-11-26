@@ -1300,7 +1300,12 @@ export function createAskQuestionDriver(deps: CdpSubmitterDeps) {
   return { inspect, submit };
 }
 
-export type CdpSubmitOpts = { reclaim?: string[]; shouldAbort?: () => boolean };
+export type CdpSubmitOpts = {
+  reclaim?: string[];
+  shouldAbort?: () => boolean;
+  /** 长注入中途续命。hub 只在上次 progress 后再静默 30s 才记 DISPATCH_TIMEOUT。 */
+  onProgress?: () => void;
+};
 
 function aborted(shouldAbort?: () => boolean): { ok: false; reason: "CANCELLED" } | null {
   return shouldAbort?.() ? { ok: false, reason: "CANCELLED" } : null;
@@ -1323,9 +1328,10 @@ function reclaimHit(existing: string, reclaim?: string[]): boolean {
  * Input.insertText 遇到换行即停，后文不会进入 composer。
  * 这个框里换行是 Shift+Enter，裸 Enter 是发送。按行写入，不改提示词、不改 DOM。
  */
-async function insertComposerText(session: CdpSession, text: string): Promise<void> {
+async function insertComposerText(session: CdpSession, text: string, onProgress?: () => void): Promise<void> {
   const lines = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
   for (let i = 0; i < lines.length; i++) {
+    onProgress?.();
     if (i > 0) await shiftEnter(session);
     const line = lines[i] ?? "";
     if (line) await session.call("Input.insertText", { text: line });
@@ -1372,6 +1378,7 @@ export function createCdpSubmitter(deps: CdpSubmitterDeps) {
       let owned = false;
       let lastFocus = "NO_INPUT";
       for (let attempt = 0; attempt < 6 && !focused && !draftMatched && !owned; attempt++) {
+        opts?.onProgress?.();
         const r = String(await session.call("Runtime.evaluate", {
           expression: `(${COMPOSER_FOCUS_JS})(${JSON.stringify(prompt)}, ${JSON.stringify(reclaim)})`,
           returnByValue: true,
@@ -1407,7 +1414,7 @@ export function createCdpSubmitter(deps: CdpSubmitterDeps) {
       if (stopped) return stopped;
       if (owned || focused) {
         if (owned) await selectAllComposer(session);
-        await insertComposerText(session, prompt);
+        await insertComposerText(session, prompt, opts?.onProgress);
         const v = String(await session.call("Runtime.evaluate", {
           expression: `(${COMPOSER_VERIFY_JS})(${JSON.stringify(prompt)})`, returnByValue: true,
         }).then((x) => x?.result?.value));
@@ -1445,6 +1452,7 @@ export function createImagePaster(deps: CdpSubmitterDeps) {
     writeClipboard: (bytes: Buffer, mime: string) => void | Promise<void>,
     autoSubmit: boolean,
     shouldAbort?: () => boolean,
+    onProgress?: () => void,
   ): Promise<CdpSubmitResult> {
     const hit = await connectWorkspacePage(deps, workspaceRoot);
     if (!hit.ok) return hit;
@@ -1453,6 +1461,7 @@ export function createImagePaster(deps: CdpSubmitterDeps) {
     try {
       let focused = false;
       for (let attempt = 0; attempt < 6 && !focused; attempt++) {
+        onProgress?.();
         const r = String(await session.call("Runtime.evaluate", {
           expression: `(${COMPOSER_FOCUS_IMAGE_JS})()`, returnByValue: true,
         }).then((x) => x?.result?.value));
@@ -1464,6 +1473,7 @@ export function createImagePaster(deps: CdpSubmitterDeps) {
       for (let i = 0; i < steps.length; i++) {
         const stopped = aborted(shouldAbort);
         if (stopped) return stopped;
+        onProgress?.();
         const step = steps[i]!;
         await writeClipboard(step.bytes, step.mime);
         let okChip = false;
@@ -1501,7 +1511,7 @@ export function createImagePaster(deps: CdpSubmitterDeps) {
       const stopped = aborted(shouldAbort);
       if (stopped) return stopped;
       if (prompt.trim()) {
-        await insertComposerText(session, prompt);
+        await insertComposerText(session, prompt, onProgress);
         const v = String(await session.call("Runtime.evaluate", {
           expression: `(${COMPOSER_VERIFY_JS})(${JSON.stringify(prompt)})`, returnByValue: true,
         }).then((x) => x?.result?.value));
@@ -1658,16 +1668,18 @@ export function createComposerFinisher(deps: CdpSubmitterDeps) {
     prompt: string,
     autoSubmit: boolean,
     shouldAbort?: () => boolean,
+    onProgress?: () => void,
   ): Promise<CdpSubmitResult> {
     const hit = await connectWorkspacePage(deps, workspaceRoot);
     if (!hit.ok) return hit;
     const session = hit.session;
     try {
+      onProgress?.();
       await session.call("Runtime.evaluate", {
         expression: `(${COMPOSER_FOCUS_IMAGE_JS})()`, returnByValue: true,
       });
       if (prompt.trim()) {
-        await insertComposerText(session, prompt);
+        await insertComposerText(session, prompt, onProgress);
         await sleep(200);
         const v = String(await session.call("Runtime.evaluate", {
           expression: `(${COMPOSER_VERIFY_JS})(${JSON.stringify(prompt)})`, returnByValue: true,

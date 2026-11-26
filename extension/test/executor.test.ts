@@ -316,6 +316,20 @@ describe("Executor image path", () => {
     expect(clipboardWrites).toEqual([]);
   });
 
+  test("in-flight text insert keeps sending run.progress", async () => {
+    const { ex, acks } = makeExec({
+      autoSubmit: async (_ws, _prompt, opts) => {
+        opts?.onProgress?.();
+        opts?.onProgress?.();
+        return { ok: true };
+      },
+    });
+    await ex.startRun({ runId: "r1", workspaceRoot: "/ws/a", prompt: "第一行\n第二行" });
+    const textBeats = acks.filter((m) => m.type === "run.progress" && m.phase === "text");
+    expect(textBeats).toHaveLength(2);
+    expect(acks.at(-1)).toEqual({ type: "run.ack", runId: "r1", status: "accepted" });
+  });
+
   test("text path still writeText when CDP autoSubmit is off", async () => {
     const { ex, acks } = makeExec({});
     await ex.startRun({ runId: "r1", workspaceRoot: "/ws/a", prompt: "hello" });

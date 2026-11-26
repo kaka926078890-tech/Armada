@@ -514,6 +514,18 @@ describe("createCdpSubmitter", () => {
     expect(log.some((c) => c.method === "Input.insertText" && String(c.params?.text).includes("\n"))).toBe(false);
   });
 
+  test("多行写入每一行都续命，焦点重试也续命", async () => {
+    const beats: string[] = [];
+    const submit = createCdpSubmitter(deps({
+      connect: async () => mockSession(["NO_INPUT", "OK", "OK", "OK"]),
+    }));
+    const r = await submit("/Users/x/armada-test-ws", "第一行\n第二行", {
+      onProgress: () => { beats.push("beat"); },
+    });
+    expect(r.ok).toBe(true);
+    expect(beats.length).toBeGreaterThanOrEqual(4);
+  });
+
   test("NO_INPUT 重试后成功", async () => {
     const submit = createCdpSubmitter(deps({ connect: async () => mockSession(["NO_INPUT", "NO_INPUT", "OK", "OK", "OK"]) }));
     expect((await submit("/Users/x/armada-test-ws", "hi")).ok).toBe(true);
