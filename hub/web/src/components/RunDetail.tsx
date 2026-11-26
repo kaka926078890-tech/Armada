@@ -6,7 +6,7 @@ import ChatThread from "./ChatThread";
 import FilePreview from "./FilePreview";
 import { eventsToChat, mergePendingAsk, mergeOutboundChat, outboundUserText, heldOutbound, queuedOutbound, stampOutboundImages, userMessageCaption, INITIAL_VISIBLE_TURNS, initialHiddenPrefixTurns, recentTurnsWindow, stampFallbackImageIds } from "../chatView";
 import { collectEventPages, mergeEvents, createForwardGate, EVENT_PAGE_SIZE, hasOlderEvents, olderEventsQuery, shouldLoadOlder, prependPreserveScroll, stickAfterContentResize } from "../loadEvents";
-import { attachmentLimitMessage, mergeAttachmentFiles, isConsoleAttachment, parseRunAttachmentIds, MAX_CONSOLE_ATTACHMENTS } from "../attachments";
+import { attachmentPickMessage, mergeAttachmentFiles, parseRunAttachmentIds, uploadErrorMessage, MAX_CONSOLE_ATTACHMENTS } from "../attachments";
 import { ConsoleFilePicker } from "./ConsoleFilePicker";
 import { HubImageRow } from "./ImageThumb";
 import { endFollowupSend, isFollowupSendEnter, tryBeginFollowupSend } from "../followupSend";
@@ -377,7 +377,7 @@ export default function RunDetail({
         }
         for (const f of followupFiles) {
           const r = await api.uploadBlob(f);
-          if (r.error || !r.blob) { setFollowupError(r.error ?? "上传失败"); return; }
+          if (r.error || !r.blob) { setFollowupError(uploadErrorMessage(r.error) ?? r.error ?? "上传失败"); return; }
           ids.push(r.blob.id);
         }
         const r = await api.followup(run.id, followup.trim(), ids);
@@ -736,11 +736,12 @@ export default function RunDetail({
               onPaste={(e) => {
                 const items = [...e.clipboardData.files];
                 if (!items.length) return;
-                const { files: next, rejected } = mergeAttachmentFiles(followupFiles, items, maxAttachments);
-                if (next.length === followupFiles.length && rejected === 0 && !items.some(isConsoleAttachment)) return;
+                const { files: next, rejected, unsupported } = mergeAttachmentFiles(followupFiles, items, maxAttachments);
+                if (next.length === followupFiles.length && rejected === 0 && unsupported === 0) return;
                 e.preventDefault();
                 setFollowupFiles(next);
-                if (rejected) setFollowupError(attachmentLimitMessage(maxAttachments));
+                const message = attachmentPickMessage(rejected, unsupported, maxAttachments);
+                if (message) setFollowupError(message);
               }}
               onKeyDown={(e) => {
                 if (!isFollowupSendEnter(e)) return;
@@ -757,7 +758,7 @@ export default function RunDetail({
             files={followupFiles}
             onFiles={setFollowupFiles}
             maxAttachments={maxAttachments}
-            onRejected={() => setFollowupError(attachmentLimitMessage(maxAttachments))}
+            onRejected={setFollowupError}
           />
         </form>
         </div>

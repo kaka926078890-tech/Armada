@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ATTACHMENT_NAME_DISPLAY_MAX, displayAttachmentName, mergeAttachmentFiles, parseRunAttachmentIds } from "../src/attachments";
+import { ATTACHMENT_NAME_DISPLAY_MAX, attachmentPickMessage, displayAttachmentName, mergeAttachmentFiles, parseRunAttachmentIds } from "../src/attachments";
 
 function png(name: string): File {
   return new File([new Uint8Array([1])], name, { type: "image/png" });
@@ -12,13 +12,17 @@ describe("mergeAttachmentFiles", () => {
     expect(rejected).toBe(1);
   });
 
-  test("ignores gif but keeps pdf/txt", () => {
+  test("keeps office and zip, and reports gif as unsupported", () => {
     const gif = new File([new Uint8Array([1])], "a.gif", { type: "image/gif" });
     const pdf = new File([new Uint8Array([1])], "spec.pdf", { type: "application/pdf" });
+    const docx = new File([new Uint8Array([1])], "brief.docx", { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+    const zip = new File([new Uint8Array([1])], "logs.zip", { type: "application/zip" });
     const txt = new File(["x"], "notes.txt", { type: "text/plain" });
-    const { files, rejected } = mergeAttachmentFiles([], [gif, pdf, txt, png("a")]);
-    expect(files.map((f) => f.name)).toEqual(["spec.pdf", "notes.txt", "a"]);
+    const { files, rejected, unsupported } = mergeAttachmentFiles([], [gif, pdf, docx, zip, txt, png("a")]);
+    expect(files.map((f) => f.name)).toEqual(["spec.pdf", "brief.docx", "logs.zip", "notes.txt", "a"]);
     expect(rejected).toBe(0);
+    expect(unsupported).toBe(1);
+    expect(attachmentPickMessage(0, 1, 32)).toBe("不支持的文件类型");
   });
 });
 

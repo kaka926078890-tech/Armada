@@ -993,13 +993,15 @@ func imageMagicMime(_ data: Data) -> String? {
     return nil
 }
 
+private let maxUploadImageBytes = 32 * 1024 * 1024
+
 func prepareUploadImage(_ data: Data, name: String) -> DraftImage? {
     if let mime = imageMagicMime(data) {
-        if data.count > 8 * 1024 * 1024 { return nil }
+        if data.count > maxUploadImageBytes { return nil }
         return DraftImage(data: data, mime: mime, name: nameFor(name, mime: mime))
     }
     guard let img = UIImage(data: data), let jpeg = img.jpegData(compressionQuality: 0.92) else { return nil }
-    if jpeg.count > 8 * 1024 * 1024 { return nil }
+    if jpeg.count > maxUploadImageBytes { return nil }
     return DraftImage(data: jpeg, mime: "image/jpeg", name: nameFor(name, mime: "image/jpeg"))
 }
 

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
-import { attachmentLimitMessage, mergeAttachmentFiles, isConsoleAttachment, MAX_CONSOLE_ATTACHMENTS } from "../attachments";
+import { attachmentPickMessage, mergeAttachmentFiles, uploadErrorMessage, MAX_CONSOLE_ATTACHMENTS } from "../attachments";
 import { ConsoleFilePicker } from "./ConsoleFilePicker";
 import { queueComposerCaretRestore, shouldRefocusComposerAfterSend, shouldRestoreComposerFocus } from "../composerFocus";
 import { dispatchSendPlaceholder, endFollowupSend, isDispatchSendChord, tryBeginFollowupSend } from "../followupSend";
@@ -89,7 +89,7 @@ export function DispatchModal({
         const ids: string[] = [];
         for (const f of files) {
           const r = await api.uploadBlob(f);
-          if (r.error || !r.blob) { setError(r.error ?? "上传失败"); return; }
+          if (r.error || !r.blob) { setError(uploadErrorMessage(r.error) ?? r.error ?? "上传失败"); return; }
           ids.push(r.blob.id);
         }
         const r = await api.dispatch(machineId, workspace, text.trim(), ids);
@@ -177,17 +177,18 @@ export function DispatchModal({
           onPaste={(e) => {
             const items = [...e.clipboardData.files];
             if (!items.length) return;
-            const { files: next, rejected } = mergeAttachmentFiles(files, items, maxAttachments);
-            if (next.length === files.length && rejected === 0 && !items.some(isConsoleAttachment)) return;
+            const { files: next, rejected, unsupported } = mergeAttachmentFiles(files, items, maxAttachments);
+            if (next.length === files.length && rejected === 0 && unsupported === 0) return;
             e.preventDefault();
             setFiles(next);
-            if (rejected) setError(attachmentLimitMessage(maxAttachments));
+            const message = attachmentPickMessage(rejected, unsupported, maxAttachments);
+            if (message) setError(message);
           }} />
         <ConsoleFilePicker
           files={files}
           onFiles={setFiles}
           maxAttachments={maxAttachments}
-          onRejected={() => setError(attachmentLimitMessage(maxAttachments))}
+          onRejected={setError}
         />
         {error && <div className={`${UI_TYPE} text-destructive`}>{error}</div>}
         <DialogFooter className="mx-0 mb-0">

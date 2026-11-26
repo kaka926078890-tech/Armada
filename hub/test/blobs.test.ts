@@ -5,7 +5,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { createServer, type HubServer } from "../src/index";
 import * as blobMod from "../src/blobs";
-import { MAX_BLOB_BYTES } from "../src/blobs";
+import { MAX_BLOB_BYTES, MAX_TOTAL_BYTES } from "../src/blobs";
 
 const PNG_1x1 = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
@@ -182,7 +182,7 @@ describe("blobs + image runs", () => {
 
   test("rejects oversize blob with 413", async () => {
     const { api, ws } = await start();
-    const big = Buffer.concat([PNG_1x1, Buffer.alloc(8 * 1024 * 1024)]);
+    const big = Buffer.concat([PNG_1x1, Buffer.alloc(MAX_BLOB_BYTES)]);
     const fd = new FormData();
     fd.append("file", new File([big], "big.png", { type: "image/png" }));
     const up = await api("/api/blobs", { method: "POST", body: fd });
@@ -298,6 +298,19 @@ describe("blobs + image runs", () => {
     const exeUp = await api("/api/blobs", { method: "POST", body: exeFd });
     expect(exeUp.status).toBe(400);
     expect(((await exeUp.json()) as any).error).toBe("ATTACHMENT_INVALID_MIME");
+
+    const zip = Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buffer.from("logs")]);
+    const zipFd = new FormData();
+    zipFd.append("file", new File([zip], "logs.zip", { type: "application/zip" }));
+    const zipUp = await api("/api/blobs", { method: "POST", body: zipFd });
+    expect(zipUp.status).toBe(201);
+    expect(((await zipUp.json()) as any).blob.mime).toBe("application/zip");
+
+    const fake = new FormData();
+    fake.append("file", new File(["MZ"], "notes.docx", { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" }));
+    const fakeUp = await api("/api/blobs", { method: "POST", body: fake });
+    expect(fakeUp.status).toBe(400);
+    expect(((await fakeUp.json()) as any).error).toBe("ATTACHMENT_INVALID_MIME");
     ws.close();
   });
 
@@ -337,13 +350,14 @@ describe("blobs + image runs", () => {
     ws.close();
   });
 
-  test("create total size over 24 MiB is 413", async () => {
+  test("create total size over the dispatch cap is 413", async () => {
     const { api, ws } = await start();
     const now = Date.now();
+    const half = Math.floor(MAX_TOTAL_BYTES / 2) + 1;
     hub!.db.query("INSERT INTO blobs (sha256, mime, size, refcount, created_at) VALUES (?1,?2,?3,0,?4)")
-      .run("id-a", "image/png", 13 * 1024 * 1024, now);
+      .run("id-a", "image/png", half, now);
     hub!.db.query("INSERT INTO blobs (sha256, mime, size, refcount, created_at) VALUES (?1,?2,?3,0,?4)")
-      .run("id-b", "image/png", 13 * 1024 * 1024, now);
+      .run("id-b", "image/png", half, now);
     const r = await api("/api/runs", {
       method: "POST",
       headers: { "content-type": "application/json" },

@@ -4,6 +4,7 @@ import { mkdtempSync, writeFileSync } from "fs";
 import { createConnection, type Socket } from "net";
 import { tmpdir } from "os";
 import { join } from "path";
+import { MAX_BLOB_BYTES } from "../../hub/src/blobs";
 import { createRelayServer, type RelayServer } from "../src/server";
 import { encodeWorkspaceId, parseRelayUri } from "../src/uri";
 import type { ApnsConfig, ApnsPost } from "../src/apns";
@@ -1494,11 +1495,11 @@ describe("relay serve", () => {
     ws.close();
   });
 
-  test("blob Content-Length over 8 MiB is 413 before 20 MiB gate", async () => {
+  test("blob Content-Length over the single-file cap is 413 before the operator body gate", async () => {
     const s = start();
     const fleet = s.createFleet();
     const r = await rawMobilePost(s.port, "/mobile/blobs", fleet.operatorToken, [
-      "Content-Length: 8388609",
+      `Content-Length: ${MAX_BLOB_BYTES + 1}`,
       "Content-Type: multipart/form-data; boundary=x",
     ], "", 800);
     expect(r.status).toBe(413);

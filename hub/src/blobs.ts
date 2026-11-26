@@ -4,16 +4,24 @@ import { join } from "path";
 import type { Database } from "bun:sqlite";
 import { clampRunLimit, DEFAULT_MAX_ATTACHMENTS } from "./concurrency";
 
-export const MAX_BLOB_BYTES = 8 * 1024 * 1024;
+export const MAX_BLOB_BYTES = 32 * 1024 * 1024;
 export const MAX_ATTACHMENTS = DEFAULT_MAX_ATTACHMENTS;
-export const MAX_TOTAL_BYTES = 24 * 1024 * 1024;
+export const MAX_TOTAL_BYTES = 64 * 1024 * 1024;
 
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
 const JPEG = Buffer.from([0xff, 0xd8, 0xff]);
 
 export type BlobMeta = { id: string; sha256: string; mime: string; name: string; size: number };
 
-export const FILE_EXTS = new Set(["pdf", "txt", "md", "json", "csv", "xml", "yaml", "yml", "html", "htm", "log"]);
+export const FILE_EXTS = new Set([
+  "pdf", "txt", "md", "json", "csv", "xml", "yaml", "yml", "html", "htm", "log",
+  "zip", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
+]);
+
+const ZIP_EXTS = new Set(["zip", "docx", "xlsx", "pptx"]);
+const OLE_EXTS = new Set(["doc", "xls", "ppt"]);
+const ZIP_MAGIC = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
+const OLE_MAGIC = Buffer.from([0xd0, 0xcf, 0x11, 0xe0]);
 
 const MIME_BY_EXT: Record<string, string> = {
   pdf: "application/pdf",
@@ -27,6 +35,13 @@ const MIME_BY_EXT: Record<string, string> = {
   html: "text/html",
   htm: "text/html",
   log: "text/plain",
+  zip: "application/zip",
+  doc: "application/msword",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xls: "application/vnd.ms-excel",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ppt: "application/vnd.ms-powerpoint",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 };
 
 export function detectImageMime(buf: Buffer): "image/png" | "image/jpeg" | null {
@@ -68,6 +83,14 @@ export function detectBlobKind(bytes: Buffer, name: string): { mime: string } | 
   if (ext === "pdf") {
     if (bytes.length < 4 || bytes.subarray(0, 4).toString("ascii") !== "%PDF") return null;
     return { mime: "application/pdf" };
+  }
+  if (ZIP_EXTS.has(ext)) {
+    if (bytes.length < ZIP_MAGIC.length || !bytes.subarray(0, ZIP_MAGIC.length).equals(ZIP_MAGIC)) return null;
+    return { mime: MIME_BY_EXT[ext] ?? "application/zip" };
+  }
+  if (OLE_EXTS.has(ext)) {
+    if (bytes.length < OLE_MAGIC.length || !bytes.subarray(0, OLE_MAGIC.length).equals(OLE_MAGIC)) return null;
+    return { mime: MIME_BY_EXT[ext] ?? "application/octet-stream" };
   }
   return { mime: MIME_BY_EXT[ext] ?? "text/plain" };
 }
