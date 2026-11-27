@@ -10,6 +10,10 @@ Armada 按 **面** 发版：扩展、桌面、iOS、Android 可以不同号。RE
 
 ## Unreleased
 
+### 修复
+
+- Windows 上一轮回复已经写完、`chatGenerationUUID` 换成另一个值时，卡片和正文不再等到下一条消息才出现。没有写完的续跑仍保持运行。
+
 ---
 
 ## 2026-11-26 — 扩展 0.4.68 · iOS TF 46 · Android 0.1.14 · 桌面 0.1.0

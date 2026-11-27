@@ -542,6 +542,16 @@ function settledOpenTurn(snap: ComposerView, gen: string | null): { ok: boolean;
   return { ok: settles, owner: owned.owner, slice: owned.slice };
 }
 
+/** This user's own `/s:n` has finished. A parentless duration can belong to the previous turn. */
+function ownStepSettled(snap: ComposerView, req: string): { ok: true; owner: number; slice: ComposerBubble[] } | null {
+  if (!req) return null;
+  const byRequest = settledOpenTurn(snap, req);
+  if (!byRequest.ok) return null;
+  const userId = snap.bubbles[byRequest.owner]?.id ?? "";
+  const own = byRequest.slice.some((b) => textTurnSettled(b) && stepParent(b.id) === userId);
+  return own ? { ok: true, owner: byRequest.owner, slice: byRequest.slice } : null;
+}
+
 function bsp(snap: ComposerView, bubble: ComposerBubble, generationId?: string | null): DbEvent {
   const gen = generationId === undefined ? snap.generationId : generationId;
   return {
@@ -821,6 +831,8 @@ export function planComposerTick(
       if (continuation) heldForContinuation = true;
       else {
         next.stopped = true;
+        // armedGen 是用户 requestId。priorGen 常常只是 chatGenerationUUID，对不上中台 live。
+        const closeGen = next.armedGen || priorGen;
         emit({
           source: "db",
           hook: "stop",
@@ -828,7 +840,7 @@ export function planComposerTick(
           payload: {
             status: hadText ? "completed" : snap.status === "error" ? "error" : "aborted",
             conversation_id: snap.cid,
-            ...(priorGen ? { generation_id: priorGen } : {}),
+            ...(closeGen ? { generation_id: closeGen } : {}),
           },
         });
       }
@@ -885,22 +897,31 @@ export function planComposerTick(
     }
   }
 
+  const openAt = lastUserIndex(snap.bubbles);
+  const openReq = openAt >= 0 ? (snap.bubbles[openAt]?.requestId.trim() || "") : "";
   if (snap.generationId) {
-    if (next.stopped && next.armedGen !== snap.generationId) next.stopped = false;
+    // requestId 和 chatGenerationUUID 可以整轮都不是同一个。已用 requestId 收口时不要解开。
+    const armedIsThisTurn = next.armedGen === snap.generationId || (openReq !== "" && next.armedGen === openReq);
+    if (next.stopped && !armedIsThisTurn) next.stopped = false;
     next.generationId = snap.generationId;
     next.sawGeneration = true;
   }
 
-  const openAt = lastUserIndex(snap.bubbles);
   for (let i = 0; i < snap.bubbles.length; i++) {
     const b = snap.bubbles[i]!;
     if (b.type !== 1 || !b.text.trim() || next.users.includes(b.id)) continue;
-    emit(bsp(snap, b, generationOwning(snap.bubbles, i, snap.generationId)));
+    const owning = generationOwning(snap.bubbles, i, snap.generationId);
+    emit(bsp(snap, b, owning));
     next.users.push(b.id);
-    if (snap.generationId && i === openAt) next.armedGen = snap.generationId;
+    // 用户 requestId 才是中台 live。chatGenerationUUID 写进 armedGen 后，
+    // stop 对不上，decideStop 记 STOP_GEN_MISMATCH，卡片一直转圈（r-17a94c8c）。
+    if (i === openAt && owning) next.armedGen = owning;
   }
   const lastUser = openAt >= 0 ? snap.bubbles[openAt] : undefined;
-  if (lastUser && snap.generationId && next.armedGen !== snap.generationId) {
+  // 这一轮自己的 /s:n 已经写完。uuid 换成另一个值也要收口，不能再武装成新的一轮。
+  const finishedOnSwap = genChanged && ownStepSettled(snap, openReq) != null;
+  // 只有 uuid 中途换成另一轮才改 armedGen。开局就和 requestId 不同的 uuid 不能盖掉 requestId。
+  if (!finishedOnSwap && lastUser && snap.generationId && genChanged && next.armedGen !== snap.generationId) {
     emit(bsp(snap, lastUser));
     next.armedGen = snap.generationId;
   }
@@ -1019,7 +1040,18 @@ export function planComposerTick(
   }
   if (!next.stopped && !childBusy && !heldForContinuation) {
     const gen = snap.generationId ?? next.generationId;
-    const settled = settledOpenTurn(snap, gen);
+    let settled = settledOpenTurn(snap, gen);
+    const req = lastUser?.requestId.trim() || "";
+    // uuid 从这一轮开始就和 requestId 不是同一个。不能等 uuid 清空。
+    // uuid 换成另一个值、又没有新用户气泡：没有 /s:n 父气泡的时长仍是续跑。
+    // 这一轮自己的 /s:n 已经写完时要收口，否则正文要等下一条用户消息（r-87f1e2cc）。
+    if (!settled.ok && req && req !== gen) {
+      if (!genChanged) settled = settledOpenTurn(snap, req);
+      else {
+        const own = ownStepSettled(snap, req);
+        if (own) settled = own;
+      }
+    }
     if (settled.ok) {
       const ownerGen = snap.bubbles[settled.owner]?.requestId || gen;
       const stopGen = snap.generationId ? ownerGen : (next.armedGen || ownerGen);

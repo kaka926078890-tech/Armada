@@ -104,6 +104,46 @@ describe("composer table plan", () => {
     expect(done.cursor.stopped).toBe(true);
   });
 
+  // r-17a94c8c: chatGenerationUUID stayed a different id from the user requestId.
+  // BSP armed the requestId; stop carried the uuid and decideStop dropped it,
+  // so the card kept spinning after the reply was already on screen.
+  test("stop uses the user requestId when chatGenerationUUID is a different id", () => {
+    const requestId = "76558d8d-a104-459a-85bb-50e57ce1edc4";
+    const uuid = "f5ac0d9f-6652-41e1-ac25-f4f9b8fc2f08";
+    const bubbles = [
+      bubble({ id: "u", type: 1, text: "你都帮我确认一下", requestId }),
+      bubble({ id: "tool", toolName: "Shell", toolStatus: "completed", toolInput: { command: "echo" } }),
+      bubble({ id: "s1", type: 2, text: "先看一眼" }),
+    ];
+    const armed = planComposerTick(snap({
+      cid: "cid-1", status: "aborted", generationId: uuid, bubbles,
+    }), [], emptyCursor());
+    expect(armed.events.find((e) => e.hook === "beforeSubmitPrompt")?.payload.generation_id).toBe(requestId);
+    expect(armed.cursor.armedGen).toBe(requestId);
+    expect(armed.events.some((e) => e.hook === "stop")).toBe(false);
+
+    const done = planComposerTick(snap({
+      cid: "cid-1",
+      status: "aborted",
+      generationId: uuid,
+      bubbles: [...bubbles, bubble({ id: "s386", type: 2, text: "这一轮已经结束", turnDurationMs: 166890 })],
+    }), [], armed.cursor);
+    expect(done.events.find((e) => e.hook === "stop")?.payload).toMatchObject({
+      status: "completed",
+      generation_id: requestId,
+    });
+    expect(done.cursor.stopped).toBe(true);
+
+    const again = planComposerTick(snap({
+      cid: "cid-1",
+      status: "aborted",
+      generationId: uuid,
+      bubbles: [...bubbles, bubble({ id: "s386", type: 2, text: "这一轮已经结束", turnDurationMs: 166890 })],
+    }), [], done.cursor);
+    expect(again.events.some((e) => e.hook === "stop")).toBe(false);
+    expect(again.cursor.stopped).toBe(true);
+  });
+
   test("an in-progress step without turnDurationMs does not stop", () => {
     const { events, cursor } = planComposerTick(snap({
       cid: "cid-1",
@@ -192,6 +232,38 @@ describe("composer table plan", () => {
     }), [], armed);
     expect(swapped.events.some((e) => e.hook === "stop")).toBe(false);
     expect(swapped.events.some((e) => e.hook === "afterAgentResponse")).toBe(false);
+  });
+
+  // r-87f1e2cc: the reply /s:n already had turnDurationMs, then chatGenerationUUID
+  // moved on before any new user bubble. The card stayed running until the next prompt.
+  test("a finished /s:n of this user stops when chatGenerationUUID swaps and no new user exists", () => {
+    const userId = "e2a0a477-42ff-4909-946c-719db1a3261d";
+    const requestId = "37d01cbf-96f1-4382-8875-ddb1c4598637";
+    const swapped = "5aa9bcb5-4c56-4a5b-a2dc-4d268dc0e4b8";
+    const open = [
+      bubble({ id: userId, type: 1, text: "Windows的任务状态更新很不及时", requestId }),
+      bubble({ id: `${userId}/t:call-1`, type: 2, toolName: "Shell", toolStatus: "completed", toolInput: { command: "echo" } }),
+    ];
+    const armed = planComposerTick(snap({
+      cid: "cid-1", status: "aborted", generationId: requestId, bubbles: open,
+    }), [], emptyCursor()).cursor;
+    expect(armed.stopped).toBe(false);
+
+    const done = planComposerTick(snap({
+      cid: "cid-1",
+      status: "aborted",
+      generationId: swapped,
+      bubbles: [
+        ...open,
+        bubble({ id: `${userId}/s:99`, type: 2, text: "结论已经写完。", turnDurationMs: 441009 }),
+      ],
+    }), [], armed);
+    const bodyAt = done.events.findIndex((e) => e.hook === "afterAgentResponse" && e.payload.text === "结论已经写完。");
+    const stopAt = done.events.findIndex((e) => e.hook === "stop");
+    expect(bodyAt).toBeGreaterThanOrEqual(0);
+    expect(stopAt).toBeGreaterThan(bodyAt);
+    expect(done.events[stopAt]?.payload).toMatchObject({ status: "completed", generation_id: requestId });
+    expect(done.events.some((e) => e.hook === "beforeSubmitPrompt" && e.payload.generation_id === swapped)).toBe(false);
   });
 
   test("a recovered turn flushes its text and stops the old generation before the next user", () => {
